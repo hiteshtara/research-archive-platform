@@ -8,6 +8,7 @@ import edu.bu.archive.domain.model.IrbSearchQuery;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -53,6 +54,15 @@ public class IrbController {
 
         return IrbWebMapper.toResponse(
                 useCase.search(searchQuery)
+        );
+    }
+
+    @GetMapping("/record/{recordId}")
+    public IrbSummaryResponse findByRecordId(
+            @PathVariable @Positive Long recordId
+    ) {
+        return IrbWebMapper.toResponse(
+                useCase.findByRecordId(recordId)
         );
     }
 

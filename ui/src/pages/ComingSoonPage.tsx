@@ -6,7 +6,7 @@ export function ComingSoonPage() {
     <Box sx={{ maxWidth: 700 }}>
       <Card>
         <CardContent sx={{ p: 5 }}>
-          <Stack spacing={2} alignItems="flex-start">
+          <Stack spacing={2} sx={{ alignItems: "flex-start" }}>
             <ConstructionOutlined color="primary" fontSize="large" />
             <Typography variant="h4">Coming soon</Typography>
             <Typography color="text.secondary">

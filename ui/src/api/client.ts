@@ -26,31 +26,77 @@ export function getDashboard(): Promise<DashboardSummary> {
   return request<DashboardSummary>("/api/dashboard");
 }
 
+export interface IrbSearchParameters {
+  page?: number;
+  size?: number;
+  query?: string;
+  status?: string;
+  type?: string;
+  sort?: string;
+  direction?: "asc" | "desc";
+}
+
 export function getIrbProtocols(
-  page = 0,
-  size = 10,
-  query = "",
+  parameters: IrbSearchParameters = {},
 ): Promise<PageResponse<IrbProtocol>> {
-  const parameters = new URLSearchParams({
+  const {
+    page = 0,
+    size = 10,
+    query = "",
+    status = "",
+    type = "",
+    sort = "approvalDate",
+    direction = "desc",
+  } = parameters;
+
+  const searchParameters = new URLSearchParams({
     page: String(page),
     size: String(size),
-    sort: "approvalDate",
-    direction: "desc",
+    sort,
+    direction,
   });
 
   if (query.trim()) {
-    parameters.set("query", query.trim());
+    searchParameters.set("query", query.trim());
+  }
+
+  if (status.trim()) {
+    searchParameters.set("status", status.trim());
+  }
+
+  if (type.trim()) {
+    searchParameters.set("type", type.trim());
   }
 
   return request<PageResponse<IrbProtocol>>(
-    `/api/irb?${parameters.toString()}`,
+    `/api/irb?${searchParameters.toString()}`,
   );
 }
 
-export function getIrbProtocol(
-  studyId: string,
+export function getIrbProtocolByRecordId(
+  recordId: number,
 ): Promise<IrbProtocol> {
   return request<IrbProtocol>(
-    `/api/irb/${encodeURIComponent(studyId)}`,
+    `/api/irb/record/${recordId}`,
+  );
+}
+
+export function globalSearch(
+  query: string,
+): Promise<import("../types/api").GlobalSearchResponse> {
+  const parameters = new URLSearchParams({
+    query: query.trim(),
+  });
+
+  return request<import("../types/api").GlobalSearchResponse>(
+    `/api/global-search?${parameters.toString()}`,
+  );
+}
+
+export function getIrbWorkspace(
+  recordId: number,
+): Promise<import("../types/api").IrbWorkspace> {
+  return request<import("../types/api").IrbWorkspace>(
+    `/api/irb/record/${recordId}/workspace`,
   );
 }

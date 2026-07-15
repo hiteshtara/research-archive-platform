@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir uv \
 
 COPY etl/archive_etl archive_etl
 COPY etl/load_from_s3.py .
+COPY etl/load_composite_from_s3.py .
 COPY database/migrations database/migrations
 
 CMD ["uv", "run", "python", "load_from_s3.py"]

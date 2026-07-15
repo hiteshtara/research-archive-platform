@@ -83,6 +83,12 @@ public class IrbPersistenceAdapter implements IrbQueryPort {
     }
 
     @Override
+    public Optional<IrbProtocol> findByRecordId(Long recordId) {
+        return repository.findById(recordId)
+                .map(IrbPersistenceMapper::toDomain);
+    }
+
+    @Override
     public long count() {
         return repository.count();
     }

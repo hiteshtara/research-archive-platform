@@ -28,12 +28,28 @@ public class IrbQueryService implements IrbQueryUseCase {
     @Override
     public IrbProtocol findByStudyId(String studyId) {
         if (studyId == null || studyId.isBlank()) {
-            throw new IllegalArgumentException("Study ID cannot be blank.");
+            throw new IllegalArgumentException(
+                    "Study ID cannot be blank."
+            );
         }
 
         return queryPort.findByStudyId(studyId.trim())
                 .orElseThrow(() -> new RecordNotFoundException(
                         "IRB study not found: " + studyId
+                ));
+    }
+
+    @Override
+    public IrbProtocol findByRecordId(Long recordId) {
+        if (recordId == null || recordId < 1) {
+            throw new IllegalArgumentException(
+                    "Record ID must be a positive number."
+            );
+        }
+
+        return queryPort.findByRecordId(recordId)
+                .orElseThrow(() -> new RecordNotFoundException(
+                        "IRB record not found: " + recordId
                 ));
     }
 

@@ -52,3 +52,29 @@ exports/
 !exports/
 !exports/**/
 !exports/**/.gitkeep
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Frontend
+ui/node_modules/
+ui/dist/
+
+# Java
+api/target/
+
+# Python
+etl/.venv/
+etl/__pycache__/
+etl/exports/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# macOS
+.DS_Store

@@ -12,5 +12,7 @@ public interface IrbQueryPort {
 
     Optional<IrbProtocol> findByStudyId(String studyId);
 
+    Optional<IrbProtocol> findByRecordId(Long recordId);
+
     long count();
 }

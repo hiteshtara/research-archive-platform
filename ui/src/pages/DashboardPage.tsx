@@ -124,12 +124,14 @@ export function DashboardPage() {
             }
           }
         }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchOutlined />
-            </InputAdornment>
-          ),
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchOutlined />
+              </InputAdornment>
+            ),
+          },
         }}
         sx={{
           maxWidth: 900,
@@ -160,9 +162,11 @@ export function DashboardPage() {
               >
                 <CardContent sx={{ p: 3 }}>
                   <Stack
-                    direction="row"
-                    alignItems="flex-start"
-                    justifyContent="space-between"
+                    sx={{
+                      flexDirection: "row",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                    }}
                   >
                     <Box
                       sx={{
@@ -214,14 +218,14 @@ export function DashboardPage() {
               <Typography variant="caption" color="text.secondary">
                 Domain
               </Typography>
-              <Typography fontWeight={700}>IRB</Typography>
+              <Typography sx={{ fontWeight: 700 }}>IRB</Typography>
             </Box>
 
             <Box>
               <Typography variant="caption" color="text.secondary">
                 Records
               </Typography>
-              <Typography fontWeight={700}>
+              <Typography sx={{ fontWeight: 700 }}>
                 {dashboard.irb.toLocaleString()}
               </Typography>
             </Box>

@@ -10,5 +10,7 @@ public interface IrbQueryUseCase {
 
     IrbProtocol findByStudyId(String studyId);
 
+    IrbProtocol findByRecordId(Long recordId);
+
     long count();
 }

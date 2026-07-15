@@ -10,12 +10,14 @@ import {
 import {
   AppBar,
   Box,
+  Chip,
   Divider,
   Drawer,
   List,
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Stack,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -77,28 +79,45 @@ export function AppLayout() {
         <Toolbar>
           <Box
             sx={{
-              width: 36,
-              height: 36,
+              width: 38,
+              height: 38,
               borderRadius: 2,
               display: "grid",
               placeItems: "center",
               backgroundColor: "primary.main",
               color: "white",
-              fontWeight: 800,
+              fontWeight: 900,
               mr: 1.5,
             }}
           >
-            R
+            BU
           </Box>
 
-          <Box>
-            <Typography variant="h6">
-              Research Archive Platform
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Legacy research administration data
-            </Typography>
-          </Box>
+          <Stack
+            sx={{
+              width: "100%",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Box>
+              <Typography variant="h6">
+                Boston University Research Data Hub
+              </Typography>
+
+              <Typography variant="caption" color="text.secondary">
+                Legacy research administration archive
+              </Typography>
+            </Box>
+
+            <Chip
+              label="Development"
+              size="small"
+              variant="outlined"
+              sx={{ display: { xs: "none", sm: "flex" } }}
+            />
+          </Stack>
         </Toolbar>
       </AppBar>
 
@@ -144,6 +163,7 @@ export function AppLayout() {
               <ListItemIcon sx={{ minWidth: 42 }}>
                 {item.icon}
               </ListItemIcon>
+
               <ListItemText primary={item.label} />
             </ListItemButton>
           ))}
@@ -153,10 +173,23 @@ export function AppLayout() {
 
         <Box sx={{ p: 3 }}>
           <Typography variant="caption" color="text.secondary">
-            Environment
+            Data source
           </Typography>
-          <Typography variant="body2" fontWeight={700}>
-            Development
+
+          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            Kuali Legacy Archive
+          </Typography>
+
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", mt: 1.5 }}
+          >
+            Current IRB records
+          </Typography>
+
+          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            1,852
           </Typography>
         </Box>
       </Drawer>
