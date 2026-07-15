@@ -1,0 +1,54 @@
+# macOS
+.DS_Store
+
+# Java
+target/
+*.class
+*.jar
+*.war
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# IDEs
+.idea/
+.vscode/
+.project
+.classpath
+.settings/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+
+# Local data exports
+data/
+exports/
+*.csv
+*.parquet
+*.xlsx
+
+# Secrets and environment files
+.env
+.env.*
+*.pem
+*.key
+
+# Logs
+*.log
+
+!data/
+!data/**/
+!data/**/.gitkeep
+
+!exports/
+!exports/**/
+!exports/**/.gitkeep
