@@ -1,0 +1,18 @@
+[project]
+name = "etl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "boto3>=1.42.97",
+    "loguru>=0.7.3",
+    "openpyxl>=3.1.5",
+    "oracledb>=4.0.2",
+    "pandas>=2.3.3",
+    "polars>=1.36.1",
+    "psycopg[binary]>=3.2.13",
+    "pyarrow>=21.0.0",
+    "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0.51",
+]

@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY etl/pyproject.toml etl/uv.lock ./
+
+RUN pip install --no-cache-dir uv \
+    && uv sync --frozen --no-dev
+
+COPY etl/archive_etl archive_etl
+COPY etl/load_from_s3.py .
+COPY database/migrations database/migrations
+
+CMD ["uv", "run", "python", "load_from_s3.py"]

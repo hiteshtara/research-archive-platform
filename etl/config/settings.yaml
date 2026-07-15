@@ -1,0 +1,18 @@
+aws:
+  region: us-east-1
+  data_bucket: "research-archive-platform-dev-data-589744711110"
+  documents_bucket: "research-archive-platform-dev-documents-589744711110"
+
+postgres:
+  host:
+  port: 5432
+  database: research_archive
+  username: archive_admin
+
+oracle:
+  host:
+  port: 1521
+  service:
+
+logging:
+  level: INFO
