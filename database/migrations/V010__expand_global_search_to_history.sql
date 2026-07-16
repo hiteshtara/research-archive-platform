@@ -1,3 +1,5 @@
+DROP VIEW IF EXISTS archive.v_global_search;
+
 CREATE OR REPLACE VIEW archive.v_global_search AS
 WITH latest_version AS (
     SELECT DISTINCT ON (protocol_base)
@@ -108,7 +110,6 @@ current_records AS (
 )
 SELECT
     current_records.record_id,
-    latest_version.protocol_id,
     'IRB'::VARCHAR(50) AS module,
     current_records.study_id,
     latest_version.protocol_base,
@@ -173,7 +174,8 @@ SELECT
         submissions.submission_statuses,
         submissions.submission_event_types,
         submissions.review_types
-    ) AS search_text
+    ) AS search_text,
+    latest_version.protocol_id
 FROM latest_version
 LEFT JOIN current_records
     ON TRIM(current_records.protocol_base) =
