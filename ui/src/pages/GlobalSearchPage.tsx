@@ -58,7 +58,7 @@ export function GlobalSearchPage() {
         </Typography>
 
         <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Search by study ID, protocol number, title, investigator, or keyword.
+          Search by study ID, protocol number, document number, CRC number, title, investigator, sponsor, award, funding source, status, or review type.
         </Typography>
       </Box>
 
@@ -74,7 +74,7 @@ export function GlobalSearchPage() {
                 submitSearch();
               }
             }}
-            placeholder="Search anything..."
+            placeholder="Search document number, protocol, PI, sponsor, award, title..."
             slotProps={{
               input: {
                 startAdornment: (
@@ -108,7 +108,7 @@ export function GlobalSearchPage() {
               </Typography>
 
               <Typography color="text.secondary">
-                Try a person name, study ID, protocol number, or title keyword.
+                Try a document number, award number, sponsor, person name, study ID, protocol number, or title keyword.
               </Typography>
             </Stack>
           </CardContent>
@@ -144,7 +144,7 @@ export function GlobalSearchPage() {
             <Card
               key={`${result.module}-${result.recordId}`}
               onClick={() =>
-                navigate(`/irb/record/${result.recordId}`)
+                navigate(`/irb/${result.recordId}`)
               }
               sx={{
                 cursor: "pointer",
