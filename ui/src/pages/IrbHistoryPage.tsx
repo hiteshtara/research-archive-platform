@@ -1,4 +1,7 @@
-import { SearchOutlined } from "@mui/icons-material";
+import {
+  ArrowForwardOutlined,
+  SearchOutlined,
+} from "@mui/icons-material";
 import {
   Alert,
   Box,
@@ -20,11 +23,13 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { getIrbHistory } from "../api/client";
 import { IrbArchiveTabs } from "../components/IrbArchiveTabs";
 
 export function IrbHistoryPage() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -109,12 +114,29 @@ export function IrbHistoryPage() {
                     <TableCell>Type</TableCell>
                     <TableCell>PI</TableCell>
                     <TableCell>Approval</TableCell>
+                    <TableCell />
                   </TableRow>
                 </TableHead>
 
                 <TableBody>
                   {query.data.content.map((version) => (
-                    <TableRow key={version.protocolId} hover>
+                    <TableRow
+                      key={version.protocolId}
+                      hover
+                      onClick={() =>
+                        navigate(
+                          `/irb/history?query=${encodeURIComponent(
+                            version.protocolBase,
+                          )}`,
+                        )
+                      }
+                      sx={{
+                        cursor: "pointer",
+                        "&:hover": {
+                          backgroundColor: "rgba(139, 24, 50, 0.035)",
+                        },
+                      }}
+                    >
                       <TableCell>
                         {version.documentNumber ?? "—"}
                       </TableCell>
@@ -149,6 +171,10 @@ export function IrbHistoryPage() {
 
                       <TableCell>
                         {version.approvalDate ?? "—"}
+                      </TableCell>
+
+                      <TableCell align="right">
+                        <ArrowForwardOutlined color="action" />
                       </TableCell>
                     </TableRow>
                   ))}
