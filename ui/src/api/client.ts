@@ -1,3 +1,5 @@
+import { accessToken } from "../auth";
+
 import type {
   DashboardSummary,
   IrbProtocol,
@@ -11,7 +13,18 @@ if (!API_BASE_URL) {
 }
 
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
+  const token = await accessToken();
+
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
 
   if (!response.ok) {
     throw new Error(

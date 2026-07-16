@@ -45,3 +45,9 @@ springdoc:
     path: /swagger-ui.html
   api-docs:
     path: /v3/api-docs
+
+app:
+  security:
+    cognito:
+      issuer-uri: ${COGNITO_ISSUER_URI}
+      client-id: ${COGNITO_CLIENT_ID}

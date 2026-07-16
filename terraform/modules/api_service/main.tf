@@ -236,6 +236,14 @@ resource "aws_ecs_task_definition" "api" {
         {
           name  = "SPRING_PROFILES_ACTIVE"
           value = "aws"
+        },
+        {
+          name  = "COGNITO_ISSUER_URI"
+          value = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_KnifXAgWm"
+        },
+        {
+          name  = "COGNITO_CLIENT_ID"
+          value = "4svvnli76o8j2qtekkvasq7agc"
         }
       ]
 
@@ -286,9 +294,9 @@ resource "aws_ecs_service" "api" {
   platform_version = "LATEST"
 
   network_configuration {
-    subnets          = var.private_subnet_ids
+    subnets          = var.public_subnet_ids
     security_groups  = [aws_security_group.api.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
   load_balancer {
