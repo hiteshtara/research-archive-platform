@@ -1,4 +1,7 @@
-import { SearchOutlined } from "@mui/icons-material";
+import {
+  ArrowForwardOutlined,
+  SearchOutlined,
+} from "@mui/icons-material";
 import {
   Alert,
   Box,
@@ -108,6 +111,7 @@ export function IrbFamiliesPage() {
                     <TableCell>Status</TableCell>
                     <TableCell>PI</TableCell>
                     <TableCell>Approval</TableCell>
+                    <TableCell />
                   </TableRow>
                 </TableHead>
 
@@ -143,6 +147,10 @@ export function IrbFamiliesPage() {
 
                       <TableCell>
                         {family.latestApprovalDate ?? "—"}
+                      </TableCell>
+
+                      <TableCell align="right">
+                        <ArrowForwardOutlined color="action" />
                       </TableCell>
                     </TableRow>
                   ))}
