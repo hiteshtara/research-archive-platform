@@ -1,15 +1,18 @@
 import {
+  AccountCircleOutlined,
   ArchiveOutlined,
   DashboardOutlined,
   DescriptionOutlined,
   GavelOutlined,
   HandshakeOutlined,
+  LogoutOutlined,
   MenuBookOutlined,
   SearchOutlined,
 } from "@mui/icons-material";
 import {
   AppBar,
   Box,
+  Button,
   Chip,
   Divider,
   Drawer,
@@ -21,7 +24,10 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+
+import { currentUser, logout } from "../auth";
 
 const drawerWidth = 250;
 
@@ -64,6 +70,49 @@ const navigation = [
 ];
 
 export function AppLayout() {
+  const [signedInUser, setSignedInUser] = useState("Signed in");
+  const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadUser() {
+      try {
+        const user = await currentUser();
+
+        if (!active) {
+          return;
+        }
+
+        const displayName =
+          user.signInDetails?.loginId ??
+          user.username ??
+          "Signed in";
+
+        setSignedInUser(displayName);
+      } catch {
+        if (active) {
+          setSignedInUser("Signed in");
+        }
+      }
+    }
+
+    void loadUser();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleSignOut() {
+    try {
+      setSigningOut(true);
+      await logout();
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
       <AppBar
@@ -99,6 +148,7 @@ export function AppLayout() {
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: 2,
             }}
           >
             <Box>
@@ -111,12 +161,50 @@ export function AppLayout() {
               </Typography>
             </Box>
 
-            <Chip
-              label="Development"
-              size="small"
-              variant="outlined"
-              sx={{ display: { xs: "none", sm: "flex" } }}
-            />
+            <Stack
+              sx={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 1.5,
+              }}
+            >
+              <Chip
+                label="Development"
+                size="small"
+                variant="outlined"
+                sx={{ display: { xs: "none", md: "flex" } }}
+              />
+
+              <Stack
+                sx={{
+                  display: { xs: "none", lg: "flex" },
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 0.75,
+                  maxWidth: 260,
+                }}
+              >
+                <AccountCircleOutlined color="action" />
+
+                <Typography
+                  variant="body2"
+                  noWrap
+                  title={signedInUser}
+                >
+                  {signedInUser}
+                </Typography>
+              </Stack>
+
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<LogoutOutlined />}
+                disabled={signingOut}
+                onClick={() => void handleSignOut()}
+              >
+                {signingOut ? "Signing out..." : "Sign out"}
+              </Button>
+            </Stack>
           </Stack>
         </Toolbar>
       </AppBar>
