@@ -39,7 +39,8 @@ export interface PageResponse<T> {
 }
 
 export interface GlobalSearchItem {
-  recordId: number;
+  recordId: number | null;
+  protocolId: number;
   module: string;
   identifier: string;
   secondaryIdentifier: string | null;

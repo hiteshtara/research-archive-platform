@@ -37,6 +37,7 @@ public class GlobalSearchRepository {
         List<GlobalSearchItemResponse> results = jdbcClient.sql("""
                 SELECT
                     record_id,
+                    protocol_id,
                     module,
                     COALESCE(
                         NULLIF(study_id, ''),
@@ -82,7 +83,8 @@ public class GlobalSearchRepository {
                 .param("resultLimit", RESULT_LIMIT)
                 .query((resultSet, rowNumber) ->
                         new GlobalSearchItemResponse(
-                                resultSet.getLong("record_id"),
+                                resultSet.getObject("record_id", Long.class),
+                                resultSet.getObject("protocol_id", Long.class),
                                 resultSet.getString("module"),
                                 resultSet.getString("identifier"),
                                 resultSet.getString("secondary_identifier"),
