@@ -23,11 +23,13 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { getIrbFamilies } from "../api/client";
 import { IrbArchiveTabs } from "../components/IrbArchiveTabs";
 
 export function IrbFamiliesPage() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -117,7 +119,23 @@ export function IrbFamiliesPage() {
 
                 <TableBody>
                   {query.data.content.map((family) => (
-                    <TableRow key={family.protocolBase} hover>
+                    <TableRow
+                      key={family.protocolBase}
+                      hover
+                      onClick={() =>
+                        navigate(
+                          `/irb/history?query=${encodeURIComponent(
+                            family.protocolBase,
+                          )}`,
+                        )
+                      }
+                      sx={{
+                        cursor: "pointer",
+                        "&:hover": {
+                          backgroundColor: "rgba(139, 24, 50, 0.035)",
+                        },
+                      }}
+                    >
                       <TableCell>{family.protocolBase}</TableCell>
 
                       <TableCell>
