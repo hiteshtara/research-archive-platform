@@ -1,5 +1,10 @@
 export interface DashboardSummary {
   irb: number;
+  protocolFamilies: number;
+  protocolVersions: number;
+  submissions: number;
+  fundingRecords: number;
+  timelineEvents: number;
   awards: number;
   proposals: number;
   negotiations: number;
