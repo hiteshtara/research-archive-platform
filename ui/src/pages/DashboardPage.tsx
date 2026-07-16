@@ -12,6 +12,7 @@ import {
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -23,6 +24,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getDashboard } from "../api/client";
@@ -125,6 +127,15 @@ const futureModuleCards: Array<{
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [searchText, setSearchText] = useState("");
+
+  function submitSearch() {
+    const normalized = searchText.trim();
+
+    if (normalized) {
+      navigate(`/search?query=${encodeURIComponent(normalized)}`);
+    }
+  }
 
   const dashboardQuery = useQuery({
     queryKey: ["dashboard"],
@@ -164,37 +175,56 @@ export function DashboardPage() {
         </Typography>
       </Box>
 
-      <TextField
-        fullWidth
-        placeholder="Search by study ID, protocol number, title or investigator"
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            const value = (
-              event.currentTarget as HTMLInputElement
-            ).value.trim();
-
-            if (value) {
-              navigate(`/irb?query=${encodeURIComponent(value)}`);
-            }
-          }
-        }}
-        slotProps={{
-          input: {
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchOutlined />
-              </InputAdornment>
-            ),
-          },
+      <Stack
+        component="form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitSearch();
         }}
         sx={{
-          maxWidth: 900,
-          "& .MuiOutlinedInput-root": {
-            backgroundColor: "white",
-            minHeight: 58,
+          maxWidth: 1050,
+          flexDirection: {
+            xs: "column",
+            sm: "row",
           },
+          gap: 1.5,
         }}
-      />
+      >
+        <TextField
+          fullWidth
+          value={searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+          placeholder="Search document number, protocol, PI, sponsor, award, title..."
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchOutlined />
+                </InputAdornment>
+              ),
+            },
+          }}
+          sx={{
+            "& .MuiOutlinedInput-root": {
+              backgroundColor: "white",
+              minHeight: 58,
+            },
+          }}
+        />
+
+        <Button
+          type="submit"
+          variant="contained"
+          size="large"
+          disabled={!searchText.trim()}
+          sx={{
+            minWidth: 140,
+            minHeight: 58,
+          }}
+        >
+          Search
+        </Button>
+      </Stack>
 
       <Box>
         <Typography variant="h6">IRB archive</Typography>
