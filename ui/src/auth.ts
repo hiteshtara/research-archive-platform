@@ -6,27 +6,25 @@ import {
   signOut,
 } from "aws-amplify/auth";
 
-const amplifyUrl =
+const userPoolClientId = "4svvnli76o8j2qtekkvasq7agc";
+const cognitoDomain =
+  "rap-dev-589744711110-1784159433.auth.us-east-1.amazoncognito.com";
+
+const productionUrl =
   "https://main.d33qc0afy3ltcj.amplifyapp.com/";
+const localUrl = "http://localhost:5173/";
 
 Amplify.configure({
   Auth: {
     Cognito: {
       userPoolId: "us-east-1_KnifXAgWm",
-      userPoolClientId: "4svvnli76o8j2qtekkvasq7agc",
+      userPoolClientId,
       loginWith: {
         oauth: {
-          domain:
-            "rap-dev-589744711110-1784159433.auth.us-east-1.amazoncognito.com",
+          domain: cognitoDomain,
           scopes: ["openid", "email", "profile"],
-          redirectSignIn: [
-            amplifyUrl,
-            "http://localhost:5173/",
-          ],
-          redirectSignOut: [
-            amplifyUrl,
-            "http://localhost:5173/",
-          ],
+          redirectSignIn: [productionUrl, localUrl],
+          redirectSignOut: [productionUrl, localUrl],
           responseType: "code",
         },
       },
@@ -39,7 +37,18 @@ export async function login(): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  await signOut();
+  await signOut({ global: true });
+
+  const logoutUri = window.location.hostname === "localhost"
+    ? localUrl
+    : productionUrl;
+
+  const logoutUrl =
+    `https://${cognitoDomain}/logout` +
+    `?client_id=${encodeURIComponent(userPoolClientId)}` +
+    `&logout_uri=${encodeURIComponent(logoutUri)}`;
+
+  window.location.assign(logoutUrl);
 }
 
 export async function currentUser() {
