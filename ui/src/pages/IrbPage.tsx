@@ -33,6 +33,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { getIrbProtocols } from "../api/client";
+import { IrbArchiveTabs } from "../components/IrbArchiveTabs";
 
 const statusOptions = [
   "Active - Open to Enrollment",
@@ -130,6 +131,7 @@ export function IrbPage() {
 
   return (
     <Stack spacing={3}>
+      <IrbArchiveTabs />
       <Card
         sx={{
           background:

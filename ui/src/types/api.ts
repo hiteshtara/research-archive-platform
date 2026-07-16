@@ -117,3 +117,32 @@ export interface IrbWorkspace {
   submissions: IrbWorkspaceSubmission[];
   timeline: IrbWorkspaceTimelineEvent[];
 }
+
+export interface IrbFamily {
+  protocolBase: string;
+  versionCount: number;
+  latestProtocolId: number;
+  latestProtocolNumber: string;
+  latestTitle: string | null;
+  latestStatus: string | null;
+  latestType: string | null;
+  piId: string | null;
+  piEmail: string | null;
+  latestApprovalDate: string | null;
+}
+
+export interface IrbHistoryVersion {
+  protocolId: number;
+  protocolBase: string;
+  protocolNumber: string;
+  sequenceNumber: number | null;
+  documentNumber: string | null;
+  crcProtocolNumber: string | null;
+  title: string | null;
+  protocolStatus: string | null;
+  protocolType: string | null;
+  piId: string | null;
+  piEmail: string | null;
+  approvalDate: string | null;
+  expirationDate: string | null;
+}

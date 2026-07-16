@@ -113,3 +113,49 @@ export function getIrbWorkspace(
     `/api/irb/record/${recordId}/workspace`,
   );
 }
+
+export function getIrbFamilies(parameters: {
+  page?: number;
+  size?: number;
+  query?: string;
+} = {}): Promise<
+  import("../types/api").PageResponse<
+    import("../types/api").IrbFamily
+  >
+> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 10),
+  });
+
+  if (parameters.query?.trim()) {
+    searchParameters.set("query", parameters.query.trim());
+  }
+
+  return request(
+    `/api/irb/families?${searchParameters.toString()}`,
+  );
+}
+
+export function getIrbHistory(parameters: {
+  page?: number;
+  size?: number;
+  query?: string;
+} = {}): Promise<
+  import("../types/api").PageResponse<
+    import("../types/api").IrbHistoryVersion
+  >
+> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 10),
+  });
+
+  if (parameters.query?.trim()) {
+    searchParameters.set("query", parameters.query.trim());
+  }
+
+  return request(
+    `/api/irb/history?${searchParameters.toString()}`,
+  );
+}

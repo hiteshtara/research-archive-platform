@@ -5,6 +5,8 @@ import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { IrbDetailPage } from "./pages/IrbDetailPage";
 import { IrbPage } from "./pages/IrbPage";
+import { IrbFamiliesPage } from "./pages/IrbFamiliesPage";
+import { IrbHistoryPage } from "./pages/IrbHistoryPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
 
 export default function App() {
@@ -13,6 +15,8 @@ export default function App() {
       <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="irb" element={<IrbPage />} />
+        <Route path="irb/families" element={<IrbFamiliesPage />} />
+        <Route path="irb/history" element={<IrbHistoryPage />} />
         <Route path="irb/record/:recordId" element={<IrbDetailPage />} />
 
         <Route path="awards" element={<ComingSoonPage />} />
