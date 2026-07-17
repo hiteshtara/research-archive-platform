@@ -22,17 +22,27 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { getIrbHistory } from "../api/client";
 import { IrbArchiveTabs } from "../components/IrbArchiveTabs";
 
 export function IrbHistoryPage() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const queryValue = searchParams.get("query") ?? "";
+
+  const [search, setSearch] = useState(queryValue);
+  const [appliedSearch, setAppliedSearch] = useState(queryValue);
   const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    setSearch(queryValue);
+    setAppliedSearch(queryValue);
+    setPage(0);
+  }, [queryValue]);
 
   const query = useQuery({
     queryKey: ["irb-history", page, appliedSearch],
@@ -62,8 +72,16 @@ export function IrbHistoryPage() {
             onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
+                const normalized = search.trim();
+
                 setPage(0);
-                setAppliedSearch(search.trim());
+                setAppliedSearch(normalized);
+
+                if (normalized) {
+                  setSearchParams({ query: normalized });
+                } else {
+                  setSearchParams({});
+                }
               }
             }}
             placeholder="Document number, protocol, CRC, title, PI or status"
