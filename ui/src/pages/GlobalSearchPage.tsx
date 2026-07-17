@@ -23,12 +23,21 @@ import { globalSearch } from "../api/client";
 import type { GlobalSearchItem } from "../types/api";
 
 
-function resultDetailPath(result: GlobalSearchItem): string {
-  if (result.recordId !== null) {
-    return `/irb/record/${result.recordId}`;
+function resultDetailPath(
+  result: GlobalSearchItem,
+): string | null {
+  const recordId = Number(result.recordId);
+  const protocolId = Number(result.protocolId);
+
+  if (Number.isInteger(recordId) && recordId > 0) {
+    return `/irb/record/${recordId}`;
   }
 
-  return `/irb/history/${result.protocolId}`;
+  if (Number.isInteger(protocolId) && protocolId > 0) {
+    return `/irb/history/${protocolId}`;
+  }
+
+  return null;
 }
 
 export function GlobalSearchPage() {
@@ -153,9 +162,13 @@ export function GlobalSearchPage() {
           {searchQuery.data.results.map((result) => (
             <Card
               key={`${result.module}-${result.recordId}`}
-              onClick={() =>
-                navigate(resultDetailPath(result))
-              }
+              onClick={() => {
+                const detailPath = resultDetailPath(result);
+
+                if (detailPath) {
+                  navigate(detailPath);
+                }
+              }}
               sx={{
                 cursor: "pointer",
                 transition: "transform 150ms ease, box-shadow 150ms ease",
