@@ -32,25 +32,23 @@ export function IrbHistoryPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const queryValue = searchParams.get("query") ?? "";
+  const queryValue = searchParams.get("query")?.trim() ?? "";
 
   const [search, setSearch] = useState(queryValue);
-  const [appliedSearch, setAppliedSearch] = useState(queryValue);
   const [page, setPage] = useState(0);
 
   useEffect(() => {
     setSearch(queryValue);
-    setAppliedSearch(queryValue);
     setPage(0);
   }, [queryValue]);
 
   const query = useQuery({
-    queryKey: ["irb-history", page, appliedSearch],
+    queryKey: ["irb-history", page, queryValue],
     queryFn: () =>
       getIrbHistory({
         page,
         size: 10,
-        query: appliedSearch,
+        query: queryValue,
       }),
   });
 
@@ -75,7 +73,6 @@ export function IrbHistoryPage() {
                 const normalized = search.trim();
 
                 setPage(0);
-                setAppliedSearch(normalized);
 
                 if (normalized) {
                   setSearchParams({ query: normalized });

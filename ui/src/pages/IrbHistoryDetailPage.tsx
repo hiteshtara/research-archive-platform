@@ -260,13 +260,15 @@ export function IrbHistoryDetailPage() {
 
       <Button
         variant="outlined"
-        onClick={() =>
-          navigate(
-            `/irb/history?query=${encodeURIComponent(
-              version.protocolBase,
-            )}`,
-          )
-        }
+        onClick={() => {
+          const protocolBase = version.protocolBase?.trim();
+
+          if (protocolBase) {
+            navigate(
+              `/irb/history?query=${encodeURIComponent(protocolBase)}`,
+            );
+          }
+        }}
         sx={{ alignSelf: "flex-start" }}
       >
         View all versions for this study
