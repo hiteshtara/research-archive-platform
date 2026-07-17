@@ -20,6 +20,16 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
+import type { GlobalSearchItem } from "../types/api";
+
+
+function resultDetailPath(result: GlobalSearchItem): string {
+  if (result.recordId !== null) {
+    return `/irb/record/${result.recordId}`;
+  }
+
+  return `/irb/history/${result.protocolId}`;
+}
 
 export function GlobalSearchPage() {
   const navigate = useNavigate();
@@ -144,7 +154,7 @@ export function GlobalSearchPage() {
             <Card
               key={`${result.module}-${result.recordId}`}
               onClick={() =>
-                navigate(`/irb/record/${result.recordId}`)
+                navigate(resultDetailPath(result))
               }
               sx={{
                 cursor: "pointer",
