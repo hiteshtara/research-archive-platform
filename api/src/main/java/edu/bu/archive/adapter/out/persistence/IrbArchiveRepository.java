@@ -39,6 +39,7 @@ public class IrbArchiveRepository {
                        OR protocol_base ILIKE :pattern ESCAPE '\\'
                        OR protocol_number ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(document_number, '') ILIKE :pattern ESCAPE '\\'
+                       OR COALESCE(crc_protocol_num, '') ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(title, '') ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(pi_id, '') ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(pi_email, '') ILIKE :pattern ESCAPE '\\'
@@ -51,30 +52,33 @@ public class IrbArchiveRepository {
                 .single();
 
         List<IrbFamilyResponse> content = jdbcClient.sql("""
-                WITH matching AS (
-                    SELECT *
+                WITH matching_families AS (
+                    SELECT DISTINCT protocol_base
                     FROM archive.irb_protocol_version
                     WHERE :hasQuery = FALSE
                        OR protocol_base ILIKE :pattern ESCAPE '\\'
                        OR protocol_number ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(document_number, '') ILIKE :pattern ESCAPE '\\'
+                       OR COALESCE(crc_protocol_num, '') ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(title, '') ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(pi_id, '') ILIKE :pattern ESCAPE '\\'
                        OR COALESCE(pi_email, '') ILIKE :pattern ESCAPE '\\'
                 ),
                 ranked AS (
                     SELECT
-                        matching.*,
+                        protocol.*,
                         COUNT(*) OVER (
-                            PARTITION BY protocol_base
+                            PARTITION BY protocol.protocol_base
                         ) AS version_count,
                         ROW_NUMBER() OVER (
-                            PARTITION BY protocol_base
+                            PARTITION BY protocol.protocol_base
                             ORDER BY
-                                COALESCE(sequence_number, -1) DESC,
-                                protocol_id DESC
+                                COALESCE(protocol.sequence_number, -1) DESC,
+                                protocol.protocol_id DESC
                         ) AS row_number
-                    FROM matching
+                    FROM archive.irb_protocol_version protocol
+                    INNER JOIN matching_families matching
+                        ON matching.protocol_base = protocol.protocol_base
                 )
                 SELECT
                     protocol_base,
