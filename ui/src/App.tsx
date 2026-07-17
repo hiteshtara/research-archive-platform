@@ -7,6 +7,7 @@ import { IrbDetailPage } from "./pages/IrbDetailPage";
 import { IrbPage } from "./pages/IrbPage";
 import { IrbFamiliesPage } from "./pages/IrbFamiliesPage";
 import { IrbHistoryPage } from "./pages/IrbHistoryPage";
+import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
 
 export default function App() {
@@ -17,6 +18,10 @@ export default function App() {
         <Route path="irb" element={<IrbPage />} />
         <Route path="irb/families" element={<IrbFamiliesPage />} />
         <Route path="irb/history" element={<IrbHistoryPage />} />
+        <Route
+          path="irb/history/:protocolId"
+          element={<IrbHistoryDetailPage />}
+        />
         <Route path="irb/record/:recordId" element={<IrbDetailPage />} />
 
         <Route path="awards" element={<ComingSoonPage />} />

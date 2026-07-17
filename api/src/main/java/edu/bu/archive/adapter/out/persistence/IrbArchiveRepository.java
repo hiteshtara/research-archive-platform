@@ -124,6 +124,66 @@ public class IrbArchiveRepository {
         return page(content, page, size, total);
     }
 
+    public IrbHistoryResponse findHistoryByProtocolId(
+            Long protocolId
+    ) {
+        return jdbcClient.sql("""
+                SELECT
+                    protocol_id,
+                    protocol_base,
+                    protocol_number,
+                    sequence_number,
+                    document_number,
+                    crc_protocol_num,
+                    title,
+                    protocol_status,
+                    protocol_type,
+                    pi_id,
+                    pi_email,
+                    approval_date,
+                    expiration_date
+                FROM archive.irb_protocol_version
+                WHERE protocol_id = :protocolId
+                """)
+                .param("protocolId", protocolId)
+                .query((resultSet, rowNumber) ->
+                        new IrbHistoryResponse(
+                                resultSet.getObject(
+                                        "protocol_id",
+                                        Long.class
+                                ),
+                                resultSet.getString("protocol_base"),
+                                resultSet.getString("protocol_number"),
+                                resultSet.getObject(
+                                        "sequence_number",
+                                        Integer.class
+                                ),
+                                resultSet.getString("document_number"),
+                                resultSet.getString("crc_protocol_num"),
+                                resultSet.getString("title"),
+                                resultSet.getString("protocol_status"),
+                                resultSet.getString("protocol_type"),
+                                resultSet.getString("pi_id"),
+                                resultSet.getString("pi_email"),
+                                resultSet.getObject(
+                                        "approval_date",
+                                        java.time.LocalDate.class
+                                ),
+                                resultSet.getObject(
+                                        "expiration_date",
+                                        java.time.LocalDate.class
+                                )
+                        )
+                )
+                .optional()
+                .orElseThrow(() ->
+                        new org.springframework.web.server.ResponseStatusException(
+                                org.springframework.http.HttpStatus.NOT_FOUND,
+                                "Historical IRB version not found"
+                        )
+                );
+    }
+
     public PageResponse<IrbHistoryResponse> findHistory(
             String query,
             int page,

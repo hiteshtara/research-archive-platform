@@ -159,3 +159,11 @@ export function getIrbHistory(parameters: {
     `/api/irb/history?${searchParameters.toString()}`,
   );
 }
+
+export function getIrbHistoryVersion(
+  protocolId: number,
+): Promise<import("../types/api").IrbHistoryVersion> {
+  return request<import("../types/api").IrbHistoryVersion>(
+    `/api/irb/history/${protocolId}`,
+  );
+}

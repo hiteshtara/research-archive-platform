@@ -124,11 +124,7 @@ export function IrbHistoryPage() {
                       key={version.protocolId}
                       hover
                       onClick={() =>
-                        navigate(
-                          `/irb/history?query=${encodeURIComponent(
-                            version.protocolBase,
-                          )}`,
-                        )
+                        navigate(`/irb/history/${version.protocolId}`)
                       }
                       sx={{
                         cursor: "pointer",

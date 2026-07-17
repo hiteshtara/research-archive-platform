@@ -7,9 +7,11 @@ import edu.bu.archive.adapter.out.persistence.IrbArchiveRepository;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,6 +36,13 @@ public class IrbArchiveController {
             @Min(1) @Max(100) int size
     ) {
         return repository.findFamilies(query, page, size);
+    }
+
+    @GetMapping("/history/{protocolId}")
+    public IrbHistoryResponse historyByProtocolId(
+            @PathVariable @Positive Long protocolId
+    ) {
+        return repository.findHistoryByProtocolId(protocolId);
     }
 
     @GetMapping("/history")
