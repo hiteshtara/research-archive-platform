@@ -167,3 +167,15 @@ export function getIrbHistoryVersion(
     `/api/irb/history/${protocolId}`,
   );
 }
+
+export function getInvestigatorProfile(
+  email: string,
+): Promise<import("../types/api").InvestigatorProfile> {
+  const parameters = new URLSearchParams({
+    email: email.trim(),
+  });
+
+  return request<import("../types/api").InvestigatorProfile>(
+    `/api/investigators?${parameters.toString()}`,
+  );
+}

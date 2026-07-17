@@ -9,6 +9,7 @@ import { IrbFamiliesPage } from "./pages/IrbFamiliesPage";
 import { IrbHistoryPage } from "./pages/IrbHistoryPage";
 import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
+import { InvestigatorProfilePage } from "./pages/InvestigatorProfilePage";
 
 export default function App() {
   return (
@@ -30,6 +31,10 @@ export default function App() {
         <Route path="subawards" element={<ComingSoonPage />} />
         <Route path="documents" element={<ComingSoonPage />} />
         <Route path="search" element={<GlobalSearchPage />} />
+        <Route
+          path="investigators/:email"
+          element={<InvestigatorProfilePage />}
+        />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

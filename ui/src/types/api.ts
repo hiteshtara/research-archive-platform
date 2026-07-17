@@ -146,3 +146,24 @@ export interface IrbHistoryVersion {
   approvalDate: string | null;
   expirationDate: string | null;
 }
+
+export interface InvestigatorStudy {
+  recordId: number | null;
+  protocolId: number;
+  protocolBase: string;
+  protocolNumber: string;
+  title: string | null;
+  status: string | null;
+  recordType: string | null;
+  approvalDate: string | null;
+}
+
+export interface InvestigatorProfile {
+  name: string;
+  email: string;
+  buid: string | null;
+  currentStudyCount: number;
+  historicalStudyCount: number;
+  currentStudies: InvestigatorStudy[];
+  historicalStudies: InvestigatorStudy[];
+}

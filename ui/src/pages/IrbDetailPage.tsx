@@ -556,7 +556,7 @@ export function IrbDetailPage() {
                           size="small"
                           onClick={() =>
                             navigate(
-                              `/search?query=${encodeURIComponent(
+                              `/investigators/${encodeURIComponent(
                                 protocol.piEmail ?? "",
                               )}`,
                             )
