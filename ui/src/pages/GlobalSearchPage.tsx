@@ -145,13 +145,7 @@ export function GlobalSearchPage() {
             <Card
               key={`${result.module}-${result.recordId}`}
               onClick={() => {
-                const recordId = Number(result.recordId);
                 const protocolId = Number(result.protocolId);
-
-                if (Number.isInteger(recordId) && recordId > 0) {
-                  navigate(`/irb/record/${recordId}`);
-                  return;
-                }
 
                 if (Number.isInteger(protocolId) && protocolId > 0) {
                   navigate(`/irb/history/${protocolId}`);
