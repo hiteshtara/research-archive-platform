@@ -204,18 +204,45 @@ export function IrbDetailPage() {
                 variant="outlined"
               />
 
-              <Chip
-                label={`Version ${protocol.sequenceNumber ?? "—"}`}
-                variant="outlined"
-              />
+              {protocol.sequenceNumber !== null &&
+                protocol.sequenceNumber !== undefined && (
+                  <Chip
+                    label={`Version ${protocol.sequenceNumber}`}
+                    variant="outlined"
+                  />
+                )}
             </Stack>
           </Box>
 
-          <Chip
-            label={protocol.protocolStatus ?? "Unknown"}
-            color="primary"
-            sx={{ alignSelf: "flex-start" }}
-          />
+          <Stack
+            spacing={1.5}
+            sx={{
+              alignItems: {
+                xs: "flex-start",
+                md: "flex-end",
+              },
+            }}
+          >
+            <Chip
+              label={protocol.protocolStatus ?? "Unknown"}
+              color="primary"
+            />
+
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<HistoryOutlined />}
+              onClick={() =>
+                navigate(
+                  `/irb/history?query=${encodeURIComponent(
+                    protocol.protocolBase,
+                  )}`,
+                )
+              }
+            >
+              View historical versions
+            </Button>
+          </Stack>
         </Stack>
       </Box>
 
@@ -514,11 +541,62 @@ export function IrbDetailPage() {
                     }}
                   >
                     <EmailOutlined color="action" />
-                    <DetailItem
-                      label="Email"
-                      value={protocol.piEmail}
-                    />
+
+                    <Box>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                      >
+                        Email
+                      </Typography>
+
+                      {protocol.piEmail ? (
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() =>
+                            navigate(
+                              `/search?query=${encodeURIComponent(
+                                protocol.piEmail ?? "",
+                              )}`,
+                            )
+                          }
+                          sx={{
+                            display: "block",
+                            minWidth: 0,
+                            mt: 0.2,
+                            p: 0,
+                            fontWeight: 600,
+                            textTransform: "none",
+                          }}
+                        >
+                          {protocol.piEmail}
+                        </Button>
+                      ) : (
+                        <Typography sx={{ mt: 0.4, fontWeight: 600 }}>
+                          Not available
+                        </Typography>
+                      )}
+                    </Box>
                   </Stack>
+
+                  {protocol.piEmail && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<PersonOutlined />}
+                      onClick={() =>
+                        navigate(
+                          `/search?query=${encodeURIComponent(
+                            protocol.piEmail ?? "",
+                          )}`,
+                        )
+                      }
+                      sx={{ alignSelf: "flex-start" }}
+                    >
+                      View all studies by this investigator
+                    </Button>
+                  )}
 
                   <DetailItem
                     label="PI ID"
