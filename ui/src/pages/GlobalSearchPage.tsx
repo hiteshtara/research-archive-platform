@@ -144,7 +144,7 @@ export function GlobalSearchPage() {
             <Card
               key={`${result.module}-${result.recordId}`}
               onClick={() =>
-                navigate(`/irb/${result.recordId}`)
+                navigate(`/irb/record/${result.recordId}`)
               }
               sx={{
                 cursor: "pointer",
