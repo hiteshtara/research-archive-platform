@@ -105,7 +105,7 @@ export function IrbHistoryDetailPage() {
           <Stack
             spacing={2}
             direction={{ xs: "column", md: "row" }}
-            justifyContent="space-between"
+            sx={{ justifyContent: "space-between" }}
           >
             <Box>
               <Chip
@@ -125,7 +125,14 @@ export function IrbHistoryDetailPage() {
               </Typography>
             </Box>
 
-            <Stack alignItems={{ xs: "flex-start", md: "flex-end" }}>
+            <Stack
+              sx={{
+                alignItems: {
+                  xs: "flex-start",
+                  md: "flex-end",
+                },
+              }}
+            >
               <Typography variant="h4" sx={{ fontWeight: 800 }}>
                 {version.documentNumber ?? "No document number"}
               </Typography>
@@ -142,7 +149,11 @@ export function IrbHistoryDetailPage() {
         <Grid size={{ xs: 12, lg: 8 }}>
           <Card>
             <CardContent sx={{ p: 3 }}>
-              <Stack direction="row" spacing={1.5} alignItems="center">
+              <Stack
+                direction="row"
+                spacing={1.5}
+                sx={{ alignItems: "center" }}
+              >
                 <DescriptionOutlined color="primary" />
                 <Typography variant="h6">Version details</Typography>
               </Stack>
@@ -200,7 +211,11 @@ export function IrbHistoryDetailPage() {
           <Stack spacing={3}>
             <Card>
               <CardContent sx={{ p: 3 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center">
+                <Stack
+                direction="row"
+                spacing={1.5}
+                sx={{ alignItems: "center" }}
+              >
                   <PersonOutlined color="primary" />
                   <Typography variant="h6">Investigator</Typography>
                 </Stack>
@@ -216,7 +231,11 @@ export function IrbHistoryDetailPage() {
 
             <Card>
               <CardContent sx={{ p: 3 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center">
+                <Stack
+                direction="row"
+                spacing={1.5}
+                sx={{ alignItems: "center" }}
+              >
                   <CalendarMonthOutlined color="primary" />
                   <Typography variant="h6">Dates</Typography>
                 </Stack>
