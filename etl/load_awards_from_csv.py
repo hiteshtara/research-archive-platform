@@ -347,6 +347,21 @@ def prepare_proposals(
         ["update_timestamp"],
     )
 
+    duplicate_links = dataframe.duplicated(
+        subset=["award_id", "proposal_id"],
+        keep="first",
+    )
+
+    if duplicate_links.any():
+        logger.warning(
+            "Removed {} duplicate Award/Proposal relationships",
+            int(duplicate_links.sum()),
+        )
+
+        dataframe = dataframe.loc[
+            ~duplicate_links
+        ].copy()
+
     return dataframe
 
 
