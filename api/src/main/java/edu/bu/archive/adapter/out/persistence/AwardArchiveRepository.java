@@ -389,7 +389,7 @@ public class AwardArchiveRepository {
                     String awardNumber
             ) {
         return jdbc.sql("""
-                SELECT
+                SELECT DISTINCT
                     proposal.award_funding_proposal_id,
                     proposal.award_id,
                     proposal.proposal_id,
@@ -401,7 +401,6 @@ public class AwardArchiveRepository {
                 INNER JOIN archive.award_version award
                     ON award.award_id = proposal.award_id
                 WHERE award.award_number = :awardNumber
-                  AND award.is_primary_current = TRUE
                 ORDER BY
                     CASE
                         WHEN UPPER(
