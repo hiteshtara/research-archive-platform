@@ -241,3 +241,22 @@ export interface AwardSequenceDetailResponse {
   currentSequence: boolean;
   rows: AwardRow[];
 }
+
+export interface AwardPerson {
+  awardPersonId: number;
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  personId: string | null;
+  rolodexId: number | null;
+  fullName: string | null;
+  contactRoleCode: string | null;
+  keyPersonProjectRole: string | null;
+  facultyFlag: string | null;
+  academicYearEffort: number | null;
+  calendarYearEffort: number | null;
+  summerEffort: number | null;
+  totalEffort: number | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}

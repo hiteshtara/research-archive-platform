@@ -269,3 +269,15 @@ export function getAwardSequenceDetail(
 
 
 
+
+export function getAwardPeople(
+  awardNumber: string,
+): Promise<
+  import("../types/api").AwardPerson[]
+> {
+  return request(
+    `/api/awards/${encodeURIComponent(
+      awardNumber,
+    )}/people`,
+  );
+}

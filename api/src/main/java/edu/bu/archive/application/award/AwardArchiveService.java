@@ -212,6 +212,27 @@ public class AwardArchiveService {
         );
     }
 
+
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award.AwardPersonResponse
+            > findCurrentPeople(
+                    String awardNumber
+            ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        if (repository.findCurrent(normalizedAwardNumber).isEmpty()) {
+            throw new NoSuchElementException(
+                    "Award not found: "
+                            + normalizedAwardNumber
+            );
+        }
+
+        return repository.findCurrentPeople(
+                normalizedAwardNumber
+        );
+    }
+
     private String normalizeAwardNumber(
             String awardNumber
     ) {

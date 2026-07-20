@@ -108,6 +108,24 @@ public class AwardArchiveController {
         );
     }
 
+
+    @GetMapping("/{awardNumber}/people")
+    public ResponseEntity<
+            List<
+                    edu.bu.archive.adapter.in.web.dto.award
+                            .AwardPersonResponse
+                    >
+            > people(
+                    @PathVariable
+                    String awardNumber
+            ) {
+        return ResponseEntity.ok(
+                service.findCurrentPeople(
+                        awardNumber
+                )
+        );
+    }
+
     /*
      * Existing proof-of-concept endpoint.
      * Keep until the React UI switches to the paginated endpoints.

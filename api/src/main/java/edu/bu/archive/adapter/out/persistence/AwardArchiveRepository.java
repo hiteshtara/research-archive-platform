@@ -245,4 +245,52 @@ public class AwardArchiveRepository {
                 .query(AwardRowResponse.class)
                 .list();
     }
+
+
+    public List<edu.bu.archive.adapter.in.web.dto.award.AwardPersonResponse>
+            findCurrentPeople(
+                    String awardNumber
+            ) {
+        return jdbc.sql("""
+                SELECT
+                    person.award_person_id,
+                    person.award_id,
+                    person.award_number,
+                    person.sequence_number,
+                    person.person_id,
+                    person.rolodex_id,
+                    person.full_name,
+                    person.contact_role_code,
+                    person.key_person_project_role,
+                    person.faculty_flag,
+                    person.academic_year_effort,
+                    person.calendar_year_effort,
+                    person.summer_effort,
+                    person.total_effort,
+                    person.source_update_timestamp,
+                    person.source_update_user
+                FROM archive.award_person person
+                INNER JOIN archive.award_version award
+                    ON award.award_id = person.award_id
+                WHERE award.award_number = :awardNumber
+                  AND award.is_primary_current = TRUE
+                ORDER BY
+                    CASE
+                        WHEN UPPER(
+                            TRIM(person.contact_role_code)
+                        ) = 'PI'
+                        THEN 0
+                        ELSE 1
+                    END,
+                    person.full_name NULLS LAST,
+                    person.award_person_id
+                """)
+                .param("awardNumber", awardNumber)
+                .query(
+                        edu.bu.archive.adapter.in.web.dto.award
+                                .AwardPersonResponse.class
+                )
+                .list();
+    }
+
 }

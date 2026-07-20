@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection, Engine
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 
+from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
@@ -20,6 +21,7 @@ FILES = {
     "amounts": DOWNLOAD_DIR / "award_amounts.csv",
     "people": DOWNLOAD_DIR / "award_people.csv",
     "proposals": DOWNLOAD_DIR / "award_proposals.csv",
+    "unit_contacts": DOWNLOAD_DIR / "award_unit_contacts.csv",
 }
 
 
@@ -48,6 +50,13 @@ PROPOSAL_REQUIRED_COLUMNS = {
     "award_funding_proposal_id",
     "award_id",
     "proposal_id",
+}
+
+UNIT_CONTACT_REQUIRED_COLUMNS = {
+    "award_unit_contact_id",
+    "award_id",
+    "award_number",
+    "sequence_number",
 }
 
 
@@ -323,6 +332,48 @@ def prepare_people(
     return dataframe
 
 
+def prepare_unit_contacts(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        UNIT_CONTACT_REQUIRED_COLUMNS,
+        "award_unit_contacts.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_unit_contact_id",
+            "award_id",
+            "sequence_number",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    duplicate_rows = dataframe.duplicated(
+        subset=["award_unit_contact_id"],
+        keep="first",
+    )
+
+    if duplicate_rows.any():
+        logger.warning(
+            "Removed {} duplicate Award Unit Contact rows",
+            int(duplicate_rows.sum()),
+        )
+
+        dataframe = dataframe.loc[
+            ~duplicate_rows
+        ].copy()
+
+    return dataframe
+
+
 def prepare_proposals(
     dataframe: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -395,6 +446,7 @@ def create_load_run(
     return int(load_id)
 
 
+
 def load_dataframe(
     connection: Connection,
     dataframe: pd.DataFrame,
@@ -402,37 +454,47 @@ def load_dataframe(
     columns: list[str],
     load_id: int,
 ) -> int:
+
     available_columns = [
-        column
-        for column in columns
-        if column in dataframe.columns
+        c
+        for c in columns
+        if c in dataframe.columns
     ]
 
-    target = dataframe[available_columns].copy()
+    target = dataframe[
+        available_columns
+    ].copy()
 
     target = target.rename(
         columns={
-            "update_timestamp": "source_update_timestamp",
-            "update_user": "source_update_user",
-            "ver_nbr": "source_version_number",
-            "active": "active_flag",
+            "update_timestamp":
+                "source_update_timestamp",
+
+            "update_user":
+                "source_update_user",
+
+            "ver_nbr":
+                "source_version_number",
+
+            "active":
+                "active_flag",
         }
     )
 
     target["load_id"] = load_id
 
-    target.to_sql(
-        name=table_name,
-        schema="archive",
-        con=connection,
-        if_exists="append",
-        index=False,
-        method="multi",
-        chunksize=500,
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        table_name,
+        len(target),
     )
 
-    return len(target)
-
+    return bulk_copy_dataframe(
+        connection=connection,
+        dataframe=target,
+        schema="archive",
+        table=table_name,
+    )
 
 def clear_existing_award_data(
     connection: Connection,
@@ -442,10 +504,13 @@ def clear_existing_award_data(
     connection.execute(
         text(
             """
-            DELETE FROM archive.award_funding_proposal;
-            DELETE FROM archive.award_person;
-            DELETE FROM archive.award_amount_info;
-            DELETE FROM archive.award_version;
+            TRUNCATE TABLE
+                archive.award_funding_proposal,
+                archive.award_unit_contact,
+                archive.award_person,
+                archive.award_amount_info,
+                archive.award_version
+            RESTART IDENTITY;
             """
         )
     )
@@ -546,6 +611,9 @@ def main() -> None:
     proposals = prepare_proposals(
         read_csv(FILES["proposals"])
     )
+    unit_contacts = prepare_unit_contacts(
+        read_csv(FILES["unit_contacts"])
+    )
 
     validate_child_award_ids(
         versions,
@@ -562,12 +630,18 @@ def main() -> None:
         proposals,
         "award_proposals.csv",
     )
+    validate_child_award_ids(
+        versions,
+        unit_contacts,
+        "award_unit_contacts.csv",
+    )
 
     total_rows = (
         len(versions)
         + len(amounts)
         + len(people)
         + len(proposals)
+        + len(unit_contacts)
     )
 
     engine = create_postgres_engine()
@@ -676,6 +750,43 @@ def main() -> None:
                 load_id,
             )
 
+            unit_contacts = unit_contacts.rename(
+                columns={"obj_id": "source_object_id"}
+            )
+
+            unit_contact_rows = load_dataframe(
+                connection,
+                unit_contacts,
+                "award_unit_contact",
+                [
+                    "award_unit_contact_id",
+                    "award_id",
+                    "award_number",
+                    "sequence_number",
+                    "person_id",
+                    "full_name",
+                    "unit_number",
+                    "unit_name",
+                    "parent_unit_number",
+                    "parent_unit_name",
+                    "unit_administrator_type_code",
+                    "project_role",
+                    "unit_contact_type",
+                    "default_unit_contact",
+                    "primary_title",
+                    "directory_title",
+                    "office_location",
+                    "email_address",
+                    "office_phone",
+                    "phone_extension",
+                    "update_timestamp",
+                    "update_user",
+                    "ver_nbr",
+                    "source_object_id",
+                ],
+                load_id,
+            )
+
             proposal_rows = load_dataframe(
                 connection,
                 proposals,
@@ -697,6 +808,7 @@ def main() -> None:
                 + amount_rows
                 + person_rows
                 + proposal_rows
+                + unit_contact_rows
             )
 
             mark_load_complete(
@@ -707,12 +819,13 @@ def main() -> None:
 
         logger.success(
             "Award load completed. "
-            "load_id={} versions={} amounts={} people={} proposals={}",
+            "load_id={} versions={} amounts={} people={} proposals={} unit_contacts={}",
             load_id,
             len(versions),
             len(amounts),
             len(people),
             len(proposals),
+            len(unit_contacts),
         )
 
     except Exception as error:

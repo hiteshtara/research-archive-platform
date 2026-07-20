@@ -25,6 +25,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 
 import {
+  getAwardPeople,
   getAwardSequenceDetail,
   getAwardSequencePage,
   getAwardWorkspace,
@@ -57,6 +58,23 @@ export function AwardHistoryPage() {
 
     queryFn: () =>
       getAwardWorkspace(
+        awardNumber!,
+      ),
+  });
+
+
+  const peopleQuery = useQuery({
+    queryKey: [
+      "award-people",
+      awardNumber,
+    ],
+
+    enabled:
+      !!awardNumber &&
+      activeTab === 1,
+
+    queryFn: () =>
+      getAwardPeople(
         awardNumber!,
       ),
   });
@@ -374,7 +392,94 @@ export function AwardHistoryPage() {
             </Table>
           )}
 
-          {activeTab >= 1 && activeTab <= 4 && (
+          {activeTab === 1 && (
+            <Stack spacing={2}>
+
+              {peopleQuery.isLoading && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    placeItems: "center",
+                    py: 8,
+                  }}
+                >
+                  <CircularProgress />
+                </Box>
+              )}
+
+              {peopleQuery.isError && (
+                <Alert severity="error">
+                  Unable to load Award people.
+                </Alert>
+              )}
+
+              {peopleQuery.data && (
+                <>
+                  <Typography sx={{ fontWeight: 700 }}>
+                    {peopleQuery.data.length.toLocaleString()} people
+                  </Typography>
+
+                  {peopleQuery.data.length === 0 ? (
+                    <Alert severity="info">
+                      No people are associated with the current Award.
+                    </Alert>
+                  ) : (
+                    <Table>
+
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Role</TableCell>
+                          <TableCell>Name</TableCell>
+                          <TableCell>Person ID</TableCell>
+                          <TableCell>Project Role</TableCell>
+                          <TableCell>Faculty</TableCell>
+                          <TableCell>Total Effort</TableCell>
+                        </TableRow>
+                      </TableHead>
+
+                      <TableBody>
+                        {peopleQuery.data.map((person) => (
+                          <TableRow key={person.awardPersonId}>
+
+                            <TableCell>
+                              {person.contactRoleCode ?? "—"}
+                            </TableCell>
+
+                            <TableCell>
+                              <Typography sx={{ fontWeight: 700 }}>
+                                {person.fullName ?? "Unnamed person"}
+                              </Typography>
+                            </TableCell>
+
+                            <TableCell>
+                              {person.personId ?? "—"}
+                            </TableCell>
+
+                            <TableCell>
+                              {person.keyPersonProjectRole ?? "—"}
+                            </TableCell>
+
+                            <TableCell>
+                              {person.facultyFlag ?? "—"}
+                            </TableCell>
+
+                            <TableCell>
+                              {person.totalEffort ?? "—"}
+                            </TableCell>
+
+                          </TableRow>
+                        ))}
+                      </TableBody>
+
+                    </Table>
+                  )}
+                </>
+              )}
+
+            </Stack>
+          )}
+
+          {activeTab >= 2 && activeTab <= 4 && (
             <Box
               sx={{
                 py: 6,
