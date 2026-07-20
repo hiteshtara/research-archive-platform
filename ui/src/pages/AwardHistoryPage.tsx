@@ -26,6 +26,7 @@ import { useParams } from "react-router-dom";
 
 import {
   getAwardPeople,
+  getAwardUnitContacts,
   getAwardSequenceDetail,
   getAwardSequencePage,
   getAwardWorkspace,
@@ -34,6 +35,7 @@ import {
 const tabs = [
   "General",
   "People",
+  "Unit Contacts",
   "Funding",
   "Amounts",
   "Proposals",
@@ -79,6 +81,22 @@ export function AwardHistoryPage() {
       ),
   });
 
+  const unitContactsQuery = useQuery({
+    queryKey: [
+      "award-unit-contacts",
+      awardNumber,
+    ],
+
+    enabled:
+      !!awardNumber &&
+      activeTab === 2,
+
+    queryFn: () =>
+      getAwardUnitContacts(
+        awardNumber!,
+      ),
+  });
+
   const historyQuery = useQuery({
     queryKey: [
       "award-sequence-page",
@@ -88,7 +106,7 @@ export function AwardHistoryPage() {
 
     enabled:
       !!awardNumber &&
-      activeTab === 5,
+      activeTab === 6,
 
     queryFn: () =>
       getAwardSequencePage(
@@ -479,7 +497,165 @@ export function AwardHistoryPage() {
             </Stack>
           )}
 
-          {activeTab >= 2 && activeTab <= 4 && (
+          {activeTab === 2 && (
+            <Stack spacing={2}>
+
+              {unitContactsQuery.isLoading && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    placeItems: "center",
+                    py: 8,
+                  }}
+                >
+                  <CircularProgress />
+                </Box>
+              )}
+
+              {unitContactsQuery.isError && (
+                <Alert severity="error">
+                  Unable to load Award unit contacts.
+                </Alert>
+              )}
+
+              {unitContactsQuery.data && (
+                <>
+                  <Typography sx={{ fontWeight: 700 }}>
+                    {unitContactsQuery.data.length.toLocaleString()} unit contacts
+                  </Typography>
+
+                  {unitContactsQuery.data.length === 0 ? (
+                    <Alert severity="info">
+                      No unit contacts are associated with the current Award.
+                    </Alert>
+                  ) : (
+                    <Box sx={{ overflowX: "auto" }}>
+                      <Table size="small">
+
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Project Role</TableCell>
+                            <TableCell>Name</TableCell>
+                            <TableCell>Email</TableCell>
+                            <TableCell>Phone</TableCell>
+                            <TableCell>Title</TableCell>
+                            <TableCell>Unit</TableCell>
+                            <TableCell>Parent Unit</TableCell>
+                            <TableCell>Default</TableCell>
+                          </TableRow>
+                        </TableHead>
+
+                        <TableBody>
+                          {unitContactsQuery.data.map((contact) => (
+                            <TableRow
+                              key={contact.awardUnitContactId}
+                              hover
+                            >
+
+                              <TableCell>
+                                {contact.projectRole ?? "—"}
+                              </TableCell>
+
+                              <TableCell>
+                                <Typography sx={{ fontWeight: 700 }}>
+                                  {contact.fullName ?? "Unnamed contact"}
+                                </Typography>
+
+                                {contact.personId && (
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                  >
+                                    {contact.personId}
+                                  </Typography>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                {contact.emailAddress ? (
+                                  <a
+                                    href={`mailto:${contact.emailAddress}`}
+                                  >
+                                    {contact.emailAddress}
+                                  </a>
+                                ) : (
+                                  "—"
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                {contact.officePhone ?? "—"}
+
+                                {contact.phoneExtension && (
+                                  <>
+                                    {" ext. "}
+                                    {contact.phoneExtension}
+                                  </>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                {contact.directoryTitle
+                                  ?? contact.primaryTitle
+                                  ?? "—"}
+                              </TableCell>
+
+                              <TableCell>
+                                <Typography>
+                                  {contact.unitName ?? "—"}
+                                </Typography>
+
+                                {contact.unitNumber && (
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                  >
+                                    {contact.unitNumber}
+                                  </Typography>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                <Typography>
+                                  {contact.parentUnitName ?? "—"}
+                                </Typography>
+
+                                {contact.parentUnitNumber && (
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                  >
+                                    {contact.parentUnitNumber}
+                                  </Typography>
+                                )}
+                              </TableCell>
+
+                              <TableCell>
+                                {contact.defaultUnitContact === "Y" ? (
+                                  <Chip
+                                    size="small"
+                                    color="primary"
+                                    label="Yes"
+                                  />
+                                ) : (
+                                  "No"
+                                )}
+                              </TableCell>
+
+                            </TableRow>
+                          ))}
+                        </TableBody>
+
+                      </Table>
+                    </Box>
+                  )}
+                </>
+              )}
+
+            </Stack>
+          )}
+
+          {activeTab >= 3 && activeTab <= 5 && (
             <Box
               sx={{
                 py: 6,
@@ -499,7 +675,7 @@ export function AwardHistoryPage() {
             </Box>
           )}
 
-          {activeTab === 5 && (
+          {activeTab === 6 && (
             <Stack spacing={3}>
 
               {historyQuery.isLoading && (

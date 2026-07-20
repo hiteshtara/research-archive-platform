@@ -260,3 +260,28 @@ export interface AwardPerson {
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
 }
+
+export interface AwardUnitContact {
+  awardUnitContactId: number;
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  personId: string | null;
+  fullName: string | null;
+  unitNumber: string | null;
+  unitName: string | null;
+  parentUnitNumber: string | null;
+  parentUnitName: string | null;
+  unitAdministratorTypeCode: string | null;
+  projectRole: string | null;
+  unitContactType: string | null;
+  defaultUnitContact: string | null;
+  primaryTitle: string | null;
+  directoryTitle: string | null;
+  officeLocation: string | null;
+  emailAddress: string | null;
+  officePhone: string | null;
+  phoneExtension: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}

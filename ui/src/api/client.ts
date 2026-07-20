@@ -281,3 +281,15 @@ export function getAwardPeople(
     )}/people`,
   );
 }
+
+export function getAwardUnitContacts(
+  awardNumber: string,
+): Promise<
+  import("../types/api").AwardUnitContact[]
+> {
+  return request(
+    `/api/awards/${encodeURIComponent(
+      awardNumber,
+    )}/unit-contacts`,
+  );
+}

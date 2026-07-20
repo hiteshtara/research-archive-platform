@@ -214,6 +214,78 @@ def prepare_versions(
             dataframe["sequence_number"] == max_sequence
         )
 
+    # Select exactly one authoritative current row for each
+    # Award Number. Multiple source rows can share the latest
+    # sequence, so use deterministic Kuali-style precedence.
+    dataframe["is_primary_current"] = False
+
+    primary_candidates = dataframe.copy()
+
+    primary_candidates["_active_sequence_rank"] = (
+        primary_candidates["award_sequence_status"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .eq("ACTIVE")
+        .astype(int)
+    )
+
+    primary_candidates = primary_candidates.sort_values(
+        by=[
+            "award_number",
+            "is_current_version",
+            "sequence_number",
+            "_active_sequence_rank",
+            "update_timestamp",
+            "award_id",
+        ],
+        ascending=[
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+        ],
+        na_position="last",
+        kind="stable",
+    )
+
+    primary_indexes = (
+        primary_candidates
+        .drop_duplicates(
+            subset=["award_number"],
+            keep="first",
+        )
+        .index
+    )
+
+    dataframe.loc[
+        primary_indexes,
+        "is_primary_current",
+    ] = True
+
+    primary_counts = dataframe.groupby(
+        "award_number"
+    )["is_primary_current"].sum()
+
+    invalid_primary_counts = primary_counts[
+        primary_counts != 1
+    ]
+
+    if not invalid_primary_counts.empty:
+        raise RuntimeError(
+            "Each Award Number must have exactly one "
+            "primary current row. Invalid Award Numbers: "
+            f"{len(invalid_primary_counts):,}"
+        )
+
+    logger.info(
+        "Selected {:,} primary current Award rows",
+        int(dataframe["is_primary_current"].sum()),
+    )
+
     duplicate_award_ids = dataframe.duplicated(
         subset=["award_id"],
         keep=False,
@@ -698,6 +770,7 @@ def main() -> None:
                     "update_timestamp",
                     "update_user",
                     "is_current_version",
+                    "is_primary_current",
                 ],
                 load_id,
             )
