@@ -293,4 +293,54 @@ public class AwardArchiveRepository {
                 .list();
     }
 
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardUnitContactResponse
+            > findCurrentUnitContacts(
+                    String awardNumber
+            ) {
+        return jdbc.sql("""
+                SELECT DISTINCT
+                    contact.award_unit_contact_id,
+                    contact.award_id,
+                    contact.award_number,
+                    contact.sequence_number,
+                    contact.person_id,
+                    contact.full_name,
+                    contact.unit_number,
+                    contact.unit_name,
+                    contact.parent_unit_number,
+                    contact.parent_unit_name,
+                    contact.unit_administrator_type_code,
+                    contact.project_role,
+                    contact.unit_contact_type,
+                    contact.default_unit_contact,
+                    contact.primary_title,
+                    contact.directory_title,
+                    contact.office_location,
+                    contact.email_address,
+                    contact.office_phone,
+                    contact.phone_extension,
+                    contact.source_update_timestamp,
+                    contact.source_update_user
+                FROM archive.award_unit_contact contact
+                INNER JOIN archive.award_version award
+                    ON award.award_id = contact.award_id
+                WHERE award.award_number = :awardNumber
+                  AND award.is_primary_current = TRUE
+                ORDER BY
+                    contact.project_role NULLS LAST,
+                    contact.full_name NULLS LAST,
+                    contact.unit_number NULLS LAST,
+                    contact.award_unit_contact_id
+                """)
+                .param("awardNumber", awardNumber)
+                .query(
+                        edu.bu.archive.adapter.in.web.dto.award
+                                .AwardUnitContactResponse.class
+                )
+                .list();
+    }
+
+
 }

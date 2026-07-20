@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSequencePageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 
 import org.springframework.stereotype.Service;
@@ -229,6 +230,28 @@ public class AwardArchiveService {
         }
 
         return repository.findCurrentPeople(
+                normalizedAwardNumber
+        );
+    }
+
+
+    public List<AwardUnitContactResponse>
+            findCurrentUnitContacts(
+                    String awardNumber
+            ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        if (repository.findCurrent(
+                normalizedAwardNumber
+        ).isEmpty()) {
+            throw new NoSuchElementException(
+                    "Award not found: "
+                            + normalizedAwardNumber
+            );
+        }
+
+        return repository.findCurrentUnitContacts(
                 normalizedAwardNumber
         );
     }

@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequencePageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.application.award.AwardArchiveService;
 
@@ -121,6 +122,20 @@ public class AwardArchiveController {
             ) {
         return ResponseEntity.ok(
                 service.findCurrentPeople(
+                        awardNumber
+                )
+        );
+    }
+
+
+    @GetMapping("/{awardNumber}/unit-contacts")
+    public ResponseEntity<List<AwardUnitContactResponse>>
+            unitContacts(
+                    @PathVariable
+                    String awardNumber
+            ) {
+        return ResponseEntity.ok(
+                service.findCurrentUnitContacts(
                         awardNumber
                 )
         );
