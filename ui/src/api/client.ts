@@ -1,10 +1,6 @@
 import { accessToken } from "../auth";
 
-import type {
-  DashboardSummary,
-  IrbProtocol,
-  PageResponse,
-} from "../types/api";
+import type { DashboardSummary, IrbProtocol, PageResponse } from "../types/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -28,9 +24,7 @@ async function request<T>(path: string): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Request failed with status ${response.status}: ${path}`,
-    );
+    throw new Error(`Request failed with status ${response.status}: ${path}`);
   }
 
   return response.json() as Promise<T>;
@@ -90,9 +84,7 @@ export function getIrbProtocols(
 export function getIrbProtocolByRecordId(
   recordId: number,
 ): Promise<IrbProtocol> {
-  return request<IrbProtocol>(
-    `/api/irb/record/${recordId}`,
-  );
+  return request<IrbProtocol>(`/api/irb/record/${recordId}`);
 }
 
 export function globalSearch(
@@ -115,14 +107,14 @@ export function getIrbWorkspace(
   );
 }
 
-export function getIrbFamilies(parameters: {
-  page?: number;
-  size?: number;
-  query?: string;
-} = {}): Promise<
-  import("../types/api").PageResponse<
-    import("../types/api").IrbFamily
-  >
+export function getIrbFamilies(
+  parameters: {
+    page?: number;
+    size?: number;
+    query?: string;
+  } = {},
+): Promise<
+  import("../types/api").PageResponse<import("../types/api").IrbFamily>
 > {
   const searchParameters = new URLSearchParams({
     page: String(parameters.page ?? 0),
@@ -133,19 +125,17 @@ export function getIrbFamilies(parameters: {
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(
-    `/api/irb/families?${searchParameters.toString()}`,
-  );
+  return request(`/api/irb/families?${searchParameters.toString()}`);
 }
 
-export function getIrbHistory(parameters: {
-  page?: number;
-  size?: number;
-  query?: string;
-} = {}): Promise<
-  import("../types/api").PageResponse<
-    import("../types/api").IrbHistoryVersion
-  >
+export function getIrbHistory(
+  parameters: {
+    page?: number;
+    size?: number;
+    query?: string;
+  } = {},
+): Promise<
+  import("../types/api").PageResponse<import("../types/api").IrbHistoryVersion>
 > {
   const searchParameters = new URLSearchParams({
     page: String(parameters.page ?? 0),
@@ -156,9 +146,7 @@ export function getIrbHistory(parameters: {
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(
-    `/api/irb/history?${searchParameters.toString()}`,
-  );
+  return request(`/api/irb/history?${searchParameters.toString()}`);
 }
 
 export function getIrbHistoryVersion(
@@ -181,53 +169,33 @@ export function getInvestigatorProfile(
   );
 }
 
-export function getAwardFamilies(parameters: {
-  query?: string;
-  limit?: number;
-} = {}): Promise<
-  import("../types/api").AwardFamily[]
-> {
-
+export function getAwardFamilies(
+  parameters: {
+    query?: string;
+    limit?: number;
+  } = {},
+): Promise<import("../types/api").AwardFamily[]> {
   const searchParameters = new URLSearchParams({
     limit: String(parameters.limit ?? 50),
   });
 
   if (parameters.query?.trim()) {
-    searchParameters.set(
-      "query",
-      parameters.query.trim(),
-    );
+    searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(
-    `/api/awards/families?${searchParameters.toString()}`,
-  );
+  return request(`/api/awards/families?${searchParameters.toString()}`);
 }
 
 export function getAwardHistory(
   awardNumber: string,
-): Promise<
-  import("../types/api").AwardFamilyResponse
-> {
-
-  return request(
-    `/api/awards/history/${encodeURIComponent(
-      awardNumber,
-    )}`,
-  );
+): Promise<import("../types/api").AwardFamilyResponse> {
+  return request(`/api/awards/history/${encodeURIComponent(awardNumber)}`);
 }
-
 
 export function getAwardWorkspace(
   awardNumber: string,
-): Promise<
-  import("../types/api").AwardWorkspaceResponse
-> {
-  return request(
-    `/api/awards/${encodeURIComponent(
-      awardNumber,
-    )}`,
-  );
+): Promise<import("../types/api").AwardWorkspaceResponse> {
+  return request(`/api/awards/${encodeURIComponent(awardNumber)}`);
 }
 
 export function getAwardSequencePage(
@@ -236,9 +204,7 @@ export function getAwardSequencePage(
     page?: number;
     size?: number;
   } = {},
-): Promise<
-  import("../types/api").AwardSequencePageResponse
-> {
+): Promise<import("../types/api").AwardSequencePageResponse> {
   const searchParameters = new URLSearchParams({
     page: String(parameters.page ?? 0),
     size: String(parameters.size ?? 20),
@@ -254,42 +220,40 @@ export function getAwardSequencePage(
 export function getAwardSequenceDetail(
   awardNumber: string,
   sequenceNumber: number,
-): Promise<
-  import("../types/api").AwardSequenceDetailResponse
-> {
+): Promise<import("../types/api").AwardSequenceDetailResponse> {
   return request(
-    `/api/awards/${encodeURIComponent(
-      awardNumber,
-    )}/history/${sequenceNumber}`,
+    `/api/awards/${encodeURIComponent(awardNumber)}/history/${sequenceNumber}`,
   );
 }
 
-
-
-
-
-
-
 export function getAwardPeople(
   awardNumber: string,
-): Promise<
-  import("../types/api").AwardPerson[]
-> {
-  return request(
-    `/api/awards/${encodeURIComponent(
-      awardNumber,
-    )}/people`,
-  );
+): Promise<import("../types/api").AwardPerson[]> {
+  return request(`/api/awards/${encodeURIComponent(awardNumber)}/people`);
 }
 
 export function getAwardUnitContacts(
   awardNumber: string,
-): Promise<
-  import("../types/api").AwardUnitContact[]
-> {
+): Promise<import("../types/api").AwardUnitContact[]> {
   return request(
-    `/api/awards/${encodeURIComponent(
-      awardNumber,
-    )}/unit-contacts`,
+    `/api/awards/${encodeURIComponent(awardNumber)}/unit-contacts`,
   );
+}
+
+export function getAwardAmounts(
+  awardNumber: string,
+): Promise<import("../types/api").AwardAmount[]> {
+  return request(`/api/awards/${encodeURIComponent(awardNumber)}/amounts`);
+}
+
+export function getAwardProposals(
+  awardNumber: string,
+): Promise<import("../types/api").AwardProposal[]> {
+  return request(`/api/awards/${encodeURIComponent(awardNumber)}/proposals`);
+}
+
+export function getAwardFunding(
+  awardNumber: string,
+): Promise<import("../types/api").AwardFunding> {
+  return request(`/api/awards/${encodeURIComponent(awardNumber)}/funding`);
 }

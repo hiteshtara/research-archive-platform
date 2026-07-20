@@ -141,6 +141,56 @@ public class AwardArchiveController {
         );
     }
 
+
+    @GetMapping("/{awardNumber}/amounts")
+    public ResponseEntity<
+            List<
+                    edu.bu.archive.adapter.in.web.dto.award
+                            .AwardAmountResponse
+                    >
+            > amounts(
+                    @PathVariable
+                    String awardNumber
+            ) {
+        return ResponseEntity.ok(
+                service.findCurrentAmounts(
+                        awardNumber
+                )
+        );
+    }
+
+    @GetMapping("/{awardNumber}/proposals")
+    public ResponseEntity<
+            List<
+                    edu.bu.archive.adapter.in.web.dto.award
+                            .AwardProposalResponse
+                    >
+            > proposals(
+                    @PathVariable
+                    String awardNumber
+            ) {
+        return ResponseEntity.ok(
+                service.findCurrentProposals(
+                        awardNumber
+                )
+        );
+    }
+
+    @GetMapping("/{awardNumber}/funding")
+    public ResponseEntity<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardFundingResponse
+            > funding(
+                    @PathVariable
+                    String awardNumber
+            ) {
+        return ResponseEntity.ok(
+                service.findCurrentFunding(
+                        awardNumber
+                )
+        );
+    }
+
     /*
      * Existing proof-of-concept endpoint.
      * Keep until the React UI switches to the paginated endpoints.

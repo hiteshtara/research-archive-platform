@@ -193,7 +193,7 @@ export interface AwardRow {
   accountNumber: string | null;
   sponsorAwardNumber: string | null;
   beginDate: string | null;
-  closeoutDate: string |null;
+  closeoutDate: string | null;
   current: boolean;
   primaryCurrent: boolean;
 }
@@ -209,7 +209,6 @@ export interface AwardFamilyResponse {
   current: AwardRow;
   sequences: AwardSequence[];
 }
-
 
 export interface AwardWorkspaceResponse {
   awardNumber: string;
@@ -284,4 +283,41 @@ export interface AwardUnitContact {
   phoneExtension: string | null;
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
+}
+
+export interface AwardAmount {
+  awardAmountInfoId: number;
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  anticipatedChangeDirect: number | null;
+  anticipatedChangeIndirect: number | null;
+  anticipatedTotalDirect: number | null;
+  anticipatedTotalIndirect: number | null;
+  obligatedTotalDirect: number | null;
+  obligatedTotalIndirect: number | null;
+  anticipatedTotalAmount: number | null;
+  obligatedTotalAmount: number | null;
+  tnmDocumentNumber: string | null;
+  sourceVersionNumber: number | null;
+}
+
+export interface AwardProposal {
+  awardFundingProposalId: number;
+  awardId: number;
+  proposalId: number;
+  activeFlag: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+}
+
+export interface AwardFunding {
+  awardNumber: string;
+  sponsor: string | null;
+  primeSponsor: string | null;
+  sponsorAwardNumber: string | null;
+  leadUnit: string | null;
+  linkedProposalCount: number;
+  activeProposalCount: number;
 }

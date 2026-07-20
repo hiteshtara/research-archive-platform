@@ -256,6 +256,110 @@ public class AwardArchiveService {
         );
     }
 
+
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardAmountResponse
+            > findCurrentAmounts(
+                    String awardNumber
+            ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        if (repository.findCurrent(
+                normalizedAwardNumber
+        ).isEmpty()) {
+            throw new NoSuchElementException(
+                    "Award not found: "
+                            + normalizedAwardNumber
+            );
+        }
+
+        return repository.findCurrentAmounts(
+                normalizedAwardNumber
+        );
+    }
+
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardProposalResponse
+            > findCurrentProposals(
+                    String awardNumber
+            ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        if (repository.findCurrent(
+                normalizedAwardNumber
+        ).isEmpty()) {
+            throw new NoSuchElementException(
+                    "Award not found: "
+                            + normalizedAwardNumber
+            );
+        }
+
+        return repository.findCurrentProposals(
+                normalizedAwardNumber
+        );
+    }
+
+    public edu.bu.archive.adapter.in.web.dto.award
+            .AwardFundingResponse findCurrentFunding(
+                    String awardNumber
+            ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        AwardRowResponse current =
+                repository.findCurrent(
+                        normalizedAwardNumber
+                ).orElseThrow(() ->
+                        new NoSuchElementException(
+                                "Award not found: "
+                                        + normalizedAwardNumber
+                        )
+                );
+
+        List<
+                edu.bu.archive.adapter.in.web.dto.award
+                        .AwardProposalResponse
+                > proposals =
+                repository.findCurrentProposals(
+                        normalizedAwardNumber
+                );
+
+        long activeProposalCount =
+                proposals.stream()
+                        .filter(proposal -> {
+                            String flag =
+                                    proposal.activeFlag();
+
+                            if (flag == null) {
+                                return false;
+                            }
+
+                            return switch (
+                                    flag.trim().toUpperCase()
+                            ) {
+                                case "Y", "YES", "TRUE", "1" ->
+                                        true;
+                                default -> false;
+                            };
+                        })
+                        .count();
+
+        return new edu.bu.archive.adapter.in.web.dto.award
+                .AwardFundingResponse(
+                normalizedAwardNumber,
+                current.sponsor(),
+                current.primeSponsor(),
+                current.sponsorAwardNumber(),
+                current.leadUnit(),
+                (long) proposals.size(),
+                activeProposalCount
+        );
+    }
+
     private String normalizeAwardNumber(
             String awardNumber
     ) {

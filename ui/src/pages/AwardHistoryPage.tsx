@@ -26,6 +26,9 @@ import { useParams } from "react-router-dom";
 
 import {
   getAwardPeople,
+  getAwardAmounts,
+  getAwardFunding,
+  getAwardProposals,
   getAwardUnitContacts,
   getAwardSequenceDetail,
   getAwardSequencePage,
@@ -47,93 +50,74 @@ export function AwardHistoryPage() {
 
   const [activeTab, setActiveTab] = useState(0);
   const [historyPage, setHistoryPage] = useState(0);
-  const [selectedSequence, setSelectedSequence] =
-    useState<number | null>(null);
+  const [selectedSequence, setSelectedSequence] = useState<number | null>(null);
 
   const workspaceQuery = useQuery({
-    queryKey: [
-      "award-workspace",
-      awardNumber,
-    ],
+    queryKey: ["award-workspace", awardNumber],
 
     enabled: !!awardNumber,
 
-    queryFn: () =>
-      getAwardWorkspace(
-        awardNumber!,
-      ),
+    queryFn: () => getAwardWorkspace(awardNumber!),
   });
 
-
   const peopleQuery = useQuery({
-    queryKey: [
-      "award-people",
-      awardNumber,
-    ],
+    queryKey: ["award-people", awardNumber],
 
-    enabled:
-      !!awardNumber &&
-      activeTab === 1,
+    enabled: !!awardNumber && activeTab === 1,
 
-    queryFn: () =>
-      getAwardPeople(
-        awardNumber!,
-      ),
+    queryFn: () => getAwardPeople(awardNumber!),
   });
 
   const unitContactsQuery = useQuery({
-    queryKey: [
-      "award-unit-contacts",
-      awardNumber,
-    ],
+    queryKey: ["award-unit-contacts", awardNumber],
 
-    enabled:
-      !!awardNumber &&
-      activeTab === 2,
+    enabled: !!awardNumber && activeTab === 2,
 
-    queryFn: () =>
-      getAwardUnitContacts(
-        awardNumber!,
-      ),
+    queryFn: () => getAwardUnitContacts(awardNumber!),
+  });
+
+  const fundingQuery = useQuery({
+    queryKey: ["award-funding", awardNumber],
+
+    enabled: !!awardNumber && activeTab === 3,
+
+    queryFn: () => getAwardFunding(awardNumber!),
+  });
+
+  const amountsQuery = useQuery({
+    queryKey: ["award-amounts", awardNumber],
+
+    enabled: !!awardNumber && activeTab === 4,
+
+    queryFn: () => getAwardAmounts(awardNumber!),
+  });
+
+  const proposalsQuery = useQuery({
+    queryKey: ["award-proposals", awardNumber],
+
+    enabled: !!awardNumber && activeTab === 5,
+
+    queryFn: () => getAwardProposals(awardNumber!),
   });
 
   const historyQuery = useQuery({
-    queryKey: [
-      "award-sequence-page",
-      awardNumber,
-      historyPage,
-    ],
+    queryKey: ["award-sequence-page", awardNumber, historyPage],
 
-    enabled:
-      !!awardNumber &&
-      activeTab === 6,
+    enabled: !!awardNumber && activeTab === 6,
 
     queryFn: () =>
-      getAwardSequencePage(
-        awardNumber!,
-        {
-          page: historyPage,
-          size: 10,
-        },
-      ),
+      getAwardSequencePage(awardNumber!, {
+        page: historyPage,
+        size: 10,
+      }),
   });
 
   const sequenceQuery = useQuery({
-    queryKey: [
-      "award-sequence-detail",
-      awardNumber,
-      selectedSequence,
-    ],
+    queryKey: ["award-sequence-detail", awardNumber, selectedSequence],
 
-    enabled:
-      !!awardNumber &&
-      selectedSequence !== null,
+    enabled: !!awardNumber && selectedSequence !== null,
 
-    queryFn: () =>
-      getAwardSequenceDetail(
-        awardNumber!,
-        selectedSequence!,
-      ),
+    queryFn: () => getAwardSequenceDetail(awardNumber!, selectedSequence!),
   });
 
   if (workspaceQuery.isLoading) {
@@ -150,41 +134,23 @@ export function AwardHistoryPage() {
     );
   }
 
-  if (
-    workspaceQuery.isError ||
-    !workspaceQuery.data
-  ) {
-    return (
-      <Alert severity="error">
-        Unable to load Award workspace.
-      </Alert>
-    );
+  if (workspaceQuery.isError || !workspaceQuery.data) {
+    return <Alert severity="error">Unable to load Award workspace.</Alert>;
   }
 
-  const current =
-    workspaceQuery.data.current;
+  const current = workspaceQuery.data.current;
 
   return (
     <Stack spacing={3}>
-
       <Card>
         <CardContent>
+          <Typography variant="h4">Award {current.awardNumber}</Typography>
 
-          <Typography variant="h4">
-            Award {current.awardNumber}
-          </Typography>
-
-          <Typography
-            variant="h6"
-            sx={{ mt: 1 }}
-          >
+          <Typography variant="h6" sx={{ mt: 1 }}>
             {current.title}
           </Typography>
 
-          <Typography
-            color="text.secondary"
-            sx={{ mt: 1 }}
-          >
+          <Typography color="text.secondary" sx={{ mt: 1 }}>
             {current.sponsor ?? "Unknown sponsor"}
           </Typography>
 
@@ -195,20 +161,13 @@ export function AwardHistoryPage() {
           <Box sx={{ mt: 3 }}>
             <Table size="small">
               <TableBody>
-
                 <TableRow>
-                  <TableCell sx={{ width: 240 }}>
-                    Status
-                  </TableCell>
-                  <TableCell>
-                    {current.status ?? "Unknown"}
-                  </TableCell>
+                  <TableCell sx={{ width: 240 }}>Status</TableCell>
+                  <TableCell>{current.status ?? "Unknown"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Current Sequence
-                  </TableCell>
+                  <TableCell>Current Sequence</TableCell>
                   <TableCell>
                     <Chip
                       color="success"
@@ -219,54 +178,34 @@ export function AwardHistoryPage() {
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Award ID
-                  </TableCell>
-                  <TableCell>
-                    {current.awardId}
-                  </TableCell>
+                  <TableCell>Award ID</TableCell>
+                  <TableCell>{current.awardId}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Sequence Status
-                  </TableCell>
-                  <TableCell>
-                    {current.awardSequenceStatus}
-                  </TableCell>
+                  <TableCell>Sequence Status</TableCell>
+                  <TableCell>{current.awardSequenceStatus}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Sponsor Award Number
-                  </TableCell>
-                  <TableCell>
-                    {current.sponsorAwardNumber ?? "—"}
-                  </TableCell>
+                  <TableCell>Sponsor Award Number</TableCell>
+                  <TableCell>{current.sponsorAwardNumber ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Account Number
-                  </TableCell>
-                  <TableCell>
-                    {current.accountNumber ?? "—"}
-                  </TableCell>
+                  <TableCell>Account Number</TableCell>
+                  <TableCell>{current.accountNumber ?? "—"}</TableCell>
                 </TableRow>
-
               </TableBody>
             </Table>
           </Box>
-
         </CardContent>
       </Card>
 
       <Card>
         <Tabs
           value={activeTab}
-          onChange={(_, nextTab) =>
-            setActiveTab(nextTab)
-          }
+          onChange={(_, nextTab) => setActiveTab(nextTab)}
           variant="scrollable"
           scrollButtons="auto"
           sx={{
@@ -276,143 +215,84 @@ export function AwardHistoryPage() {
           }}
         >
           {tabs.map((tab) => (
-            <Tab
-              key={tab}
-              label={tab}
-            />
+            <Tab key={tab} label={tab} />
           ))}
         </Tabs>
 
         <CardContent>
-
           {activeTab === 0 && (
             <Table size="small">
               <TableBody>
-
                 <TableRow>
-                  <TableCell sx={{ width: 240 }}>
-                    Award Number
-                  </TableCell>
-                  <TableCell>
-                    {current.awardNumber}
-                  </TableCell>
+                  <TableCell sx={{ width: 240 }}>Award Number</TableCell>
+                  <TableCell>{current.awardNumber}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Award ID
-                  </TableCell>
-                  <TableCell>
-                    {current.awardId}
-                  </TableCell>
+                  <TableCell>Award ID</TableCell>
+                  <TableCell>{current.awardId}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Sequence Number
-                  </TableCell>
-                  <TableCell>
-                    {current.sequenceNumber}
-                  </TableCell>
+                  <TableCell>Sequence Number</TableCell>
+                  <TableCell>{current.sequenceNumber}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Title
-                  </TableCell>
-                  <TableCell>
-                    {current.title}
-                  </TableCell>
+                  <TableCell>Title</TableCell>
+                  <TableCell>{current.title}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Status
-                  </TableCell>
-                  <TableCell>
-                    {current.status ?? "—"}
-                  </TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>{current.status ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Sequence Status
-                  </TableCell>
-                  <TableCell>
-                    {current.awardSequenceStatus}
-                  </TableCell>
+                  <TableCell>Sequence Status</TableCell>
+                  <TableCell>{current.awardSequenceStatus}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Sponsor
-                  </TableCell>
-                  <TableCell>
-                    {current.sponsor ?? "—"}
-                  </TableCell>
+                  <TableCell>Sponsor</TableCell>
+                  <TableCell>{current.sponsor ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Prime Sponsor
-                  </TableCell>
-                  <TableCell>
-                    {current.primeSponsor ?? "—"}
-                  </TableCell>
+                  <TableCell>Prime Sponsor</TableCell>
+                  <TableCell>{current.primeSponsor ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Lead Unit
-                  </TableCell>
-                  <TableCell>
-                    {current.leadUnit ?? "—"}
-                  </TableCell>
+                  <TableCell>Lead Unit</TableCell>
+                  <TableCell>{current.leadUnit ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Account Number
-                  </TableCell>
-                  <TableCell>
-                    {current.accountNumber ?? "—"}
-                  </TableCell>
+                  <TableCell>Account Number</TableCell>
+                  <TableCell>{current.accountNumber ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Sponsor Award Number
-                  </TableCell>
-                  <TableCell>
-                    {current.sponsorAwardNumber ?? "—"}
-                  </TableCell>
+                  <TableCell>Sponsor Award Number</TableCell>
+                  <TableCell>{current.sponsorAwardNumber ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Begin Date
-                  </TableCell>
-                  <TableCell>
-                    {current.beginDate ?? "—"}
-                  </TableCell>
+                  <TableCell>Begin Date</TableCell>
+                  <TableCell>{current.beginDate ?? "—"}</TableCell>
                 </TableRow>
 
                 <TableRow>
-                  <TableCell>
-                    Closeout Date
-                  </TableCell>
-                  <TableCell>
-                    {current.closeoutDate ?? "—"}
-                  </TableCell>
+                  <TableCell>Closeout Date</TableCell>
+                  <TableCell>{current.closeoutDate ?? "—"}</TableCell>
                 </TableRow>
-
               </TableBody>
             </Table>
           )}
 
           {activeTab === 1 && (
             <Stack spacing={2}>
-
               {peopleQuery.isLoading && (
                 <Box
                   sx={{
@@ -426,9 +306,7 @@ export function AwardHistoryPage() {
               )}
 
               {peopleQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Award people.
-                </Alert>
+                <Alert severity="error">Unable to load Award people.</Alert>
               )}
 
               {peopleQuery.data && (
@@ -443,7 +321,6 @@ export function AwardHistoryPage() {
                     </Alert>
                   ) : (
                     <Table>
-
                       <TableHead>
                         <TableRow>
                           <TableCell>Role</TableCell>
@@ -458,7 +335,6 @@ export function AwardHistoryPage() {
                       <TableBody>
                         {peopleQuery.data.map((person) => (
                           <TableRow key={person.awardPersonId}>
-
                             <TableCell>
                               {person.contactRoleCode ?? "—"}
                             </TableCell>
@@ -469,37 +345,27 @@ export function AwardHistoryPage() {
                               </Typography>
                             </TableCell>
 
-                            <TableCell>
-                              {person.personId ?? "—"}
-                            </TableCell>
+                            <TableCell>{person.personId ?? "—"}</TableCell>
 
                             <TableCell>
                               {person.keyPersonProjectRole ?? "—"}
                             </TableCell>
 
-                            <TableCell>
-                              {person.facultyFlag ?? "—"}
-                            </TableCell>
+                            <TableCell>{person.facultyFlag ?? "—"}</TableCell>
 
-                            <TableCell>
-                              {person.totalEffort ?? "—"}
-                            </TableCell>
-
+                            <TableCell>{person.totalEffort ?? "—"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
-
                     </Table>
                   )}
                 </>
               )}
-
             </Stack>
           )}
 
           {activeTab === 2 && (
             <Stack spacing={2}>
-
               {unitContactsQuery.isLoading && (
                 <Box
                   sx={{
@@ -521,7 +387,8 @@ export function AwardHistoryPage() {
               {unitContactsQuery.data && (
                 <>
                   <Typography sx={{ fontWeight: 700 }}>
-                    {unitContactsQuery.data.length.toLocaleString()} unit contacts
+                    {unitContactsQuery.data.length.toLocaleString()} unit
+                    contacts
                   </Typography>
 
                   {unitContactsQuery.data.length === 0 ? (
@@ -531,7 +398,6 @@ export function AwardHistoryPage() {
                   ) : (
                     <Box sx={{ overflowX: "auto" }}>
                       <Table size="small">
-
                         <TableHead>
                           <TableRow>
                             <TableCell>Project Role</TableCell>
@@ -547,11 +413,7 @@ export function AwardHistoryPage() {
 
                         <TableBody>
                           {unitContactsQuery.data.map((contact) => (
-                            <TableRow
-                              key={contact.awardUnitContactId}
-                              hover
-                            >
-
+                            <TableRow key={contact.awardUnitContactId} hover>
                               <TableCell>
                                 {contact.projectRole ?? "—"}
                               </TableCell>
@@ -573,9 +435,7 @@ export function AwardHistoryPage() {
 
                               <TableCell>
                                 {contact.emailAddress ? (
-                                  <a
-                                    href={`mailto:${contact.emailAddress}`}
-                                  >
+                                  <a href={`mailto:${contact.emailAddress}`}>
                                     {contact.emailAddress}
                                   </a>
                                 ) : (
@@ -595,9 +455,9 @@ export function AwardHistoryPage() {
                               </TableCell>
 
                               <TableCell>
-                                {contact.directoryTitle
-                                  ?? contact.primaryTitle
-                                  ?? "—"}
+                                {contact.directoryTitle ??
+                                  contact.primaryTitle ??
+                                  "—"}
                               </TableCell>
 
                               <TableCell>
@@ -641,43 +501,305 @@ export function AwardHistoryPage() {
                                   "No"
                                 )}
                               </TableCell>
-
                             </TableRow>
                           ))}
                         </TableBody>
-
                       </Table>
                     </Box>
                   )}
                 </>
               )}
-
             </Stack>
           )}
 
-          {activeTab >= 3 && activeTab <= 5 && (
-            <Box
-              sx={{
-                py: 6,
-                textAlign: "center",
-              }}
-            >
-              <Typography variant="h6">
-                {tabs[activeTab]}
-              </Typography>
+          {activeTab === 3 && (
+            <Stack spacing={2}>
+              {fundingQuery.isLoading && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    placeItems: "center",
+                    py: 8,
+                  }}
+                >
+                  <CircularProgress />
+                </Box>
+              )}
 
-              <Typography
-                color="text.secondary"
-                sx={{ mt: 1 }}
-              >
-                This section will be connected next.
-              </Typography>
-            </Box>
+              {fundingQuery.isError && (
+                <Alert severity="error">Unable to load Award funding.</Alert>
+              )}
+
+              {fundingQuery.data && (
+                <>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    Funding Summary
+                  </Typography>
+
+                  <Box
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: {
+                        xs: "1fr",
+                        md: "repeat(2, minmax(0, 1fr))",
+                        xl: "repeat(4, minmax(0, 1fr))",
+                      },
+                      gap: 2,
+                    }}
+                  >
+                    {[
+                      ["Sponsor", fundingQuery.data.sponsor ?? "—"],
+                      ["Prime Sponsor", fundingQuery.data.primeSponsor ?? "—"],
+                      [
+                        "Sponsor Award Number",
+                        fundingQuery.data.sponsorAwardNumber ?? "—",
+                      ],
+                      ["Lead Unit", fundingQuery.data.leadUnit ?? "—"],
+                      [
+                        "Linked Proposals",
+                        fundingQuery.data.linkedProposalCount,
+                      ],
+                      [
+                        "Active Proposals",
+                        fundingQuery.data.activeProposalCount,
+                      ],
+                    ].map(([label, value]) => (
+                      <Card key={String(label)} variant="outlined">
+                        <CardContent>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            {label}
+                          </Typography>
+
+                          <Typography
+                            variant="h6"
+                            sx={{
+                              mt: 1,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {value}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Box>
+                </>
+              )}
+            </Stack>
+          )}
+
+          {activeTab === 4 && (
+            <Stack spacing={2}>
+              {amountsQuery.isLoading && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    placeItems: "center",
+                    py: 8,
+                  }}
+                >
+                  <CircularProgress />
+                </Box>
+              )}
+
+              {amountsQuery.isError && (
+                <Alert severity="error">Unable to load Award amounts.</Alert>
+              )}
+
+              {amountsQuery.data && (
+                <>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    Award Amounts
+                  </Typography>
+
+                  {amountsQuery.data.length === 0 ? (
+                    <Alert severity="info">
+                      No amount records are associated with the current Award.
+                    </Alert>
+                  ) : (
+                    <Box sx={{ overflowX: "auto" }}>
+                      <Table size="small" sx={{ minWidth: 1450 }}>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Sequence</TableCell>
+                            <TableCell>Obligated Total</TableCell>
+                            <TableCell>Obligated Direct</TableCell>
+                            <TableCell>Obligated Indirect</TableCell>
+                            <TableCell>Anticipated Total</TableCell>
+                            <TableCell>Anticipated Direct</TableCell>
+                            <TableCell>Anticipated Indirect</TableCell>
+                            <TableCell>Change Direct</TableCell>
+                            <TableCell>Change Indirect</TableCell>
+                            <TableCell>TNM Document</TableCell>
+                            <TableCell>Source Version</TableCell>
+                          </TableRow>
+                        </TableHead>
+
+                        <TableBody>
+                          {amountsQuery.data.map((amount) => {
+                            const money = (value: number | null) =>
+                              value === null
+                                ? "—"
+                                : new Intl.NumberFormat("en-US", {
+                                    style: "currency",
+                                    currency: "USD",
+                                  }).format(value);
+
+                            return (
+                              <TableRow key={amount.awardAmountInfoId} hover>
+                                <TableCell>{amount.sequenceNumber}</TableCell>
+
+                                <TableCell>
+                                  {money(amount.obligatedTotalAmount)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.obligatedTotalDirect)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.obligatedTotalIndirect)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.anticipatedTotalAmount)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.anticipatedTotalDirect)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.anticipatedTotalIndirect)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.anticipatedChangeDirect)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {money(amount.anticipatedChangeIndirect)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {amount.tnmDocumentNumber ?? "—"}
+                                </TableCell>
+
+                                <TableCell>
+                                  {amount.sourceVersionNumber ?? "—"}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </Box>
+                  )}
+                </>
+              )}
+            </Stack>
+          )}
+
+          {activeTab === 5 && (
+            <Stack spacing={2}>
+              {proposalsQuery.isLoading && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    placeItems: "center",
+                    py: 8,
+                  }}
+                >
+                  <CircularProgress />
+                </Box>
+              )}
+
+              {proposalsQuery.isError && (
+                <Alert severity="error">Unable to load linked proposals.</Alert>
+              )}
+
+              {proposalsQuery.data && (
+                <>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    Linked Proposals
+                  </Typography>
+
+                  {proposalsQuery.data.length === 0 ? (
+                    <Alert severity="info">
+                      No proposals are linked to the current Award.
+                    </Alert>
+                  ) : (
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Proposal ID</TableCell>
+                          <TableCell>Status</TableCell>
+                          <TableCell>Source Updated</TableCell>
+                          <TableCell>Source User</TableCell>
+                          <TableCell>Source Version</TableCell>
+                        </TableRow>
+                      </TableHead>
+
+                      <TableBody>
+                        {proposalsQuery.data.map((proposal) => {
+                          const active = ["Y", "YES", "TRUE", "1"].includes(
+                            proposal.activeFlag?.trim().toUpperCase() ?? "",
+                          );
+
+                          return (
+                            <TableRow
+                              key={proposal.awardFundingProposalId}
+                              hover
+                            >
+                              <TableCell>
+                                <Typography sx={{ fontWeight: 800 }}>
+                                  {proposal.proposalId}
+                                </Typography>
+                              </TableCell>
+
+                              <TableCell>
+                                <Chip
+                                  size="small"
+                                  color={active ? "success" : "default"}
+                                  label={
+                                    active
+                                      ? "Active"
+                                      : (proposal.activeFlag ?? "Inactive")
+                                  }
+                                />
+                              </TableCell>
+
+                              <TableCell>
+                                {proposal.sourceUpdateTimestamp ?? "—"}
+                              </TableCell>
+
+                              <TableCell>
+                                {proposal.sourceUpdateUser ?? "—"}
+                              </TableCell>
+
+                              <TableCell>
+                                {proposal.sourceVersionNumber ?? "—"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </>
+              )}
+            </Stack>
           )}
 
           {activeTab === 6 && (
             <Stack spacing={3}>
-
               {historyQuery.isLoading && (
                 <Box
                   sx={{
@@ -691,89 +813,62 @@ export function AwardHistoryPage() {
               )}
 
               {historyQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Award history.
-                </Alert>
+                <Alert severity="error">Unable to load Award history.</Alert>
               )}
 
               {historyQuery.data && (
                 <>
-
                   <Typography sx={{ fontWeight: 700 }}>
                     {historyQuery.data.totalElements.toLocaleString()} sequences
                   </Typography>
 
                   <Table>
-
                     <TableHead>
                       <TableRow>
-                        <TableCell>
-                          Sequence
-                        </TableCell>
-                        <TableCell>
-                          Status
-                        </TableCell>
-                        <TableCell>
-                          Sequence Status
-                        </TableCell>
-                        <TableCell>
-                          Rows
-                        </TableCell>
-                        <TableCell>
-                          Current
-                        </TableCell>
+                        <TableCell>Sequence</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell>Sequence Status</TableCell>
+                        <TableCell>Rows</TableCell>
+                        <TableCell>Current</TableCell>
                       </TableRow>
                     </TableHead>
 
                     <TableBody>
-                      {historyQuery.data.content.map(
-                        (sequence) => (
-                          <TableRow
-                            key={
-                              sequence.sequenceNumber
-                            }
-                            hover
-                            onClick={() =>
-                              setSelectedSequence(
-                                sequence.sequenceNumber,
-                              )
-                            }
-                            sx={{
-                              cursor: "pointer",
-                            }}
-                          >
-                            <TableCell>
-                              {sequence.sequenceNumber}
-                            </TableCell>
+                      {historyQuery.data.content.map((sequence) => (
+                        <TableRow
+                          key={sequence.sequenceNumber}
+                          hover
+                          onClick={() =>
+                            setSelectedSequence(sequence.sequenceNumber)
+                          }
+                          sx={{
+                            cursor: "pointer",
+                          }}
+                        >
+                          <TableCell>{sequence.sequenceNumber}</TableCell>
 
-                            <TableCell>
-                              {sequence.status ?? "—"}
-                            </TableCell>
+                          <TableCell>{sequence.status ?? "—"}</TableCell>
 
-                            <TableCell>
-                              {sequence.awardSequenceStatus ?? "—"}
-                            </TableCell>
+                          <TableCell>
+                            {sequence.awardSequenceStatus ?? "—"}
+                          </TableCell>
 
-                            <TableCell>
-                              {sequence.rowCount}
-                            </TableCell>
+                          <TableCell>{sequence.rowCount}</TableCell>
 
-                            <TableCell>
-                              {sequence.currentSequence
-                                ? (
-                                  <Chip
-                                    color="success"
-                                    size="small"
-                                    label="Current"
-                                  />
-                                )
-                                : "—"}
-                            </TableCell>
-                          </TableRow>
-                        ),
-                      )}
+                          <TableCell>
+                            {sequence.currentSequence ? (
+                              <Chip
+                                color="success"
+                                size="small"
+                                label="Current"
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
-
                   </Table>
 
                   <Box
@@ -785,44 +880,29 @@ export function AwardHistoryPage() {
                   >
                     <Pagination
                       page={historyPage + 1}
-                      count={
-                        historyQuery.data.totalPages
-                      }
-                      onChange={(_, nextPage) =>
-                        setHistoryPage(
-                          nextPage - 1,
-                        )
-                      }
+                      count={historyQuery.data.totalPages}
+                      onChange={(_, nextPage) => setHistoryPage(nextPage - 1)}
                       color="primary"
                       showFirstButton
                       showLastButton
                     />
                   </Box>
-
                 </>
               )}
-
             </Stack>
           )}
-
         </CardContent>
       </Card>
 
       <Dialog
         open={selectedSequence !== null}
-        onClose={() =>
-          setSelectedSequence(null)
-        }
+        onClose={() => setSelectedSequence(null)}
         fullWidth
         maxWidth="lg"
       >
-
-        <DialogTitle>
-          Sequence {selectedSequence}
-        </DialogTitle>
+        <DialogTitle>Sequence {selectedSequence}</DialogTitle>
 
         <DialogContent>
-
           {sequenceQuery.isLoading && (
             <Box
               sx={{
@@ -836,82 +916,46 @@ export function AwardHistoryPage() {
           )}
 
           {sequenceQuery.isError && (
-            <Alert severity="error">
-              Unable to load sequence details.
-            </Alert>
+            <Alert severity="error">Unable to load sequence details.</Alert>
           )}
 
           {sequenceQuery.data && (
             <Table size="small">
-
               <TableHead>
                 <TableRow>
-                  <TableCell>
-                    Award ID
-                  </TableCell>
-                  <TableCell>
-                    Status
-                  </TableCell>
-                  <TableCell>
-                    Sequence Status
-                  </TableCell>
-                  <TableCell>
-                    Sponsor
-                  </TableCell>
-                  <TableCell>
-                    Prime Sponsor
-                  </TableCell>
-                  <TableCell>
-                    Lead Unit
-                  </TableCell>
-                  <TableCell>
-                    Account
-                  </TableCell>
+                  <TableCell>Award ID</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Sequence Status</TableCell>
+                  <TableCell>Sponsor</TableCell>
+                  <TableCell>Prime Sponsor</TableCell>
+                  <TableCell>Lead Unit</TableCell>
+                  <TableCell>Account</TableCell>
                 </TableRow>
               </TableHead>
 
               <TableBody>
-                {sequenceQuery.data.rows.map(
-                  (row) => (
-                    <TableRow key={row.awardId}>
-                      <TableCell>
-                        {row.awardId}
-                      </TableCell>
+                {sequenceQuery.data.rows.map((row) => (
+                  <TableRow key={row.awardId}>
+                    <TableCell>{row.awardId}</TableCell>
 
-                      <TableCell>
-                        {row.status ?? "—"}
-                      </TableCell>
+                    <TableCell>{row.status ?? "—"}</TableCell>
 
-                      <TableCell>
-                        {row.awardSequenceStatus}
-                      </TableCell>
+                    <TableCell>{row.awardSequenceStatus}</TableCell>
 
-                      <TableCell>
-                        {row.sponsor ?? "—"}
-                      </TableCell>
+                    <TableCell>{row.sponsor ?? "—"}</TableCell>
 
-                      <TableCell>
-                        {row.primeSponsor ?? "—"}
-                      </TableCell>
+                    <TableCell>{row.primeSponsor ?? "—"}</TableCell>
 
-                      <TableCell>
-                        {row.leadUnit ?? "—"}
-                      </TableCell>
+                    <TableCell>{row.leadUnit ?? "—"}</TableCell>
 
-                      <TableCell>
-                        {row.accountNumber ?? "—"}
-                      </TableCell>
-                    </TableRow>
-                  ),
-                )}
+                    <TableCell>{row.accountNumber ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
-
             </Table>
           )}
-
         </DialogContent>
       </Dialog>
-
     </Stack>
   );
 }
