@@ -1,6 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
-import edu.bu.archive.adapter.in.web.dto.award.AwardHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -17,7 +17,7 @@ public class AwardArchiveRepository {
         this.jdbc = jdbc;
     }
 
-    public List<AwardHistoryResponse> history(
+    public List<AwardRowResponse> findHistoryRows(
             String awardNumber
     ) {
         return jdbc.sql("""
@@ -67,7 +67,7 @@ public class AwardArchiveRepository {
                     award_id DESC
                 """)
                 .param("awardNumber", awardNumber)
-                .query(AwardHistoryResponse.class)
+                .query(AwardRowResponse.class)
                 .list();
     }
 }
