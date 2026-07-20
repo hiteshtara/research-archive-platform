@@ -8,6 +8,7 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+console.log("API_BASE_URL =", API_BASE_URL);
 if (!API_BASE_URL) {
   throw new Error("VITE_API_BASE_URL is not configured.");
 }
@@ -179,3 +180,40 @@ export function getInvestigatorProfile(
     `/api/investigators?${parameters.toString()}`,
   );
 }
+
+export function getAwardFamilies(parameters: {
+  query?: string;
+  limit?: number;
+} = {}): Promise<
+  import("../types/api").AwardFamily[]
+> {
+
+  const searchParameters = new URLSearchParams({
+    limit: String(parameters.limit ?? 50),
+  });
+
+  if (parameters.query?.trim()) {
+    searchParameters.set(
+      "query",
+      parameters.query.trim(),
+    );
+  }
+
+  return request(
+    `/api/awards/families?${searchParameters.toString()}`,
+  );
+}
+
+export function getAwardHistory(
+  awardNumber: string,
+): Promise<
+  import("../types/api").AwardFamilyResponse
+> {
+
+  return request(
+    `/api/awards/history/${encodeURIComponent(
+      awardNumber,
+    )}`,
+  );
+}
+

@@ -167,3 +167,46 @@ export interface InvestigatorProfile {
   currentStudies: InvestigatorStudy[];
   historicalStudies: InvestigatorStudy[];
 }
+
+export interface AwardFamily {
+  awardNumber: string;
+  title: string;
+  status: string | null;
+  awardSequenceStatus: string | null;
+  sponsor: string | null;
+  leadUnit: string | null;
+  accountNumber: string | null;
+  latestSequenceNumber: number;
+  primaryAwardId: number;
+}
+
+export interface AwardRow {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  title: string;
+  status: string | null;
+  awardSequenceStatus: string;
+  sponsor: string | null;
+  primeSponsor: string | null;
+  leadUnit: string | null;
+  accountNumber: string | null;
+  sponsorAwardNumber: string | null;
+  beginDate: string | null;
+  closeoutDate: string |null;
+  current: boolean;
+  primaryCurrent: boolean;
+}
+
+export interface AwardSequence {
+  sequenceNumber: number;
+  currentSequence: boolean;
+  rows: AwardRow[];
+}
+
+export interface AwardFamilyResponse {
+  awardNumber: string;
+  current: AwardRow;
+  sequences: AwardSequence[];
+}
+
