@@ -389,7 +389,7 @@ public class AwardArchiveRepository {
                     String awardNumber
             ) {
         return jdbc.sql("""
-                SELECT DISTINCT
+                SELECT
                     proposal.award_funding_proposal_id,
                     proposal.award_id,
                     proposal.proposal_id,
