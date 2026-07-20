@@ -205,16 +205,45 @@ def prepare_versions(
             dataframe["sequence_number"] == max_sequence
         )
 
-    duplicate_count = dataframe.duplicated(
-        subset=["award_number", "sequence_number"],
+    duplicate_award_ids = dataframe.duplicated(
+        subset=["award_id"],
         keep=False,
-    ).sum()
+    )
 
-    if duplicate_count:
+    if duplicate_award_ids.any():
+        duplicate_count = int(duplicate_award_ids.sum())
+
+        duplicate_preview = (
+            dataframe.loc[
+                duplicate_award_ids,
+                [
+                    "award_id",
+                    "award_number",
+                    "sequence_number",
+                ],
+            ]
+            .head(20)
+            .to_string(index=False)
+        )
+
         raise RuntimeError(
-            "award_versions.csv contains "
-            f"{duplicate_count} duplicate rows for "
-            "award_number + sequence_number"
+            "award_versions.csv contains duplicate AWARD_ID values. "
+            f"Duplicate rows: {duplicate_count}\n"
+            + duplicate_preview
+        )
+
+    repeated_sequences = int(
+        dataframe.duplicated(
+            subset=["award_number", "sequence_number"],
+            keep=False,
+        ).sum()
+    )
+
+    if repeated_sequences:
+        logger.warning(
+            "{} Award rows share an award_number + sequence_number; "
+            "all source AWARD_ID rows will be preserved",
+            repeated_sequences,
         )
 
     invalid = dataframe[
