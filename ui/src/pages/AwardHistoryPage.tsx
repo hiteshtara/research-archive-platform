@@ -1,17 +1,14 @@
 import {
-  ExpandMore,
-} from "@mui/icons-material";
-
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Box,
   Card,
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Pagination,
   Stack,
   Tab,
   Tabs,
@@ -27,7 +24,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { getAwardHistory } from "../api/client";
+import {
+  getAwardSequenceDetail,
+  getAwardSequencePage,
+  getAwardWorkspace,
+} from "../api/client";
 
 const tabs = [
   "General",
@@ -40,23 +41,66 @@ const tabs = [
 
 export function AwardHistoryPage() {
   const { awardNumber } = useParams();
-  const [activeTab, setActiveTab] = useState(0);
 
-  const query = useQuery({
+  const [activeTab, setActiveTab] = useState(0);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [selectedSequence, setSelectedSequence] =
+    useState<number | null>(null);
+
+  const workspaceQuery = useQuery({
     queryKey: [
-      "award-history",
+      "award-workspace",
       awardNumber,
     ],
 
     enabled: !!awardNumber,
 
     queryFn: () =>
-      getAwardHistory(
+      getAwardWorkspace(
         awardNumber!,
       ),
   });
 
-  if (query.isLoading) {
+  const historyQuery = useQuery({
+    queryKey: [
+      "award-sequence-page",
+      awardNumber,
+      historyPage,
+    ],
+
+    enabled:
+      !!awardNumber &&
+      activeTab === 5,
+
+    queryFn: () =>
+      getAwardSequencePage(
+        awardNumber!,
+        {
+          page: historyPage,
+          size: 10,
+        },
+      ),
+  });
+
+  const sequenceQuery = useQuery({
+    queryKey: [
+      "award-sequence-detail",
+      awardNumber,
+      selectedSequence,
+    ],
+
+    enabled:
+      !!awardNumber &&
+      selectedSequence !== null,
+
+    queryFn: () =>
+      getAwardSequenceDetail(
+        awardNumber!,
+        selectedSequence!,
+      ),
+  });
+
+  if (workspaceQuery.isLoading) {
     return (
       <Box
         sx={{
@@ -70,19 +114,19 @@ export function AwardHistoryPage() {
     );
   }
 
-  if (query.isError) {
+  if (
+    workspaceQuery.isError ||
+    !workspaceQuery.data
+  ) {
     return (
       <Alert severity="error">
-        Unable to load Award history.
+        Unable to load Award workspace.
       </Alert>
     );
   }
 
-  if (!query.data) {
-    return null;
-  }
-
-  const current = query.data.current;
+  const current =
+    workspaceQuery.data.current;
 
   return (
     <Stack spacing={3}>
@@ -171,24 +215,6 @@ export function AwardHistoryPage() {
                   </TableCell>
                   <TableCell>
                     {current.accountNumber ?? "—"}
-                  </TableCell>
-                </TableRow>
-
-                <TableRow>
-                  <TableCell>
-                    Begin Date
-                  </TableCell>
-                  <TableCell>
-                    {current.beginDate ?? "—"}
-                  </TableCell>
-                </TableRow>
-
-                <TableRow>
-                  <TableCell>
-                    Closeout Date
-                  </TableCell>
-                  <TableCell>
-                    {current.closeoutDate ?? "—"}
                   </TableCell>
                 </TableRow>
 
@@ -363,97 +389,247 @@ export function AwardHistoryPage() {
                 color="text.secondary"
                 sx={{ mt: 1 }}
               >
-                This section will be connected to archived Award data next.
+                This section will be connected next.
               </Typography>
             </Box>
           )}
 
           {activeTab === 5 && (
-            <Stack spacing={2}>
+            <Stack spacing={3}>
 
-              {query.data.sequences.map((sequence) => (
-                <Accordion
-                  key={sequence.sequenceNumber}
-                  defaultExpanded={sequence.currentSequence}
+              {historyQuery.isLoading && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    placeItems: "center",
+                    py: 8,
+                  }}
                 >
+                  <CircularProgress />
+                </Box>
+              )}
 
-                  <AccordionSummary
-                    expandIcon={<ExpandMore />}
-                  >
-                    <Stack
-                      direction="row"
-                      spacing={2}
-                      sx={{ alignItems: "center" }}
-                    >
-                      <Typography sx={{ fontWeight: 700 }}>
-                        Sequence {sequence.sequenceNumber}
-                      </Typography>
+              {historyQuery.isError && (
+                <Alert severity="error">
+                  Unable to load Award history.
+                </Alert>
+              )}
 
-                      {sequence.currentSequence && (
-                        <Chip
-                          color="success"
-                          size="small"
-                          label="Current"
-                        />
-                      )}
-                    </Stack>
-                  </AccordionSummary>
+              {historyQuery.data && (
+                <>
 
-                  <AccordionDetails>
-                    <Table size="small">
+                  <Typography sx={{ fontWeight: 700 }}>
+                    {historyQuery.data.totalElements.toLocaleString()} sequences
+                  </Typography>
 
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Award ID</TableCell>
-                          <TableCell>Status</TableCell>
-                          <TableCell>Sequence Status</TableCell>
-                          <TableCell>Sponsor</TableCell>
-                          <TableCell>Lead Unit</TableCell>
-                          <TableCell>Account</TableCell>
-                        </TableRow>
-                      </TableHead>
+                  <Table>
 
-                      <TableBody>
-                        {sequence.rows.map((row) => (
-                          <TableRow key={row.awardId}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>
+                          Sequence
+                        </TableCell>
+                        <TableCell>
+                          Status
+                        </TableCell>
+                        <TableCell>
+                          Sequence Status
+                        </TableCell>
+                        <TableCell>
+                          Rows
+                        </TableCell>
+                        <TableCell>
+                          Current
+                        </TableCell>
+                      </TableRow>
+                    </TableHead>
+
+                    <TableBody>
+                      {historyQuery.data.content.map(
+                        (sequence) => (
+                          <TableRow
+                            key={
+                              sequence.sequenceNumber
+                            }
+                            hover
+                            onClick={() =>
+                              setSelectedSequence(
+                                sequence.sequenceNumber,
+                              )
+                            }
+                            sx={{
+                              cursor: "pointer",
+                            }}
+                          >
                             <TableCell>
-                              {row.awardId}
+                              {sequence.sequenceNumber}
                             </TableCell>
 
                             <TableCell>
-                              {row.status ?? "—"}
+                              {sequence.status ?? "—"}
                             </TableCell>
 
                             <TableCell>
-                              {row.awardSequenceStatus}
+                              {sequence.awardSequenceStatus ?? "—"}
                             </TableCell>
 
                             <TableCell>
-                              {row.sponsor ?? "—"}
+                              {sequence.rowCount}
                             </TableCell>
 
                             <TableCell>
-                              {row.leadUnit ?? "—"}
-                            </TableCell>
-
-                            <TableCell>
-                              {row.accountNumber ?? "—"}
+                              {sequence.currentSequence
+                                ? (
+                                  <Chip
+                                    color="success"
+                                    size="small"
+                                    label="Current"
+                                  />
+                                )
+                                : "—"}
                             </TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
+                        ),
+                      )}
+                    </TableBody>
 
-                    </Table>
-                  </AccordionDetails>
+                  </Table>
 
-                </Accordion>
-              ))}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "center",
+                      pt: 2,
+                    }}
+                  >
+                    <Pagination
+                      page={historyPage + 1}
+                      count={
+                        historyQuery.data.totalPages
+                      }
+                      onChange={(_, nextPage) =>
+                        setHistoryPage(
+                          nextPage - 1,
+                        )
+                      }
+                      color="primary"
+                      showFirstButton
+                      showLastButton
+                    />
+                  </Box>
+
+                </>
+              )}
 
             </Stack>
           )}
 
         </CardContent>
       </Card>
+
+      <Dialog
+        open={selectedSequence !== null}
+        onClose={() =>
+          setSelectedSequence(null)
+        }
+        fullWidth
+        maxWidth="lg"
+      >
+
+        <DialogTitle>
+          Sequence {selectedSequence}
+        </DialogTitle>
+
+        <DialogContent>
+
+          {sequenceQuery.isLoading && (
+            <Box
+              sx={{
+                display: "grid",
+                placeItems: "center",
+                py: 8,
+              }}
+            >
+              <CircularProgress />
+            </Box>
+          )}
+
+          {sequenceQuery.isError && (
+            <Alert severity="error">
+              Unable to load sequence details.
+            </Alert>
+          )}
+
+          {sequenceQuery.data && (
+            <Table size="small">
+
+              <TableHead>
+                <TableRow>
+                  <TableCell>
+                    Award ID
+                  </TableCell>
+                  <TableCell>
+                    Status
+                  </TableCell>
+                  <TableCell>
+                    Sequence Status
+                  </TableCell>
+                  <TableCell>
+                    Sponsor
+                  </TableCell>
+                  <TableCell>
+                    Prime Sponsor
+                  </TableCell>
+                  <TableCell>
+                    Lead Unit
+                  </TableCell>
+                  <TableCell>
+                    Account
+                  </TableCell>
+                </TableRow>
+              </TableHead>
+
+              <TableBody>
+                {sequenceQuery.data.rows.map(
+                  (row) => (
+                    <TableRow key={row.awardId}>
+                      <TableCell>
+                        {row.awardId}
+                      </TableCell>
+
+                      <TableCell>
+                        {row.status ?? "—"}
+                      </TableCell>
+
+                      <TableCell>
+                        {row.awardSequenceStatus}
+                      </TableCell>
+
+                      <TableCell>
+                        {row.sponsor ?? "—"}
+                      </TableCell>
+
+                      <TableCell>
+                        {row.primeSponsor ?? "—"}
+                      </TableCell>
+
+                      <TableCell>
+                        {row.leadUnit ?? "—"}
+                      </TableCell>
+
+                      <TableCell>
+                        {row.accountNumber ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  ),
+                )}
+              </TableBody>
+
+            </Table>
+          )}
+
+        </DialogContent>
+      </Dialog>
 
     </Stack>
   );

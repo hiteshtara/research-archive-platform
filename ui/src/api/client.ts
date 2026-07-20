@@ -217,3 +217,55 @@ export function getAwardHistory(
   );
 }
 
+
+export function getAwardWorkspace(
+  awardNumber: string,
+): Promise<
+  import("../types/api").AwardWorkspaceResponse
+> {
+  return request(
+    `/api/awards/${encodeURIComponent(
+      awardNumber,
+    )}`,
+  );
+}
+
+export function getAwardSequencePage(
+  awardNumber: string,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+): Promise<
+  import("../types/api").AwardSequencePageResponse
+> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 20),
+  });
+
+  return request(
+    `/api/awards/${encodeURIComponent(
+      awardNumber,
+    )}/history?${searchParameters.toString()}`,
+  );
+}
+
+export function getAwardSequenceDetail(
+  awardNumber: string,
+  sequenceNumber: number,
+): Promise<
+  import("../types/api").AwardSequenceDetailResponse
+> {
+  return request(
+    `/api/awards/${encodeURIComponent(
+      awardNumber,
+    )}/history/${sequenceNumber}`,
+  );
+}
+
+
+
+
+
+

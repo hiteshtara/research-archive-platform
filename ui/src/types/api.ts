@@ -210,3 +210,34 @@ export interface AwardFamilyResponse {
   sequences: AwardSequence[];
 }
 
+
+export interface AwardWorkspaceResponse {
+  awardNumber: string;
+  current: AwardRow;
+}
+
+export interface AwardSequenceSummary {
+  sequenceNumber: number;
+  status: string | null;
+  awardSequenceStatus: string | null;
+  currentSequence: boolean;
+  rowCount: number;
+  representativeAwardId: number;
+}
+
+export interface AwardSequencePageResponse {
+  content: AwardSequenceSummary[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
+}
+
+export interface AwardSequenceDetailResponse {
+  awardNumber: string;
+  sequenceNumber: number;
+  currentSequence: boolean;
+  rows: AwardRow[];
+}

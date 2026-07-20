@@ -2,8 +2,11 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
-import edu.bu.archive.application.award.AwardArchiveService;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSequencePageResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
+import edu.bu.archive.application.award.AwardArchiveService;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,28 +32,14 @@ public class AwardArchiveController {
         this.repository = repository;
     }
 
-    /**
-     * Search Award Families
-     *
-     * Examples
-     *
-     * GET /api/awards/families
-     *
-     * GET /api/awards/families?query=NIH
-     *
-     * GET /api/awards/families?query=100836
-     */
     @GetMapping("/families")
     public List<AwardFamilySummaryResponse> families(
-
             @RequestParam(required = false)
             String query,
 
             @RequestParam(defaultValue = "50")
             int limit
-
     ) {
-
         int safeLimit = Math.min(
                 Math.max(limit, 1),
                 200
@@ -60,30 +49,78 @@ public class AwardArchiveController {
                 query,
                 safeLimit
         );
-
     }
 
-    /**
-     * Award Family History
-     *
-     * GET /api/awards/history/100836-00001
+    /*
+     * Lightweight Award workspace.
      */
-    @GetMapping("/history/{awardNumber}")
-    public ResponseEntity<AwardFamilyResponse> history(
-
+    @GetMapping("/{awardNumber}")
+    public ResponseEntity<AwardWorkspaceResponse> workspace(
             @PathVariable
             String awardNumber
-
     ) {
-
         return ResponseEntity.ok(
+                service.findWorkspace(
+                        awardNumber
+                )
+        );
+    }
 
+    /*
+     * Paginated sequence summaries.
+     */
+    @GetMapping("/{awardNumber}/history")
+    public ResponseEntity<AwardSequencePageResponse> historyPage(
+            @PathVariable
+            String awardNumber,
+
+            @RequestParam(defaultValue = "0")
+            int page,
+
+            @RequestParam(defaultValue = "25")
+            int size
+    ) {
+        return ResponseEntity.ok(
+                service.findSequencePage(
+                        awardNumber,
+                        page,
+                        size
+                )
+        );
+    }
+
+    /*
+     * Load only one selected sequence.
+     */
+    @GetMapping("/{awardNumber}/history/{sequenceNumber}")
+    public ResponseEntity<AwardSequenceDetailResponse> sequence(
+            @PathVariable
+            String awardNumber,
+
+            @PathVariable
+            int sequenceNumber
+    ) {
+        return ResponseEntity.ok(
+                service.findSequence(
+                        awardNumber,
+                        sequenceNumber
+                )
+        );
+    }
+
+    /*
+     * Existing proof-of-concept endpoint.
+     * Keep until the React UI switches to the paginated endpoints.
+     */
+    @GetMapping("/history/{awardNumber}")
+    public ResponseEntity<AwardFamilyResponse> legacyHistory(
+            @PathVariable
+            String awardNumber
+    ) {
+        return ResponseEntity.ok(
                 service.findFamily(
                         awardNumber
                 )
-
         );
-
     }
-
 }

@@ -2,7 +2,11 @@ package edu.bu.archive.application.award;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSequencePageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 
 import org.springframework.stereotype.Service;
@@ -24,19 +28,129 @@ public class AwardArchiveService {
         this.repository = repository;
     }
 
+    public AwardWorkspaceResponse findWorkspace(
+            String awardNumber
+    ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        AwardRowResponse current =
+                repository.findCurrent(normalizedAwardNumber)
+                        .orElseThrow(() ->
+                                new NoSuchElementException(
+                                        "Award not found: "
+                                                + normalizedAwardNumber
+                                )
+                        );
+
+        return new AwardWorkspaceResponse(
+                normalizedAwardNumber,
+                current
+        );
+    }
+
+    public AwardSequencePageResponse findSequencePage(
+            String awardNumber,
+            int page,
+            int size
+    ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        if (repository.findCurrent(normalizedAwardNumber).isEmpty()) {
+            throw new NoSuchElementException(
+                    "Award not found: "
+                            + normalizedAwardNumber
+            );
+        }
+
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(
+                Math.max(size, 1),
+                100
+        );
+
+        long totalElements =
+                repository.countSequences(
+                        normalizedAwardNumber
+                );
+
+        int totalPages =
+                totalElements == 0
+                        ? 0
+                        : (int) Math.ceil(
+                                (double) totalElements
+                                        / safeSize
+                        );
+
+        int offset = safePage * safeSize;
+
+        List<AwardSequenceSummaryResponse> content =
+                repository.findSequenceSummaries(
+                        normalizedAwardNumber,
+                        safeSize,
+                        offset
+                );
+
+        return new AwardSequencePageResponse(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                totalPages,
+                safePage == 0,
+                totalPages == 0
+                        || safePage >= totalPages - 1
+        );
+    }
+
+    public AwardSequenceDetailResponse findSequence(
+            String awardNumber,
+            int sequenceNumber
+    ) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        List<AwardRowResponse> rows =
+                repository.findSequenceRows(
+                        normalizedAwardNumber,
+                        sequenceNumber
+                );
+
+        if (rows.isEmpty()) {
+            throw new NoSuchElementException(
+                    "Award sequence not found: "
+                            + normalizedAwardNumber
+                            + ", sequence "
+                            + sequenceNumber
+            );
+        }
+
+        boolean currentSequence =
+                rows.stream()
+                        .anyMatch(row ->
+                                Boolean.TRUE.equals(
+                                        row.current()
+                                )
+                        );
+
+        return new AwardSequenceDetailResponse(
+                normalizedAwardNumber,
+                sequenceNumber,
+                currentSequence,
+                rows
+        );
+    }
+
+    /*
+     * Existing proof-of-concept response.
+     * Keep temporarily until the React history tab uses pagination.
+     */
     public AwardFamilyResponse findFamily(
             String awardNumber
     ) {
         String normalizedAwardNumber =
-                awardNumber == null
-                        ? ""
-                        : awardNumber.trim();
-
-        if (normalizedAwardNumber.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Award number is required"
-            );
-        }
+                normalizeAwardNumber(awardNumber);
 
         List<AwardRowResponse> rows =
                 repository.findHistoryRows(
@@ -96,5 +210,22 @@ public class AwardArchiveService {
                 current,
                 sequences
         );
+    }
+
+    private String normalizeAwardNumber(
+            String awardNumber
+    ) {
+        String normalized =
+                awardNumber == null
+                        ? ""
+                        : awardNumber.trim();
+
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Award number is required"
+            );
+        }
+
+        return normalized;
     }
 }
