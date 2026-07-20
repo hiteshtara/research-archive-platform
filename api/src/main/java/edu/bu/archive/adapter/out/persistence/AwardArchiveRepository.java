@@ -20,34 +20,54 @@ public class AwardArchiveRepository {
     public List<AwardHistoryResponse> history(
             String awardNumber
     ) {
-
         return jdbc.sql("""
                 SELECT
                     award_id,
                     award_number,
                     sequence_number,
                     title,
-                    status_description,
+
+                    status_description
+                        AS status,
+
                     award_sequence_status,
-                    sponsor_name,
-                    prime_sponsor_name,
-                    lead_unit_name,
+
+                    sponsor_name
+                        AS sponsor,
+
+                    prime_sponsor_name
+                        AS prime_sponsor,
+
+                    lead_unit_name
+                        AS lead_unit,
+
                     account_number,
                     sponsor_award_number,
                     begin_date,
                     closeout_date,
-                    is_current_version,
+
+                    is_current_version
+                        AS current,
+
                     is_primary_current
+                        AS primary_current
+
                 FROM archive.award_version
                 WHERE award_number = :awardNumber
                 ORDER BY
                     sequence_number DESC,
+
+                    CASE
+                        WHEN UPPER(TRIM(award_sequence_status)) = 'ACTIVE'
+                        THEN 1
+                        ELSE 0
+                    END DESC,
+
+                    source_update_timestamp DESC NULLS LAST,
                     award_id DESC
                 """)
                 .param("awardNumber", awardNumber)
                 .query(AwardHistoryResponse.class)
                 .list();
-
     }
-
 }
