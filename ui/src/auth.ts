@@ -11,7 +11,7 @@ const cognitoDomain =
   "rap-dev-589744711110-1784159433.auth.us-east-1.amazoncognito.com";
 
 const productionUrl =
-  "https://main.d33gc0afy3ltcj.amplifyapp.com/";
+  "https://main.d33qc0afy3ltcj.amplifyapp.com/";
 const localUrl = "http://localhost:5173/";
 
 Amplify.configure({
