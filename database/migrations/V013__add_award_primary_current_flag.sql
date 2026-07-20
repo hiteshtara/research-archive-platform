@@ -12,6 +12,13 @@ WITH ranked AS (
             PARTITION BY award_number
             ORDER BY
                 sequence_number DESC,
+
+                CASE
+                    WHEN UPPER(TRIM(award_sequence_status)) = 'ACTIVE'
+                    THEN 1
+                    ELSE 0
+                END DESC,
+
                 source_update_timestamp DESC NULLS LAST,
                 award_id DESC
         ) AS row_rank
