@@ -422,3 +422,73 @@ public class AwardArchiveRepository {
 
 
 }
+
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardAmountResponse
+            > findCurrentAmounts(
+                    String awardNumber
+            ) {
+        return jdbc.sql("""
+                SELECT
+                    amount.award_amount_info_id,
+                    amount.award_id,
+                    amount.award_number,
+                    amount.sequence_number,
+                    amount.anticipated_change_direct,
+                    amount.anticipated_change_indirect,
+                    amount.anticipated_total_direct,
+                    amount.anticipated_total_indirect,
+                    amount.obligated_total_direct,
+                    amount.obligated_total_indirect,
+                    amount.anticipated_total_amount,
+                    amount.obligated_total_amount,
+                    amount.tnm_document_number,
+                    amount.source_version_number
+                FROM archive.award_amount_info amount
+                INNER JOIN archive.award_version award
+                    ON award.award_id = amount.award_id
+                WHERE award.award_number = :awardNumber
+                ORDER BY
+                    amount.sequence_number DESC,
+                    amount.award_amount_info_id DESC
+                """)
+                .param("awardNumber", awardNumber)
+                .query(
+                        edu.bu.archive.adapter.in.web.dto.award
+                                .AwardAmountResponse.class
+                )
+                .list();
+    }
+
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardProposalResponse
+            > findCurrentProposals(
+                    String awardNumber
+            ) {
+        return jdbc.sql("""
+                SELECT DISTINCT
+                    proposal.award_funding_proposal_id,
+                    proposal.award_id,
+                    proposal.proposal_id,
+                    proposal.active_flag,
+                    proposal.source_update_timestamp,
+                    proposal.source_update_user,
+                    proposal.source_version_number
+                FROM archive.award_funding_proposal proposal
+                INNER JOIN archive.award_version award
+                    ON award.award_id = proposal.award_id
+                WHERE award.award_number = :awardNumber
+                ORDER BY
+                    proposal.proposal_id,
+                    proposal.award_funding_proposal_id
+                """)
+                .param("awardNumber", awardNumber)
+                .query(
+                        edu.bu.archive.adapter.in.web.dto.award
+                                .AwardProposalResponse.class
+                )
+                .list();
+    }
+
