@@ -1,4 +1,4 @@
-package edu.bu.researcharchive.api.proposal.dto;
+package edu.bu.archive.adapter.in.web.dto.proposal;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -11,9 +11,11 @@ public record ProposalRowResponse(
         String status,
         String proposalType,
         String activityType,
+        String sponsorCode,
         String sponsorName,
         String leadUnitNumber,
         String leadUnitName,
+        String principalInvestigatorId,
         String principalInvestigator,
         LocalDate initialStartDate,
         LocalDate initialEndDate,
