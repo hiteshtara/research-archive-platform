@@ -1,5 +1,8 @@
 package edu.bu.archive.config;
 
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -7,12 +10,27 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebCorsConfiguration implements WebMvcConfigurer {
 
+    private final List<String> allowedOrigins;
+
+    public WebCorsConfiguration(
+            @Value(
+                    "${app.cors.allowed-origins:"
+                            + "http://localhost:5173,"
+                            + "https://main.d33gc0afy3ltcj.amplifyapp.com}"
+            )
+            List<String> allowedOrigins
+    ) {
+        this.allowedOrigins = allowedOrigins;
+    }
+
     @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/**")
+    public void addCorsMappings(
+            CorsRegistry registry
+    ) {
+        registry
+                .addMapping("/api/**")
                 .allowedOrigins(
-                        "http://localhost:5173",
-                        "https://main.d33qc0afy3ltcj.amplifyapp.com"
+                        allowedOrigins.toArray(String[]::new)
                 )
                 .allowedMethods(
                         "GET",
@@ -22,7 +40,15 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
                         "DELETE",
                         "OPTIONS"
                 )
-                .allowedHeaders("*")
-                .allowCredentials(true);
+                .allowedHeaders(
+                        "Authorization",
+                        "Content-Type",
+                        "Accept"
+                )
+                .exposedHeaders(
+                        "Location"
+                )
+                .allowCredentials(true)
+                .maxAge(3600);
     }
 }
