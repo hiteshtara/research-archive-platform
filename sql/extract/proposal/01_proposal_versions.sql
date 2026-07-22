@@ -22,21 +22,29 @@ SELECT
 
     p.requested_start_date_initial AS initial_start_date,
     p.requested_end_date_initial AS initial_end_date,
-    p.initial_direct_cost,
-    p.initial_indirect_cost,
-    (
-        NVL(p.initial_direct_cost, 0)
-        + NVL(p.initial_indirect_cost, 0)
-    ) AS initial_total_cost,
+    p.total_direct_cost_initial AS initial_direct_cost,
+    p.total_indirect_cost_initial AS initial_indirect_cost,
+
+    CASE
+        WHEN p.total_direct_cost_initial IS NULL
+         AND p.total_indirect_cost_initial IS NULL
+        THEN NULL
+        ELSE NVL(p.total_direct_cost_initial, 0)
+           + NVL(p.total_indirect_cost_initial, 0)
+    END AS initial_total_cost,
 
     p.requested_start_date_total AS total_start_date,
     p.requested_end_date_total AS total_end_date,
-    p.total_direct_cost,
-    p.total_indirect_cost,
-    (
-        NVL(p.total_direct_cost, 0)
-        + NVL(p.total_indirect_cost, 0)
-    ) AS total_cost,
+    p.total_direct_cost_total AS total_direct_cost,
+    p.total_indirect_cost_total AS total_indirect_cost,
+
+    CASE
+        WHEN p.total_direct_cost_total IS NULL
+         AND p.total_indirect_cost_total IS NULL
+        THEN NULL
+        ELSE NVL(p.total_direct_cost_total, 0)
+           + NVL(p.total_indirect_cost_total, 0)
+    END AS total_cost,
 
     p.update_timestamp AS source_update_timestamp
 
@@ -57,18 +65,21 @@ LEFT JOIN unit u
 LEFT JOIN (
     SELECT
         proposal_id,
+        sequence_number,
         person_id,
         full_name,
         ROW_NUMBER() OVER (
-            PARTITION BY proposal_id
+            PARTITION BY
+                proposal_id,
+                sequence_number
             ORDER BY
-                sequence_number DESC,
                 proposal_person_id DESC
         ) AS row_rank
     FROM proposal_persons
-    WHERE UPPER(TRIM(proposal_person_role_id)) = 'PI'
+    WHERE UPPER(TRIM(contact_role_code)) = 'PI'
 ) pi
     ON pi.proposal_id = p.proposal_id
+   AND pi.sequence_number = p.sequence_number
    AND pi.row_rank = 1
 
 ORDER BY
