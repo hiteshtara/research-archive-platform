@@ -43,6 +43,22 @@ export function GlobalSearchPage() {
     }
   };
 
+  const resultPath = (
+    result: import("../types/api").GlobalSearchItem,
+  ) => {
+    if (result.module.trim().toUpperCase() === "PROPOSAL") {
+      return `/proposals/${encodeURIComponent(result.identifier)}`;
+    }
+
+    const protocolId = Number(result.protocolId);
+
+    if (Number.isInteger(protocolId) && protocolId > 0) {
+      return `/irb/history/${protocolId}`;
+    }
+
+    return null;
+  };
+
   return (
     <Stack spacing={3}>
       <Box>
@@ -143,12 +159,12 @@ export function GlobalSearchPage() {
 
           {searchQuery.data.results.map((result) => (
             <Card
-              key={`${result.module}-${result.recordId}`}
+              key={`${result.module}-${result.recordId}-${result.identifier}-${result.secondaryIdentifier}`}
               onClick={() => {
-                const protocolId = Number(result.protocolId);
+                const path = resultPath(result);
 
-                if (Number.isInteger(protocolId) && protocolId > 0) {
-                  navigate(`/irb/history/${protocolId}`);
+                if (path) {
+                  navigate(path);
                 }
               }}
               sx={{

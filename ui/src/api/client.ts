@@ -257,3 +257,57 @@ export function getAwardFunding(
 ): Promise<import("../types/api").AwardFunding> {
   return request(`/api/awards/${encodeURIComponent(awardNumber)}/funding`);
 }
+
+export function getProposalFamilies(
+  parameters: {
+    query?: string;
+    limit?: number;
+  } = {},
+): Promise<import("../types/api").ProposalFamily[]> {
+  const searchParameters = new URLSearchParams({
+    limit: String(parameters.limit ?? 50),
+  });
+
+  if (parameters.query?.trim()) {
+    searchParameters.set("query", parameters.query.trim());
+  }
+
+  return request(`/api/proposals/families?${searchParameters.toString()}`);
+}
+
+export function getProposalWorkspace(
+  proposalNumber: string,
+): Promise<import("../types/api").ProposalWorkspaceResponse> {
+  return request(`/api/proposals/${encodeURIComponent(proposalNumber)}`);
+}
+
+export function getProposalHistory(
+  proposalNumber: string,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+): Promise<import("../types/api").ProposalVersionPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 20),
+  });
+
+  return request(
+    `/api/proposals/${encodeURIComponent(
+      proposalNumber,
+    )}/history?${searchParameters.toString()}`,
+  );
+}
+
+export function getProposalPeople(
+  proposalNumber: string,
+): Promise<import("../types/api").ProposalPerson[]> {
+  return request(`/api/proposals/${encodeURIComponent(proposalNumber)}/people`);
+}
+
+export function getProposalAwards(
+  proposalNumber: string,
+): Promise<import("../types/api").ProposalAward[]> {
+  return request(`/api/proposals/${encodeURIComponent(proposalNumber)}/awards`);
+}

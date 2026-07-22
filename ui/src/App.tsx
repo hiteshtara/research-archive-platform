@@ -14,6 +14,7 @@ import { IrbFamiliesPage } from "./pages/IrbFamiliesPage";
 import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
 import { IrbHistoryPage } from "./pages/IrbHistoryPage";
 import { IrbPage } from "./pages/IrbPage";
+import { ProposalWorkspacePage } from "./pages/ProposalWorkspacePage";
 
 export default function App() {
   return (
@@ -47,6 +48,11 @@ export default function App() {
         <Route
           path="proposals"
           element={<ComingSoonPage />}
+        />
+
+        <Route
+          path="proposals/:proposalNumber"
+          element={<ProposalWorkspacePage />}
         />
 
         <Route

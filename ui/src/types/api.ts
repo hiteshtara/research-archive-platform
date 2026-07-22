@@ -321,3 +321,79 @@ export interface AwardFunding {
   linkedProposalCount: number;
   activeProposalCount: number;
 }
+
+export interface ProposalFamily {
+  proposalNumber: string;
+  title: string | null;
+  status: string | null;
+  sponsorName: string | null;
+  leadUnitName: string | null;
+  principalInvestigator: string | null;
+  latestVersionNumber: number;
+  currentProposalId: number;
+}
+
+export interface ProposalRow {
+  proposalId: number;
+  proposalNumber: string;
+  versionNumber: number;
+  title: string | null;
+  status: string | null;
+  proposalType: string | null;
+  activityType: string | null;
+  sponsorCode: string | null;
+  sponsorName: string | null;
+  leadUnitNumber: string | null;
+  leadUnitName: string | null;
+  principalInvestigatorId: string | null;
+  principalInvestigator: string | null;
+  initialStartDate: string | null;
+  initialEndDate: string | null;
+  initialDirectCost: number | null;
+  initialIndirectCost: number | null;
+  initialTotalCost: number | null;
+  totalStartDate: string | null;
+  totalEndDate: string | null;
+  totalDirectCost: number | null;
+  totalIndirectCost: number | null;
+  totalCost: number | null;
+}
+
+export interface ProposalWorkspaceResponse {
+  proposalNumber: string;
+  current: ProposalRow;
+}
+
+export interface ProposalVersionPageResponse {
+  content: ProposalRow[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
+}
+
+export interface ProposalPerson {
+  proposalId: number;
+  versionNumber: number;
+  personId: string | null;
+  fullName: string | null;
+  role: string | null;
+  projectRole: string | null;
+  principalInvestigator: boolean;
+  facultyFlag: string | null;
+  academicYearEffort: number | null;
+  calendarYearEffort: number | null;
+  summerEffort: number | null;
+  totalEffort: number | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  verNbr: number | null;
+}
+
+export interface ProposalAward {
+  proposalId: number;
+  awardId: number | null;
+  awardNumber: string | null;
+}
