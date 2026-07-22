@@ -28,8 +28,8 @@ public class DashboardController {
                 count("archive.irb_submission"),
                 count("archive.irb_funding_source"),
                 count("archive.irb_timeline_event"),
-                0,
-                0,
+                count("archive.award_version"),
+                count("archive.proposal_version"),
                 0,
                 0,
                 0
