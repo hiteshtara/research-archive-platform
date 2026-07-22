@@ -5,8 +5,10 @@
 us-east-1
 
 -------------------------------------------------------------------------------
+SSM Tunnel
+-------------------------------------------------------------------------------
 
-## SSM Tunnel
+Start the PostgreSQL tunnel:
 
 aws ssm start-session \
   --region us-east-1 \
@@ -14,41 +16,70 @@ aws ssm start-session \
   --document-name AWS-StartPortForwardingSessionToRemoteHost \
   --parameters '{"host":["research-archive-platform-dev-postgres.cs3i6a24sthk.us-east-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["15432"]}'
 
--------------------------------------------------------------------------------
-
-## PostgreSQL
-
-POSTGRES_HOST=localhost
-
-POSTGRES_PORT=15432
-
-POSTGRES_DB=research_archive
-
-POSTGRES_USER=<environment>
-
-POSTGRES_PASSWORD=<environment>
+Keep this terminal open while running ETL or connecting to PostgreSQL.
 
 -------------------------------------------------------------------------------
+Environment
+-------------------------------------------------------------------------------
 
-## ECS
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=15432
+export POSTGRES_DB=research_archive
 
-Docker build
+POSTGRES_USER and POSTGRES_PASSWORD come from your local environment.
 
-Push to ECR
+Verify:
 
-Force ECS deployment
+env | grep POSTGRES
+
+-------------------------------------------------------------------------------
+Verify Tunnel
+-------------------------------------------------------------------------------
+
+lsof -nP -iTCP:15432 -sTCP:LISTEN
+
+-------------------------------------------------------------------------------
+Run ETL
+-------------------------------------------------------------------------------
+
+PYTHONPATH=etl uv run --project etl python \
+    etl/load_proposals_from_csv.py
+
+-------------------------------------------------------------------------------
+Backend
+-------------------------------------------------------------------------------
+
+cd api
+
+mvn test
+
+-------------------------------------------------------------------------------
+Deployment
+-------------------------------------------------------------------------------
+
+Docker
+
+↓
+
+ECR
+
+↓
+
+ECS
+
+↓
 
 Verify API
 
--------------------------------------------------------------------------------
+↓
 
-## Amplify
-
-Verify frontend
+Verify React
 
 -------------------------------------------------------------------------------
+Important
+-------------------------------------------------------------------------------
 
-Never connect AWS directly to BU Oracle.
-
-Only approved CSV exports are uploaded.
-
+- BU Oracle is accessible only through the BU VPN/private network.
+- Oracle exports are created locally.
+- Only approved CSV exports are uploaded into AWS.
+- Never connect AWS directly to BU Oracle.
