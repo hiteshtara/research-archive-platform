@@ -1,0 +1,76 @@
+SELECT
+    p.proposal_id,
+    p.proposal_number,
+    p.sequence_number AS version_number,
+    p.title,
+    p.proposal_sequence_status,
+
+    p.proposal_type_code,
+    pt.description AS proposal_type,
+
+    p.activity_type_code,
+    at.description AS activity_type,
+
+    p.sponsor_code,
+    s.sponsor_name,
+
+    p.lead_unit_number,
+    u.unit_name AS lead_unit_name,
+
+    pi.person_id AS principal_investigator_id,
+    pi.full_name AS principal_investigator_name,
+
+    p.requested_start_date_initial AS initial_start_date,
+    p.requested_end_date_initial AS initial_end_date,
+    p.initial_direct_cost,
+    p.initial_indirect_cost,
+    (
+        NVL(p.initial_direct_cost, 0)
+        + NVL(p.initial_indirect_cost, 0)
+    ) AS initial_total_cost,
+
+    p.requested_start_date_total AS total_start_date,
+    p.requested_end_date_total AS total_end_date,
+    p.total_direct_cost,
+    p.total_indirect_cost,
+    (
+        NVL(p.total_direct_cost, 0)
+        + NVL(p.total_indirect_cost, 0)
+    ) AS total_cost,
+
+    p.update_timestamp AS source_update_timestamp
+
+FROM proposal p
+
+LEFT JOIN proposal_type pt
+    ON pt.proposal_type_code = p.proposal_type_code
+
+LEFT JOIN activity_type at
+    ON at.activity_type_code = p.activity_type_code
+
+LEFT JOIN sponsor s
+    ON s.sponsor_code = p.sponsor_code
+
+LEFT JOIN unit u
+    ON u.unit_number = p.lead_unit_number
+
+LEFT JOIN (
+    SELECT
+        proposal_id,
+        person_id,
+        full_name,
+        ROW_NUMBER() OVER (
+            PARTITION BY proposal_id
+            ORDER BY
+                sequence_number DESC,
+                proposal_person_id DESC
+        ) AS row_rank
+    FROM proposal_persons
+    WHERE UPPER(TRIM(proposal_person_role_id)) = 'PI'
+) pi
+    ON pi.proposal_id = p.proposal_id
+   AND pi.row_rank = 1
+
+ORDER BY
+    p.proposal_number,
+    p.sequence_number;
