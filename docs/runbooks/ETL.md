@@ -1,28 +1,16 @@
 # ETL Runbook
 
-Environment
+Order
 
-PYTHONPATH=etl
-
--------------------------------------------------------------------------------
-
-Run
-
-uv run --project etl ...
-
--------------------------------------------------------------------------------
-
-Workflow
-
-Oracle
+Migration
 
 ↓
 
-CSV
+Oracle Export
 
 ↓
 
-Validation
+CSV Validation
 
 ↓
 
@@ -30,23 +18,23 @@ Bulk Copy
 
 ↓
 
-PostgreSQL
+Verification
 
 -------------------------------------------------------------------------------
 
-Order
+Proposal ETL
 
-Migration
+proposal_versions.csv
 
-↓
+proposal_people.csv
 
-CSV
-
-↓
-
-ETL
+award_proposals.csv
 
 ↓
 
-Validation
+proposal_version
+
+proposal_person
+
+proposal_award
 

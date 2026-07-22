@@ -1,4 +1,4 @@
-# Demo Runbook
+# Demo
 
 Story
 
@@ -22,19 +22,9 @@ Current Demo
 
 Global Search
 
-IRB Workspace
-
 Award Workspace
 
+IRB Workspace
+
 Proposal Roadmap
-
--------------------------------------------------------------------------------
-
-Audience
-
-Executives
-
-Researchers
-
-Administrators
 

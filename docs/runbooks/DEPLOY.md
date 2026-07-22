@@ -1,4 +1,4 @@
-# Deployment Runbook
+# Deployment
 
 Backend
 
@@ -16,7 +16,7 @@ npm run build
 
 -------------------------------------------------------------------------------
 
-Deployment Order
+Deploy
 
 Docker
 
@@ -31,8 +31,4 @@ ECS
 ↓
 
 Verification
-
--------------------------------------------------------------------------------
-
-Deploy only after feature completion.
 

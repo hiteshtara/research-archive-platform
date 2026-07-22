@@ -6,21 +6,13 @@ KCOEUS
 
 -------------------------------------------------------------------------------
 
-Oracle is accessible only through BU VPN.
-
--------------------------------------------------------------------------------
-
-Export Process
+Workflow
 
 Oracle
 
 ↓
 
 CSV
-
-↓
-
-Downloads
 
 ↓
 
@@ -50,7 +42,7 @@ proposal_people.csv
 
 -------------------------------------------------------------------------------
 
-Always verify Oracle columns before writing extraction SQL.
+Never guess Oracle columns.
 
-Never guess Oracle metadata.
+Always verify metadata first.
 
