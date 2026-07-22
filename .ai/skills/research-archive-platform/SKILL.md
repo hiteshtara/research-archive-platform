@@ -2,10 +2,11 @@
 
 ## Project
 
-Boston University Historical Research Archive Platform
+Boston University Research Archive Platform
 
-Purpose:
-Preserve Kuali historical research administration data after Kuali retirement.
+Purpose
+
+Provide a historical archive for Kuali research administration data after Kuali retirement.
 
 ---
 
@@ -13,31 +14,33 @@ Preserve Kuali historical research administration data after Kuali retirement.
 
 Hexagonal Architecture
 
-adapter
-application
-domain
+adapter/
+application/
+domain/
 
 Spring Boot
 
 React
 
+JdbcClient
+
 PostgreSQL
 
-Oracle source
+Oracle
 
 Flyway
-
-JdbcClient
 
 Terraform
 
 AWS ECS
 
+AWS RDS
+
 ---
 
 ## Core Objects
 
-Proposal (center)
+Proposal
 
 Award
 
@@ -49,51 +52,39 @@ Investigator
 
 Subaward
 
-Proposal is the backbone of the system.
+Proposal is the central research object.
 
 ---
 
-## Development Order
+## Development Workflow
 
-Database
+1 Database
 
-↓
+2 ETL
 
-ETL
+3 Repository
 
-↓
+4 Service
 
-Repository
+5 Controller
 
-↓
-
-Service
-
-↓
-
-Controller
-
-↓
-
-React
+6 React
 
 ---
 
 ## Coding Rules
 
-Always use existing Award implementation as the template.
-
-Never invent package names.
+Mirror Award implementation.
 
 Never invent Oracle column names.
 
-Mirror existing architecture.
+Always inspect existing implementation first.
 
 Compile after every commit.
 
 Push after successful compile.
 
-Prefer cat <<'EOF' examples.
+Use cat <<'EOF' for generated files.
 
 Keep commits small.
 
@@ -105,7 +96,7 @@ Proposal Archive
 
 Completed
 
-- Proposal migration
+- Proposal migration V015
 - Proposal tables
 - Proposal extraction SQL
 
