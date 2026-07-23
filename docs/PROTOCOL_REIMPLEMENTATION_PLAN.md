@@ -1,5 +1,18 @@
 # Protocol Archive Implementation Plan
 
+## Protocol child parent resolution
+
+Protocol children do not share a universally safe parent key. Each slice must
+select `NUMBER_SEQUENCE`, `DIRECT_PROTOCOL_ID`, or `OWNER_CHAIN` from measured
+source evidence before implementation.
+
+Personnel uses `NUMBER_SEQUENCE`: resolve `protocol_id` from the unique
+`(PROTOCOL_NUMBER, SEQUENCE_NUMBER)` version, preserve the Oracle child
+`PROTOCOL_ID` as `source_protocol_id`, report source-ID differences, and reject
+missing or ambiguous tuples. Other child domains retain separate future
+decisions; the Personnel rule must not be copied without reviewing their
+measured evidence.
+
 ## Purpose and constraints
 
 Protocol Archive is the canonical human-subjects archive. The existing flat
