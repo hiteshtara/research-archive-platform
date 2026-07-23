@@ -397,3 +397,118 @@ export interface ProposalAward {
   awardId: number | null;
   awardNumber: string | null;
 }
+
+export interface NegotiationSummary {
+  negotiationId: number;
+  documentNumber: string | null;
+  negotiationStatusId: number | null;
+  negotiationStatusCode: string | null;
+  negotiationStatusDescription: string | null;
+  negotiationAgreementTypeId: number | null;
+  negotiationAgreementTypeCode: string | null;
+  negotiationAgreementTypeDescription: string | null;
+  negotiationAssociationTypeId: number | null;
+  negotiationAssociationTypeCode: string | null;
+  negotiationAssociationTypeDescription: string | null;
+  associatedDocumentId: string | null;
+  negotiatorPersonId: string | null;
+  negotiatorFullName: string | null;
+  negotiationStartDate: string | null;
+  negotiationEndDate: string | null;
+  anticipatedAwardDate: string | null;
+}
+
+export interface NegotiationPageResponse {
+  content: NegotiationSummary[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
+}
+
+export interface NegotiationRow extends NegotiationSummary {
+  documentFolder: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+  documentSourceUpdateTimestamp: string | null;
+  documentSourceUpdateUser: string | null;
+  documentSourceVersionNumber: number | null;
+  documentSourceObjectId: string | null;
+}
+
+export interface NegotiationWorkspaceResponse {
+  negotiationId: number;
+  current: NegotiationRow;
+}
+
+export interface NegotiationActivity {
+  negotiationActivityId: number;
+  negotiationId: number;
+  activityTypeId: number | null;
+  activityTypeCode: string | null;
+  activityTypeDescription: string | null;
+  locationId: number | null;
+  locationCode: string | null;
+  locationDescription: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  createDate: string | null;
+  followupDate: string | null;
+  lastModifiedUser: string | null;
+  lastModifiedDate: string | null;
+  description: string | null;
+  restricted: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface NegotiationCustomData {
+  negotiationCustomDataId: number;
+  negotiationId: number;
+  negotiationNumber: string | null;
+  customAttributeId: number | null;
+  value: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface NegotiationNotification {
+  notificationId: number;
+  notificationTypeId: number | null;
+  documentNumber: string | null;
+  owningDocumentIdFk: number;
+  recipients: string | null;
+  subject: string | null;
+  message: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface NegotiationUnassociatedDetail {
+  negotiationUnassocDetailId: number;
+  negotiationId: number;
+  title: string | null;
+  piPersonId: string | null;
+  piRolodexId: string | null;
+  leadUnit: string | null;
+  sponsorCode: string | null;
+  piName: string | null;
+  primeSponsorCode: string | null;
+  sponsorAwardNumber: string | null;
+  contactAdminPersonId: string | null;
+  subawardOrg: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}

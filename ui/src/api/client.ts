@@ -311,3 +311,62 @@ export function getProposalAwards(
 ): Promise<import("../types/api").ProposalAward[]> {
   return request(`/api/proposals/${encodeURIComponent(proposalNumber)}/awards`);
 }
+
+export function getNegotiations(
+  parameters: {
+    query?: string;
+    page?: number;
+    size?: number;
+  } = {},
+): Promise<import("../types/api").NegotiationPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
+  if (parameters.query?.trim()) {
+    searchParameters.set("query", parameters.query.trim());
+  }
+
+  return request(`/api/negotiations?${searchParameters.toString()}`);
+}
+
+export function getNegotiationWorkspace(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationWorkspaceResponse> {
+  return request(`/api/negotiations/${encodeURIComponent(negotiationId)}`);
+}
+
+export function getNegotiationActivities(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationActivity[]> {
+  return request(
+    `/api/negotiations/${encodeURIComponent(negotiationId)}/activities`,
+  );
+}
+
+export function getNegotiationCustomData(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationCustomData[]> {
+  return request(
+    `/api/negotiations/${encodeURIComponent(negotiationId)}/custom-data`,
+  );
+}
+
+export function getNegotiationNotifications(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationNotification[]> {
+  return request(
+    `/api/negotiations/${encodeURIComponent(negotiationId)}/notifications`,
+  );
+}
+
+export function getNegotiationUnassociatedDetails(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationUnassociatedDetail[]> {
+  return request(
+    `/api/negotiations/${encodeURIComponent(
+      negotiationId,
+    )}/unassociated-details`,
+  );
+}

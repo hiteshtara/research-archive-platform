@@ -14,6 +14,8 @@ import { IrbFamiliesPage } from "./pages/IrbFamiliesPage";
 import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
 import { IrbHistoryPage } from "./pages/IrbHistoryPage";
 import { IrbPage } from "./pages/IrbPage";
+import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
+import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
 import { ProposalFamiliesPage } from "./pages/ProposalFamiliesPage";
 import { ProposalWorkspacePage } from "./pages/ProposalWorkspacePage";
 
@@ -58,7 +60,12 @@ export default function App() {
 
         <Route
           path="negotiations"
-          element={<ComingSoonPage />}
+          element={<NegotiationFamiliesPage />}
+        />
+
+        <Route
+          path="negotiations/:negotiationId"
+          element={<NegotiationWorkspacePage />}
         />
 
         <Route
