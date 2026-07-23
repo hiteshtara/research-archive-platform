@@ -12,7 +12,7 @@ SELECT
     renewal.SEQUENCE_NUMBER AS sequence_number,
     renewal.PROTO_AMEND_REN_NUMBER AS proto_amend_ren_number,
     renewal.DATE_CREATED AS date_created,
-    renewal.SUMMARY AS summary,
+    DBMS_LOB.SUBSTR(renewal.SUMMARY, 4000, 1) AS summary,
     renewal.UPDATE_TIMESTAMP AS source_update_timestamp,
     renewal.UPDATE_USER AS source_update_user,
     renewal.VER_NBR AS source_version_number,
