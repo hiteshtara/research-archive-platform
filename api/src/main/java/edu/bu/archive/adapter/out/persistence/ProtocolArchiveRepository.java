@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
@@ -289,6 +290,50 @@ public class ProtocolArchiveRepository {
                 """)
                 .param("protocolId", protocolId)
                 .query(ProtocolLocationResponse.class)
+                .list();
+    }
+
+    public List<ProtocolSubmissionResponse> findSubmissions(
+            long protocolId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    submission_id,
+                    protocol_id,
+                    source_protocol_id,
+                    protocol_number,
+                    sequence_number,
+                    submission_number,
+                    schedule_id,
+                    committee_id,
+                    submission_type_code,
+                    submission_type_qual_code,
+                    submission_status_code,
+                    schedule_id_fk,
+                    committee_id_fk,
+                    protocol_review_type_code,
+                    submission_date,
+                    comments,
+                    comm_decision_motion_type_code,
+                    yes_vote_count,
+                    no_vote_count,
+                    abstainer_count,
+                    recused_count,
+                    voting_comments,
+                    is_billable,
+                    source_update_timestamp,
+                    source_update_user,
+                    source_version_number,
+                    source_object_id
+                FROM archive.protocol_submission
+                WHERE protocol_id = :protocolId
+                ORDER BY
+                    submission_date NULLS LAST,
+                    submission_number NULLS LAST,
+                    submission_id
+                """)
+                .param("protocolId", protocolId)
+                .query(ProtocolSubmissionResponse.class)
                 .list();
     }
 

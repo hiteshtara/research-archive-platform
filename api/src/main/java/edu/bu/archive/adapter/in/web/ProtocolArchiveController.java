@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 import edu.bu.archive.application.protocol.ProtocolArchiveService;
@@ -85,5 +86,12 @@ public class ProtocolArchiveController {
             @PathVariable long protocolId
     ) {
         return ResponseEntity.ok(service.findLocations(protocolId));
+    }
+
+    @GetMapping("/versions/{protocolId}/submissions")
+    public ResponseEntity<List<ProtocolSubmissionResponse>> submissions(
+            @PathVariable long protocolId
+    ) {
+        return ResponseEntity.ok(service.findSubmissions(protocolId));
     }
 }

@@ -23,6 +23,7 @@ import {
   getProtocolLocations,
   getProtocolPersonnel,
   getProtocolResearchAreas,
+  getProtocolSubmissions,
 } from "../api/client";
 
 const show = (value: string | number | null) => value ?? "—";
@@ -55,6 +56,11 @@ export function ProtocolWorkspacePage() {
     queryKey: ["protocol-locations", protocolId],
     enabled: tab === 4 && protocolId !== null,
     queryFn: () => getProtocolLocations(protocolId!),
+  });
+  const submissions = useQuery({
+    queryKey: ["protocol-submissions", protocolId],
+    enabled: tab === 5 && protocolId !== null,
+    queryFn: () => getProtocolSubmissions(protocolId!),
   });
 
   useEffect(() => {
@@ -94,6 +100,7 @@ export function ProtocolWorkspacePage() {
         <Tab label="Funding" />
         <Tab label="Research Areas" />
         <Tab label="Locations" />
+        <Tab label="Submissions" />
       </Tabs>
       {tab === 0 && (
         <Card>
@@ -313,6 +320,75 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
+      {tab === 5 && submissions.isLoading && <CircularProgress />}
+      {tab === 5 && submissions.isError && (
+        <Alert severity="error">
+          Unable to load Submissions for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 5 && submissions.data?.length === 0 && (
+        <Alert severity="info">
+          No Submissions are archived for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 5 &&
+        submissions.data &&
+        submissions.data.length > 0 && (
+          <Card>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Submission</TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Qualifier</TableCell>
+                  <TableCell>Review type</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Committee</TableCell>
+                  <TableCell>Schedule</TableCell>
+                  <TableCell>Votes</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {submissions.data.map((submission) => (
+                  <TableRow key={submission.submissionId}>
+                    <TableCell>
+                      {show(submission.submissionNumber)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.submissionDate)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.submissionTypeCode)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.submissionTypeQualCode)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.protocolReviewTypeCode)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.submissionStatusCode)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.committeeId)}
+                    </TableCell>
+                    <TableCell>
+                      {show(submission.scheduleId)}
+                    </TableCell>
+                    <TableCell>
+                      {`Yes ${show(submission.yesVoteCount)} · No ${show(
+                        submission.noVoteCount,
+                      )} · Abstain ${show(
+                        submission.abstainerCount,
+                      )} · Recused ${show(submission.recusedCount)}`}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
     </Stack>
   );
 }

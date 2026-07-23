@@ -4,6 +4,7 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 import edu.bu.archive.application.protocol.ProtocolArchiveService;
 
@@ -13,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
+import java.time.LocalDate;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -187,6 +189,44 @@ class ProtocolArchiveControllerTest {
                         jsonPath("$[0].organizationId").value("ORG")
                 );
         verify(service).findLocations(100L);
+    }
+
+    @Test
+    void submissionsAreScopedToExactProtocolId() throws Exception {
+        when(service.findSubmissions(100L)).thenReturn(
+                List.of(
+                        new ProtocolSubmissionResponse(
+                                50L, 100L, 100L, "000100", 2, 3,
+                                "SCHEDULE", "COMMITTEE", "100", "1",
+                                "200", 10L, 20L, "FULL",
+                                LocalDate.of(2026, 1, 2), null, "MOTION",
+                                5, 1, 0, 0, null, "Y",
+                                null, null, null, null
+                        )
+                )
+        );
+        mockMvc.perform(
+                        get(
+                                "/api/protocols/versions/100/submissions"
+                        )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].submissionId").value(50))
+                .andExpect(jsonPath("$[0].protocolId").value(100))
+                .andExpect(jsonPath("$[0].submissionNumber").value(3))
+                .andExpect(
+                        jsonPath("$[0].submissionDate[0]")
+                                .value(2026)
+                )
+                .andExpect(
+                        jsonPath("$[0].submissionDate[1]")
+                                .value(1)
+                )
+                .andExpect(
+                        jsonPath("$[0].submissionDate[2]")
+                                .value(2)
+                );
+        verify(service).findSubmissions(100L);
     }
 
     private ProtocolVersionResponse version(

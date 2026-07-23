@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -99,5 +100,46 @@ class ProtocolArchiveRepositoryTest {
                 new ProtocolArchiveRepository(jdbc).findLocations(100L)
         ).isEmpty();
         verify(statement).param("protocolId", 100L);
+    }
+
+    @Test
+    void submissionsAreScopedAndDeterministicallyOrdered() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolSubmissionResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("protocolId", 100L))
+                .thenReturn(statement);
+        when(statement.query(ProtocolSubmissionResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveRepository(jdbc)
+                        .findSubmissions(100L)
+        ).isEmpty();
+
+        String sql = org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .findFirst()
+                .orElseThrow()
+                .replaceAll("\\s+", " ");
+        assertThat(sql)
+                .contains("FROM archive.protocol_submission")
+                .contains("WHERE protocol_id = :protocolId")
+                .contains(
+                        "submission_date NULLS LAST, "
+                                + "submission_number NULLS LAST, "
+                                + "submission_id"
+                );
     }
 }

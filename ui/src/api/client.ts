@@ -218,6 +218,16 @@ export function getProtocolLocations(
   );
 }
 
+export function getProtocolSubmissions(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolSubmission[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(
+      protocolId,
+    )}/submissions`,
+  );
+}
+
 export function getInvestigatorProfile(
   email: string,
 ): Promise<import("../types/api").InvestigatorProfile> {

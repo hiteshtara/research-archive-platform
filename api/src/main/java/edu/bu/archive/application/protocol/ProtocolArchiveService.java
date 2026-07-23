@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 import edu.bu.archive.adapter.out.persistence.ProtocolArchiveRepository;
@@ -78,6 +79,13 @@ public class ProtocolArchiveService {
     public List<ProtocolLocationResponse> findLocations(long protocolId) {
         findVersion(protocolId);
         return repository.findLocations(protocolId);
+    }
+
+    public List<ProtocolSubmissionResponse> findSubmissions(
+            long protocolId
+    ) {
+        findVersion(protocolId);
+        return repository.findSubmissions(protocolId);
     }
 
     private String normalize(String protocolNumber) {

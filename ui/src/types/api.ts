@@ -256,6 +256,36 @@ export interface ProtocolLocation {
   sourceObjectId: string | null;
 }
 
+export interface ProtocolSubmission {
+  submissionId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  submissionNumber: number | null;
+  scheduleId: string | null;
+  committeeId: string | null;
+  submissionTypeCode: string | null;
+  submissionTypeQualCode: string | null;
+  submissionStatusCode: string | null;
+  scheduleIdFk: number | null;
+  committeeIdFk: number | null;
+  protocolReviewTypeCode: string | null;
+  submissionDate: string | null;
+  comments: string | null;
+  commDecisionMotionTypeCode: string | null;
+  yesVoteCount: number | null;
+  noVoteCount: number | null;
+  abstainerCount: number | null;
+  recusedCount: number | null;
+  votingComments: string | null;
+  isBillable: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
 export interface InvestigatorStudy {
   recordId: number | null;
   protocolId: number;
