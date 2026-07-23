@@ -41,7 +41,7 @@ Always mirror existing implementations.
 - React
 - PostgreSQL
 - Oracle (source)
-- Flyway
+- Custom SQL migration runner (`public.schema_migration`)
 - Python ETL
 - AWS ECS
 - AWS RDS
@@ -55,7 +55,7 @@ Proposal
 
 Award
 
-IRB
+Protocol
 
 Negotiation
 
@@ -88,7 +88,8 @@ Always implement features in this order.
 - Never invent Oracle table or column names.
 - Verify Oracle metadata before writing SQL.
 - Use JdbcClient.
-- Follow Flyway migration conventions.
+- Follow the repository migration conventions and use
+  `public.schema_migration`.
 - Keep one logical change per commit.
 - Compile after every commit.
 - Push only after successful compilation.

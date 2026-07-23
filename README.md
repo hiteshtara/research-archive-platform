@@ -4,7 +4,7 @@ Read-only archive and reporting platform for legacy BU research administration d
 
 ## Data domains
 
-- IRB
+- Protocols
 - Awards
 - Institutional Proposals
 - Negotiations

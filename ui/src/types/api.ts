@@ -147,6 +147,185 @@ export interface IrbHistoryVersion {
   expirationDate: string | null;
 }
 
+export interface ProtocolSummary {
+  protocolNumber: string;
+  versionCount: number;
+  latestProtocolId: number;
+  latestSequenceNumber: number;
+  title: string | null;
+  protocolStatusDescription: string | null;
+  protocolTypeDescription: string | null;
+  active: string | null;
+  expirationDate: string | null;
+}
+
+export interface ProtocolVersion {
+  protocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  documentNumber: string | null;
+  active: string | null;
+  protocolTypeCode: string | null;
+  protocolTypeDescription: string | null;
+  protocolStatusCode: string | null;
+  protocolStatusDescription: string | null;
+  title: string | null;
+  description: string | null;
+  initialSubmissionDate: string | null;
+  approvalDate: string | null;
+  expirationDate: string | null;
+  lastApprovalDate: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}
+
+export interface ProtocolUnit {
+  protocolUnitsId: number;
+  protocolPersonId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  unitNumber: string | null;
+  leadUnitFlag: string | null;
+  personId: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface ProtocolPerson {
+  protocolPersonId: number;
+  protocolId: number;
+  sourceProtocolId: number | null;
+  protocolNumber: string;
+  sequenceNumber: number;
+  personId: string | null;
+  personName: string | null;
+  protocolPersonRoleId: string | null;
+  rolodexId: number | null;
+  affiliationTypeCode: string | null;
+  comments: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+  units: ProtocolUnit[];
+}
+
+export interface ProtocolFunding {
+  protocolFundingSourceId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  fundingSourceTypeCode: string | null;
+  fundingSourceNumber: string | null;
+  fundingSourceName: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface ProtocolResearchArea {
+  protocolResearchAreaId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  researchAreaCode: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface ProtocolLocation {
+  protocolLocationId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  parentResolutionMethod: "NUMBER_SEQUENCE" | "DIRECT_ID_PLACEHOLDER";
+  protocolOrgTypeCode: string | null;
+  organizationId: string | null;
+  rolodexId: number | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface ProtocolSubmission {
+  submissionId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  submissionNumber: number | null;
+  scheduleId: string | null;
+  committeeId: string | null;
+  submissionTypeCode: string | null;
+  submissionTypeQualCode: string | null;
+  submissionStatusCode: string | null;
+  scheduleIdFk: number | null;
+  committeeIdFk: number | null;
+  protocolReviewTypeCode: string | null;
+  submissionDate: string | null;
+  comments: string | null;
+  commDecisionMotionTypeCode: string | null;
+  yesVoteCount: number | null;
+  noVoteCount: number | null;
+  abstainerCount: number | null;
+  recusedCount: number | null;
+  votingComments: string | null;
+  isBillable: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface ProtocolAction {
+  protocolActionId: number;
+  actionId: number | null;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  submissionNumber: number | null;
+  submissionIdFk: number | null;
+  protocolActionTypeCode: string | null;
+  comments: string | null;
+  prevSubmissionStatusCode: string | null;
+  submissionTypeCode: string | null;
+  prevProtocolStatusCode: string | null;
+  sourceCreateTimestamp: string | null;
+  sourceCreateUser: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  actionDate: string | null;
+  actualActionDate: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+  followupActionCode: string | null;
+}
+
+export interface ProtocolAmendRenewal {
+  protoAmendRenewalId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  protoAmendRenNumber: string | null;
+  dateCreated: string | null;
+  summary: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
 export interface InvestigatorStudy {
   recordId: number | null;
   protocolId: number;
