@@ -18,6 +18,8 @@ import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
 import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
 import { ProposalFamiliesPage } from "./pages/ProposalFamiliesPage";
 import { ProposalWorkspacePage } from "./pages/ProposalWorkspacePage";
+import { ProtocolFamiliesPage } from "./pages/ProtocolFamiliesPage";
+import { ProtocolWorkspacePage } from "./pages/ProtocolWorkspacePage";
 import { SubawardFamiliesPage } from "./pages/SubawardFamiliesPage";
 import { SubawardWorkspacePage } from "./pages/SubawardWorkspacePage";
 
@@ -38,6 +40,12 @@ export default function App() {
         <Route
           path="irb/record/:recordId"
           element={<IrbDetailPage />}
+        />
+
+        <Route path="protocols" element={<ProtocolFamiliesPage />} />
+        <Route
+          path="protocols/:protocolNumber"
+          element={<ProtocolWorkspacePage />}
         />
 
         <Route

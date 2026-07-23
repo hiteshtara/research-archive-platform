@@ -6,33 +6,33 @@ Research Archive Platform
 
 Current Sprint
 
-Proposal Archive
+Protocol Archive
 
-Completed
-
-- IRB Archive
+Operational
 
 - Award Archive
+- Proposal Archive
+- Negotiation Archive
+- Subaward Archive
 
-- Proposal database schema
+Deprecated Compatibility Path
 
-- Proposal migration
-
-- Proposal tables
+- Legacy flat IRB implementation
+- No new IRB features
+- Preserve until Protocol feature parity
 
 Current Work
 
-Proposal Oracle extraction
-
-Proposal ETL
+Protocol Core validation and promotion
 
 Next
 
-Proposal Repository
-
-Proposal API
-
-Proposal Workspace
+- Protocol Personnel
+- Protocol Funding and Research
+- Protocol Workflow
+- Protocol Reviews and Correspondence
+- Protocol Attachments
+- Dedicated legacy IRB cleanup after feature parity
 
 Coding Pattern
 
@@ -51,4 +51,3 @@ Controller
 ↓
 
 React
-

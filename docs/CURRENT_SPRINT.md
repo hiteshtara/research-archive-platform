@@ -3,39 +3,36 @@
 
 ### Operational Archives
 
-- IRB Archive
 - Award Archive
 - Proposal Archive
+- Negotiation Archive
+- Subaward Archive
 
-Award and Proposal database migrations, repeatable ETL, backend APIs, and
-workspace user interfaces are operational.
-
-### Negotiations Archive
+### Protocol Archive
 
 In Progress
 
-- Oracle extraction and CSV contract
-- Historical-scope decision: all records or an approved date-bounded subset
+- Phase 1: Protocol Core implementation complete; production reconciliation
+  pending
+- Phase 2: Personnel implementation in progress
+- Canonical parent: `archive.protocol_version`
+- Derived views: `archive.v_protocol_latest`,
+  `archive.v_protocol_family`
+- Identity: `PROTOCOL_NUMBER`, `SEQUENCE_NUMBER`, `PROTOCOL_ID`
 
-Not Started
+Next
 
-- Local CSV export
-- PostgreSQL migration
-- Repeatable ETL
-- Spring Boot API
-- React workspace
+- Phase 3: Funding and Research
+- Phase 4: Workflow
+- Phase 5: Reviews and Correspondence
+- Phase 6: Attachments
 
-Negotiations are not implemented. Oracle extraction and the CSV contract are
-in progress. Database and ETL design must wait for validation of the exported
-files and relationship semantics.
+### Legacy IRB Compatibility
 
-### Subawards Archive
-
-- Not started
-
-### IRB v2 Oracle Rebuild
-
-- Deferred until after Negotiations and Subawards
+Deprecated. Do not add features. Preserve V004–V010 and the existing loader,
+API, views, routes, and UI until Protocol reaches feature parity. Retirement
+is a separate cleanup milestone and must not be mixed with Protocol feature
+development.
 
 ### Future Modules
 

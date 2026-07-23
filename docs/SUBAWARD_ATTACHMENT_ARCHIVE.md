@@ -122,6 +122,40 @@ From `etl/`, with the BU VPN connected:
   --s3-prefix subawards
 ```
 
+The reusable entry point accepts the same options from the repository root:
+
+```bash
+uv run --project etl python etl/archive_attachments.py \
+  --module subaward \
+  --subaward-id 94202 \
+  --limit 10 \
+  --s3-bucket "$SUBAWARD_ATTACHMENT_S3_BUCKET" \
+  --s3-prefix test/subawards
+```
+
+`etl/archive_subaward_attachments.py` remains available as a
+backward-compatible wrapper. The generic runner currently registers only the
+Subaward plugin; no other archive module is enabled.
+
+The generic framework separates Oracle BLOB streaming, S3 storage, SQLite
+manifest handling, and orchestration under
+`etl/archive_etl/attachments/`. The Subaward plugin continues to own its CSV
+mapping, deterministic key format, S3 object metadata, pilot validation, and
+PostgreSQL synchronization.
+
+For a non-mutating 10-file verification run, add `--dry-run` (an alias for the
+existing `--verify-only` option):
+
+```bash
+uv run --project etl python etl/archive_attachments.py \
+  --module subaward \
+  --subaward-id 94202 \
+  --limit 10 \
+  --s3-bucket "$SUBAWARD_ATTACHMENT_S3_BUCKET" \
+  --s3-prefix test/subawards \
+  --dry-run
+```
+
 The command enforces these verified expectations for Subaward 94202:
 
 - Attachment metadata count: 10

@@ -157,6 +157,95 @@ export function getIrbHistoryVersion(
   );
 }
 
+export function getProtocols(
+  parameters: {
+    query?: string;
+    page?: number;
+    size?: number;
+  } = {},
+): Promise<
+  import("../types/api").PageResponse<import("../types/api").ProtocolSummary>
+> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+  if (parameters.query?.trim()) {
+    searchParameters.set("query", parameters.query.trim());
+  }
+  return request(`/api/protocols?${searchParameters.toString()}`);
+}
+
+export function getProtocolHistory(
+  protocolNumber: string,
+): Promise<import("../types/api").ProtocolVersion[]> {
+  return request(
+    `/api/protocols/${encodeURIComponent(protocolNumber)}/history`,
+  );
+}
+
+export function getProtocolPersonnel(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolPerson[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(protocolId)}/personnel`,
+  );
+}
+
+export function getProtocolFunding(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolFunding[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(protocolId)}/funding`,
+  );
+}
+
+export function getProtocolResearchAreas(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolResearchArea[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(
+      protocolId,
+    )}/research-areas`,
+  );
+}
+
+export function getProtocolLocations(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolLocation[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(protocolId)}/locations`,
+  );
+}
+
+export function getProtocolSubmissions(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolSubmission[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(
+      protocolId,
+    )}/submissions`,
+  );
+}
+
+export function getProtocolActions(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolAction[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(protocolId)}/actions`,
+  );
+}
+
+export function getProtocolAmendRenewals(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolAmendRenewal[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(
+      protocolId,
+    )}/amend-renewals`,
+  );
+}
+
 export function getInvestigatorProfile(
   email: string,
 ): Promise<import("../types/api").InvestigatorProfile> {

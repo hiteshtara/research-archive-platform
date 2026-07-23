@@ -38,9 +38,9 @@ const navigation = [
     path: "/",
   },
   {
-    label: "IRB Protocols",
+    label: "Protocols",
     icon: <MenuBookOutlined />,
-    path: "/irb",
+    path: "/protocols",
   },
   {
     label: "Awards",
