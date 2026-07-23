@@ -200,6 +200,24 @@ export function getProtocolFunding(
   );
 }
 
+export function getProtocolResearchAreas(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolResearchArea[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(
+      protocolId,
+    )}/research-areas`,
+  );
+}
+
+export function getProtocolLocations(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolLocation[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(protocolId)}/locations`,
+  );
+}
+
 export function getInvestigatorProfile(
   email: string,
 ): Promise<import("../types/api").InvestigatorProfile> {

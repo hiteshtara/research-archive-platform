@@ -1,7 +1,9 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 import edu.bu.archive.application.protocol.ProtocolArchiveService;
 
@@ -125,6 +127,66 @@ class ProtocolArchiveControllerTest {
                 );
 
         verify(service).findFunding(100L);
+    }
+
+    @Test
+    void researchAreasAreScopedToExactProtocolId() throws Exception {
+        when(service.findResearchAreas(100L)).thenReturn(
+                List.of(
+                        new ProtocolResearchAreaResponse(
+                                30L,
+                                100L,
+                                999L,
+                                "000100",
+                                2,
+                                "RA-1",
+                                null,
+                                null,
+                                null,
+                                null
+                        )
+                )
+        );
+        mockMvc.perform(
+                        get(
+                                "/api/protocols/versions/100/"
+                                        + "research-areas"
+                        )
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$[0].protocolResearchAreaId")
+                                .value(30)
+                )
+                .andExpect(
+                        jsonPath("$[0].researchAreaCode").value("RA-1")
+                );
+        verify(service).findResearchAreas(100L);
+    }
+
+    @Test
+    void locationsAreScopedToExactProtocolId() throws Exception {
+        when(service.findLocations(100L)).thenReturn(
+                List.of(
+                        new ProtocolLocationResponse(
+                                40L, 100L, 999L, "000100", 2,
+                                "NUMBER_SEQUENCE",
+                                "1", "ORG", 50L,
+                                null, null, null, null
+                        )
+                )
+        );
+        mockMvc.perform(
+                        get("/api/protocols/versions/100/locations")
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$[0].protocolLocationId").value(40)
+                )
+                .andExpect(
+                        jsonPath("$[0].organizationId").value("ORG")
+                );
+        verify(service).findLocations(100L);
     }
 
     private ProtocolVersionResponse version(

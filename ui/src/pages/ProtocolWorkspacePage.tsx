@@ -20,7 +20,9 @@ import { useParams } from "react-router-dom";
 import {
   getProtocolFunding,
   getProtocolHistory,
+  getProtocolLocations,
   getProtocolPersonnel,
+  getProtocolResearchAreas,
 } from "../api/client";
 
 const show = (value: string | number | null) => value ?? "—";
@@ -43,6 +45,16 @@ export function ProtocolWorkspacePage() {
     queryKey: ["protocol-funding", protocolId],
     enabled: tab === 2 && protocolId !== null,
     queryFn: () => getProtocolFunding(protocolId!),
+  });
+  const researchAreas = useQuery({
+    queryKey: ["protocol-research-areas", protocolId],
+    enabled: tab === 3 && protocolId !== null,
+    queryFn: () => getProtocolResearchAreas(protocolId!),
+  });
+  const locations = useQuery({
+    queryKey: ["protocol-locations", protocolId],
+    enabled: tab === 4 && protocolId !== null,
+    queryFn: () => getProtocolLocations(protocolId!),
   });
 
   useEffect(() => {
@@ -80,6 +92,8 @@ export function ProtocolWorkspacePage() {
         <Tab label="History" />
         <Tab label="Personnel" />
         <Tab label="Funding" />
+        <Tab label="Research Areas" />
+        <Tab label="Locations" />
       </Tabs>
       {tab === 0 && (
         <Card>
@@ -211,6 +225,88 @@ export function ProtocolWorkspacePage() {
                   <TableCell>
                     {show(source.sourceUpdateUser)}
                   </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+      {tab === 3 && researchAreas.isLoading && <CircularProgress />}
+      {tab === 3 && researchAreas.isError && (
+        <Alert severity="error">
+          Unable to load Research Areas for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 3 && researchAreas.data?.length === 0 && (
+        <Alert severity="info">
+          No Research Areas are archived for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 3 &&
+        researchAreas.data &&
+        researchAreas.data.length > 0 && (
+          <Card>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Research area code</TableCell>
+                  <TableCell>Updated</TableCell>
+                  <TableCell>Updated by</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {researchAreas.data.map((area) => (
+                  <TableRow key={area.protocolResearchAreaId}>
+                    <TableCell>{show(area.researchAreaCode)}</TableCell>
+                    <TableCell>
+                      {show(area.sourceUpdateTimestamp)}
+                    </TableCell>
+                    <TableCell>{show(area.sourceUpdateUser)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
+      {tab === 4 && locations.isLoading && <CircularProgress />}
+      {tab === 4 && locations.isError && (
+        <Alert severity="error">
+          Unable to load Locations for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 4 && locations.data?.length === 0 && (
+        <Alert severity="info">
+          No Locations are archived for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 4 && locations.data && locations.data.length > 0 && (
+        <Card>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Type</TableCell>
+                <TableCell>Parent resolution</TableCell>
+                <TableCell>Organization ID</TableCell>
+                <TableCell>Rolodex ID</TableCell>
+                <TableCell>Updated</TableCell>
+                <TableCell>Updated by</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {locations.data.map((location) => (
+                <TableRow key={location.protocolLocationId}>
+                  <TableCell>
+                    {show(location.protocolOrgTypeCode)}
+                  </TableCell>
+                  <TableCell>
+                    {location.parentResolutionMethod}
+                  </TableCell>
+                  <TableCell>{show(location.organizationId)}</TableCell>
+                  <TableCell>{show(location.rolodexId)}</TableCell>
+                  <TableCell>
+                    {show(location.sourceUpdateTimestamp)}
+                  </TableCell>
+                  <TableCell>{show(location.sourceUpdateUser)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

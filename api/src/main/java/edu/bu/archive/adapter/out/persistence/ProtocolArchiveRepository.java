@@ -2,7 +2,9 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
@@ -232,6 +234,61 @@ public class ProtocolArchiveRepository {
                 """)
                 .param("protocolId", protocolId)
                 .query(ProtocolFundingResponse.class)
+                .list();
+    }
+
+    public List<ProtocolResearchAreaResponse> findResearchAreas(
+            long protocolId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    protocol_research_area_id,
+                    protocol_id,
+                    source_protocol_id,
+                    protocol_number,
+                    sequence_number,
+                    research_area_code,
+                    source_update_timestamp,
+                    source_update_user,
+                    source_version_number,
+                    source_object_id
+                FROM archive.protocol_research_area
+                WHERE protocol_id = :protocolId
+                ORDER BY
+                    research_area_code NULLS LAST,
+                    protocol_research_area_id
+                """)
+                .param("protocolId", protocolId)
+                .query(ProtocolResearchAreaResponse.class)
+                .list();
+    }
+
+    public List<ProtocolLocationResponse> findLocations(long protocolId) {
+        return jdbc.sql("""
+                SELECT
+                    protocol_location_id,
+                    protocol_id,
+                    source_protocol_id,
+                    protocol_number,
+                    sequence_number,
+                    parent_resolution_method,
+                    protocol_org_type_code,
+                    organization_id,
+                    rolodex_id,
+                    source_update_timestamp,
+                    source_update_user,
+                    source_version_number,
+                    source_object_id
+                FROM archive.protocol_location
+                WHERE protocol_id = :protocolId
+                ORDER BY
+                    protocol_org_type_code NULLS LAST,
+                    organization_id NULLS LAST,
+                    rolodex_id NULLS LAST,
+                    protocol_location_id
+                """)
+                .param("protocolId", protocolId)
+                .query(ProtocolLocationResponse.class)
                 .list();
     }
 

@@ -227,6 +227,35 @@ export interface ProtocolFunding {
   sourceObjectId: string | null;
 }
 
+export interface ProtocolResearchArea {
+  protocolResearchAreaId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  researchAreaCode: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface ProtocolLocation {
+  protocolLocationId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  parentResolutionMethod: "NUMBER_SEQUENCE" | "DIRECT_ID_PLACEHOLDER";
+  protocolOrgTypeCode: string | null;
+  organizationId: string | null;
+  rolodexId: number | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
 export interface InvestigatorStudy {
   recordId: number | null;
   protocolId: number;

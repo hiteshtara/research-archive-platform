@@ -1,6 +1,8 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -54,5 +56,48 @@ class ProtocolArchiveRepositoryTest {
         assertThat(sql)
                 .contains("FROM archive.protocol_funding")
                 .contains("WHERE protocol_id = :protocolId");
+    }
+
+    @Test
+    void researchAreasAreScopedToResolvedProtocolId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolResearchAreaResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("protocolId", 100L))
+                .thenReturn(statement);
+        when(statement.query(ProtocolResearchAreaResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        ProtocolArchiveRepository repository =
+                new ProtocolArchiveRepository(jdbc);
+
+        assertThat(repository.findResearchAreas(100L)).isEmpty();
+        verify(statement).param("protocolId", 100L);
+    }
+
+    @Test
+    void locationsAreScopedToResolvedProtocolId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolLocationResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("protocolId", 100L))
+                .thenReturn(statement);
+        when(statement.query(ProtocolLocationResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveRepository(jdbc).findLocations(100L)
+        ).isEmpty();
+        verify(statement).param("protocolId", 100L);
     }
 }

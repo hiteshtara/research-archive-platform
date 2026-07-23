@@ -2,7 +2,9 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 import edu.bu.archive.application.protocol.ProtocolArchiveService;
@@ -67,5 +69,21 @@ public class ProtocolArchiveController {
         return ResponseEntity.ok(
                 service.findFunding(protocolId)
         );
+    }
+
+    @GetMapping("/versions/{protocolId}/research-areas")
+    public ResponseEntity<List<ProtocolResearchAreaResponse>> researchAreas(
+            @PathVariable long protocolId
+    ) {
+        return ResponseEntity.ok(
+                service.findResearchAreas(protocolId)
+        );
+    }
+
+    @GetMapping("/versions/{protocolId}/locations")
+    public ResponseEntity<List<ProtocolLocationResponse>> locations(
+            @PathVariable long protocolId
+    ) {
+        return ResponseEntity.ok(service.findLocations(protocolId));
     }
 }

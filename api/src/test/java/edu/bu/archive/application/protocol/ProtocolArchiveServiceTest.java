@@ -49,6 +49,40 @@ class ProtocolArchiveServiceTest {
         verify(repository).findFunding(100L);
     }
 
+    @Test
+    void researchAreasCheckExactPhysicalParent() {
+        ProtocolArchiveRepository repository =
+                mock(ProtocolArchiveRepository.class);
+        when(repository.findVersion(100L))
+                .thenReturn(Optional.of(version()));
+        when(repository.findResearchAreas(100L)).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveService(repository)
+                        .findResearchAreas(100L)
+        ).isEmpty();
+
+        verify(repository).findVersion(100L);
+        verify(repository).findResearchAreas(100L);
+    }
+
+    @Test
+    void locationsCheckExactPhysicalParent() {
+        ProtocolArchiveRepository repository =
+                mock(ProtocolArchiveRepository.class);
+        when(repository.findVersion(100L))
+                .thenReturn(Optional.of(version()));
+        when(repository.findLocations(100L)).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveService(repository)
+                        .findLocations(100L)
+        ).isEmpty();
+
+        verify(repository).findVersion(100L);
+        verify(repository).findLocations(100L);
+    }
+
     private ProtocolVersionResponse version() {
         return new ProtocolVersionResponse(
                 100L,
