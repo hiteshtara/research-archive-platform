@@ -6,7 +6,7 @@
 - React
 - PostgreSQL
 - Oracle (source)
-- Flyway
+- Custom SQL migration runner (`public.schema_migration`)
 - JdbcClient
 - AWS ECS
 - AWS RDS
@@ -38,10 +38,9 @@ React UI
 
 Proposal
 Award
-IRB
+Protocol
 Negotiation
 Investigator
 Subaward
 
 Proposal is the central research object.
-

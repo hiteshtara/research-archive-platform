@@ -24,7 +24,9 @@ CURRENT STATUS
 
 Completed
 
-✓ IRB Archive
+◐ Protocol Archive — canonical replacement in progress
+
+⚠ Legacy IRB compatibility path — deprecated; no new features
 
 ✓ Award Archive
 
@@ -102,7 +104,7 @@ React
 
 JdbcClient
 
-Flyway
+Custom SQL migration runner (`public.schema_migration`)
 
 PostgreSQL
 
@@ -130,7 +132,7 @@ Funding
 
 ↓
 
-IRB
+Protocol
 
 ↓
 
@@ -150,7 +152,7 @@ DATABASE
 
 Current Archive Tables
 
-IRB
+Protocol
 
 Award
 
@@ -318,3 +320,234 @@ administration data.
 The application should eventually replace the legacy Kuali portal for historical
 research records.
 
+# Research Archive Platform
+## Subaward Attachment Download Troubleshooting Guide
+
+This document captures the complete troubleshooting process for enabling Subaward Attachment downloads from S3.
+
+---
+
+# 1. Verify ECS Service
+
+Determine which task definition is currently running.
+
+```bash
+aws ecs describe-services \
+  --cluster research-archive-platform-dev-api \
+  --services research-archive-platform-dev-api \
+  --query 'services[0].taskDefinition' \
+  --output text
+```
+
+---
+
+# 2. Verify Environment Variables
+
+Ensure the API task definition contains the required environment variables.
+
+```bash
+aws ecs describe-task-definition \
+  --task-definition research-archive-platform-dev-api:4 \
+  --query 'taskDefinition.containerDefinitions[0].environment' \
+  --output table
+```
+
+Expected output should include:
+
+| Name | Value |
+|------|-------|
+| ARCHIVE_DOCUMENTS_BUCKET | research-archive-platform-dev-documents-589744711110 |
+| AWS_REGION | us-east-1 |
+
+---
+
+# 3. View API Logs
+
+Using helper script:
+
+```bash
+./ops/logs-api.sh
+```
+
+Or directly through CloudWatch:
+
+```bash
+aws logs tail /ecs/research-archive-platform-dev-api \
+    --since 5m \
+    --follow
+```
+
+---
+
+# 4. Initial Failure
+
+The backend originally failed with:
+
+```
+IllegalStateException:
+ARCHIVE_DOCUMENTS_BUCKET is not configured
+```
+
+## Resolution
+
+Added the following ECS environment variables:
+
+```
+ARCHIVE_DOCUMENTS_BUCKET=research-archive-platform-dev-documents-589744711110
+AWS_REGION=us-east-1
+```
+
+No code changes required.
+
+---
+
+# 5. Second Failure
+
+After fixing the environment variables, downloads still returned HTTP 403.
+
+CloudWatch showed:
+
+```
+software.amazon.awssdk.services.s3.model.S3Exception
+
+User:
+arn:aws:sts::589744711110:assumed-role/research-archive-platform-dev-api-task-role
+
+is not authorized to perform:
+
+s3:GetObject
+
+because no identity-based policy allows the s3:GetObject action.
+```
+
+This confirmed:
+
+- Bucket exists
+- Object exists
+- API found the object
+- IAM permission was missing
+
+---
+
+# 6. Attach IAM Policy
+
+Grant the ECS task role permission to read archived documents.
+
+```bash
+aws iam put-role-policy \
+  --role-name research-archive-platform-dev-api-task-role \
+  --policy-name ReadSubawardArchiveDocuments \
+  --policy-document '{
+    "Version":"2012-10-17",
+    "Statement":[
+      {
+        "Sid":"ReadSubawardArchiveDocuments",
+        "Effect":"Allow",
+        "Action":"s3:GetObject",
+        "Resource":"arn:aws:s3:::research-archive-platform-dev-documents-589744711110/test/subawards/*"
+      }
+    ]
+  }'
+```
+
+---
+
+# 7. Verify IAM Policy
+
+```bash
+aws iam get-role-policy \
+  --role-name research-archive-platform-dev-api-task-role \
+  --policy-name ReadSubawardArchiveDocuments
+```
+
+Expected:
+
+```json
+{
+  "PolicyName": "ReadSubawardArchiveDocuments",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::research-archive-platform-dev-documents-589744711110/test/subawards/*"
+    }
+  ]
+}
+```
+
+---
+
+# 8. Optional IAM Simulation
+
+Useful if downloads still fail.
+
+```bash
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::589744711110:role/research-archive-platform-dev-api-task-role \
+  --action-names s3:GetObject \
+  --resource-arns arn:aws:s3:::research-archive-platform-dev-documents-589744711110/test/subawards/94202/495672/VC_Screen_Resolution_KC_4276.pdf
+```
+
+Expected:
+
+```
+EvalDecision: allowed
+```
+
+---
+
+# 9. Final Result
+
+Everything is now working successfully.
+
+✅ ECS Task Definition updated
+
+✅ Environment variables configured
+
+✅ S3 bucket configured
+
+✅ Attachments uploaded
+
+✅ PostgreSQL metadata synchronized
+
+✅ Download endpoint operational
+
+✅ IAM policy attached
+
+✅ Attachment downloads working
+
+---
+
+# Remaining Cleanup
+
+Move the IAM policy into Terraform.
+
+The role contains:
+
+```
+ManagedBy = Terraform
+```
+
+A future Terraform apply could overwrite manually attached inline policies.
+
+The following permission should be added to Terraform:
+
+```
+Action:
+    s3:GetObject
+
+Resource:
+    arn:aws:s3:::research-archive-platform-dev-documents-589744711110/test/subawards/*
+```
+
+Once added, remove the manually attached inline policy if desired.
+
+---
+
+# Lessons Learned
+
+1. Verify environment variables before debugging code.
+2. Read the complete CloudWatch exception.
+3. A 403 from S3 is almost always an IAM or bucket policy issue.
+4. `aws iam simulate-principal-policy` is invaluable for debugging IAM.
+5. Always codify IAM changes in Terraform to prevent configuration drift.

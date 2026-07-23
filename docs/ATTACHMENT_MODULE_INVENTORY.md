@@ -8,7 +8,7 @@ This inventory covers only BU-supported archive modules:
 - Award
 - Proposal
 - Negotiation
-- IRB
+- Protocol
 
 It excludes IACUC, S2S, templates, lookup tables, and unused KC modules.
 Oracle extraction remains local to a BU-managed computer on the VPN.
@@ -32,8 +32,8 @@ KCOEUS.ATTACHMENT_FILE.FILE_DATA
 KCOEUS.ATTACHMENT_FILE.FILE_DATA_ID
 ```
 
-Award, Negotiation, and IRB read `ATTACHMENT_FILE.FILE_DATA` directly through
-`FILE_ID`; they do not look up `KCOEUS.FILE_DATA`.
+Award, Negotiation, and Protocol read `ATTACHMENT_FILE.FILE_DATA` directly
+through `FILE_ID`; they do not look up `KCOEUS.FILE_DATA`.
 
 ## Summary
 
@@ -43,10 +43,10 @@ Award, Negotiation, and IRB read `ATTACHMENT_FILE.FILE_DATA` directly through
 | Proposal | Verified | Direct `FILE_DATA_ID` verified | Generic V020 destination | Implemented |
 | Award | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
 | Negotiation | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
-| IRB | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Generic V020 destination | Both implemented |
+| Protocol | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Generic V020 destination | Both implemented |
 
 V020 adds `archive.archived_attachment` for Award, Proposal, Negotiation,
-IRB protocol, and IRB personnel. Its typed columns hold the common archive
+Protocol, and Protocol personnel. Its typed columns hold the common archive
 contract, while `source_metadata` preserves source-specific identifiers and
 attributes. The uniqueness key is `(module_code, source_attachment_id)`.
 Subaward continues to use its V019 destination and existing API/UI contract.
@@ -201,7 +201,7 @@ restriction identifiers remain in `source_metadata`.
 The inventory must not describe `NEGOTIATION_ATTACHMENT` as physically
 unverified.
 
-## IRB
+## Protocol
 
 ### Confirmed Oracle contract
 
@@ -224,7 +224,7 @@ unverified.
 | Attachment version | `ATTACHMENT_VERSION` |
 | Document status | `DOCUMENT_STATUS_CODE` |
 
-### Confirmed IRB personnel attachment contract
+### Confirmed Protocol personnel attachment contract
 
 - Personnel attachment table:
   `KCOEUS.PROTOCOL_ATTACHMENT_PERSONNEL`
@@ -256,19 +256,19 @@ The verified `ATTACHMENT_FILE` enrichment and payload fields are:
 
 ### Repository evidence
 
-- Current IRB ingestion does not contain a verified attachment CSV.
-- IRB Flyway migrations contain no IRB-specific attachment metadata/archive
-  destination.
-- `source_file_name` in IRB staging describes an ETL input file, not a
+- Current Protocol ingestion does not contain a verified attachment CSV.
+- Existing migrations contain no Protocol-specific attachment
+  metadata/archive destination.
+- `source_file_name` in legacy IRB staging describes an ETL input file, not a
   protocol attachment.
 - The older `sql/schema/008_documents.sql` generic document concept is not an
-  IRB-specific Flyway destination and has no confirmed mapping here.
-- IRB repositories, DTOs, and UI have no attachment contract.
+  Protocol-specific migration destination and has no confirmed mapping here.
+- Protocol repositories, DTOs, and UI have no attachment contract.
 
 ### Status and missing information
 
-Both IRB source tables and their direct `ATTACHMENT_FILE.FILE_ID` joins are
-verified. The IRB protocol and personnel plugins read
+Both Protocol source tables and their direct `ATTACHMENT_FILE.FILE_ID` joins
+are verified. The Protocol and personnel plugins read
 `ATTACHMENT_FILE.FILE_DATA`; filename and MIME type come from `FILE_NAME` and
 `CONTENT_TYPE`.
 
@@ -278,8 +278,9 @@ fields, and personnel `PERSON_ID` and `TYPE_CD`, remain in `source_metadata`.
 
 ## CLI behavior
 
-Subaward, Award, Proposal, Negotiation, IRB protocol (`irb`), and IRB
-personnel (`irb-personnel`) are registered. Each generic module supports
+Subaward, Award, Proposal, Negotiation, Protocol (legacy plugin ID `irb`), and
+Protocol personnel (legacy plugin ID `irb-personnel`) are registered. Each
+generic module supports
 `--sync-postgres`; this applies migrations and idempotently upserts its local
 manifest without contacting Oracle or S3.
 

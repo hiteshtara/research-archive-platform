@@ -10,7 +10,7 @@ Award
 
 ↓
 
-IRB
+Protocol
 
 ↓
 
@@ -24,7 +24,6 @@ Global Search
 
 Award Workspace
 
-IRB Workspace
+Protocol Archive
 
 Proposal Roadmap
-
