@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -334,6 +335,44 @@ public class ProtocolArchiveRepository {
                 """)
                 .param("protocolId", protocolId)
                 .query(ProtocolSubmissionResponse.class)
+                .list();
+    }
+
+    public List<ProtocolActionResponse> findActions(long protocolId) {
+        return jdbc.sql("""
+                SELECT
+                    protocol_action_id,
+                    action_id,
+                    protocol_id,
+                    source_protocol_id,
+                    protocol_number,
+                    sequence_number,
+                    submission_number,
+                    submission_id_fk,
+                    protocol_action_type_code,
+                    comments,
+                    prev_submission_status_code,
+                    submission_type_code,
+                    prev_protocol_status_code,
+                    source_create_timestamp,
+                    source_create_user,
+                    source_update_timestamp,
+                    source_update_user,
+                    action_date,
+                    actual_action_date,
+                    source_version_number,
+                    source_object_id,
+                    followup_action_code
+                FROM archive.protocol_action
+                WHERE protocol_id = :protocolId
+                ORDER BY
+                    action_date NULLS LAST,
+                    actual_action_date NULLS LAST,
+                    action_id NULLS LAST,
+                    protocol_action_id
+                """)
+                .param("protocolId", protocolId)
+                .query(ProtocolActionResponse.class)
                 .list();
     }
 

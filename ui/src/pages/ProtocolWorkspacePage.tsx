@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import {
+  getProtocolActions,
   getProtocolFunding,
   getProtocolHistory,
   getProtocolLocations,
@@ -62,6 +63,11 @@ export function ProtocolWorkspacePage() {
     enabled: tab === 5 && protocolId !== null,
     queryFn: () => getProtocolSubmissions(protocolId!),
   });
+  const actions = useQuery({
+    queryKey: ["protocol-actions", protocolId],
+    enabled: tab === 6 && protocolId !== null,
+    queryFn: () => getProtocolActions(protocolId!),
+  });
 
   useEffect(() => {
     setTab(0);
@@ -101,6 +107,7 @@ export function ProtocolWorkspacePage() {
         <Tab label="Research Areas" />
         <Tab label="Locations" />
         <Tab label="Submissions" />
+        <Tab label="Actions" />
       </Tabs>
       {tab === 0 && (
         <Card>
@@ -389,6 +396,63 @@ export function ProtocolWorkspacePage() {
             </Table>
           </Card>
         )}
+      {tab === 6 && actions.isLoading && <CircularProgress />}
+      {tab === 6 && actions.isError && (
+        <Alert severity="error">
+          Unable to load Actions for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 6 && actions.data?.length === 0 && (
+        <Alert severity="info">
+          No Actions are archived for this exact Protocol version.
+        </Alert>
+      )}
+      {tab === 6 && actions.data && actions.data.length > 0 && (
+        <Card>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Action</TableCell>
+                <TableCell>Action date</TableCell>
+                <TableCell>Actual date</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Submission</TableCell>
+                <TableCell>Previous protocol status</TableCell>
+                <TableCell>Follow-up</TableCell>
+                <TableCell>Comments</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {actions.data.map((action) => (
+                <TableRow key={action.protocolActionId}>
+                  <TableCell>{show(action.actionId)}</TableCell>
+                  <TableCell>{show(action.actionDate)}</TableCell>
+                  <TableCell>{show(action.actualActionDate)}</TableCell>
+                  <TableCell>
+                    {show(action.protocolActionTypeCode)}
+                  </TableCell>
+                  <TableCell>
+                    {action.submissionNumber !== null
+                      ? `${action.submissionNumber}${
+                          action.submissionIdFk !== null
+                            ? ` (${action.submissionIdFk})`
+                            : ""
+                        }`
+                      : "—"}
+                  </TableCell>
+                  <TableCell>
+                    {show(action.prevProtocolStatusCode)}
+                  </TableCell>
+                  <TableCell>
+                    {show(action.followupActionCode)}
+                  </TableCell>
+                  <TableCell>{show(action.comments)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
     </Stack>
   );
 }

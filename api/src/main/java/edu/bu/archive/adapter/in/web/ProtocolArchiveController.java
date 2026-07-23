@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -93,5 +94,12 @@ public class ProtocolArchiveController {
             @PathVariable long protocolId
     ) {
         return ResponseEntity.ok(service.findSubmissions(protocolId));
+    }
+
+    @GetMapping("/versions/{protocolId}/actions")
+    public ResponseEntity<List<ProtocolActionResponse>> actions(
+            @PathVariable long protocolId
+    ) {
+        return ResponseEntity.ok(service.findActions(protocolId));
     }
 }

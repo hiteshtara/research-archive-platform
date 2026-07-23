@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.in.web;
 
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -227,6 +228,31 @@ class ProtocolArchiveControllerTest {
                                 .value(2)
                 );
         verify(service).findSubmissions(100L);
+    }
+
+    @Test
+    void actionsAreScopedToExactProtocolId() throws Exception {
+        when(service.findActions(100L)).thenReturn(
+                List.of(
+                        new ProtocolActionResponse(
+                                60L, 4, 100L, 999L, "000100", 2,
+                                3, 50L, "100", "Comment", "1", "2",
+                                "3", null, null, null, null, null, null,
+                                1L, "OBJ", "200"
+                        )
+                )
+        );
+        mockMvc.perform(
+                        get("/api/protocols/versions/100/actions")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].protocolActionId").value(60))
+                .andExpect(jsonPath("$[0].protocolId").value(100))
+                .andExpect(
+                        jsonPath("$[0].sourceProtocolId").value(999)
+                )
+                .andExpect(jsonPath("$[0].submissionIdFk").value(50));
+        verify(service).findActions(100L);
     }
 
     private ProtocolVersionResponse version(

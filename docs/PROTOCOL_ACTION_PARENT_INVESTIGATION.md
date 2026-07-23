@@ -54,8 +54,9 @@ The earlier broad analysis measured:
 - zero unresolved number/sequence tuples; and
 - an 85.5640% direct-ID mismatch rate.
 
-These figures are prior evidence only. They must be replaced or confirmed by
-the focused result sets before implementation.
+The focused investigation confirmed these figures. It also confirmed 903,796
+unique number/sequence parents, zero missing tuple parents, and zero
+ambiguous tuple parents.
 
 Protocol Submission has separately been validated at 221,519 rows with zero
 direct-parent, identity, duplicate, missing, or ambiguous-parent issues.
@@ -102,18 +103,13 @@ with the Action and the unique tuple parent. Rows without
 
 ## Recommendation
 
-No strategy is promoted before the focused results are reviewed.
+`NUMBER_SEQUENCE` is the confirmed canonical strategy. All 903,796 rows
+resolve uniquely, with zero missing and zero ambiguous tuple parents.
+`source_protocol_id` is retained as audit data and differs from the resolved
+historical parent for 773,324 rows.
 
-If Result Set 3 confirms unique tuple resolution for all 903,796 rows with
-zero missing or ambiguous parents, `NUMBER_SEQUENCE` is the leading
-candidate. The direct ID would be retained as source audit data. The owner
-chain would remain relationship evidence rather than override the Action's
-own exact business version.
-
-If tuple resolution is incomplete, a hybrid may be considered only for a
-mutually exclusive pattern whose owner chain resolves uniquely and agrees
-with the Action business identity. There must be no unrestricted direct-ID
-fallback.
+There is no direct-ID or owner-chain fallback. The submission relationship is
+archived as metadata only.
 
 ## Promotion gates
 

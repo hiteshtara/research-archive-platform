@@ -286,6 +286,31 @@ export interface ProtocolSubmission {
   sourceObjectId: string | null;
 }
 
+export interface ProtocolAction {
+  protocolActionId: number;
+  actionId: number | null;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  submissionNumber: number | null;
+  submissionIdFk: number | null;
+  protocolActionTypeCode: string | null;
+  comments: string | null;
+  prevSubmissionStatusCode: string | null;
+  submissionTypeCode: string | null;
+  prevProtocolStatusCode: string | null;
+  sourceCreateTimestamp: string | null;
+  sourceCreateUser: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  actionDate: string | null;
+  actualActionDate: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+  followupActionCode: string | null;
+}
+
 export interface InvestigatorStudy {
   recordId: number | null;
   protocolId: number;
