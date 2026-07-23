@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+import re
 from typing import Any
+import unicodedata
 
 
 class MissingBlobError(RuntimeError):
@@ -39,3 +42,21 @@ def utc_now() -> str:
 
 def safe_error_message(error: Exception) -> str:
     return f"{type(error).__name__}: archival operation failed"[:1000]
+
+
+def sanitize_file_name(
+    file_name: str | None,
+    attachment_id: int,
+) -> str:
+    candidate = Path(file_name or "").name.strip()
+    candidate = unicodedata.normalize("NFKC", candidate)
+    candidate = re.sub(r"[^A-Za-z0-9._ -]+", "_", candidate)
+    candidate = re.sub(r"\s+", "_", candidate).strip("._-")
+    if not candidate:
+        candidate = f"attachment-{attachment_id}.bin"
+    if len(candidate) > 180:
+        suffix = Path(candidate).suffix[:20]
+        candidate = (
+            f"{Path(candidate).stem[:180 - len(suffix)]}{suffix}"
+        )
+    return candidate

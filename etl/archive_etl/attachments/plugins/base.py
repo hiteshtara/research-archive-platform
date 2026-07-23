@@ -7,6 +7,7 @@ from typing import Any, Iterator
 
 from archive_etl.attachments.manifest import ManifestStore
 from archive_etl.attachments.models import ArchiveCounts, AttachmentRecord
+from archive_etl.attachments.oracle_blob import FileDataBlobReader
 
 
 class AttachmentPlugin(ABC):
@@ -18,6 +19,17 @@ class AttachmentPlugin(ABC):
     prefix_environment_variable: str
     sse_environment_variable: str
     kms_environment_variable: str
+    file_reference_label = "FILE_DATA_ID"
+
+    def create_manifest(self, path: Path) -> ManifestStore:
+        return ManifestStore(path)
+
+    def create_blob_reader(
+        self,
+        attempts: int,
+        chunk_size: int,
+    ) -> FileDataBlobReader:
+        return FileDataBlobReader(attempts, chunk_size)
 
     @abstractmethod
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:

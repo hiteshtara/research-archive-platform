@@ -18,6 +18,11 @@ from archive_etl.attachments.models import (
 )
 from archive_etl.attachments.oracle_blob import OracleBlobReader
 from archive_etl.attachments.plugins.base import AttachmentPlugin
+from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
+from archive_etl.attachments.plugins.irb import IrbProtocolAttachmentPlugin
+from archive_etl.attachments.plugins.negotiation import (
+    NegotiationAttachmentPlugin,
+)
 from archive_etl.attachments.plugins.subaward import (
     SubawardAttachmentPlugin,
 )
@@ -30,26 +35,17 @@ from archive_etl.attachments.s3_storage import (
 
 
 PLUGINS: dict[str, AttachmentPlugin] = {
+    "award": AwardAttachmentPlugin(),
+    "irb": IrbProtocolAttachmentPlugin(),
+    "negotiation": NegotiationAttachmentPlugin(),
     "subaward": SubawardAttachmentPlugin(),
 }
 
 UNSUPPORTED_MODULES = {
-    "award": (
-        "missing a verified Oracle attachment table/FILE_DATA join and "
-        "an Award-specific PostgreSQL attachment archive table"
-    ),
     "proposal": (
-        "missing a verified Oracle attachment table/FILE_DATA join and "
-        "a Proposal-specific PostgreSQL attachment archive table"
-    ),
-    "negotiation": (
-        "NEGOTIATION_ATTACHMENT and its AttachmentFile/FILE_DATA join "
-        "are not physically verified, and no Negotiation-specific "
-        "PostgreSQL attachment archive table exists"
-    ),
-    "irb": (
-        "missing a verified Oracle attachment source/FILE_DATA join and "
-        "an IRB-specific PostgreSQL attachment archive table"
+        "the Oracle source and direct FILE_DATA_ID join are verified, "
+        "but no Proposal-specific PostgreSQL attachment archive table "
+        "exists"
     ),
 }
 
@@ -86,12 +82,15 @@ def process_attachment(
                     sha256=None,
                     status="MISSING",
                     archived_timestamp=None,
-                    error_message="FILE_DATA_ID is missing",
+                    error_message=(
+                        f"{plugin.file_reference_label} is missing"
+                    ),
                 )
             )
         logger.error(
-            "Attachment {} has no FILE_DATA_ID",
+            "Attachment {} has no {}",
             plugin.attachment_id(record),
+            plugin.file_reference_label,
         )
         return
 
@@ -187,13 +186,16 @@ def process_attachment(
                     status="MISSING",
                     archived_timestamp=None,
                     error_message=(
-                        "KCOEUS.FILE_DATA row or DATA BLOB is missing"
+                        f"KCOEUS.{reader.reference_name} row or BLOB "
+                        "is missing"
                     ),
                 )
             )
         logger.error(
-            "Missing FILE_DATA BLOB for attachment {} and FILE_DATA_ID {}",
+            "Missing {} BLOB for attachment {} and {} {}",
+            reader.reference_name,
             plugin.attachment_id(record),
+            plugin.file_reference_label,
             file_data_id,
         )
     except Exception as error:
@@ -252,7 +254,7 @@ def build_parser(plugin: AttachmentPlugin) -> argparse.ArgumentParser:
     parser.add_argument(
         "--module",
         required=True,
-        choices=MODULE_NAMES,
+        choices=[plugin.module_name],
     )
     parser.add_argument(
         "--metadata-csv",
@@ -364,7 +366,7 @@ def run(argv: Sequence[str] | None = None) -> ArchiveCounts | None:
             f"--{plugin.module_name}-id must be positive"
         )
 
-    manifest = ManifestStore(args.manifest)
+    manifest = plugin.create_manifest(args.manifest)
     if args.sync_postgres:
         try:
             synced = plugin.sync_postgres(manifest, record_id)
@@ -383,7 +385,7 @@ def run(argv: Sequence[str] | None = None) -> ArchiveCounts | None:
             f"{plugin.bucket_environment_variable} is required"
         )
 
-    reader = OracleBlobReader(
+    reader = plugin.create_blob_reader(
         args.max_retries,
         args.blob_chunk_size,
     )

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import contextlib
+import csv
+import hashlib
 import io
+import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -16,8 +19,7 @@ from archive_etl.attachments.plugins.subaward import (
     SubawardAttachmentPlugin,
     sanitize_file_name,
 )
-from archive_etl.attachments.runner import process_attachment
-from archive_etl.attachments.runner import selected_plugin
+from archive_etl.attachments.runner import process_attachment, selected_plugin
 
 
 class AttachmentArchivalTest(unittest.TestCase):
@@ -54,6 +56,56 @@ class AttachmentArchivalTest(unittest.TestCase):
             self.plugin.s3_key("test/subawards/", self.record),
             "test/subawards/94202/500/Signed_Agreement.pdf",
         )
+
+    def test_subaward_csv_metadata_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "subaward_attachments.csv"
+            with path.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(
+                    stream,
+                    fieldnames=[
+                        "attachment_id",
+                        "subaward_id",
+                        "subaward_code",
+                        "sequence_number",
+                        "file_data_id",
+                        "file_name",
+                        "mime_type",
+                        "document_id",
+                        "update_timestamp",
+                        "last_update_timestamp",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "attachment_id": "500",
+                        "subaward_id": "94202",
+                        "subaward_code": "SUB-1",
+                        "sequence_number": "3",
+                        "file_data_id": "FILE-500",
+                        "file_name": "Signed Agreement.pdf",
+                        "mime_type": "application/pdf",
+                        "document_id": "700",
+                        "update_timestamp": "2026-01-01T10:00:00",
+                        "last_update_timestamp": "2026-01-02T10:00:00",
+                    }
+                )
+
+            records = list(
+                self.plugin.iter_records(path, 94202, 10)
+            )
+
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record.record_id, 94202)
+        self.assertEqual(record.attachment_id, 500)
+        self.assertEqual(record.file_data_id, "FILE-500")
+        self.assertEqual(record.original_file_name, "Signed Agreement.pdf")
+        self.assertEqual(record.mime_type, "application/pdf")
+        self.assertEqual(record.attributes["subaward_code"], "SUB-1")
+        self.assertEqual(record.attributes["sequence_number"], 3)
+        self.assertEqual(record.attributes["document_id"], 700)
 
     @patch("archive_etl.attachments.runner.upload_object")
     @patch("archive_etl.attachments.runner.head_object")
@@ -173,7 +225,12 @@ class AttachmentArchivalTest(unittest.TestCase):
         manifest.upsert.assert_not_called()
 
     def test_unconfirmed_modules_are_rejected_before_execution(self) -> None:
-        for module in ("award", "proposal", "negotiation", "irb"):
+        expected_reasons = {
+            "proposal": (
+                "Oracle source and direct FILE_DATA_ID join are verified"
+            ),
+        }
+        for module, expected_reason in expected_reasons.items():
             with self.subTest(module=module):
                 error_output = io.StringIO()
                 with contextlib.redirect_stderr(error_output):
@@ -184,6 +241,53 @@ class AttachmentArchivalTest(unittest.TestCase):
                     f"module '{module}' is unavailable",
                     error_output.getvalue(),
                 )
+                self.assertIn(
+                    expected_reason,
+                    error_output.getvalue(),
+                )
+
+    @patch(
+        "archive_etl.attachments.plugins.subaward.apply_migrations"
+    )
+    @patch(
+        "archive_etl.attachments.plugins.subaward.create_postgres_engine"
+    )
+    def test_subaward_postgres_sync_maps_archived_manifest_rows(
+        self,
+        create_engine: Mock,
+        apply_migrations: Mock,
+    ) -> None:
+        row = self.plugin.manifest_values(
+            self.record,
+            "bucket",
+            self.plugin.s3_key("subawards", self.record),
+            byte_size=20,
+            sha256="a" * 64,
+            status="ARCHIVED",
+            archived_timestamp="2026-01-03T10:00:00+00:00",
+            error_message=None,
+        )
+        manifest = Mock()
+        manifest.rows.return_value = [row]
+        connection = Mock()
+        engine = Mock()
+        engine.begin.return_value = nullcontext(connection)
+        create_engine.return_value = engine
+
+        synced = self.plugin.sync_postgres(manifest, 94202)
+
+        self.assertEqual(synced, 1)
+        manifest.rows.assert_called_once_with(94202)
+        apply_migrations.assert_called_once()
+        parameters = connection.execute.call_args.args[1]
+        self.assertEqual(parameters[0]["attachment_id"], 500)
+        self.assertEqual(parameters[0]["subaward_id"], 94202)
+        self.assertEqual(parameters[0]["file_data_id"], "FILE-500")
+        self.assertEqual(parameters[0]["s3_bucket"], "bucket")
+        self.assertEqual(
+            parameters[0]["s3_key"],
+            "subawards/94202/500/Signed_Agreement.pdf",
+        )
 
     def _reader(self, payload: bytes) -> Mock:
         reader = Mock()

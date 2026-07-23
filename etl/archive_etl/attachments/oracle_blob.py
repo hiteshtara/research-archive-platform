@@ -42,6 +42,11 @@ def retry(
 
 
 class OracleBlobReader:
+    table_name: str
+    id_column: str
+    blob_column: str
+    reference_name: str
+
     def __init__(self, attempts: int, chunk_size: int) -> None:
         self.attempts = attempts
         self.chunk_size = chunk_size
@@ -78,17 +83,17 @@ class OracleBlobReader:
                 assert self.connection is not None
                 with self.connection.cursor() as cursor:
                     cursor.execute(
-                        """
-                        SELECT fd.data
-                        FROM KCOEUS.FILE_DATA fd
-                        WHERE fd.id = :file_data_id
+                        f"""
+                        SELECT source.{self.blob_column}
+                        FROM KCOEUS.{self.table_name} source
+                        WHERE source.{self.id_column} = :file_reference
                         """,
-                        file_data_id=file_data_id,
+                        file_reference=file_data_id,
                     )
                     row = cursor.fetchone()
                     if row is None or row[0] is None:
                         raise MissingBlobError(
-                            "FILE_DATA row or BLOB missing for "
+                            f"{self.reference_name} row or BLOB missing for "
                             f"{file_data_id}"
                         )
 
@@ -119,3 +124,17 @@ class OracleBlobReader:
             attempts=self.attempts,
             operation_name="Oracle BLOB read",
         )
+
+
+class FileDataBlobReader(OracleBlobReader):
+    table_name = "FILE_DATA"
+    id_column = "ID"
+    blob_column = "DATA"
+    reference_name = "FILE_DATA"
+
+
+class AttachmentFileBlobReader(OracleBlobReader):
+    table_name = "ATTACHMENT_FILE"
+    id_column = "FILE_ID"
+    blob_column = "FILE_DATA"
+    reference_name = "ATTACHMENT_FILE"
