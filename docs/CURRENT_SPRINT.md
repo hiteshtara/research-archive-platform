@@ -1,51 +1,43 @@
 # Research Archive Platform
 ## Current Sprint
 
-### Completed
+### Operational Archives
 
 - IRB Archive
 - Award Archive
-- Global Search
-- Award Workspace
-- Award History
-- Award People
-- Award Funding
-- Award Amounts
-- Award Unit Contacts
+- Proposal Archive
 
-### Proposal Archive
+Award and Proposal database migrations, repeatable ETL, backend APIs, and
+workspace user interfaces are operational.
 
-Completed
-
-- Proposal database design
-- Flyway migration V015
-- archive.proposal_version
-- archive.proposal_person
-- archive.proposal_award
-- Proposal DTOs
-- Proposal extraction SQL (01_proposal_versions.sql)
-- Proposal column discovery SQL
+### Negotiations Archive
 
 In Progress
 
-- Validate Oracle Proposal schema
-- Export proposal_versions.csv
-- Export proposal_people.csv
-- Proposal ETL loader
+- Oracle extraction and CSV contract
+- Historical-scope decision: all records or an approved date-bounded subset
 
-Next
+Not Started
 
-- ProposalArchiveRepository
-- ProposalService
-- ProposalController
-- Proposal Workspace
-- Proposal Search
-- Award → Proposal navigation
+- Local CSV export
+- PostgreSQL migration
+- Repeatable ETL
+- Spring Boot API
+- React workspace
+
+Negotiations are not implemented. Oracle extraction and the CSV contract are
+in progress. Database and ETL design must wait for validation of the exported
+files and relationship semantics.
+
+### Subawards Archive
+
+- Not started
+
+### IRB v2 Oracle Rebuild
+
+- Deferred until after Negotiations and Subawards
 
 ### Future Modules
 
-- Negotiation Archive
 - Investigator Workspace
-- Subaward Archive
 - Agreement Archive
-
