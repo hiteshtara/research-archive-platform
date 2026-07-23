@@ -13,6 +13,15 @@ from archive_etl.attachments.plugins.attachment_file import (
 
 class NegotiationAttachmentPlugin(AttachmentFilePlugin):
     module_name = "negotiation"
+    postgres_module_code = "NEGOTIATION"
+    source_identifier_fields = {
+        "attachment_id": "attachment_id",
+        "activity_id": "parent_activity_id",
+        "negotiation_id": "record_id",
+        "document_number": "document_number",
+        "associated_document_id": "associated_document_id",
+        "file_id": "file_reference",
+    }
     default_metadata_csv = (
         Path.home() / "Downloads" / "negotiation_attachments.csv"
     )
@@ -75,9 +84,43 @@ class NegotiationAttachmentPlugin(AttachmentFilePlugin):
                     mime_type=row["content_type"].strip() or None,
                     attributes={
                         "parent_activity_id": int(row["activity_id"]),
+                        "business_key":
+                            row.get("document_number", "").strip()
+                            or row.get(
+                                "associated_document_id",
+                                "",
+                            ).strip()
+                            or None,
+                        "document_number":
+                            row.get("document_number", "").strip()
+                            or None,
+                        "associated_document_id":
+                            row.get(
+                                "associated_document_id",
+                                "",
+                            ).strip()
+                            or None,
                         "description": row["description"].strip() or None,
                         "restricted": row["restricted"].strip() or None,
                         "source_update_timestamp":
                             row["update_timestamp"].strip() or None,
+                        "attachment_file_data_id":
+                            row.get(
+                                "attachment_file_data_id",
+                                "",
+                            ).strip()
+                            or None,
+                        "attachment_file_sequence_number":
+                            row.get(
+                                "attachment_file_sequence_number",
+                                "",
+                            ).strip()
+                            or None,
+                        "attachment_file_update_timestamp":
+                            row.get(
+                                "attachment_file_update_timestamp",
+                                "",
+                            ).strip()
+                            or None,
                     },
                 )

@@ -17,7 +17,7 @@ Each module is evaluated independently for:
 
 1. verified physical Oracle attachment source;
 2. verified relationship to the binary BLOB source;
-3. verified module-specific PostgreSQL archive destination.
+3. verified PostgreSQL archive destination.
 
 A verified Oracle table does not imply that its `FILE_ID` points directly to
 `KCOEUS.FILE_DATA`. No such relationship is assumed without direct evidence.
@@ -40,10 +40,16 @@ Award, Negotiation, and IRB read `ATTACHMENT_FILE.FILE_DATA` directly through
 | Module | Oracle source | Binary relationship | PostgreSQL destination | Plugin status |
 |---|---|---|---|---|
 | Subaward | Verified | Direct `FILE_DATA_ID` verified | Verified | Implemented |
-| Proposal | Verified | Direct `FILE_DATA_ID` verified | Missing | Blocked only on destination |
-| Award | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Missing | Oracle-to-S3 implemented |
-| Negotiation | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Missing | Oracle-to-S3 implemented |
-| IRB | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Missing | Protocol implemented; personnel blocked on destination |
+| Proposal | Verified | Direct `FILE_DATA_ID` verified | Generic V020 destination | Implemented |
+| Award | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
+| Negotiation | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
+| IRB | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Generic V020 destination | Both implemented |
+
+V020 adds `archive.archived_attachment` for Award, Proposal, Negotiation,
+IRB protocol, and IRB personnel. Its typed columns hold the common archive
+contract, while `source_metadata` preserves source-specific identifiers and
+attributes. The uniqueness key is `(module_code, source_attachment_id)`.
+Subaward continues to use its V019 destination and existing API/UI contract.
 
 ## Subaward
 
@@ -118,19 +124,15 @@ Subaward remains implemented and unchanged.
 ### Status
 
 The Oracle source and direct `FILE_DATA_ID` relationship are fully verified.
-Only the repository destination contract is blocked.
-
-The Proposal plugin is not registered because the repository has no
-module-specific PostgreSQL attachment metadata/archive table or synchronization
-contract. The CLI rejection must not describe the Oracle table or BLOB join as
-unverified.
+The Proposal plugin is registered and synchronizes archived manifests into
+the generic V020 destination. It reads `KCOEUS.FILE_DATA.DATA` through
+`FILE_DATA_ID`.
 
 Remaining work:
 
 1. Define and review a Proposal attachment CSV export contract.
-2. Add a module-specific PostgreSQL metadata/archive migration.
-3. Add repeatable metadata ETL and verification.
-4. Implement the plugin against that confirmed destination.
+2. Add repeatable metadata ETL and verification.
+3. Add API/UI attachment metadata and download behavior when approved.
 
 ## Award
 
@@ -163,8 +165,7 @@ Remaining work:
 
 The Award plugin is implemented using `AWARD_ATTACHMENT.FILE_ID` to read
 `ATTACHMENT_FILE.FILE_DATA`, with filename and MIME type from `FILE_NAME` and
-`CONTENT_TYPE`. An Award-specific PostgreSQL destination remains missing, so
-`--sync-postgres` is disabled.
+`CONTENT_TYPE`. Manifest synchronization uses the generic V020 destination.
 
 ## Negotiation
 
@@ -194,7 +195,8 @@ The Award plugin is implemented using `AWARD_ATTACHMENT.FILE_ID` to read
 The Negotiation plugin uses the existing verified activity relationship to
 resolve the owning Negotiation and reads `ATTACHMENT_FILE.FILE_DATA` through
 `FILE_ID`. Filename and MIME type come from `FILE_NAME` and `CONTENT_TYPE`.
-A Negotiation-specific PostgreSQL destination remains missing.
+Manifest synchronization uses the generic V020 destination. The activity and
+restriction identifiers remain in `source_metadata`.
 
 The inventory must not describe `NEGOTIATION_ATTACHMENT` as physically
 unverified.
@@ -266,31 +268,20 @@ The verified `ATTACHMENT_FILE` enrichment and payload fields are:
 ### Status and missing information
 
 Both IRB source tables and their direct `ATTACHMENT_FILE.FILE_ID` joins are
-verified. The existing IRB protocol plugin reads
+verified. The IRB protocol and personnel plugins read
 `ATTACHMENT_FILE.FILE_DATA`; filename and MIME type come from `FILE_NAME` and
 `CONTENT_TYPE`.
 
-The personnel source is not implemented because no IRB-specific PostgreSQL
-attachment metadata/archive destination exists. Implementing it before that
-contract is defined would require inventing its destination schema. The
-existing protocol plugin remains unchanged and its `--sync-postgres` path is
-also unavailable for the same destination reason.
+Both plugins synchronize into V020 with separate module codes:
+`IRB_PROTOCOL` and `IRB_PERSONNEL`. Protocol attachment version and status
+fields, and personnel `PERSON_ID` and `TYPE_CD`, remain in `source_metadata`.
 
 ## CLI behavior
 
-Subaward, Award, Negotiation, and IRB are registered. Proposal remains blocked
-only by its missing PostgreSQL destination contract.
-
-Example:
-
-```bash
-uv run --project etl python etl/archive_attachments.py --module proposal
-```
-
-Expected reason: the Proposal Oracle source and direct `FILE_DATA_ID` join are
-verified, but the module-specific PostgreSQL destination is missing.
-
-No dry-run or upload commands are provided for blocked modules.
+Subaward, Award, Proposal, Negotiation, IRB protocol (`irb`), and IRB
+personnel (`irb-personnel`) are registered. Each generic module supports
+`--sync-postgres`; this applies migrations and idempotently upserts its local
+manifest without contacting Oracle or S3.
 
 Confirmed Subaward dry run:
 

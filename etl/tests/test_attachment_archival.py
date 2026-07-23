@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import contextlib
 import csv
 import hashlib
-import io
 import tempfile
 import unittest
 from contextlib import nullcontext
@@ -224,26 +222,20 @@ class AttachmentArchivalTest(unittest.TestCase):
         self.assertEqual(counts.resumed_count, 0)
         manifest.upsert.assert_not_called()
 
-    def test_unconfirmed_modules_are_rejected_before_execution(self) -> None:
-        expected_reasons = {
-            "proposal": (
-                "Oracle source and direct FILE_DATA_ID join are verified"
-            ),
+    def test_supported_modules_are_registered(self) -> None:
+        expected_modules = {
+            "award",
+            "proposal",
+            "negotiation",
+            "irb",
+            "irb-personnel",
+            "subaward",
         }
-        for module, expected_reason in expected_reasons.items():
+        for module in expected_modules:
             with self.subTest(module=module):
-                error_output = io.StringIO()
-                with contextlib.redirect_stderr(error_output):
-                    with self.assertRaises(SystemExit) as raised:
-                        selected_plugin(["--module", module])
-                self.assertEqual(raised.exception.code, 2)
-                self.assertIn(
-                    f"module '{module}' is unavailable",
-                    error_output.getvalue(),
-                )
-                self.assertIn(
-                    expected_reason,
-                    error_output.getvalue(),
+                self.assertEqual(
+                    selected_plugin(["--module", module]).module_name,
+                    module,
                 )
 
     @patch(

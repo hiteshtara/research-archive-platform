@@ -13,6 +13,15 @@ from archive_etl.attachments.plugins.attachment_file import (
 
 class AwardAttachmentPlugin(AttachmentFilePlugin):
     module_name = "award"
+    postgres_module_code = "AWARD"
+    source_identifier_fields = {
+        "award_attachment_id": "attachment_id",
+        "award_id": "record_id",
+        "award_number": "business_key",
+        "sequence_number": "sequence_number",
+        "document_id": "document_id",
+        "file_id": "file_reference",
+    }
     default_metadata_csv = Path.home() / "Downloads" / "award_attachments.csv"
     default_manifest = (
         Path(__file__).resolve().parents[3]
@@ -100,5 +109,20 @@ def _read_records(
                         row["last_update_timestamp"].strip() or None,
                     "document_status_code":
                         row["document_status_code"].strip() or None,
+                    "attachment_file_data_id":
+                        row.get("attachment_file_data_id", "").strip()
+                        or None,
+                    "attachment_file_sequence_number":
+                        row.get(
+                            "attachment_file_sequence_number",
+                            "",
+                        ).strip()
+                        or None,
+                    "attachment_file_update_timestamp":
+                        row.get(
+                            "attachment_file_update_timestamp",
+                            "",
+                        ).strip()
+                        or None,
                 },
             )
