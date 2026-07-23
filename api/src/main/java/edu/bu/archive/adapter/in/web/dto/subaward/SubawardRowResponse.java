@@ -1,0 +1,49 @@
+package edu.bu.archive.adapter.in.web.dto.subaward;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+public record SubawardRowResponse(
+        Long subawardId,
+        String documentNumber,
+        Integer sequenceNumber,
+        String subawardCode,
+        String organizationId,
+        LocalDate startDate,
+        LocalDate endDate,
+        Long subawardTypeCode,
+        String purchaseOrderNum,
+        String title,
+        Long statusCode,
+        String statusDescription,
+        String accountNumber,
+        String vendorNumber,
+        String requisitionerId,
+        String requisitionerUnit,
+        String archiveLocation,
+        LocalDate closeoutDate,
+        String comments,
+        Long siteInvestigator,
+        String costType,
+        LocalDate dateOfFullyExecuted,
+        String requisitionNumber,
+        String fedAwardProjDesc,
+        BigDecimal fAndARate,
+        String deMinimus,
+        String subawardSequenceStatus,
+        String ffataRequired,
+        String fsrsSubawardNumber,
+        String awardPrimeSponsorName,
+        String awardSponsorName,
+        LocalDate extensionDateReceived,
+        LocalDateTime sourceUpdateTimestamp,
+        String sourceUpdateUser,
+        Long sourceVersionNumber,
+        String sourceObjectId,
+        LocalDateTime documentSourceUpdateTimestamp,
+        String documentSourceUpdateUser,
+        Long documentSourceVersionNumber,
+        String documentSourceObjectId
+) {
+}
