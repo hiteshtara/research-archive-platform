@@ -236,6 +236,16 @@ export function getProtocolActions(
   );
 }
 
+export function getProtocolAmendRenewals(
+  protocolId: number,
+): Promise<import("../types/api").ProtocolAmendRenewal[]> {
+  return request(
+    `/api/protocols/versions/${encodeURIComponent(
+      protocolId,
+    )}/amend-renewals`,
+  );
+}
+
 export function getInvestigatorProfile(
   email: string,
 ): Promise<import("../types/api").InvestigatorProfile> {

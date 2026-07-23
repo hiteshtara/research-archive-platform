@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -101,5 +102,14 @@ public class ProtocolArchiveController {
             @PathVariable long protocolId
     ) {
         return ResponseEntity.ok(service.findActions(protocolId));
+    }
+
+    @GetMapping("/versions/{protocolId}/amend-renewals")
+    public ResponseEntity<List<ProtocolAmendRenewalResponse>> amendRenewals(
+            @PathVariable long protocolId
+    ) {
+        return ResponseEntity.ok(
+                service.findAmendRenewals(protocolId)
+        );
     }
 }

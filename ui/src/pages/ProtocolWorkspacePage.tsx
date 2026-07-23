@@ -19,6 +19,7 @@ import { useParams } from "react-router-dom";
 
 import {
   getProtocolActions,
+  getProtocolAmendRenewals,
   getProtocolFunding,
   getProtocolHistory,
   getProtocolLocations,
@@ -68,6 +69,11 @@ export function ProtocolWorkspacePage() {
     enabled: tab === 6 && protocolId !== null,
     queryFn: () => getProtocolActions(protocolId!),
   });
+  const amendRenewals = useQuery({
+    queryKey: ["protocol-amend-renewals", protocolId],
+    enabled: tab === 7 && protocolId !== null,
+    queryFn: () => getProtocolAmendRenewals(protocolId!),
+  });
 
   useEffect(() => {
     setTab(0);
@@ -108,6 +114,7 @@ export function ProtocolWorkspacePage() {
         <Tab label="Locations" />
         <Tab label="Submissions" />
         <Tab label="Actions" />
+        <Tab label="Amend/Renewals" />
       </Tabs>
       {tab === 0 && (
         <Card>
@@ -453,6 +460,53 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
+      {tab === 7 && amendRenewals.isLoading && <CircularProgress />}
+      {tab === 7 && amendRenewals.isError && (
+        <Alert severity="error">
+          Unable to load Amendments/Renewals for this exact Protocol
+          version.
+        </Alert>
+      )}
+      {tab === 7 && amendRenewals.data?.length === 0 && (
+        <Alert severity="info">
+          No Amendments/Renewals are archived for this exact Protocol
+          version.
+        </Alert>
+      )}
+      {tab === 7 &&
+        amendRenewals.data &&
+        amendRenewals.data.length > 0 && (
+          <Card>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Number</TableCell>
+                  <TableCell>Date created</TableCell>
+                  <TableCell>Summary</TableCell>
+                  <TableCell>Updated</TableCell>
+                  <TableCell>Updated by</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {amendRenewals.data.map((renewal) => (
+                  <TableRow key={renewal.protoAmendRenewalId}>
+                    <TableCell>
+                      {show(renewal.protoAmendRenNumber)}
+                    </TableCell>
+                    <TableCell>{show(renewal.dateCreated)}</TableCell>
+                    <TableCell>{show(renewal.summary)}</TableCell>
+                    <TableCell>
+                      {show(renewal.sourceUpdateTimestamp)}
+                    </TableCell>
+                    <TableCell>
+                      {show(renewal.sourceUpdateUser)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
     </Stack>
   );
 }

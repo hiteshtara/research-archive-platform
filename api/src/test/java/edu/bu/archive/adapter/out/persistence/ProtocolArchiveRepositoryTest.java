@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
@@ -179,5 +180,43 @@ class ProtocolArchiveRepositoryTest {
                 .contains("WHERE protocol_id = :protocolId")
                 .contains("action_date NULLS LAST")
                 .contains("protocol_action_id");
+    }
+
+    @Test
+    void amendRenewalsAreScopedAndDeterministicallyOrdered() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolAmendRenewalResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("protocolId", 100L))
+                .thenReturn(statement);
+        when(statement.query(ProtocolAmendRenewalResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveRepository(jdbc)
+                        .findAmendRenewals(100L)
+        ).isEmpty();
+
+        String sql = org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .findFirst()
+                .orElseThrow()
+                .replaceAll("\\s+", " ");
+        assertThat(sql)
+                .contains("FROM archive.protocol_amend_renewal")
+                .contains("WHERE protocol_id = :protocolId")
+                .contains("date_created NULLS LAST")
+                .contains("proto_amend_renewal_id");
     }
 }

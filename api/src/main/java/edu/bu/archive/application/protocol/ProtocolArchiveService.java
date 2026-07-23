@@ -2,6 +2,7 @@ package edu.bu.archive.application.protocol;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -92,6 +93,13 @@ public class ProtocolArchiveService {
     public List<ProtocolActionResponse> findActions(long protocolId) {
         findVersion(protocolId);
         return repository.findActions(protocolId);
+    }
+
+    public List<ProtocolAmendRenewalResponse> findAmendRenewals(
+            long protocolId
+    ) {
+        findVersion(protocolId);
+        return repository.findAmendRenewals(protocolId);
     }
 
     private String normalize(String protocolNumber) {

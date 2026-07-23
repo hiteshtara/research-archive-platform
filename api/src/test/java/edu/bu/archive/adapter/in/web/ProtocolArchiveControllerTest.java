@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -253,6 +254,39 @@ class ProtocolArchiveControllerTest {
                 )
                 .andExpect(jsonPath("$[0].submissionIdFk").value(50));
         verify(service).findActions(100L);
+    }
+
+    @Test
+    void amendRenewalsAreScopedToExactProtocolId() throws Exception {
+        when(service.findAmendRenewals(100L)).thenReturn(
+                List.of(
+                        new ProtocolAmendRenewalResponse(
+                                70L, 100L, 999L, "000100", 2,
+                                "A001", LocalDate.of(2026, 1, 2),
+                                "Amendment", null, null, 1L, "OBJ"
+                        )
+                )
+        );
+        mockMvc.perform(
+                        get(
+                                "/api/protocols/versions/100/"
+                                        + "amend-renewals"
+                        )
+                )
+                .andExpect(status().isOk())
+                .andExpect(
+                        jsonPath("$[0].protoAmendRenewalId")
+                                .value(70)
+                )
+                .andExpect(jsonPath("$[0].protocolId").value(100))
+                .andExpect(
+                        jsonPath("$[0].sourceProtocolId").value(999)
+                )
+                .andExpect(
+                        jsonPath("$[0].protoAmendRenNumber")
+                                .value("A001")
+                );
+        verify(service).findAmendRenewals(100L);
     }
 
     private ProtocolVersionResponse version(

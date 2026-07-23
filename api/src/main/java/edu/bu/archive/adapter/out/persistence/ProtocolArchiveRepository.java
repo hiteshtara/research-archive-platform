@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
@@ -373,6 +374,35 @@ public class ProtocolArchiveRepository {
                 """)
                 .param("protocolId", protocolId)
                 .query(ProtocolActionResponse.class)
+                .list();
+    }
+
+    public List<ProtocolAmendRenewalResponse> findAmendRenewals(
+            long protocolId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    proto_amend_renewal_id,
+                    protocol_id,
+                    source_protocol_id,
+                    protocol_number,
+                    sequence_number,
+                    proto_amend_ren_number,
+                    date_created,
+                    summary,
+                    source_update_timestamp,
+                    source_update_user,
+                    source_version_number,
+                    source_object_id
+                FROM archive.protocol_amend_renewal
+                WHERE protocol_id = :protocolId
+                ORDER BY
+                    date_created NULLS LAST,
+                    proto_amend_ren_number NULLS LAST,
+                    proto_amend_renewal_id
+                """)
+                .param("protocolId", protocolId)
+                .query(ProtocolAmendRenewalResponse.class)
                 .list();
     }
 

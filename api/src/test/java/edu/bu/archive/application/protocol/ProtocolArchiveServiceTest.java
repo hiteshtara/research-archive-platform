@@ -117,6 +117,23 @@ class ProtocolArchiveServiceTest {
         verify(repository).findActions(100L);
     }
 
+    @Test
+    void amendRenewalsCheckExactPhysicalParent() {
+        ProtocolArchiveRepository repository =
+                mock(ProtocolArchiveRepository.class);
+        when(repository.findVersion(100L))
+                .thenReturn(Optional.of(version()));
+        when(repository.findAmendRenewals(100L)).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveService(repository)
+                        .findAmendRenewals(100L)
+        ).isEmpty();
+
+        verify(repository).findVersion(100L);
+        verify(repository).findAmendRenewals(100L);
+    }
+
     private ProtocolVersionResponse version() {
         return new ProtocolVersionResponse(
                 100L,

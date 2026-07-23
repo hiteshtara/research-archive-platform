@@ -311,6 +311,21 @@ export interface ProtocolAction {
   followupActionCode: string | null;
 }
 
+export interface ProtocolAmendRenewal {
+  protoAmendRenewalId: number;
+  protocolId: number;
+  sourceProtocolId: number;
+  protocolNumber: string;
+  sequenceNumber: number;
+  protoAmendRenNumber: string | null;
+  dateCreated: string | null;
+  summary: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
 export interface InvestigatorStudy {
   recordId: number | null;
   protocolId: number;
