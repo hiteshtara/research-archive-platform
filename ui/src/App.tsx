@@ -18,6 +18,8 @@ import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
 import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
 import { ProposalFamiliesPage } from "./pages/ProposalFamiliesPage";
 import { ProposalWorkspacePage } from "./pages/ProposalWorkspacePage";
+import { SubawardFamiliesPage } from "./pages/SubawardFamiliesPage";
+import { SubawardWorkspacePage } from "./pages/SubawardWorkspacePage";
 
 export default function App() {
   return (
@@ -70,7 +72,12 @@ export default function App() {
 
         <Route
           path="subawards"
-          element={<ComingSoonPage />}
+          element={<SubawardFamiliesPage />}
+        />
+
+        <Route
+          path="subawards/:subawardId"
+          element={<SubawardWorkspacePage />}
         />
 
         <Route

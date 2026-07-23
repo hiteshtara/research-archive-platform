@@ -512,3 +512,279 @@ export interface NegotiationUnassociatedDetail {
   sourceVersionNumber: number | null;
   sourceObjectId: string | null;
 }
+
+export interface SubawardSummary {
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  documentNumber: string | null;
+  title: string | null;
+  statusCode: number | null;
+  statusDescription: string | null;
+  organizationId: string | null;
+  accountNumber: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  subawardSequenceStatus: string | null;
+  sourceUpdateTimestamp: string | null;
+}
+
+export interface SubawardPageResponse extends PageResponse<SubawardSummary> {}
+
+export interface SubawardRow {
+  subawardId: number;
+  documentNumber: string | null;
+  sequenceNumber: number;
+  subawardCode: string;
+  organizationId: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  subawardTypeCode: number | null;
+  purchaseOrderNum: string | null;
+  title: string | null;
+  statusCode: number | null;
+  statusDescription: string | null;
+  accountNumber: string | null;
+  vendorNumber: string | null;
+  requisitionerId: string | null;
+  requisitionerUnit: string | null;
+  archiveLocation: string | null;
+  closeoutDate: string | null;
+  comments: string | null;
+  siteInvestigator: number | null;
+  costType: string | null;
+  dateOfFullyExecuted: string | null;
+  requisitionNumber: string | null;
+  fedAwardProjDesc: string | null;
+  fAndARate: number | null;
+  deMinimus: string | null;
+  subawardSequenceStatus: string | null;
+  ffataRequired: string | null;
+  fsrsSubawardNumber: string | null;
+  awardPrimeSponsorName: string | null;
+  awardSponsorName: string | null;
+  extensionDateReceived: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+  documentSourceUpdateTimestamp: string | null;
+  documentSourceUpdateUser: string | null;
+  documentSourceVersionNumber: number | null;
+  documentSourceObjectId: string | null;
+}
+
+export interface SubawardWorkspaceResponse {
+  subawardId: number;
+  current: SubawardRow;
+}
+
+export interface SubawardAmount {
+  subawardAmountInfoId: number;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  obligatedAmount: number | null;
+  obligatedChange: number | null;
+  obligatedChangeDirect: number | null;
+  obligatedChangeIndirect: number | null;
+  anticipatedAmount: number | null;
+  anticipatedChange: number | null;
+  anticipatedChangeDirect: number | null;
+  anticipatedChangeIndirect: number | null;
+  rate: number | null;
+  effectiveDate: string | null;
+  modificationEffectiveDate: string | null;
+  modificationNumber: string | null;
+  modificationTypeCode: string | null;
+  modificationTypeDescription: string | null;
+  performanceStartDate: string | null;
+  performanceEndDate: string | null;
+  purchaseOrderNum: string | null;
+  comments: string | null;
+  fileDataId: string | null;
+  fileName: string | null;
+  mimeType: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardContact {
+  subawardContactId: number;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  contactTypeCode: string | null;
+  rolodexId: number | null;
+  requisitionerId: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardCustomData {
+  subawardCustomDataId: number;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  customAttributeId: number | null;
+  value: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardFunding {
+  subawardFundingSourceId: number;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  awardId: number | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardAttachment {
+  attachmentId: number;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  attachmentTypeCode: number | null;
+  attachmentTypeDescription: string | null;
+  documentId: number | null;
+  fileDataId: string | null;
+  fileName: string | null;
+  mimeType: string | null;
+  documentStatusCode: string | null;
+  description: string | null;
+  lastUpdateTimestamp: string | null;
+  lastUpdateUser: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardTemplateInfo {
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  sowOrSubProposalBudget: string | null;
+  subProposalDate: string | null;
+  invoiceOrPaymentContact: number | null;
+  irbIacucContact: number | null;
+  finalStmtOfCostsContact: number | null;
+  changeRequestsContact: number | null;
+  subChangeRequestsContact: number | null;
+  terminationContact: number | null;
+  subTerminationContact: number | null;
+  noCostExtensionContact: number | null;
+  perfSiteDiffFromOrgAddr: string | null;
+  perfSiteSameAsSubPiAddr: string | null;
+  subRegisteredInCcr: string | null;
+  subExemptFromReportingComp: string | null;
+  parentDunsNumber: string | null;
+  parentCongressionalDistrict: string | null;
+  exemptFromRprtgExecComp: string | null;
+  copyrightType: string | null;
+  automaticCarryForward: string | null;
+  carryForwardRequestsSentTo: number | null;
+  treatmentPrgmIncomeAdditive: string | null;
+  applicableProgramRegulations: string | null;
+  applicableProgramRegsDate: string | null;
+  mpiAward: string | null;
+  mpiLeadershipPlan: string | null;
+  rAndD: string | null;
+  includesCostSharing: string | null;
+  fcio: string | null;
+  invoicesEmailed: string | null;
+  invoiceAddressDiff: string | null;
+  invoiceEmailDiff: string | null;
+  fcioSubrecPolicyCd: string | null;
+  animalFlag: string | null;
+  animalPteSendCd: string | null;
+  animalPteNrCd: string | null;
+  humanFlag: string | null;
+  humanSubjects: string | null;
+  humanExemptDocs: string | null;
+  humanPteSendCd: string | null;
+  humanPteNrCd: string | null;
+  humanDataExchangeAgreeCd: string | null;
+  humanDataExchangeTermsCd: string | null;
+  humanIncludesClinicalTrials: string | null;
+  additionalTerms: string | null;
+  treatmentOfIncome: string | null;
+  dataSharingAttachment: string | null;
+  dataSharingCd: string | null;
+  finalStatementDueCd: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}
+
+export interface SubawardCloseout {
+  subawardCloseoutId: number;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  closeoutNumber: number | null;
+  closeoutTypeCode: number | null;
+  dateRequested: string | null;
+  dateFollowup: string | null;
+  dateReceived: string | null;
+  comments: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardReport {
+  subawardReportId: string;
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  reportTypeCode: string | null;
+  reportTypeDescription: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardNotepad {
+  subawardNotepadId: number;
+  subawardId: number;
+  subawardCode: string;
+  entryNumber: number | null;
+  noteTopic: string | null;
+  comments: string | null;
+  restrictedView: string | null;
+  createTimestamp: string | null;
+  createUser: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
+export interface SubawardNotification {
+  notificationId: number;
+  owningDocumentIdFk: number;
+  documentNumber: string | null;
+  subawardCode: string | null;
+  notificationTypeId: number | null;
+  recipients: string | null;
+  subject: string | null;
+  message: string | null;
+  createTimestamp: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}

@@ -370,3 +370,108 @@ export function getNegotiationUnassociatedDetails(
     )}/unassociated-details`,
   );
 }
+
+export function getSubawards(
+  parameters: {
+    query?: string;
+    page?: number;
+    size?: number;
+  } = {},
+): Promise<import("../types/api").SubawardPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
+  if (parameters.query?.trim()) {
+    searchParameters.set("query", parameters.query.trim());
+  }
+
+  return request(`/api/subawards?${searchParameters.toString()}`);
+}
+
+export function getSubawardWorkspace(
+  subawardId: number,
+): Promise<import("../types/api").SubawardWorkspaceResponse> {
+  return request(`/api/subawards/${encodeURIComponent(subawardId)}`);
+}
+
+export function getSubawardAmounts(
+  subawardId: number,
+): Promise<import("../types/api").SubawardAmount[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/amounts`,
+  );
+}
+
+export function getSubawardContacts(
+  subawardId: number,
+): Promise<import("../types/api").SubawardContact[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/contacts`,
+  );
+}
+
+export function getSubawardCustomData(
+  subawardId: number,
+): Promise<import("../types/api").SubawardCustomData[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/custom-data`,
+  );
+}
+
+export function getSubawardFunding(
+  subawardId: number,
+): Promise<import("../types/api").SubawardFunding[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/funding`,
+  );
+}
+
+export function getSubawardAttachments(
+  subawardId: number,
+): Promise<import("../types/api").SubawardAttachment[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/attachments`,
+  );
+}
+
+export function getSubawardTemplateInfo(
+  subawardId: number,
+): Promise<import("../types/api").SubawardTemplateInfo> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/template-info`,
+  );
+}
+
+export function getSubawardCloseout(
+  subawardId: number,
+): Promise<import("../types/api").SubawardCloseout[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/closeout`,
+  );
+}
+
+export function getSubawardReports(
+  subawardId: number,
+): Promise<import("../types/api").SubawardReport[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/reports`,
+  );
+}
+
+export function getSubawardNotepad(
+  subawardId: number,
+): Promise<import("../types/api").SubawardNotepad[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/notepad`,
+  );
+}
+
+export function getSubawardNotifications(
+  subawardId: number,
+): Promise<import("../types/api").SubawardNotification[]> {
+  return request(
+    `/api/subawards/${encodeURIComponent(subawardId)}/notifications`,
+  );
+}
