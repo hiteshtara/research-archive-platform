@@ -76,7 +76,7 @@ parent.
 
 | Child object | Missing direct evidence | Required owning path |
 |---|---|---|
-| `PROTOCOL_UNITS` | No physical `PROTOCOL_ID` | `PROTOCOL_PERSON_ID` → `PROTOCOL_PERSONS`, then Protocol number + sequence |
+| `PROTOCOL_UNITS` | No physical `PROTOCOL_ID` | `PROTOCOL_PERSON_ID` → archived person → that person's resolved `protocol_id`; unit number/sequence are audit-only |
 | `PROTOCOL_SPECIAL_REVIEW` | No `SEQUENCE_NUMBER` | Resolve through a verified owning/version rule; direct three-column comparison is impossible |
 | `PROTOCOL_EXEMPT_NUMBER` | No Protocol version fields | `PROTOCOL_SPECIAL_REVIEW_ID` → special review |
 | `PROTOCOL_ONLN_RVWS` | No Protocol number or sequence | Submission/reviewer parent chain |

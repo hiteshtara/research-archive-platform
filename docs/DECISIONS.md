@@ -26,6 +26,10 @@ parents. Select a measured strategy per child: `NUMBER_SEQUENCE`,
 `protocol_id` is resolved from `(PROTOCOL_NUMBER, SEQUENCE_NUMBER)` and the
 original Oracle value is retained as `source_protocol_id`.
 
+Protocol Units use `OWNER_CHAIN`: `PROTOCOL_PERSON_ID` resolves the archived
+person, and the unit inherits that person's resolved `protocol_id`. Unit
+Protocol number and sequence are audit evidence, not independent parent keys.
+
 Use Hexagonal Architecture.
 
 Never duplicate Award logic.

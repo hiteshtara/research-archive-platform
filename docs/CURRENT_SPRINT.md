@@ -12,7 +12,9 @@
 
 In Progress
 
-- Phase 1: Protocol Core validation and promotion
+- Phase 1: Protocol Core implementation complete; production reconciliation
+  pending
+- Phase 2: Personnel implementation in progress
 - Canonical parent: `archive.protocol_version`
 - Derived views: `archive.v_protocol_latest`,
   `archive.v_protocol_family`
@@ -20,7 +22,6 @@ In Progress
 
 Next
 
-- Phase 2: Personnel
 - Phase 3: Funding and Research
 - Phase 4: Workflow
 - Phase 5: Reviews and Correspondence
