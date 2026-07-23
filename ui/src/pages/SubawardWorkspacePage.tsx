@@ -1,6 +1,7 @@
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -22,6 +23,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 
 import {
+  downloadSubawardAttachment,
   getSubawardAmounts,
   getSubawardAttachments,
   getSubawardCloseout,
@@ -161,6 +163,9 @@ function SubawardWorkspaceContent({
   subawardId: string | undefined;
 }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] =
+    useState<number | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const parsedSubawardId = Number(subawardId);
   const validSubawardId =
     Number.isSafeInteger(parsedSubawardId) && parsedSubawardId > 0;
@@ -456,26 +461,67 @@ function SubawardWorkspaceContent({
           )}
 
           {activeTab === 4 && (
-            <TableSection
-              data={attachmentsQuery.data}
-              isLoading={attachmentsQuery.isLoading}
-              isError={attachmentsQuery.isError}
-              errorMessage="Unable to load Subaward attachment metadata."
-              emptyMessage="No attachment metadata is archived for this Subaward record."
-              rowKey={(row) => row.attachmentId}
-              columns={[
-                { label: "Attachment ID", render: (row) => row.attachmentId },
-                { label: "Type", render: (row) => display(row.attachmentTypeDescription ?? row.attachmentTypeCode) },
-                { label: "File Name", render: (row) => display(row.fileName) },
-                { label: "MIME Type", render: (row) => display(row.mimeType) },
-                { label: "File Data ID", render: (row) => display(row.fileDataId) },
-                { label: "Document ID", render: (row) => display(row.documentId) },
-                { label: "Status", render: (row) => display(row.documentStatusCode) },
-                { label: "Description", render: (row) => display(row.description) },
-                { label: "Last Updated", render: (row) => display(row.lastUpdateTimestamp) },
-                { label: "Last Update User", render: (row) => display(row.lastUpdateUser) },
-              ]}
-            />
+            <Stack spacing={2}>
+              {downloadError && (
+                <Alert severity="error" onClose={() => setDownloadError(null)}>
+                  {downloadError}
+                </Alert>
+              )}
+              <TableSection
+                data={attachmentsQuery.data}
+                isLoading={attachmentsQuery.isLoading}
+                isError={attachmentsQuery.isError}
+                errorMessage="Unable to load Subaward attachment metadata."
+                emptyMessage="No attachment metadata is archived for this Subaward record."
+                rowKey={(row) => row.attachmentId}
+                columns={[
+                  { label: "Attachment ID", render: (row) => row.attachmentId },
+                  { label: "Type", render: (row) => display(row.attachmentTypeDescription ?? row.attachmentTypeCode) },
+                  { label: "File Name", render: (row) => display(row.fileName) },
+                  { label: "MIME Type", render: (row) => display(row.mimeType) },
+                  { label: "Description", render: (row) => display(row.description) },
+                  { label: "Date", render: (row) => display(row.lastUpdateTimestamp) },
+                  { label: "User", render: (row) => display(row.lastUpdateUser) },
+                  {
+                    label: "Action",
+                    render: (row) =>
+                      row.archived ? (
+                        <Button
+                          size="small"
+                          disabled={downloadingAttachmentId === row.attachmentId}
+                          onClick={async () => {
+                            setDownloadError(null);
+                            setDownloadingAttachmentId(row.attachmentId);
+                            try {
+                              await downloadSubawardAttachment(
+                                parsedSubawardId,
+                                row.attachmentId,
+                                row.fileName ?? `attachment-${row.attachmentId}`,
+                              );
+                            } catch (error) {
+                              setDownloadError(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Unable to download this attachment.",
+                              );
+                            } finally {
+                              setDownloadingAttachmentId(null);
+                            }
+                          }}
+                        >
+                          {downloadingAttachmentId === row.attachmentId
+                            ? "Downloading…"
+                            : "Download"}
+                        </Button>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          Not archived
+                        </Typography>
+                      ),
+                  },
+                ]}
+              />
+            </Stack>
           )}
 
           {activeTab === 5 && (

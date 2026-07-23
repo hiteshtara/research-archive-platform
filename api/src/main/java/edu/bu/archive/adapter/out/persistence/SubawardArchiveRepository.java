@@ -265,31 +265,70 @@ public class SubawardArchiveRepository {
     public List<SubawardAttachmentResponse> findAttachments(long subawardId) {
         return jdbc.sql("""
                 SELECT
-                    attachment_id,
-                    subaward_id,
-                    subaward_code,
-                    sequence_number,
-                    attachment_type_code,
-                    attachment_type_description,
-                    document_id,
-                    file_data_id,
-                    file_name,
-                    mime_type,
-                    document_status_code,
-                    description,
-                    last_update_timestamp,
-                    last_update_user,
-                    source_update_timestamp,
-                    source_update_user,
-                    source_version_number,
-                    source_object_id
-                FROM archive.subaward_attachment
-                WHERE subaward_id = :subawardId
-                ORDER BY attachment_id
+                    attachment.attachment_id,
+                    attachment.subaward_id,
+                    attachment.subaward_code,
+                    attachment.sequence_number,
+                    attachment.attachment_type_code,
+                    attachment.attachment_type_description,
+                    attachment.document_id,
+                    attachment.file_name,
+                    attachment.mime_type,
+                    attachment.document_status_code,
+                    attachment.description,
+                    attachment.last_update_timestamp,
+                    attachment.last_update_user,
+                    attachment.source_update_timestamp,
+                    attachment.source_update_user,
+                    attachment.source_version_number,
+                    attachment.source_object_id,
+                    archived.attachment_id IS NOT NULL AS archived
+                FROM archive.subaward_attachment attachment
+                LEFT JOIN archive.subaward_attachment_archive archived
+                  ON archived.attachment_id = attachment.attachment_id
+                 AND archived.subaward_id = attachment.subaward_id
+                 AND archived.archive_status = 'ARCHIVED'
+                WHERE attachment.subaward_id = :subawardId
+                ORDER BY attachment.attachment_id
                 """)
                 .param("subawardId", subawardId)
                 .query(SubawardAttachmentResponse.class)
                 .list();
+    }
+
+    public Optional<Long> findAttachmentSubawardId(long attachmentId) {
+        return jdbc.sql("""
+                SELECT subaward_id
+                FROM archive.subaward_attachment
+                WHERE attachment_id = :attachmentId
+                """)
+                .param("attachmentId", attachmentId)
+                .query(Long.class)
+                .optional();
+    }
+
+    public Optional<SubawardArchivedAttachment> findArchivedAttachment(
+            long subawardId,
+            long attachmentId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    attachment_id,
+                    subaward_id,
+                    original_file_name,
+                    mime_type,
+                    s3_bucket,
+                    s3_key,
+                    byte_size,
+                    archive_status
+                FROM archive.subaward_attachment_archive
+                WHERE attachment_id = :attachmentId
+                  AND subaward_id = :subawardId
+                """)
+                .param("attachmentId", attachmentId)
+                .param("subawardId", subawardId)
+                .query(SubawardArchivedAttachment.class)
+                .optional();
     }
 
     public Optional<SubawardTemplateInfoResponse> findTemplateInfo(

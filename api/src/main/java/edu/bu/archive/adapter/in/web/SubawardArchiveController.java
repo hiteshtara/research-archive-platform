@@ -13,14 +13,20 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardReportResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
 import edu.bu.archive.application.subaward.SubawardArchiveService;
+import edu.bu.archive.application.subaward.SubawardAttachmentDownload;
 
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController
@@ -95,6 +101,43 @@ public class SubawardArchiveController {
             long subawardId
     ) {
         return ResponseEntity.ok(service.findAttachments(subawardId));
+    }
+
+    @GetMapping(
+            "/{subawardId}/attachments/{attachmentId}/download"
+    )
+    public ResponseEntity<StreamingResponseBody> downloadAttachment(
+            @PathVariable
+            long subawardId,
+            @PathVariable
+            long attachmentId
+    ) {
+        SubawardAttachmentDownload download =
+                service.downloadAttachment(subawardId, attachmentId);
+        StreamingResponseBody body = output -> {
+            try (var input = download.stream()) {
+                input.transferTo(output);
+            }
+        };
+
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(download.mimeType());
+        } catch (Exception ignored) {
+            mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        }
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(download.fileName(), StandardCharsets.UTF_8)
+                .build();
+
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(download.contentLength())
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        disposition.toString()
+                )
+                .body(body);
     }
 
     @GetMapping("/{subawardId}/template-info")

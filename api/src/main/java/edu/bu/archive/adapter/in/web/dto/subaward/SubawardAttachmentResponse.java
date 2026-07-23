@@ -10,7 +10,6 @@ public record SubawardAttachmentResponse(
         Long attachmentTypeCode,
         String attachmentTypeDescription,
         Long documentId,
-        String fileDataId,
         String fileName,
         String mimeType,
         String documentStatusCode,
@@ -20,6 +19,7 @@ public record SubawardAttachmentResponse(
         LocalDateTime sourceUpdateTimestamp,
         String sourceUpdateUser,
         Long sourceVersionNumber,
-        String sourceObjectId
+        String sourceObjectId,
+        boolean archived
 ) {
 }

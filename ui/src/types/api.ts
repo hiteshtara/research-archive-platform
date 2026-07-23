@@ -658,7 +658,6 @@ export interface SubawardAttachment {
   attachmentTypeCode: number | null;
   attachmentTypeDescription: string | null;
   documentId: number | null;
-  fileDataId: string | null;
   fileName: string | null;
   mimeType: string | null;
   documentStatusCode: string | null;
@@ -669,6 +668,7 @@ export interface SubawardAttachment {
   sourceUpdateUser: string | null;
   sourceVersionNumber: number | null;
   sourceObjectId: string | null;
+  archived: boolean;
 }
 
 export interface SubawardTemplateInfo {

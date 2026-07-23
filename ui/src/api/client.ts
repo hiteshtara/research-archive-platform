@@ -436,6 +436,56 @@ export function getSubawardAttachments(
   );
 }
 
+function downloadFileName(
+  contentDisposition: string | null,
+  fallback: string,
+): string {
+  const encoded = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded?.[1]) {
+    return decodeURIComponent(encoded[1].replace(/^"|"$/g, ""));
+  }
+  const plain = contentDisposition?.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] ?? fallback;
+}
+
+export async function downloadSubawardAttachment(
+  subawardId: number,
+  attachmentId: number,
+  fallbackFileName: string,
+): Promise<void> {
+  const token = await accessToken();
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const path =
+    `/api/subawards/${encodeURIComponent(subawardId)}` +
+    `/attachments/${encodeURIComponent(attachmentId)}/download`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This attachment has not been archived for download.");
+    }
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = downloadFileName(
+    response.headers.get("Content-Disposition"),
+    fallbackFileName,
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
 export function getSubawardTemplateInfo(
   subawardId: number,
 ): Promise<import("../types/api").SubawardTemplateInfo> {

@@ -15,6 +15,8 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
 import edu.bu.archive.adapter.out.persistence.SubawardArchiveRepository;
+import edu.bu.archive.adapter.out.persistence.SubawardArchivedAttachment;
+import edu.bu.archive.adapter.out.persistence.SubawardAttachmentStorage;
 
 import org.springframework.stereotype.Service;
 
@@ -25,11 +27,14 @@ import java.util.NoSuchElementException;
 public class SubawardArchiveService {
 
     private final SubawardArchiveRepository repository;
+    private final SubawardAttachmentStorage attachmentStorage;
 
     public SubawardArchiveService(
-            SubawardArchiveRepository repository
+            SubawardArchiveRepository repository,
+            SubawardAttachmentStorage attachmentStorage
     ) {
         this.repository = repository;
+        this.attachmentStorage = attachmentStorage;
     }
 
     public SubawardPageResponse findPage(
@@ -91,6 +96,65 @@ public class SubawardArchiveService {
     public List<SubawardAttachmentResponse> findAttachments(long subawardId) {
         requireSubaward(subawardId);
         return repository.findAttachments(subawardId);
+    }
+
+    public SubawardAttachmentDownload downloadAttachment(
+            long subawardId,
+            long attachmentId
+    ) {
+        requireSubaward(subawardId);
+        if (attachmentId <= 0) {
+            throw new IllegalArgumentException(
+                    "Attachment ID must be positive"
+            );
+        }
+
+        long owner = repository.findAttachmentSubawardId(attachmentId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Subaward attachment not found"
+                ));
+        if (owner != subawardId) {
+            throw new NoSuchElementException(
+                    "Subaward attachment not found"
+            );
+        }
+
+        SubawardArchivedAttachment archived =
+                repository.findArchivedAttachment(
+                        subawardId,
+                        attachmentId
+                ).filter(row ->
+                        "ARCHIVED".equals(row.archiveStatus())
+                                && row.s3Bucket() != null
+                                && !row.s3Bucket().isBlank()
+                                && row.s3Key() != null
+                                && !row.s3Key().isBlank()
+                )
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Archived attachment not found"
+                ));
+        SubawardAttachmentStorage.StoredObject object =
+                attachmentStorage.open(archived);
+        return new SubawardAttachmentDownload(
+                safeFileName(
+                        archived.originalFileName(),
+                        attachmentId
+                ),
+                archived.mimeType(),
+                object.contentLength(),
+                object.stream()
+        );
+    }
+
+    private String safeFileName(String fileName, long attachmentId) {
+        String candidate = fileName == null ? "" : fileName
+                .replace('\\', '/')
+                .replaceAll("[\\r\\n\\p{Cntrl}]", "");
+        candidate = candidate.substring(candidate.lastIndexOf('/') + 1)
+                .trim();
+        return candidate.isEmpty()
+                ? "attachment-" + attachmentId + ".bin"
+                : candidate;
     }
 
     public SubawardTemplateInfoResponse findTemplateInfo(long subawardId) {
