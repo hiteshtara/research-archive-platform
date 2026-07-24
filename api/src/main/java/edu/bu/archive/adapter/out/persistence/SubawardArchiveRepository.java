@@ -32,22 +32,16 @@ public class SubawardArchiveRepository {
 
     public long countSubawards(String query) {
         String normalizedQuery = normalizeQuery(query);
+        String filter = subawardFilter(normalizedQuery);
 
-        Long count = jdbc.sql("""
+        JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.subaward
-                WHERE :query = ''
-                   OR CAST(subaward_id AS TEXT) ILIKE '%' || :query || '%'
-                   OR subaward_code ILIKE '%' || :query || '%'
-                   OR document_number ILIKE '%' || :query || '%'
-                   OR title ILIKE '%' || :query || '%'
-                   OR status_description ILIKE '%' || :query || '%'
-                   OR organization_id ILIKE '%' || :query || '%'
-                   OR account_number ILIKE '%' || :query || '%'
-                   OR award_prime_sponsor_name ILIKE '%' || :query || '%'
-                   OR award_sponsor_name ILIKE '%' || :query || '%'
-                """)
-                .param("query", normalizedQuery)
+                """ + filter);
+        if (!normalizedQuery.isEmpty()) {
+            statement = statement.param("query", normalizedQuery);
+        }
+        Long count = statement
                 .query(Long.class)
                 .single();
 
@@ -60,8 +54,9 @@ public class SubawardArchiveRepository {
             int offset
     ) {
         String normalizedQuery = normalizeQuery(query);
+        String filter = subawardFilter(normalizedQuery);
 
-        return jdbc.sql("""
+        JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT
                     subaward_id,
                     subaward_code,
@@ -77,8 +72,30 @@ public class SubawardArchiveRepository {
                     subaward_sequence_status,
                     source_update_timestamp
                 FROM archive.subaward
-                WHERE :query = ''
-                   OR CAST(subaward_id AS TEXT) ILIKE '%' || :query || '%'
+                """ + filter + """
+                ORDER BY
+                    source_update_timestamp DESC NULLS LAST,
+                    sequence_number DESC,
+                    subaward_id DESC
+                LIMIT :limit
+                OFFSET :offset
+                """);
+        if (!normalizedQuery.isEmpty()) {
+            statement = statement.param("query", normalizedQuery);
+        }
+        return statement
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(SubawardSummaryResponse.class)
+                .list();
+    }
+
+    private String subawardFilter(String normalizedQuery) {
+        return normalizedQuery.isEmpty()
+                ? ""
+                : """
+                WHERE CAST(subaward_id AS TEXT)
+                        ILIKE '%' || :query || '%'
                    OR subaward_code ILIKE '%' || :query || '%'
                    OR document_number ILIKE '%' || :query || '%'
                    OR title ILIKE '%' || :query || '%'
@@ -87,18 +104,7 @@ public class SubawardArchiveRepository {
                    OR account_number ILIKE '%' || :query || '%'
                    OR award_prime_sponsor_name ILIKE '%' || :query || '%'
                    OR award_sponsor_name ILIKE '%' || :query || '%'
-                ORDER BY
-                    source_update_timestamp DESC NULLS LAST,
-                    sequence_number DESC,
-                    subaward_id DESC
-                LIMIT :limit
-                OFFSET :offset
-                """)
-                .param("query", normalizedQuery)
-                .param("limit", limit)
-                .param("offset", offset)
-                .query(SubawardSummaryResponse.class)
-                .list();
+                """;
     }
 
     public Optional<SubawardRowResponse> findById(long subawardId) {

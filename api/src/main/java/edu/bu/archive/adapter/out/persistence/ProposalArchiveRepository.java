@@ -30,8 +30,20 @@ public class ProposalArchiveRepository {
                 query == null
                         ? ""
                         : query.trim();
+        String filter = normalizedQuery.isEmpty()
+                ? ""
+                : """
+                  AND (
+                        proposal_number ILIKE '%' || :query || '%'
+                        OR title ILIKE '%' || :query || '%'
+                        OR sponsor_name ILIKE '%' || :query || '%'
+                        OR lead_unit_name ILIKE '%' || :query || '%'
+                        OR principal_investigator_name
+                            ILIKE '%' || :query || '%'
+                  )
+                """;
 
-        return jdbc.sql("""
+        JdbcClient.StatementSpec statement = jdbc.sql("""
                 WITH ranked AS (
                     SELECT
                         proposal_id,
@@ -63,19 +75,14 @@ public class ProposalArchiveRepository {
                     proposal_id AS current_proposal_id
                 FROM ranked
                 WHERE row_rank = 1
-                  AND (
-                        :query = ''
-                        OR proposal_number ILIKE '%' || :query || '%'
-                        OR title ILIKE '%' || :query || '%'
-                        OR sponsor_name ILIKE '%' || :query || '%'
-                        OR lead_unit_name ILIKE '%' || :query || '%'
-                        OR principal_investigator_name
-                            ILIKE '%' || :query || '%'
-                  )
+                """ + filter + """
                 ORDER BY proposal_number
                 LIMIT :limit
-                """)
-                .param("query", normalizedQuery)
+                """);
+        if (!normalizedQuery.isEmpty()) {
+            statement = statement.param("query", normalizedQuery);
+        }
+        return statement
                 .param("limit", limit)
                 .query(ProposalFamilySummaryResponse.class)
                 .list();

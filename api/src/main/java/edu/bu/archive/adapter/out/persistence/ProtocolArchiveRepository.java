@@ -35,9 +35,10 @@ public class ProtocolArchiveRepository {
             int size
     ) {
         String normalized = query == null ? "" : query.trim();
-        String filter = """
-                WHERE :query = ''
-                   OR EXISTS (
+        String filter = normalized.isEmpty()
+                ? ""
+                : """
+                WHERE EXISTS (
                         SELECT 1
                         FROM archive.protocol_version version
                         WHERE version.protocol_number =
@@ -184,15 +185,18 @@ public class ProtocolArchiveRepository {
                           )
                    )
                 """;
-        long total = jdbc.sql(
+        JdbcClient.StatementSpec countStatement = jdbc.sql(
                         "SELECT COUNT(*) "
                                 + "FROM archive.v_protocol_family family "
                                 + filter
-                )
-                .param("query", normalized)
+                );
+        if (!normalized.isEmpty()) {
+            countStatement = countStatement.param("query", normalized);
+        }
+        long total = countStatement
                 .query(Long.class)
                 .single();
-        List<ProtocolSummaryResponse> content = jdbc.sql("""
+        JdbcClient.StatementSpec contentStatement = jdbc.sql("""
                 SELECT
                     protocol_number,
                     version_count,
@@ -207,8 +211,14 @@ public class ProtocolArchiveRepository {
                 """ + filter + """
                 ORDER BY family.protocol_number
                 LIMIT :size OFFSET :offset
-                """)
-                .param("query", normalized)
+                """);
+        if (!normalized.isEmpty()) {
+            contentStatement = contentStatement.param(
+                    "query",
+                    normalized
+            );
+        }
+        List<ProtocolSummaryResponse> content = contentStatement
                 .param("size", size)
                 .param("offset", page * size)
                 .query(ProtocolSummaryResponse.class)

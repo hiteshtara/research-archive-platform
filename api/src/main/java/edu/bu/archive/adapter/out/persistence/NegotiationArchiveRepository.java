@@ -26,12 +26,10 @@ public class NegotiationArchiveRepository {
 
     public long countNegotiations(String query) {
         String normalizedQuery = normalizeQuery(query);
-
-        Long count = jdbc.sql("""
-                SELECT COUNT(*)
-                FROM archive.negotiation
-                WHERE :query = ''
-                   OR CAST(negotiation_id AS TEXT)
+        String filter = normalizedQuery.isEmpty()
+                ? ""
+                : """
+                WHERE CAST(negotiation_id AS TEXT)
                         ILIKE '%' || :query || '%'
                    OR document_number ILIKE '%' || :query || '%'
                    OR negotiation_status_description
@@ -42,8 +40,16 @@ public class NegotiationArchiveRepository {
                         ILIKE '%' || :query || '%'
                    OR associated_document_id ILIKE '%' || :query || '%'
                    OR negotiator_full_name ILIKE '%' || :query || '%'
-                """)
-                .param("query", normalizedQuery)
+                """;
+
+        JdbcClient.StatementSpec statement = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.negotiation
+                """ + filter);
+        if (!normalizedQuery.isEmpty()) {
+            statement = statement.param("query", normalizedQuery);
+        }
+        Long count = statement
                 .query(Long.class)
                 .single();
 
@@ -56,8 +62,23 @@ public class NegotiationArchiveRepository {
             int offset
     ) {
         String normalizedQuery = normalizeQuery(query);
+        String filter = normalizedQuery.isEmpty()
+                ? ""
+                : """
+                WHERE CAST(negotiation_id AS TEXT)
+                        ILIKE '%' || :query || '%'
+                   OR document_number ILIKE '%' || :query || '%'
+                   OR negotiation_status_description
+                        ILIKE '%' || :query || '%'
+                   OR negotiation_agreement_type_description
+                        ILIKE '%' || :query || '%'
+                   OR negotiation_association_type_description
+                        ILIKE '%' || :query || '%'
+                   OR associated_document_id ILIKE '%' || :query || '%'
+                   OR negotiator_full_name ILIKE '%' || :query || '%'
+                """;
 
-        return jdbc.sql("""
+        JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT
                     negotiation_id,
                     document_number,
@@ -77,25 +98,17 @@ public class NegotiationArchiveRepository {
                     negotiation_end_date,
                     anticipated_award_date
                 FROM archive.negotiation
-                WHERE :query = ''
-                   OR CAST(negotiation_id AS TEXT)
-                        ILIKE '%' || :query || '%'
-                   OR document_number ILIKE '%' || :query || '%'
-                   OR negotiation_status_description
-                        ILIKE '%' || :query || '%'
-                   OR negotiation_agreement_type_description
-                        ILIKE '%' || :query || '%'
-                   OR negotiation_association_type_description
-                        ILIKE '%' || :query || '%'
-                   OR associated_document_id ILIKE '%' || :query || '%'
-                   OR negotiator_full_name ILIKE '%' || :query || '%'
+                """ + filter + """
                 ORDER BY
                     source_update_timestamp DESC NULLS LAST,
                     negotiation_id DESC
                 LIMIT :limit
                 OFFSET :offset
-                """)
-                .param("query", normalizedQuery)
+                """);
+        if (!normalizedQuery.isEmpty()) {
+            statement = statement.param("query", normalizedQuery);
+        }
+        return statement
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(NegotiationSummaryResponse.class)
