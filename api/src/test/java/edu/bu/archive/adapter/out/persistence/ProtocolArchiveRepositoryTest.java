@@ -23,6 +23,50 @@ import static org.mockito.Mockito.when;
 class ProtocolArchiveRepositoryTest {
 
     @Test
+    void unfilteredFamilyLoadSkipsRelatedObjectSearches() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> countQuery =
+                mock(JdbcClient.MappedQuerySpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolSummaryResponse> contentQuery =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(
+                anyString(),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(countQuery);
+        when(countQuery.single()).thenReturn(0L);
+        when(statement.query(ProtocolSummaryResponse.class))
+                .thenReturn(contentQuery);
+        when(contentQuery.list()).thenReturn(List.of());
+
+        new ProtocolArchiveRepository(jdbc).findFamilies("", 0, 25);
+
+        List<String> sqlStatements = org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .toList();
+
+        assertThat(sqlStatements).hasSize(2);
+        assertThat(sqlStatements).allSatisfy(sql -> assertThat(sql)
+                .contains("FROM archive.v_protocol_family family")
+                .doesNotContain("archive.protocol_version version")
+                .doesNotContain("archive.protocol_person person")
+                .doesNotContain("archive.protocol_funding funding")
+                .doesNotContain("archive.protocol_submission submission"));
+    }
+
+    @Test
     void familySearchIncludesProtocolAndRelatedArchiveObjects() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =

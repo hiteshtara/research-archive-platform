@@ -51,10 +51,11 @@ class DashboardControllerTest {
                 )
                 .contains(
                         "COUNT(DISTINCT protocol_number) "
-                                + "FROM archive.protocol_version"
+                                + "AS protocol_families"
                 )
                 .contains(
-                        "COUNT(*) FROM archive.protocol_version"
+                        "COUNT(*) AS protocol_versions "
+                                + "FROM archive.protocol_version"
                 )
                 .contains(
                         "COUNT(*) FROM archive.irb_submission"
@@ -66,18 +67,18 @@ class DashboardControllerTest {
                         "COUNT(*) FROM archive.irb_timeline_event"
                 )
                 .contains(
-                        "COUNT(DISTINCT award_number) "
+                        "COUNT(DISTINCT award_number) AS awards"
+                )
+                .contains(
+                        "COUNT(*) AS award_history_records "
                                 + "FROM archive.award_version"
                 )
                 .contains(
-                        "COUNT(*) FROM archive.award_version"
+                        "COUNT(DISTINCT proposal_number) AS proposals"
                 )
                 .contains(
-                        "COUNT(DISTINCT proposal_number) "
+                        "COUNT(*) AS proposal_history_records "
                                 + "FROM archive.proposal_version"
-                )
-                .contains(
-                        "COUNT(*) FROM archive.proposal_version"
                 )
                 .contains(
                         "COUNT(*) FROM archive.negotiation"
@@ -89,5 +90,17 @@ class DashboardControllerTest {
                 .doesNotContain(
                         "FROM archive.award_funding_proposal"
                 );
+        assertThat(sql.split(
+                "FROM archive.protocol_version",
+                -1
+        )).hasSize(2);
+        assertThat(sql.split(
+                "FROM archive.award_version",
+                -1
+        )).hasSize(2);
+        assertThat(sql.split(
+                "FROM archive.proposal_version",
+                -1
+        )).hasSize(2);
     }
 }
