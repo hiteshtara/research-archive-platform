@@ -5,11 +5,9 @@ export function IrbArchiveTabs() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const value = location.pathname.startsWith("/irb/families")
-    ? "/irb/families"
-    : location.pathname.startsWith("/irb/history")
-      ? "/irb/history"
-      : "/irb";
+  const value = location.pathname.startsWith("/irb/history")
+    ? "/protocols"
+    : "/irb";
 
   return (
     <Tabs
@@ -20,15 +18,11 @@ export function IrbArchiveTabs() {
     >
       <Tab
         value="/irb"
-        label="Current Workspaces · 1,852"
+        label="Current IRB Workspaces"
       />
       <Tab
-        value="/irb/families"
-        label="Protocol Families · 6,038"
-      />
-      <Tab
-        value="/irb/history"
-        label="Historical Versions · 23,891"
+        value="/protocols"
+        label="Protocol Archive"
       />
     </Tabs>
   );
