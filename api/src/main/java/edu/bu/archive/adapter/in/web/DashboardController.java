@@ -49,7 +49,8 @@ public class DashboardController {
                     (SELECT COUNT(*)
                      FROM archive.proposal_version)
                         AS proposal_history_records,
-                    0 AS negotiations,
+                    (SELECT COUNT(*)
+                     FROM archive.negotiation) AS negotiations,
                     0 AS subawards,
                     0 AS documents
                 """)
