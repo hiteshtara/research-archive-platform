@@ -8,6 +8,7 @@ public record ProtocolUnitResponse(
         String protocolNumber,
         Integer sequenceNumber,
         String unitNumber,
+        String unitName,
         String leadUnitFlag,
         String personId,
         LocalDateTime sourceUpdateTimestamp,

@@ -46,7 +46,18 @@ class ProtocolArchiveControllerTest {
         mockMvc.perform(get("/api/protocols/000100/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].protocolId").value(100))
-                .andExpect(jsonPath("$[0].sequenceNumber").value(2));
+                .andExpect(jsonPath("$[0].sequenceNumber").value(2))
+                .andExpect(
+                        jsonPath("$[0].leadUnitName")
+                                .value(
+                                        "CAS Psychological and "
+                                                + "Brain Sciences"
+                                )
+                )
+                .andExpect(
+                        jsonPath("$[0].leadUnitNumber")
+                                .value("1202200000")
+                );
     }
 
     @Test
@@ -309,6 +320,8 @@ class ProtocolArchiveControllerTest {
                 null,
                 null,
                 null,
+                "CAS Psychological and Brain Sciences",
+                "1202200000",
                 null,
                 null
         );

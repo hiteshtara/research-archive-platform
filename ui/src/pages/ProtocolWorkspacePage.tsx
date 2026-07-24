@@ -1,7 +1,9 @@
 import {
   Alert,
+  Box,
   Card,
   CardContent,
+  Chip,
   CircularProgress,
   Stack,
   Tab,
@@ -29,6 +31,17 @@ import {
 } from "../api/client";
 
 const show = (value: string | number | null) => value ?? "—";
+const tabs = [
+  "Overview",
+  "History",
+  "Personnel",
+  "Funding",
+  "Research Areas",
+  "Locations",
+  "Submissions",
+  "Actions",
+  "Amend/Renewals",
+];
 
 export function ProtocolWorkspacePage() {
   const { protocolNumber } = useParams();
@@ -41,37 +54,37 @@ export function ProtocolWorkspacePage() {
   });
   const personnel = useQuery({
     queryKey: ["protocol-personnel", protocolId],
-    enabled: tab === 1 && protocolId !== null,
+    enabled: protocolId !== null,
     queryFn: () => getProtocolPersonnel(protocolId!),
   });
   const funding = useQuery({
     queryKey: ["protocol-funding", protocolId],
-    enabled: tab === 2 && protocolId !== null,
+    enabled: tab === 3 && protocolId !== null,
     queryFn: () => getProtocolFunding(protocolId!),
   });
   const researchAreas = useQuery({
     queryKey: ["protocol-research-areas", protocolId],
-    enabled: tab === 3 && protocolId !== null,
+    enabled: tab === 4 && protocolId !== null,
     queryFn: () => getProtocolResearchAreas(protocolId!),
   });
   const locations = useQuery({
     queryKey: ["protocol-locations", protocolId],
-    enabled: tab === 4 && protocolId !== null,
+    enabled: tab === 5 && protocolId !== null,
     queryFn: () => getProtocolLocations(protocolId!),
   });
   const submissions = useQuery({
     queryKey: ["protocol-submissions", protocolId],
-    enabled: tab === 5 && protocolId !== null,
+    enabled: tab === 6 && protocolId !== null,
     queryFn: () => getProtocolSubmissions(protocolId!),
   });
   const actions = useQuery({
     queryKey: ["protocol-actions", protocolId],
-    enabled: tab === 6 && protocolId !== null,
+    enabled: tab === 7 && protocolId !== null,
     queryFn: () => getProtocolActions(protocolId!),
   });
   const amendRenewals = useQuery({
     queryKey: ["protocol-amend-renewals", protocolId],
-    enabled: tab === 7 && protocolId !== null,
+    enabled: tab === 8 && protocolId !== null,
     queryFn: () => getProtocolAmendRenewals(protocolId!),
   });
 
@@ -92,31 +105,173 @@ export function ProtocolWorkspacePage() {
   const selected =
     history.data.find((version) => version.protocolId === protocolId) ??
     history.data[0];
+  const leadAssignment = personnel.data
+    ?.flatMap((person) =>
+      person.units.map((unit) => ({ person, unit })),
+    )
+    .find(({ unit }) => unit.leadUnitFlag?.toUpperCase() === "Y");
+  const principalInvestigator =
+    leadAssignment?.person ??
+    personnel.data?.find((person) => {
+      const role = person.protocolPersonRoleId?.trim().toUpperCase();
+      return role === "PI" || role === "PRINCIPAL INVESTIGATOR";
+    });
+  const personnelMetadata = personnel.isLoading ? "Loading…" : "—";
+  const metadata: Array<{
+    label: string;
+    value: string | number;
+    secondary?: string;
+  }> = [
+    { label: "Protocol Number", value: selected.protocolNumber },
+    { label: "Sequence Number", value: selected.sequenceNumber },
+    {
+      label: "Protocol Type",
+      value: show(selected.protocolTypeDescription),
+    },
+    {
+      label: "Current Status",
+      value: show(selected.protocolStatusDescription),
+    },
+    {
+      label: "Principal Investigator",
+      value: principalInvestigator?.personName ?? personnelMetadata,
+    },
+    {
+      label: "Lead Unit",
+      value:
+        selected.leadUnitName ??
+        leadAssignment?.unit.unitName ??
+        (personnel.isLoading ? "Loading…" : "Unit name unavailable"),
+      secondary:
+        selected.leadUnitNumber ??
+        leadAssignment?.unit.unitNumber ??
+        undefined,
+    },
+    { label: "Approval Date", value: show(selected.approvalDate) },
+    { label: "Expiration Date", value: show(selected.expirationDate) },
+  ];
 
   return (
     <Stack spacing={3}>
       <Card>
         <CardContent>
-          <Typography variant="h4">
-            Protocol {selected.protocolNumber}
+          <Typography
+            variant="h4"
+            component="h1"
+            sx={{ maxWidth: 1100, overflowWrap: "anywhere" }}
+          >
+            {selected.title ?? "Untitled Protocol"}
           </Typography>
-          <Typography color="text.secondary">
-            Sequence {selected.sequenceNumber} · Protocol ID{" "}
-            {selected.protocolId}
-          </Typography>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "minmax(0, 1fr)",
+                sm: "repeat(2, minmax(0, 1fr))",
+                md: "repeat(4, minmax(0, 1fr))",
+              },
+              gap: 1.25,
+              mt: 2.5,
+            }}
+          >
+            {metadata.map(({ label, value, secondary }) => (
+              <Box
+                key={label}
+                sx={{
+                  minWidth: 0,
+                  border: "1px solid",
+                  borderColor: "divider",
+                  borderRadius: 1.5,
+                  px: 1.5,
+                  py: 1.1,
+                  bgcolor: "background.default",
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", fontWeight: 700 }}
+                >
+                  {label}
+                </Typography>
+                {label === "Current Status" ? (
+                  <Chip
+                    label={value}
+                    size="small"
+                    variant="outlined"
+                    sx={{ mt: 0.5, maxWidth: "100%" }}
+                  />
+                ) : (
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      mt: 0.25,
+                      fontWeight: 600,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {value}
+                  </Typography>
+                )}
+                {secondary && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mt: 0.25 }}
+                  >
+                    {secondary}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Box>
         </CardContent>
       </Card>
-      <Tabs value={tab} onChange={(_, value) => setTab(value)}>
-        <Tab label="History" />
-        <Tab label="Personnel" />
-        <Tab label="Funding" />
-        <Tab label="Research Areas" />
-        <Tab label="Locations" />
-        <Tab label="Submissions" />
-        <Tab label="Actions" />
-        <Tab label="Amend/Renewals" />
+      <Tabs
+        value={tab}
+        onChange={(_, value) => setTab(value)}
+        variant="scrollable"
+        scrollButtons="auto"
+        aria-label="Protocol detail sections"
+      >
+        {tabs.map((label) => (
+          <Tab key={label} label={label} />
+        ))}
       </Tabs>
       {tab === 0 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6">Study overview</Typography>
+            <Typography
+              color="text.secondary"
+              sx={{ mt: 1, whiteSpace: "pre-wrap" }}
+            >
+              {selected.description ?? "No protocol description is archived."}
+            </Typography>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1}
+              sx={{ mt: 2, flexWrap: "wrap" }}
+            >
+              <Chip
+                size="small"
+                label={`Protocol ID ${selected.protocolId}`}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`Document ${show(selected.documentNumber)}`}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`Active ${show(selected.active)}`}
+              />
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+      {tab === 1 && (
         <Card>
           <Table>
             <TableHead>
@@ -152,18 +307,18 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
-      {tab === 1 && personnel.isLoading && <CircularProgress />}
-      {tab === 1 && personnel.isError && (
+      {tab === 2 && personnel.isLoading && <CircularProgress />}
+      {tab === 2 && personnel.isError && (
         <Alert severity="error">
           Unable to load Personnel for this exact Protocol version.
         </Alert>
       )}
-      {tab === 1 && personnel.data?.length === 0 && (
+      {tab === 2 && personnel.data?.length === 0 && (
         <Alert severity="info">
           No Personnel are archived for this exact Protocol version.
         </Alert>
       )}
-      {tab === 1 && personnel.data && personnel.data.length > 0 && (
+      {tab === 2 && personnel.data && personnel.data.length > 0 && (
         <Card>
           <Table>
             <TableHead>
@@ -205,18 +360,18 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
-      {tab === 2 && funding.isLoading && <CircularProgress />}
-      {tab === 2 && funding.isError && (
+      {tab === 3 && funding.isLoading && <CircularProgress />}
+      {tab === 3 && funding.isError && (
         <Alert severity="error">
           Unable to load Funding for this exact Protocol version.
         </Alert>
       )}
-      {tab === 2 && funding.data?.length === 0 && (
+      {tab === 3 && funding.data?.length === 0 && (
         <Alert severity="info">
           No Funding sources are archived for this exact Protocol version.
         </Alert>
       )}
-      {tab === 2 && funding.data && funding.data.length > 0 && (
+      {tab === 3 && funding.data && funding.data.length > 0 && (
         <Card>
           <Table>
             <TableHead>
@@ -252,18 +407,18 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
-      {tab === 3 && researchAreas.isLoading && <CircularProgress />}
-      {tab === 3 && researchAreas.isError && (
+      {tab === 4 && researchAreas.isLoading && <CircularProgress />}
+      {tab === 4 && researchAreas.isError && (
         <Alert severity="error">
           Unable to load Research Areas for this exact Protocol version.
         </Alert>
       )}
-      {tab === 3 && researchAreas.data?.length === 0 && (
+      {tab === 4 && researchAreas.data?.length === 0 && (
         <Alert severity="info">
           No Research Areas are archived for this exact Protocol version.
         </Alert>
       )}
-      {tab === 3 &&
+      {tab === 4 &&
         researchAreas.data &&
         researchAreas.data.length > 0 && (
           <Card>
@@ -289,18 +444,18 @@ export function ProtocolWorkspacePage() {
             </Table>
           </Card>
         )}
-      {tab === 4 && locations.isLoading && <CircularProgress />}
-      {tab === 4 && locations.isError && (
+      {tab === 5 && locations.isLoading && <CircularProgress />}
+      {tab === 5 && locations.isError && (
         <Alert severity="error">
           Unable to load Locations for this exact Protocol version.
         </Alert>
       )}
-      {tab === 4 && locations.data?.length === 0 && (
+      {tab === 5 && locations.data?.length === 0 && (
         <Alert severity="info">
           No Locations are archived for this exact Protocol version.
         </Alert>
       )}
-      {tab === 4 && locations.data && locations.data.length > 0 && (
+      {tab === 5 && locations.data && locations.data.length > 0 && (
         <Card>
           <Table>
             <TableHead>
@@ -334,18 +489,18 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
-      {tab === 5 && submissions.isLoading && <CircularProgress />}
-      {tab === 5 && submissions.isError && (
+      {tab === 6 && submissions.isLoading && <CircularProgress />}
+      {tab === 6 && submissions.isError && (
         <Alert severity="error">
           Unable to load Submissions for this exact Protocol version.
         </Alert>
       )}
-      {tab === 5 && submissions.data?.length === 0 && (
+      {tab === 6 && submissions.data?.length === 0 && (
         <Alert severity="info">
           No Submissions are archived for this exact Protocol version.
         </Alert>
       )}
-      {tab === 5 &&
+      {tab === 6 &&
         submissions.data &&
         submissions.data.length > 0 && (
           <Card>
@@ -403,18 +558,18 @@ export function ProtocolWorkspacePage() {
             </Table>
           </Card>
         )}
-      {tab === 6 && actions.isLoading && <CircularProgress />}
-      {tab === 6 && actions.isError && (
+      {tab === 7 && actions.isLoading && <CircularProgress />}
+      {tab === 7 && actions.isError && (
         <Alert severity="error">
           Unable to load Actions for this exact Protocol version.
         </Alert>
       )}
-      {tab === 6 && actions.data?.length === 0 && (
+      {tab === 7 && actions.data?.length === 0 && (
         <Alert severity="info">
           No Actions are archived for this exact Protocol version.
         </Alert>
       )}
-      {tab === 6 && actions.data && actions.data.length > 0 && (
+      {tab === 7 && actions.data && actions.data.length > 0 && (
         <Card>
           <Table>
             <TableHead>
@@ -460,20 +615,20 @@ export function ProtocolWorkspacePage() {
           </Table>
         </Card>
       )}
-      {tab === 7 && amendRenewals.isLoading && <CircularProgress />}
-      {tab === 7 && amendRenewals.isError && (
+      {tab === 8 && amendRenewals.isLoading && <CircularProgress />}
+      {tab === 8 && amendRenewals.isError && (
         <Alert severity="error">
           Unable to load Amendments/Renewals for this exact Protocol
           version.
         </Alert>
       )}
-      {tab === 7 && amendRenewals.data?.length === 0 && (
+      {tab === 8 && amendRenewals.data?.length === 0 && (
         <Alert severity="info">
           No Amendments/Renewals are archived for this exact Protocol
           version.
         </Alert>
       )}
-      {tab === 7 &&
+      {tab === 8 &&
         amendRenewals.data &&
         amendRenewals.data.length > 0 && (
           <Card>
