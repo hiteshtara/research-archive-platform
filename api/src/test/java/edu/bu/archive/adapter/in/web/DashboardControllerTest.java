@@ -24,7 +24,7 @@ class DashboardControllerTest {
                 1, 2, 3, 4, 5, 6,
                 43057, 281591,
                 7, 8,
-                9, 0, 0
+                9, 10, 0
         );
         when(jdbc.sql(anyString())).thenReturn(statement);
         when(statement.query(DashboardDto.class)).thenReturn(query);
@@ -81,6 +81,10 @@ class DashboardControllerTest {
                 )
                 .contains(
                         "COUNT(*) FROM archive.negotiation"
+                )
+                .contains(
+                        "COUNT(DISTINCT subaward_code) "
+                                + "FROM archive.subaward"
                 )
                 .doesNotContain(
                         "FROM archive.award_funding_proposal"
