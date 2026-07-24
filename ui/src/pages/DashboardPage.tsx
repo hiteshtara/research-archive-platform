@@ -30,7 +30,7 @@ import { useNavigate } from "react-router-dom";
 import { getDashboard } from "../api/client";
 import type { DashboardSummary } from "../types/api";
 
-const archiveCards: Array<{
+const primaryBusinessCards: Array<{
   key: keyof DashboardSummary;
   title: string;
   description: string;
@@ -52,11 +52,48 @@ const archiveCards: Array<{
     path: "/irb",
   },
   {
+    key: "awards",
+    title: "Awards",
+    description: "Distinct institutional award numbers",
+    icon: <ArchiveOutlined />,
+    path: "/awards",
+  },
+  {
+    key: "proposals",
+    title: "Proposals",
+    description: "Distinct institutional proposal numbers",
+    icon: <DescriptionOutlined />,
+    path: "/proposals",
+  },
+];
+
+const historicalActivityCards: Array<{
+  key: keyof DashboardSummary;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  path: string;
+}> = [
+  {
     key: "protocolVersions",
-    title: "Historical Versions",
+    title: "Historical Protocol Versions",
     description: "All historical protocol versions loaded from Kuali",
     icon: <HistoryOutlined />,
     path: "/irb",
+  },
+  {
+    key: "awardHistoryRecords",
+    title: "Historical Award Records",
+    description: "All preserved Kuali Award source rows",
+    icon: <HistoryOutlined />,
+    path: "/awards",
+  },
+  {
+    key: "proposalHistoryRecords",
+    title: "Historical Proposal Records",
+    description: "All preserved Kuali Proposal history rows",
+    icon: <HistoryOutlined />,
+    path: "/proposals",
   },
   {
     key: "submissions",
@@ -67,7 +104,7 @@ const archiveCards: Array<{
   },
   {
     key: "fundingRecords",
-    title: "Funding Records",
+    title: "Funding Relationships",
     description: "Archived protocol funding source relationships",
     icon: <GavelOutlined />,
     path: "/irb",
@@ -88,20 +125,6 @@ const futureModuleCards: Array<{
   icon: React.ReactNode;
   path: string;
 }> = [
-  {
-    key: "awards",
-    title: "Awards",
-    description: "Award records and sponsor information",
-    icon: <ArchiveOutlined />,
-    path: "/awards",
-  },
-  {
-    key: "proposals",
-    title: "Proposals",
-    description: "Institutional proposal archive",
-    icon: <DescriptionOutlined />,
-    path: "/proposals",
-  },
   {
     key: "negotiations",
     title: "Negotiations",
@@ -227,14 +250,14 @@ export function DashboardPage() {
       </Stack>
 
       <Box>
-        <Typography variant="h6">IRB archive</Typography>
+        <Typography variant="h6">Primary business objects</Typography>
 
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-          Current records and the complete historical composite archive.
+          Current records and stable institutional business identifiers.
         </Typography>
 
         <Grid container spacing={2.5}>
-          {archiveCards.map((card) => {
+          {primaryBusinessCards.map((card) => {
             const value = dashboard[card.key];
 
             return (
@@ -298,11 +321,85 @@ export function DashboardPage() {
       </Box>
 
       <Box>
+        <Typography variant="h6">
+          Historical and activity metrics
+        </Typography>
+
+        <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
+          Complete preserved history and relationships across archive
+          domains.
+        </Typography>
+
+        <Grid container spacing={2.5}>
+          {historicalActivityCards.map((card) => {
+            const value = dashboard[card.key];
+
+            return (
+              <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
+                <Card
+                  onClick={() => navigate(card.path)}
+                  sx={{
+                    height: "100%",
+                    cursor: "pointer",
+                    transition:
+                      "transform 160ms ease, box-shadow 160ms ease",
+                    "&:hover": {
+                      transform: "translateY(-3px)",
+                      boxShadow: "0 14px 30px rgba(15, 23, 42, 0.10)",
+                    },
+                  }}
+                >
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack
+                      sx={{
+                        flexDirection: "row",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: 46,
+                          height: 46,
+                          borderRadius: 2.5,
+                          display: "grid",
+                          placeItems: "center",
+                          backgroundColor: "rgba(15, 23, 42, 0.06)",
+                          color: "text.secondary",
+                        }}
+                      >
+                        {card.icon}
+                      </Box>
+
+                      <Typography variant="h4">
+                        {value.toLocaleString()}
+                      </Typography>
+                    </Stack>
+
+                    <Typography variant="h6" sx={{ mt: 3 }}>
+                      {card.title}
+                    </Typography>
+
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mt: 0.5 }}
+                    >
+                      {card.description}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          })}
+        </Grid>
+      </Box>
+
+      <Box>
         <Typography variant="h6">Additional modules</Typography>
 
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-          These archive domains will populate as their migration pipelines are
-          completed.
+          Other archive domains and document collections.
         </Typography>
 
         <Grid container spacing={2.5}>
