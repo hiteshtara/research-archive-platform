@@ -19,6 +19,31 @@ import static org.mockito.Mockito.when;
 class SubawardArchiveRepositoryTest {
 
     @Test
+    void unfilteredSubawardsUsePrimaryKeyOrderForFastPaging() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<SubawardSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(statement);
+        when(statement.query(SubawardSummaryResponse.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new SubawardArchiveRepository(jdbc)
+                .findSubawards("", 25, 0);
+
+        assertThat(firstSql(jdbc))
+                .contains("ORDER BY subaward_id DESC")
+                .doesNotContain("source_update_timestamp DESC")
+                .doesNotContain("ILIKE");
+    }
+
+    @Test
     void findByIdMapsThePhysicalSubawardRow() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =

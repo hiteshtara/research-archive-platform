@@ -55,6 +55,14 @@ public class SubawardArchiveRepository {
     ) {
         String normalizedQuery = normalizeQuery(query);
         String filter = subawardFilter(normalizedQuery);
+        String orderBy = normalizedQuery.isEmpty()
+                ? "ORDER BY subaward_id DESC"
+                : """
+                ORDER BY
+                    source_update_timestamp DESC NULLS LAST,
+                    sequence_number DESC,
+                    subaward_id DESC
+                """;
 
         JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT
@@ -73,10 +81,7 @@ public class SubawardArchiveRepository {
                     source_update_timestamp
                 FROM archive.subaward
                 """ + filter + """
-                ORDER BY
-                    source_update_timestamp DESC NULLS LAST,
-                    sequence_number DESC,
-                    subaward_id DESC
+                """ + orderBy + """
                 LIMIT :limit
                 OFFSET :offset
                 """);
