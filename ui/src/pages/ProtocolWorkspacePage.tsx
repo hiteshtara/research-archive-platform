@@ -343,15 +343,43 @@ export function ProtocolWorkspacePage() {
                     {show(person.affiliationTypeCode)}
                   </TableCell>
                   <TableCell>
-                    {person.units.length
-                      ? person.units
-                          .map((unit) =>
-                            `${unit.unitNumber ?? "—"}${
-                              unit.leadUnitFlag === "Y" ? " (Lead)" : ""
-                            }`,
-                          )
-                          .join(", ")
-                      : "—"}
+                    {person.units.length ? (
+                      <Stack spacing={0.75}>
+                        {person.units.map((unit) => (
+                          <Box key={unit.protocolUnitsId}>
+                            <Stack
+                              direction="row"
+                              spacing={0.75}
+                              sx={{
+                                alignItems: "center",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <Typography variant="body2">
+                                {unit.unitName ?? "Unit name unavailable"}
+                              </Typography>
+                              {unit.leadUnitFlag?.toUpperCase() === "Y" && (
+                                <Chip
+                                  label="Lead"
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              )}
+                            </Stack>
+                            {unit.unitNumber && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {unit.unitNumber}
+                              </Typography>
+                            )}
+                          </Box>
+                        ))}
+                      </Stack>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell>{show(person.comments)}</TableCell>
                 </TableRow>
