@@ -21,32 +21,39 @@ public class DashboardController {
 
     @GetMapping
     public DashboardDto dashboard() {
-        return new DashboardDto(
-                count("archive.irb_protocol"),
-                countDistinct("archive.irb_protocol_version", "protocol_base"),
-                count("archive.irb_protocol_version"),
-                count("archive.irb_submission"),
-                count("archive.irb_funding_source"),
-                count("archive.irb_timeline_event"),
-                count("archive.award_version"),
-                count("archive.proposal_version"),
-                0,
-                0,
-                0
-        );
-    }
-
-    private long count(String tableName) {
-        return jdbcClient.sql("SELECT COUNT(*) FROM " + tableName)
-                .query(Long.class)
-                .single();
-    }
-
-    private long countDistinct(String tableName, String columnName) {
-        return jdbcClient.sql(
-                        "SELECT COUNT(DISTINCT " + columnName + ") FROM " + tableName
-                )
-                .query(Long.class)
+        return jdbcClient.sql("""
+                SELECT
+                    (SELECT COUNT(*)
+                     FROM archive.irb_protocol) AS irb,
+                    (SELECT COUNT(DISTINCT protocol_base)
+                     FROM archive.irb_protocol_version)
+                        AS protocol_families,
+                    (SELECT COUNT(*)
+                     FROM archive.irb_protocol_version)
+                        AS protocol_versions,
+                    (SELECT COUNT(*)
+                     FROM archive.irb_submission) AS submissions,
+                    (SELECT COUNT(*)
+                     FROM archive.irb_funding_source)
+                        AS funding_records,
+                    (SELECT COUNT(*)
+                     FROM archive.irb_timeline_event)
+                        AS timeline_events,
+                    (SELECT COUNT(DISTINCT award_number)
+                     FROM archive.award_version) AS awards,
+                    (SELECT COUNT(*)
+                     FROM archive.award_version)
+                        AS award_history_records,
+                    (SELECT COUNT(DISTINCT proposal_number)
+                     FROM archive.proposal_version) AS proposals,
+                    (SELECT COUNT(*)
+                     FROM archive.proposal_version)
+                        AS proposal_history_records,
+                    0 AS negotiations,
+                    0 AS subawards,
+                    0 AS documents
+                """)
+                .query(DashboardDto.class)
                 .single();
     }
 }
