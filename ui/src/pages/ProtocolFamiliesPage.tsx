@@ -35,7 +35,8 @@ export function ProtocolFamiliesPage() {
   const [page, setPage] = useState(0);
   const query = useQuery({
     queryKey: ["protocols", appliedQuery, page],
-    queryFn: () => getProtocols({ query: appliedQuery, page, size: 25 }),
+    queryFn: ({ signal }) =>
+      getProtocols({ query: appliedQuery, page, size: 25 }, signal),
   });
 
   function applySearch() {

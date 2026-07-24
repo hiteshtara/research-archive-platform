@@ -33,11 +33,11 @@ export function ProposalFamiliesPage() {
 
   const query = useQuery({
     queryKey: ["proposal-families", appliedSearch],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getProposalFamilies({
         query: appliedSearch,
         limit: 100,
-      }),
+      }, signal),
   });
 
   return (

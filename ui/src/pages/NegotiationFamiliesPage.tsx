@@ -41,12 +41,12 @@ export function NegotiationFamiliesPage() {
 
   const query = useQuery({
     queryKey: ["negotiations", appliedSearch, page],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getNegotiations({
         query: appliedSearch,
         page,
         size: pageSize,
-      }),
+      }, signal),
   });
 
   const applySearch = () => {
