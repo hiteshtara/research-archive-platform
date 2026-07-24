@@ -296,11 +296,11 @@ public class ProtocolArchiveRepository {
             String protocolNumber
     ) {
         return jdbc.sql(VERSION_SELECT + """
-                WHERE protocol_number = :protocolNumber
+                WHERE protocol.protocol_number = :protocolNumber
                 ORDER BY
-                    sequence_number DESC,
-                    source_update_timestamp DESC NULLS LAST,
-                    protocol_id DESC
+                    protocol.sequence_number DESC,
+                    protocol.source_update_timestamp DESC NULLS LAST,
+                    protocol.protocol_id DESC
                 """)
                 .param("protocolNumber", protocolNumber)
                 .query(ProtocolVersionResponse.class)
@@ -309,7 +309,7 @@ public class ProtocolArchiveRepository {
 
     public Optional<ProtocolVersionResponse> findVersion(long protocolId) {
         return jdbc.sql(VERSION_SELECT + """
-                WHERE protocol_id = :protocolId
+                WHERE protocol.protocol_id = :protocolId
                 """)
                 .param("protocolId", protocolId)
                 .query(ProtocolVersionResponse.class)
@@ -324,6 +324,7 @@ public class ProtocolArchiveRepository {
                     unit_row.protocol_number,
                     unit_row.sequence_number,
                     unit_row.unit_number,
+                    unit_row.unit_name,
                     unit_row.lead_unit_flag,
                     unit_row.person_id,
                     unit_row.source_update_timestamp,
@@ -618,23 +619,41 @@ public class ProtocolArchiveRepository {
 
     private static final String VERSION_SELECT = """
             SELECT
-                protocol_id,
-                protocol_number,
-                sequence_number,
-                document_number,
-                active,
-                protocol_type_code,
-                protocol_type_description,
-                protocol_status_code,
-                protocol_status_description,
-                title,
-                description,
-                initial_submission_date,
-                approval_date,
-                expiration_date,
-                last_approval_date,
-                source_update_timestamp,
-                source_update_user
-            FROM archive.protocol_version
+                protocol.protocol_id,
+                protocol.protocol_number,
+                protocol.sequence_number,
+                protocol.document_number,
+                protocol.active,
+                protocol.protocol_type_code,
+                protocol.protocol_type_description,
+                protocol.protocol_status_code,
+                protocol.protocol_status_description,
+                protocol.title,
+                protocol.description,
+                protocol.initial_submission_date,
+                protocol.approval_date,
+                protocol.expiration_date,
+                protocol.last_approval_date,
+                lead_unit.unit_name AS lead_unit_name,
+                lead_unit.unit_number AS lead_unit_number,
+                protocol.source_update_timestamp,
+                protocol.source_update_user
+            FROM archive.protocol_version protocol
+            LEFT JOIN LATERAL (
+                SELECT
+                    unit_row.unit_name,
+                    unit_row.unit_number
+                FROM archive.protocol_person person
+                JOIN archive.protocol_unit unit_row
+                  ON unit_row.protocol_person_id =
+                     person.protocol_person_id
+                WHERE person.protocol_id = protocol.protocol_id
+                  AND UPPER(COALESCE(
+                          unit_row.lead_unit_flag,
+                          ''
+                      )) = 'Y'
+                ORDER BY unit_row.protocol_units_id
+                LIMIT 1
+            ) lead_unit ON TRUE
             """;
 }

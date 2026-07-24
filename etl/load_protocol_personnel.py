@@ -59,6 +59,7 @@ UNIT_COLUMNS = [
     "protocol_number",
     "sequence_number",
     "unit_number",
+    "unit_name",
     "lead_unit_flag",
     "person_id",
     "source_update_timestamp",

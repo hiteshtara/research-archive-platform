@@ -177,6 +177,8 @@ export interface ProtocolVersion {
   approvalDate: string | null;
   expirationDate: string | null;
   lastApprovalDate: string | null;
+  leadUnitName: string | null;
+  leadUnitNumber: string | null;
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
 }
@@ -187,6 +189,7 @@ export interface ProtocolUnit {
   protocolNumber: string;
   sequenceNumber: number;
   unitNumber: string | null;
+  unitName: string | null;
   leadUnitFlag: string | null;
   personId: string | null;
   sourceUpdateTimestamp: string | null;

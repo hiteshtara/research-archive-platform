@@ -8,6 +8,9 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolUnitResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -22,6 +25,107 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProtocolArchiveRepositoryTest {
+
+    @Test
+    void historySelectsFlaggedLeadUnitDeterministically() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolVersionResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("protocolNumber", "000100"))
+                .thenReturn(statement);
+        when(statement.query(ProtocolVersionResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveRepository(jdbc)
+                        .findHistory("000100")
+        ).isEmpty();
+
+        String sql = org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .findFirst()
+                .orElseThrow()
+                .replaceAll("\\s+", " ");
+        assertThat(sql)
+                .contains("unit_row.unit_name")
+                .contains("unit_row.unit_number")
+                .contains("unit_row.lead_unit_flag")
+                .contains("= 'Y'")
+                .contains("ORDER BY unit_row.protocol_units_id")
+                .contains("LIMIT 1");
+    }
+
+    @Test
+    void personnelReturnsArchivedUnitNameAndNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec unitStatement =
+                mock(JdbcClient.StatementSpec.class);
+        JdbcClient.StatementSpec personStatement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolUnitResponse> unitQuery =
+                mock(JdbcClient.MappedQuerySpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolPersonResponse> personQuery =
+                mock(JdbcClient.MappedQuerySpec.class);
+        ProtocolUnitResponse unit = new ProtocolUnitResponse(
+                20L, 10L, "000100", 2, "1202200000",
+                "CAS Psychological and Brain Sciences", "Y", "P1",
+                null, null, null, null
+        );
+
+        when(jdbc.sql(anyString()))
+                .thenReturn(unitStatement, personStatement);
+        when(unitStatement.param("protocolId", 100L))
+                .thenReturn(unitStatement);
+        when(unitStatement.query(ProtocolUnitResponse.class))
+                .thenReturn(unitQuery);
+        when(unitQuery.list()).thenReturn(List.of(unit));
+        when(personStatement.param("protocolId", 100L))
+                .thenReturn(personStatement);
+        when(personStatement.query(
+                org.mockito.ArgumentMatchers.<
+                        org.springframework.jdbc.core.RowMapper<
+                                ProtocolPersonResponse
+                        >
+                >any()
+        ))
+                .thenReturn(personQuery);
+        when(personQuery.list()).thenReturn(List.of());
+
+        assertThat(
+                new ProtocolArchiveRepository(jdbc).findPersonnel(100L)
+        ).isEmpty();
+        String unitSql = org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .findFirst()
+                .orElseThrow()
+                .replaceAll("\\s+", " ");
+        assertThat(unitSql)
+                .contains("unit_row.unit_number")
+                .contains("unit_row.unit_name")
+                .contains("unit_row.lead_unit_flag");
+        assertThat(unit.unitName())
+                .isEqualTo("CAS Psychological and Brain Sciences");
+        assertThat(unit.unitNumber()).isEqualTo("1202200000");
+    }
 
     @Test
     void firstPageUsesOneMaterializedSearchAndPreservesPagination() {

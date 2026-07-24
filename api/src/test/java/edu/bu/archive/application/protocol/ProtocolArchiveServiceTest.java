@@ -193,6 +193,8 @@ class ProtocolArchiveServiceTest {
                 null,
                 null,
                 null,
+                "CAS Psychological and Brain Sciences",
+                "1202200000",
                 null,
                 null
         );

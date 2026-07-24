@@ -10,6 +10,7 @@ SELECT
     pu.PROTOCOL_NUMBER          AS protocol_number,
     pu.SEQUENCE_NUMBER          AS sequence_number,
     pu.UNIT_NUMBER              AS unit_number,
+    u.UNIT_NAME                 AS unit_name,
     pu.LEAD_UNIT_FLAG           AS lead_unit_flag,
     pu.PERSON_ID                AS person_id,
     pu.UPDATE_TIMESTAMP         AS source_update_timestamp,
@@ -17,6 +18,8 @@ SELECT
     pu.VER_NBR                  AS source_version_number,
     pu.OBJ_ID                   AS source_object_id
 FROM KCOEUS.PROTOCOL_UNITS pu
+LEFT JOIN KCOEUS.UNIT u
+  ON u.UNIT_NUMBER = pu.UNIT_NUMBER
 ORDER BY
     pu.PROTOCOL_NUMBER,
     pu.SEQUENCE_NUMBER,

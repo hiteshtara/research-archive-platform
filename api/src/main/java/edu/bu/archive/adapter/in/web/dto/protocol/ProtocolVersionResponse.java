@@ -19,6 +19,8 @@ public record ProtocolVersionResponse(
         LocalDate approvalDate,
         LocalDate expirationDate,
         LocalDate lastApprovalDate,
+        String leadUnitName,
+        String leadUnitNumber,
         LocalDateTime sourceUpdateTimestamp,
         String sourceUpdateUser
 ) {
