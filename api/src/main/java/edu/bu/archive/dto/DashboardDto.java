@@ -8,7 +8,9 @@ public record DashboardDto(
         long fundingRecords,
         long timelineEvents,
         long awards,
+        long awardHistoryRecords,
         long proposals,
+        long proposalHistoryRecords,
         long negotiations,
         long subawards,
         long documents
