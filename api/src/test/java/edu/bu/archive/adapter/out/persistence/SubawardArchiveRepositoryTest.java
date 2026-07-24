@@ -32,15 +32,27 @@ class SubawardArchiveRepositoryTest {
                 org.mockito.ArgumentMatchers.any()))
                 .thenReturn(statement);
         when(statement.query(SubawardSummaryResponse.class)).thenReturn(query);
-        when(query.list()).thenReturn(List.of());
+        SubawardSummaryResponse expected = new SubawardSummaryResponse(
+                101L, "1004", 4, "DOC-101", "Title", 1L, "Active",
+                "ORG-1", "ACCOUNT-1", null, null, "ACTIVE", null
+        );
+        when(query.list()).thenReturn(List.of(expected));
 
-        new SubawardArchiveRepository(jdbc)
-                .findSubawards("", 25, 0);
+        List<SubawardSummaryResponse> result =
+                new SubawardArchiveRepository(jdbc)
+                        .findSubawards("", 25, 0);
 
         assertThat(firstSql(jdbc))
                 .contains("ORDER BY subaward_id DESC")
+                .containsPattern(
+                        "ORDER BY subaward_id DESC\\s+LIMIT :limit"
+                )
+                .doesNotContain("DESCLIMIT")
                 .doesNotContain("source_update_timestamp DESC")
                 .doesNotContain("ILIKE");
+        assertThat(result).containsExactly(expected);
+        verify(statement).param("limit", 25);
+        verify(statement).param("offset", 0);
     }
 
     @Test
