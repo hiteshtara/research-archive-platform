@@ -49,8 +49,10 @@ public class DashboardController {
                     (SELECT COUNT(*)
                      FROM archive.proposal_version)
                         AS proposal_history_records,
-                    0 AS negotiations,
-                    0 AS subawards,
+                    (SELECT COUNT(*)
+                     FROM archive.negotiation) AS negotiations,
+                    (SELECT COUNT(DISTINCT subaward_code)
+                     FROM archive.subaward) AS subawards,
                     0 AS documents
                 """)
                 .query(DashboardDto.class)

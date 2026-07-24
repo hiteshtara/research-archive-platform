@@ -6,6 +6,7 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolLocationResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolResearchAreaResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSubmissionResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -15,10 +16,70 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProtocolArchiveRepositoryTest {
+
+    @Test
+    void familySearchIncludesProtocolAndRelatedArchiveObjects() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> countQuery =
+                mock(JdbcClient.MappedQuerySpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProtocolSummaryResponse> contentQuery =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(
+                anyString(),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(countQuery);
+        when(countQuery.single()).thenReturn(0L);
+        when(statement.query(ProtocolSummaryResponse.class))
+                .thenReturn(contentQuery);
+        when(contentQuery.list()).thenReturn(List.of());
+
+        new ProtocolArchiveRepository(jdbc)
+                .findFamilies("researcher", 0, 25);
+
+        List<String> sqlStatements = org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .map(sql -> sql.replaceAll("\\s+", " "))
+                .toList();
+
+        assertThat(sqlStatements).hasSize(2);
+        assertThat(sqlStatements).allSatisfy(sql -> assertThat(sql)
+                .contains("FROM archive.v_protocol_family family")
+                .contains("FROM archive.protocol_version version")
+                .contains("version.document_number")
+                .contains("FROM archive.protocol_person person")
+                .contains("person.person_name")
+                .contains("FROM archive.protocol_unit unit_row")
+                .contains("FROM archive.protocol_funding funding")
+                .contains("funding.funding_source_name")
+                .contains(
+                        "FROM archive.protocol_research_area research_area"
+                )
+                .contains("FROM archive.protocol_location location")
+                .contains("FROM archive.protocol_submission submission")
+                .contains("FROM archive.protocol_action action")
+                .contains(
+                        "FROM archive.protocol_amend_renewal amend_renewal"
+                ));
+        verify(statement, times(2)).param("query", "researcher");
+    }
 
     @Test
     void fundingIsScopedToResolvedProtocolId() {

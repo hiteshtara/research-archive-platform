@@ -1,8 +1,10 @@
 import {
   Alert,
+  Button,
   Card,
   CardContent,
   CircularProgress,
+  InputAdornment,
   Pagination,
   Stack,
   Table,
@@ -13,6 +15,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { SearchOutlined } from "@mui/icons-material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -22,27 +25,58 @@ import { getProtocols } from "../api/client";
 export function ProtocolFamiliesPage() {
   const navigate = useNavigate();
   const [queryText, setQueryText] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [page, setPage] = useState(0);
   const query = useQuery({
-    queryKey: ["protocols", queryText, page],
-    queryFn: () => getProtocols({ query: queryText, page, size: 25 }),
+    queryKey: ["protocols", appliedQuery, page],
+    queryFn: () => getProtocols({ query: appliedQuery, page, size: 25 }),
   });
+
+  function applySearch() {
+    setPage(0);
+    setAppliedQuery(queryText.trim());
+  }
 
   return (
     <Stack spacing={3}>
       <Card>
-        <CardContent>
+        <CardContent
+          component="form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applySearch();
+          }}
+        >
           <Typography variant="h4">Protocol Archive</Typography>
-          <TextField
-            fullWidth
-            sx={{ mt: 2 }}
-            label="Search protocol number or title"
-            value={queryText}
-            onChange={(event) => {
-              setPage(0);
-              setQueryText(event.target.value);
-            }}
-          />
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+            <TextField
+              fullWidth
+              sx={{ mt: 2 }}
+              label="Search Protocol archive"
+              helperText={
+                "Search protocols, titles, people, units, funding, research " +
+                "areas, locations, submissions, actions, and amendments"
+              }
+              value={queryText}
+              onChange={(event) => setQueryText(event.target.value)}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchOutlined />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              sx={{ mt: 2, alignSelf: "flex-start", minHeight: 56 }}
+            >
+              Search
+            </Button>
+          </Stack>
         </CardContent>
       </Card>
       {query.isLoading && <CircularProgress />}

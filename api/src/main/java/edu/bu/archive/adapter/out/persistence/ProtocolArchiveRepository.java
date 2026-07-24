@@ -37,11 +37,156 @@ public class ProtocolArchiveRepository {
         String normalized = query == null ? "" : query.trim();
         String filter = """
                 WHERE :query = ''
-                   OR protocol_number ILIKE '%' || :query || '%'
-                   OR COALESCE(title, '') ILIKE '%' || :query || '%'
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_version version
+                        WHERE version.protocol_number =
+                              family.protocol_number
+                          AND (
+                               version.protocol_number
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(version.document_number, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(version.title, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(version.description, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   version.protocol_status_description,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   version.protocol_type_description,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   version.fda_application_number,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(version.reference_number_1, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(version.reference_number_2, '')
+                                   ILIKE '%' || :query || '%'
+                          )
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_person person
+                        WHERE person.protocol_number =
+                              family.protocol_number
+                          AND (
+                               COALESCE(person.person_name, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(person.person_id, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   CAST(person.rolodex_id AS TEXT),
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                          )
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_unit unit_row
+                        WHERE unit_row.protocol_number =
+                              family.protocol_number
+                          AND COALESCE(unit_row.unit_number, '')
+                              ILIKE '%' || :query || '%'
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_funding funding
+                        WHERE funding.protocol_number =
+                              family.protocol_number
+                          AND (
+                               COALESCE(
+                                   funding.funding_source_number,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   funding.funding_source_name,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                          )
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_research_area research_area
+                        WHERE research_area.protocol_number =
+                              family.protocol_number
+                          AND COALESCE(
+                                  research_area.research_area_code,
+                                  ''
+                              ) ILIKE '%' || :query || '%'
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_location location
+                        WHERE location.protocol_number =
+                              family.protocol_number
+                          AND (
+                               COALESCE(location.organization_id, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   CAST(location.rolodex_id AS TEXT),
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                          )
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_submission submission
+                        WHERE submission.protocol_number =
+                              family.protocol_number
+                          AND (
+                               COALESCE(submission.schedule_id, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(submission.committee_id, '')
+                                   ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   submission.submission_type_code,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(
+                                   submission.submission_status_code,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(submission.comments, '')
+                                   ILIKE '%' || :query || '%'
+                          )
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_action action
+                        WHERE action.protocol_number =
+                              family.protocol_number
+                          AND (
+                               COALESCE(
+                                   action.protocol_action_type_code,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(action.comments, '')
+                                   ILIKE '%' || :query || '%'
+                          )
+                   )
+                   OR EXISTS (
+                        SELECT 1
+                        FROM archive.protocol_amend_renewal amend_renewal
+                        WHERE amend_renewal.protocol_number =
+                              family.protocol_number
+                          AND (
+                               COALESCE(
+                                   amend_renewal.proto_amend_ren_number,
+                                   ''
+                               ) ILIKE '%' || :query || '%'
+                            OR COALESCE(amend_renewal.summary, '')
+                                   ILIKE '%' || :query || '%'
+                          )
+                   )
                 """;
         long total = jdbc.sql(
-                        "SELECT COUNT(*) FROM archive.v_protocol_family "
+                        "SELECT COUNT(*) "
+                                + "FROM archive.v_protocol_family family "
                                 + filter
                 )
                 .param("query", normalized)
@@ -58,9 +203,9 @@ public class ProtocolArchiveRepository {
                     protocol_type_description,
                     active,
                     expiration_date
-                FROM archive.v_protocol_family
+                FROM archive.v_protocol_family family
                 """ + filter + """
-                ORDER BY protocol_number
+                ORDER BY family.protocol_number
                 LIMIT :size OFFSET :offset
                 """)
                 .param("query", normalized)
