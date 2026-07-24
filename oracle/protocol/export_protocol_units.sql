@@ -18,7 +18,7 @@ SELECT
     pu.VER_NBR                  AS source_version_number,
     pu.OBJ_ID                   AS source_object_id
 FROM KCOEUS.PROTOCOL_UNITS pu
-LEFT JOIN KCOEUS.UNIT u
+LEFT JOIN UNIT u
   ON u.UNIT_NUMBER = pu.UNIT_NUMBER
 ORDER BY
     pu.PROTOCOL_NUMBER,
