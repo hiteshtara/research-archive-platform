@@ -185,44 +185,68 @@ public class ProtocolArchiveRepository {
                           )
                    )
                 """;
-        JdbcClient.StatementSpec countStatement = jdbc.sql(
-                        "SELECT COUNT(*) "
-                                + "FROM archive.v_protocol_family family "
-                                + filter
-                );
-        if (!normalized.isEmpty()) {
-            countStatement = countStatement.param("query", normalized);
-        }
-        long total = countStatement
-                .query(Long.class)
-                .single();
-        JdbcClient.StatementSpec contentStatement = jdbc.sql("""
-                SELECT
-                    protocol_number,
-                    version_count,
-                    latest_protocol_id,
-                    latest_sequence_number,
-                    title,
-                    protocol_status_description,
-                    protocol_type_description,
-                    active,
-                    expiration_date
-                FROM archive.v_protocol_family family
+        JdbcClient.StatementSpec statement = jdbc.sql("""
+                WITH filtered AS MATERIALIZED (
+                    SELECT
+                        family.protocol_number,
+                        family.version_count,
+                        family.latest_protocol_id,
+                        family.latest_sequence_number,
+                        family.title,
+                        family.protocol_status_description,
+                        family.protocol_type_description,
+                        family.active,
+                        family.expiration_date
+                    FROM archive.v_protocol_family family
                 """ + filter + """
-                ORDER BY family.protocol_number
-                LIMIT :size OFFSET :offset
+                ),
+                page_rows AS (
+                    SELECT
+                        protocol_number,
+                        version_count,
+                        latest_protocol_id,
+                        latest_sequence_number,
+                        title,
+                        protocol_status_description,
+                        protocol_type_description,
+                        active,
+                        expiration_date
+                    FROM filtered
+                    ORDER BY protocol_number
+                    LIMIT :size OFFSET :offset
+                ),
+                total AS (
+                    SELECT COUNT(*) AS total_elements
+                    FROM filtered
+                )
+                SELECT
+                    total.total_elements,
+                    page_rows.protocol_number,
+                    page_rows.version_count,
+                    page_rows.latest_protocol_id,
+                    page_rows.latest_sequence_number,
+                    page_rows.title,
+                    page_rows.protocol_status_description,
+                    page_rows.protocol_type_description,
+                    page_rows.active,
+                    page_rows.expiration_date
+                FROM total
+                LEFT JOIN page_rows ON TRUE
+                ORDER BY page_rows.protocol_number
                 """);
         if (!normalized.isEmpty()) {
-            contentStatement = contentStatement.param(
-                    "query",
-                    normalized
-            );
+            statement = statement.param("query", normalized);
         }
-        List<ProtocolSummaryResponse> content = contentStatement
+        List<FamilySearchRow> rows = statement
                 .param("size", size)
                 .param("offset", page * size)
-                .query(ProtocolSummaryResponse.class)
+                .query(FamilySearchRow.class)
                 .list();
+        long total = rows.getFirst().totalElements();
+        List<ProtocolSummaryResponse> content = rows.stream()
+                .filter(FamilySearchRow::hasProtocol)
+                .map(FamilySearchRow::toResponse)
+                .toList();
         int pages = total == 0
                 ? 0
                 : (int) Math.ceil((double) total / size);
@@ -235,6 +259,37 @@ public class ProtocolArchiveRepository {
                 page == 0,
                 pages == 0 || page >= pages - 1
         );
+    }
+
+    record FamilySearchRow(
+            long totalElements,
+            String protocolNumber,
+            Long versionCount,
+            Long latestProtocolId,
+            Integer latestSequenceNumber,
+            String title,
+            String protocolStatusDescription,
+            String protocolTypeDescription,
+            String active,
+            java.time.LocalDate expirationDate
+    ) {
+        boolean hasProtocol() {
+            return protocolNumber != null;
+        }
+
+        ProtocolSummaryResponse toResponse() {
+            return new ProtocolSummaryResponse(
+                    protocolNumber,
+                    versionCount,
+                    latestProtocolId,
+                    latestSequenceNumber,
+                    title,
+                    protocolStatusDescription,
+                    protocolTypeDescription,
+                    active,
+                    expirationDate
+            );
+        }
     }
 
     public List<ProtocolVersionResponse> findHistory(
