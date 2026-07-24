@@ -47,9 +47,9 @@ const primaryBusinessCards: Array<{
   {
     key: "protocolFamilies",
     title: "Protocol Families",
-    description: "Unique IRB protocol bases across the historical archive",
+    description: "Distinct institutional protocol numbers",
     icon: <ArchiveOutlined />,
-    path: "/irb",
+    path: "/protocols",
   },
   {
     key: "awards",
@@ -79,7 +79,7 @@ const historicalActivityCards: Array<{
     title: "Historical Protocol Versions",
     description: "All historical protocol versions loaded from Kuali",
     icon: <HistoryOutlined />,
-    path: "/irb",
+    path: "/protocols",
   },
   {
     key: "awardHistoryRecords",
@@ -100,21 +100,21 @@ const historicalActivityCards: Array<{
     title: "Submissions",
     description: "Initial applications, amendments, renewals and other submissions",
     icon: <DescriptionOutlined />,
-    path: "/irb",
+    path: "/protocols",
   },
   {
     key: "fundingRecords",
     title: "Funding Relationships",
     description: "Archived protocol funding source relationships",
     icon: <GavelOutlined />,
-    path: "/irb",
+    path: "/protocols",
   },
   {
     key: "timelineEvents",
     title: "Timeline Events",
     description: "Historical workflow and review events",
     icon: <TimelineOutlined />,
-    path: "/irb",
+    path: "/protocols",
   },
 ];
 

@@ -234,7 +234,7 @@ export function IrbDetailPage() {
               startIcon={<HistoryOutlined />}
               onClick={() =>
                 navigate(
-                  `/irb/history?query=${encodeURIComponent(
+                  `/protocols/${encodeURIComponent(
                     protocol.protocolBase,
                   )}`,
                 )

@@ -50,11 +50,11 @@ class DashboardControllerTest {
                         "COUNT(*) FROM archive.irb_protocol"
                 )
                 .contains(
-                        "COUNT(DISTINCT protocol_base) "
-                                + "FROM archive.irb_protocol_version"
+                        "COUNT(DISTINCT protocol_number) "
+                                + "FROM archive.protocol_version"
                 )
                 .contains(
-                        "COUNT(*) FROM archive.irb_protocol_version"
+                        "COUNT(*) FROM archive.protocol_version"
                 )
                 .contains(
                         "COUNT(*) FROM archive.irb_submission"

@@ -25,11 +25,11 @@ public class DashboardController {
                 SELECT
                     (SELECT COUNT(*)
                      FROM archive.irb_protocol) AS irb,
-                    (SELECT COUNT(DISTINCT protocol_base)
-                     FROM archive.irb_protocol_version)
+                    (SELECT COUNT(DISTINCT protocol_number)
+                     FROM archive.protocol_version)
                         AS protocol_families,
                     (SELECT COUNT(*)
-                     FROM archive.irb_protocol_version)
+                     FROM archive.protocol_version)
                         AS protocol_versions,
                     (SELECT COUNT(*)
                      FROM archive.irb_submission) AS submissions,

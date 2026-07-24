@@ -10,9 +10,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
 import { InvestigatorProfilePage } from "./pages/InvestigatorProfilePage";
 import { IrbDetailPage } from "./pages/IrbDetailPage";
-import { IrbFamiliesPage } from "./pages/IrbFamiliesPage";
 import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
-import { IrbHistoryPage } from "./pages/IrbHistoryPage";
 import { IrbPage } from "./pages/IrbPage";
 import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
 import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
@@ -31,8 +29,14 @@ export default function App() {
         <Route index element={<DashboardPage />} />
 
         <Route path="irb" element={<IrbPage />} />
-        <Route path="irb/families" element={<IrbFamiliesPage />} />
-        <Route path="irb/history" element={<IrbHistoryPage />} />
+        <Route
+          path="irb/families"
+          element={<Navigate to="/protocols" replace />}
+        />
+        <Route
+          path="irb/history"
+          element={<Navigate to="/protocols" replace />}
+        />
         <Route
           path="irb/history/:protocolId"
           element={<IrbHistoryDetailPage />}
