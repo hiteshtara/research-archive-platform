@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
@@ -11,100 +12,63 @@ import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProtocolArchiveRepositoryTest {
 
     @Test
-    void unfilteredFamilyLoadSkipsRelatedObjectSearches() {
-        JdbcClient jdbc = mock(JdbcClient.class);
-        JdbcClient.StatementSpec statement =
-                mock(JdbcClient.StatementSpec.class);
-        @SuppressWarnings("unchecked")
-        JdbcClient.MappedQuerySpec<Long> countQuery =
-                mock(JdbcClient.MappedQuerySpec.class);
-        @SuppressWarnings("unchecked")
-        JdbcClient.MappedQuerySpec<ProtocolSummaryResponse> contentQuery =
-                mock(JdbcClient.MappedQuerySpec.class);
+    void firstPageUsesOneMaterializedSearchAndPreservesPagination() {
+        FamilyQuery query = familyQuery(List.of(
+                familyRow(51L, "000001"),
+                familyRow(51L, "000002")
+        ));
 
-        when(jdbc.sql(anyString())).thenReturn(statement);
-        when(statement.param(
-                anyString(),
-                org.mockito.ArgumentMatchers.any()
-        )).thenReturn(statement);
-        when(statement.query(Long.class)).thenReturn(countQuery);
-        when(countQuery.single()).thenReturn(0L);
-        when(statement.query(ProtocolSummaryResponse.class))
-                .thenReturn(contentQuery);
-        when(contentQuery.list()).thenReturn(List.of());
+        PageResponse<ProtocolSummaryResponse> result =
+                query.repository().findFamilies("", 0, 25);
 
-        new ProtocolArchiveRepository(jdbc).findFamilies("", 0, 25);
-
-        List<String> sqlStatements = org.mockito.Mockito
-                .mockingDetails(jdbc)
-                .getInvocations()
-                .stream()
-                .filter(invocation ->
-                        invocation.getMethod().getName().equals("sql")
-                )
-                .map(invocation -> (String) invocation.getArgument(0))
-                .toList();
-
-        assertThat(sqlStatements).hasSize(2);
-        assertThat(sqlStatements).allSatisfy(sql -> assertThat(sql)
+        assertThat(query.sqlStatements()).singleElement().satisfies(sql ->
+                assertThat(sql)
+                .contains("WITH filtered AS MATERIALIZED")
+                .contains("page_rows AS")
+                .contains("total AS")
+                .contains("SELECT COUNT(*) AS total_elements")
+                .contains("LEFT JOIN page_rows ON TRUE")
                 .contains("FROM archive.v_protocol_family family")
                 .doesNotContain("archive.protocol_version version")
                 .doesNotContain("archive.protocol_person person")
                 .doesNotContain("archive.protocol_funding funding")
-                .doesNotContain("archive.protocol_submission submission"));
+                .doesNotContain("archive.protocol_submission submission")
+        );
+        assertThat(result.content())
+                .extracting(ProtocolSummaryResponse::protocolNumber)
+                .containsExactly("000001", "000002");
+        assertThat(result.totalElements()).isEqualTo(51L);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.first()).isTrue();
+        assertThat(result.last()).isFalse();
+        verify(query.statement()).param("size", 25);
+        verify(query.statement()).param("offset", 0);
     }
 
     @Test
-    void familySearchIncludesProtocolAndRelatedArchiveObjects() {
-        JdbcClient jdbc = mock(JdbcClient.class);
-        JdbcClient.StatementSpec statement =
-                mock(JdbcClient.StatementSpec.class);
-        @SuppressWarnings("unchecked")
-        JdbcClient.MappedQuerySpec<Long> countQuery =
-                mock(JdbcClient.MappedQuerySpec.class);
-        @SuppressWarnings("unchecked")
-        JdbcClient.MappedQuerySpec<ProtocolSummaryResponse> contentQuery =
-                mock(JdbcClient.MappedQuerySpec.class);
+    void filteredSearchUsesOneStatementAndPreservesPredicates() {
+        FamilyQuery query = familyQuery(
+                List.of(familyRow(1L, "000100"))
+        );
 
-        when(jdbc.sql(anyString())).thenReturn(statement);
-        when(statement.param(
-                anyString(),
-                org.mockito.ArgumentMatchers.any()
-        )).thenReturn(statement);
-        when(statement.query(Long.class)).thenReturn(countQuery);
-        when(countQuery.single()).thenReturn(0L);
-        when(statement.query(ProtocolSummaryResponse.class))
-                .thenReturn(contentQuery);
-        when(contentQuery.list()).thenReturn(List.of());
+        PageResponse<ProtocolSummaryResponse> result =
+                query.repository().findFamilies("researcher", 0, 25);
 
-        new ProtocolArchiveRepository(jdbc)
-                .findFamilies("researcher", 0, 25);
-
-        List<String> sqlStatements = org.mockito.Mockito
-                .mockingDetails(jdbc)
-                .getInvocations()
-                .stream()
-                .filter(invocation ->
-                        invocation.getMethod().getName().equals("sql")
-                )
-                .map(invocation -> (String) invocation.getArgument(0))
-                .map(sql -> sql.replaceAll("\\s+", " "))
-                .toList();
-
-        assertThat(sqlStatements).hasSize(2);
-        assertThat(sqlStatements).allSatisfy(sql -> assertThat(sql)
+        assertThat(query.normalizedSqlStatements())
+                .singleElement()
+                .satisfies(sql -> assertThat(sql)
                 .contains("FROM archive.v_protocol_family family")
                 .contains("FROM archive.protocol_version version")
                 .contains("version.document_number")
@@ -121,8 +85,47 @@ class ProtocolArchiveRepositoryTest {
                 .contains("FROM archive.protocol_action action")
                 .contains(
                         "FROM archive.protocol_amend_renewal amend_renewal"
-                ));
-        verify(statement, times(2)).param("query", "researcher");
+                )
+        );
+        verify(query.statement()).param("query", "researcher");
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.totalElements()).isEqualTo(1L);
+        assertThat(result.totalPages()).isEqualTo(1);
+        assertThat(result.first()).isTrue();
+        assertThat(result.last()).isTrue();
+    }
+
+    @Test
+    void zeroMatchesReturnsExactTotalWithoutSyntheticFamily() {
+        FamilyQuery query = familyQuery(
+                List.of(familyRow(0L, null))
+        );
+
+        PageResponse<ProtocolSummaryResponse> result =
+                query.repository().findFamilies("missing", 0, 25);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
+        assertThat(result.totalPages()).isZero();
+        assertThat(result.first()).isTrue();
+        assertThat(result.last()).isTrue();
+    }
+
+    @Test
+    void outOfRangePageReturnsTotalWithoutSyntheticFamily() {
+        FamilyQuery query = familyQuery(
+                List.of(familyRow(51L, null))
+        );
+
+        PageResponse<ProtocolSummaryResponse> result =
+                query.repository().findFamilies("", 3, 25);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isEqualTo(51L);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.first()).isFalse();
+        assertThat(result.last()).isTrue();
+        verify(query.statement()).param("offset", 75);
     }
 
     @Test
@@ -323,5 +326,79 @@ class ProtocolArchiveRepositoryTest {
                 .contains("WHERE protocol_id = :protocolId")
                 .contains("date_created NULLS LAST")
                 .contains("proto_amend_renewal_id");
+    }
+
+    private FamilyQuery familyQuery(
+            List<ProtocolArchiveRepository.FamilySearchRow> rows
+    ) {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<
+                ProtocolArchiveRepository.FamilySearchRow
+        > mappedQuery = mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(
+                anyString(),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn(statement);
+        when(statement.query(
+                ProtocolArchiveRepository.FamilySearchRow.class
+        )).thenReturn(mappedQuery);
+        when(mappedQuery.list()).thenReturn(rows);
+
+        return new FamilyQuery(
+                new ProtocolArchiveRepository(jdbc),
+                jdbc,
+                statement
+        );
+    }
+
+    private ProtocolArchiveRepository.FamilySearchRow familyRow(
+            long totalElements,
+            String protocolNumber
+    ) {
+        return new ProtocolArchiveRepository.FamilySearchRow(
+                totalElements,
+                protocolNumber,
+                protocolNumber == null ? null : 3L,
+                protocolNumber == null ? null : 100L,
+                protocolNumber == null ? null : 2,
+                protocolNumber == null ? null : "Protocol title",
+                protocolNumber == null ? null : "Active",
+                protocolNumber == null ? null : "Research",
+                protocolNumber == null ? null : "Y",
+                protocolNumber == null
+                        ? null
+                        : LocalDate.of(2027, 1, 1)
+        );
+    }
+
+    private record FamilyQuery(
+            ProtocolArchiveRepository repository,
+            JdbcClient jdbc,
+            JdbcClient.StatementSpec statement
+    ) {
+        List<String> sqlStatements() {
+            return org.mockito.Mockito
+                    .mockingDetails(jdbc)
+                    .getInvocations()
+                    .stream()
+                    .filter(invocation ->
+                            invocation.getMethod().getName().equals("sql")
+                    )
+                    .map(invocation ->
+                            (String) invocation.getArgument(0)
+                    )
+                    .toList();
+        }
+
+        List<String> normalizedSqlStatements() {
+            return sqlStatements().stream()
+                    .map(sql -> sql.replaceAll("\\s+", " "))
+                    .toList();
+        }
     }
 }

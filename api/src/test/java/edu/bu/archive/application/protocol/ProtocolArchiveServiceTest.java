@@ -1,5 +1,7 @@
 package edu.bu.archive.application.protocol;
 
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolVersionResponse;
 import edu.bu.archive.adapter.out.persistence.ProtocolArchiveRepository;
 
@@ -14,6 +16,46 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProtocolArchiveServiceTest {
+
+    @Test
+    void familySearchPreservesRepositoryPaginationResponse() {
+        ProtocolArchiveRepository repository =
+                mock(ProtocolArchiveRepository.class);
+        ProtocolSummaryResponse family = new ProtocolSummaryResponse(
+                "000100",
+                3L,
+                100L,
+                2,
+                "Title",
+                "Active",
+                "Research",
+                "Y",
+                null
+        );
+        PageResponse<ProtocolSummaryResponse> expected =
+                new PageResponse<>(
+                        List.of(family),
+                        1,
+                        25,
+                        51L,
+                        3,
+                        false,
+                        false
+                );
+        when(repository.findFamilies("researcher", 1, 25))
+                .thenReturn(expected);
+
+        PageResponse<ProtocolSummaryResponse> result =
+                new ProtocolArchiveService(repository)
+                        .findFamilies("researcher", 1, 25);
+
+        assertThat(result).isSameAs(expected);
+        assertThat(result.totalElements()).isEqualTo(51L);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.first()).isFalse();
+        assertThat(result.last()).isFalse();
+        verify(repository).findFamilies("researcher", 1, 25);
+    }
 
     @Test
     void personnelChecksExactPhysicalParent() {
