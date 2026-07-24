@@ -44,11 +44,11 @@ export function AwardFamiliesPage() {
       appliedSearch,
     ],
 
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getAwardFamilies({
         query: appliedSearch,
         limit: 100,
-      }),
+      }, signal),
 
   });
 

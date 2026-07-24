@@ -41,12 +41,12 @@ export function SubawardFamiliesPage() {
 
   const query = useQuery({
     queryKey: ["subawards", appliedSearch, page],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getSubawards({
         query: appliedSearch,
         page,
         size: pageSize,
-      }),
+      }, signal),
   });
 
   const applySearch = () => {

@@ -36,12 +36,12 @@ export function IrbFamiliesPage() {
 
   const query = useQuery({
     queryKey: ["irb-families", page, appliedSearch],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getIrbFamilies({
         page,
         size: 10,
         query: appliedSearch,
-      }),
+      }, signal),
   });
 
   return (

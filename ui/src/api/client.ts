@@ -9,7 +9,23 @@ if (!API_BASE_URL) {
   throw new Error("VITE_API_BASE_URL is not configured.");
 }
 
-async function request<T>(path: string): Promise<T> {
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(
+    status: number,
+    path: string,
+  ) {
+    super(`Request failed with status ${status}: ${path}`);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
+async function request<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
   const token = await accessToken();
 
   if (!token) {
@@ -17,6 +33,7 @@ async function request<T>(path: string): Promise<T> {
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    signal,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
@@ -24,7 +41,7 @@ async function request<T>(path: string): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}: ${path}`);
+    throw new ApiRequestError(response.status, path);
   }
 
   return response.json() as Promise<T>;
@@ -113,6 +130,7 @@ export function getIrbFamilies(
     size?: number;
     query?: string;
   } = {},
+  signal?: AbortSignal,
 ): Promise<
   import("../types/api").PageResponse<import("../types/api").IrbFamily>
 > {
@@ -125,7 +143,10 @@ export function getIrbFamilies(
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(`/api/irb/families?${searchParameters.toString()}`);
+  return request(
+    `/api/irb/families?${searchParameters.toString()}`,
+    signal,
+  );
 }
 
 export function getIrbHistory(
@@ -163,6 +184,7 @@ export function getProtocols(
     page?: number;
     size?: number;
   } = {},
+  signal?: AbortSignal,
 ): Promise<
   import("../types/api").PageResponse<import("../types/api").ProtocolSummary>
 > {
@@ -173,7 +195,7 @@ export function getProtocols(
   if (parameters.query?.trim()) {
     searchParameters.set("query", parameters.query.trim());
   }
-  return request(`/api/protocols?${searchParameters.toString()}`);
+  return request(`/api/protocols?${searchParameters.toString()}`, signal);
 }
 
 export function getProtocolHistory(
@@ -263,6 +285,7 @@ export function getAwardFamilies(
     query?: string;
     limit?: number;
   } = {},
+  signal?: AbortSignal,
 ): Promise<import("../types/api").AwardFamily[]> {
   const searchParameters = new URLSearchParams({
     limit: String(parameters.limit ?? 50),
@@ -272,7 +295,10 @@ export function getAwardFamilies(
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(`/api/awards/families?${searchParameters.toString()}`);
+  return request(
+    `/api/awards/families?${searchParameters.toString()}`,
+    signal,
+  );
 }
 
 export function getAwardHistory(
@@ -352,6 +378,7 @@ export function getProposalFamilies(
     query?: string;
     limit?: number;
   } = {},
+  signal?: AbortSignal,
 ): Promise<import("../types/api").ProposalFamily[]> {
   const searchParameters = new URLSearchParams({
     limit: String(parameters.limit ?? 50),
@@ -361,7 +388,10 @@ export function getProposalFamilies(
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(`/api/proposals/families?${searchParameters.toString()}`);
+  return request(
+    `/api/proposals/families?${searchParameters.toString()}`,
+    signal,
+  );
 }
 
 export function getProposalWorkspace(
@@ -407,6 +437,7 @@ export function getNegotiations(
     page?: number;
     size?: number;
   } = {},
+  signal?: AbortSignal,
 ): Promise<import("../types/api").NegotiationPageResponse> {
   const searchParameters = new URLSearchParams({
     page: String(parameters.page ?? 0),
@@ -417,7 +448,7 @@ export function getNegotiations(
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(`/api/negotiations?${searchParameters.toString()}`);
+  return request(`/api/negotiations?${searchParameters.toString()}`, signal);
 }
 
 export function getNegotiationWorkspace(
@@ -466,6 +497,7 @@ export function getSubawards(
     page?: number;
     size?: number;
   } = {},
+  signal?: AbortSignal,
 ): Promise<import("../types/api").SubawardPageResponse> {
   const searchParameters = new URLSearchParams({
     page: String(parameters.page ?? 0),
@@ -476,7 +508,7 @@ export function getSubawards(
     searchParameters.set("query", parameters.query.trim());
   }
 
-  return request(`/api/subawards?${searchParameters.toString()}`);
+  return request(`/api/subawards?${searchParameters.toString()}`, signal);
 }
 
 export function getSubawardWorkspace(
