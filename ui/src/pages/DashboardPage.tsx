@@ -135,7 +135,7 @@ const futureModuleCards: Array<{
   {
     key: "subawards",
     title: "Subawards",
-    description: "Subaward history and organizations",
+    description: "Distinct institutional subaward codes",
     icon: <GavelOutlined />,
     path: "/subawards",
   },
