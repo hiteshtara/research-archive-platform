@@ -6,7 +6,9 @@ export interface DashboardSummary {
   fundingRecords: number;
   timelineEvents: number;
   awards: number;
+  awardHistoryRecords: number;
   proposals: number;
+  proposalHistoryRecords: number;
   negotiations: number;
   subawards: number;
   documents: number;
