@@ -506,6 +506,28 @@ export interface AwardFunding {
   activeProposalCount: number;
 }
 
+export interface AiCitation {
+  recordType: string;
+  recordId: string;
+  awardNumber: string;
+  sequenceNumber: number;
+}
+
+export interface AwardAiSummaryResponse {
+  summary: string;
+  citations: AiCitation[];
+  provider: string;
+  model: string;
+  correlationId: string;
+}
+
+export interface SafeApiErrorResponse {
+  status?: number;
+  error?: string;
+  message?: string;
+  correlationId?: string;
+}
+
 export interface ProposalFamily {
   proposalNumber: string;
   title: string | null;

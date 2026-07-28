@@ -34,6 +34,9 @@ import {
   getAwardSequencePage,
   getAwardWorkspace,
 } from "../api/client";
+import { AwardAiSummaryPanel } from "../features/ai/AwardAiSummaryPanel";
+
+const AI_SUMMARY_ENABLED = import.meta.env.VITE_AI_ENABLED === "true";
 
 const tabs = [
   "General",
@@ -201,6 +204,10 @@ export function AwardHistoryPage() {
           </Box>
         </CardContent>
       </Card>
+
+      {AI_SUMMARY_ENABLED && (
+        <AwardAiSummaryPanel awardNumber={current.awardNumber} />
+      )}
 
       <Card>
         <Tabs
