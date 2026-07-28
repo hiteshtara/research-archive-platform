@@ -207,3 +207,15 @@ Before committing:
 - Show exact SQL/count logic.
 - Show test results.
 - Do not commit or push unless explicitly requested.
+# AI Development Rules
+
+- Never bypass AwardArchiveService.
+- Never let providers access PostgreSQL.
+- Never send unrestricted archive rows.
+- Always use ContextBuilder.
+- Every factual response must contain validated citations.
+- Feature flags default OFF.
+- Providers never write archive data.
+- AI remains read-only.
+- Run mvn test before claiming completion.
+- Never commit without passing tests.

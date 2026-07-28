@@ -1,6 +1,12 @@
 import { accessToken } from "../auth";
 
-import type { DashboardSummary, IrbProtocol, PageResponse } from "../types/api";
+import type {
+  AwardAiSummaryResponse,
+  DashboardSummary,
+  IrbProtocol,
+  PageResponse,
+  SafeApiErrorResponse,
+} from "../types/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -11,20 +17,50 @@ if (!API_BASE_URL) {
 
 export class ApiRequestError extends Error {
   readonly status: number;
+  readonly correlationId?: string;
 
   constructor(
     status: number,
     path: string,
+    correlationId?: string,
   ) {
     super(`Request failed with status ${status}: ${path}`);
     this.name = "ApiRequestError";
     this.status = status;
+    this.correlationId = correlationId;
+  }
+}
+
+async function readSafeError(
+  response: Response,
+): Promise<SafeApiErrorResponse | undefined> {
+  try {
+    const body: unknown = await response.json();
+    if (!body || typeof body !== "object") {
+      return undefined;
+    }
+
+    const candidate = body as Record<string, unknown>;
+    return {
+      status:
+        typeof candidate.status === "number" ? candidate.status : undefined,
+      error: typeof candidate.error === "string" ? candidate.error : undefined,
+      message:
+        typeof candidate.message === "string" ? candidate.message : undefined,
+      correlationId:
+        typeof candidate.correlationId === "string"
+          ? candidate.correlationId
+          : undefined,
+    };
+  } catch {
+    return undefined;
   }
 }
 
 async function request<T>(
   path: string,
   signal?: AbortSignal,
+  method: "GET" | "POST" = "GET",
 ): Promise<T> {
   const token = await accessToken();
 
@@ -33,6 +69,7 @@ async function request<T>(
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    method,
     signal,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -41,7 +78,12 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    throw new ApiRequestError(response.status, path);
+    const safeError = await readSafeError(response);
+    throw new ApiRequestError(
+      response.status,
+      path,
+      safeError?.correlationId,
+    );
   }
 
   return response.json() as Promise<T>;
@@ -371,6 +413,17 @@ export function getAwardFunding(
   awardNumber: string,
 ): Promise<import("../types/api").AwardFunding> {
   return request(`/api/awards/${encodeURIComponent(awardNumber)}/funding`);
+}
+
+export function generateAwardAiSummary(
+  awardNumber: string,
+  signal?: AbortSignal,
+): Promise<AwardAiSummaryResponse> {
+  return request(
+    `/api/ai/awards/${encodeURIComponent(awardNumber)}/summary`,
+    signal,
+    "POST",
+  );
 }
 
 export function getProposalFamilies(

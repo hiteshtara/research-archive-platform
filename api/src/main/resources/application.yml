@@ -47,6 +47,13 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  ai:
+    enabled: ${AI_ENABLED:false}
+    stub-enabled: ${AI_STUB_ENABLED:false}
+    provider: ${AI_PROVIDER:}
+    max-records: ${AI_MAX_RECORDS:100}
+    max-serialized-context-chars: ${AI_MAX_CONTEXT_CHARS:20000}
+
   security:
     cognito:
       issuer-uri: ${COGNITO_ISSUER_URI}
