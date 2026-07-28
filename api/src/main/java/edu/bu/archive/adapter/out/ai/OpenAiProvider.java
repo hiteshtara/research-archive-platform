@@ -37,7 +37,7 @@ public class OpenAiProvider implements AiProvider {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final URI responsesUri;
-    private final Duration timeout;
+    private final Duration requestTimeout;
     private final String apiKey;
     private final String model;
 
@@ -77,7 +77,7 @@ public class OpenAiProvider implements AiProvider {
                 properties.getOpenAiModel(),
                 "OpenAI model is not configured"
         );
-        timeout = timeout(properties);
+        requestTimeout = requestTimeout(properties);
         responsesUri = responsesUri(
                 properties.getOpenAiBaseUrl()
         );
@@ -106,7 +106,7 @@ public class OpenAiProvider implements AiProvider {
         }
 
         HttpRequest httpRequest = HttpRequest.newBuilder(responsesUri)
-                .timeout(timeout)
+                .timeout(requestTimeout)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
@@ -135,7 +135,7 @@ public class OpenAiProvider implements AiProvider {
             return parseResponse(response.body());
         } catch (HttpTimeoutException exception) {
             throw new AiProviderException(
-                    "OpenAI request timed out",
+                    "Timed out waiting for OpenAI Responses API",
                     exception
             );
         } catch (InterruptedException exception) {
@@ -347,25 +347,39 @@ public class OpenAiProvider implements AiProvider {
         );
     }
 
-    private static HttpClient createHttpClient(
+    static HttpClient createHttpClient(
             AiProperties properties
     ) {
         return HttpClient.newBuilder()
-                .connectTimeout(timeout(properties))
+                .connectTimeout(connectTimeout(properties))
                 .build();
     }
 
-    private static Duration timeout(
+    private static Duration requestTimeout(
             AiProperties properties
     ) {
         if (properties == null
                 || properties.getOpenAiTimeoutSeconds() < 1) {
             throw new AiProviderException(
-                    "OpenAI timeout must be positive"
+                    "OpenAI request timeout must be positive"
             );
         }
         return Duration.ofSeconds(
                 properties.getOpenAiTimeoutSeconds()
+        );
+    }
+
+    private static Duration connectTimeout(
+            AiProperties properties
+    ) {
+        if (properties == null
+                || properties.getOpenAiConnectTimeoutSeconds() < 1) {
+            throw new AiProviderException(
+                    "OpenAI connect timeout must be positive"
+            );
+        }
+        return Duration.ofSeconds(
+                properties.getOpenAiConnectTimeoutSeconds()
         );
     }
 

@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -91,6 +92,8 @@ class OpenAiProviderTest {
         assertThat(sent.uri().toString())
                 .isEqualTo("https://api.openai.com/v1/responses");
         assertThat(sent.method()).isEqualTo("POST");
+        assertThat(sent.timeout())
+                .contains(Duration.ofSeconds(12));
         assertThat(sent.headers().firstValue("Authorization"))
                 .contains("Bearer " + API_KEY);
 
@@ -142,9 +145,23 @@ class OpenAiProviderTest {
 
         assertThatThrownBy(() -> provider.generate(request()))
                 .isInstanceOf(AiProviderException.class)
-                .hasMessage("OpenAI request timed out")
+                .hasMessage(
+                        "Timed out waiting for OpenAI Responses API"
+                )
                 .hasMessageNotContaining("socket detail")
                 .hasMessageNotContaining(API_KEY);
+    }
+
+    @Test
+    void appliesTheConfiguredConnectTimeout() {
+        AiProperties properties = properties();
+        properties.setOpenAiConnectTimeoutSeconds(7);
+
+        HttpClient client =
+                OpenAiProvider.createHttpClient(properties);
+
+        assertThat(client.connectTimeout())
+                .contains(Duration.ofSeconds(7));
     }
 
     @Test
@@ -208,6 +225,7 @@ class OpenAiProviderTest {
                 "https://api.openai.com/v1/"
         );
         properties.setOpenAiTimeoutSeconds(12);
+        properties.setOpenAiConnectTimeoutSeconds(5);
         return properties;
     }
 

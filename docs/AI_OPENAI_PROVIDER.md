@@ -21,7 +21,9 @@ OPENAI_API_KEY=<injected from AWS Secrets Manager>
 `APP_AI_OPENAI_MODEL` is configurable and defaults to `gpt-5`.
 `APP_AI_OPENAI_BASE_URL` optionally overrides the default
 `https://api.openai.com/v1`, and `APP_AI_OPENAI_TIMEOUT_SECONDS` optionally
-overrides the 30-second request timeout.
+overrides the 60-second request timeout.
+`APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS` optionally overrides the 10-second
+connection-establishment timeout.
 
 The feature and OpenAI provider flags default to disabled. The deterministic
 stub provider remains available through its separate flag and provider
