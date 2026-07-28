@@ -12,7 +12,9 @@ import edu.bu.archive.domain.model.ai.AwardAiSummaryResult;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -97,7 +99,11 @@ public class AwardAiSummaryService {
             AiResponse response = provider.generate(
                     new AiRequest(SYSTEM_PROMPT, context)
             );
-            validateResponse(response, context, provider);
+            response = validateResponse(
+                    response,
+                    context,
+                    provider
+            );
 
             metadataLogger.log(
                     correlationId,
@@ -131,7 +137,7 @@ public class AwardAiSummaryService {
         }
     }
 
-    private void validateResponse(
+    private AiResponse validateResponse(
             AiResponse response,
             AwardAiContext context,
             AiProvider provider
@@ -160,15 +166,38 @@ public class AwardAiSummaryService {
                 )
         );
 
+        if (response.citations().isEmpty()) {
+            throw new AiProviderException(
+                    "AI provider returned an invalid response"
+            );
+        }
+
+        List<AiCitation> validatedCitations =
+                new ArrayList<>();
         for (AiCitation citation : response.citations()) {
+            if (citation == null) {
+                throw new AiProviderException(
+                        "AI provider returned an unsupported citation"
+                );
+            }
+
+            String recordId = normalizeCitationValue(
+                    citation.recordId()
+            );
             AwardAiContextRecord supplied =
-                    suppliedRecords.get(citation.recordId());
+                    suppliedRecords.get(recordId);
 
             if (supplied == null
-                    || !"award".equals(citation.recordType())
+                    || !"award".equalsIgnoreCase(
+                            normalizeCitationValue(
+                                    citation.recordType()
+                            )
+                    )
                     || !Objects.equals(
                             supplied.awardNumber(),
-                            citation.awardNumber()
+                            normalizeCitationValue(
+                                    citation.awardNumber()
+                            )
                     )
                     || !Objects.equals(
                             supplied.sequenceNumber(),
@@ -178,7 +207,29 @@ public class AwardAiSummaryService {
                         "AI provider returned an unsupported citation"
                 );
             }
+
+            validatedCitations.add(new AiCitation(
+                    "award",
+                    String.valueOf(supplied.awardId()),
+                    supplied.awardNumber(),
+                    supplied.sequenceNumber()
+            ));
         }
+
+        return new AiResponse(
+                response.summary(),
+                validatedCitations,
+                response.provider(),
+                response.model(),
+                response.inputTokenCount(),
+                response.outputTokenCount()
+        );
+    }
+
+    private String normalizeCitationValue(
+            String value
+    ) {
+        return value == null ? null : value.trim();
     }
 
     private long elapsedMilliseconds(

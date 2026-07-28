@@ -158,6 +158,97 @@ class AwardAiSummaryServiceTest {
     }
 
     @Test
+    void acceptsAndCanonicalizesGptCitationPresentation() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(family());
+        when(provider.generate(any()))
+                .thenReturn(responseWithCitations(
+                        List.of(new AiCitation(
+                                " Award ",
+                                " 101 ",
+                                " A-100 ",
+                                1
+                        ))
+                ));
+
+        AwardAiSummaryResult result =
+                service.summarize("A-100", "user-subject");
+
+        assertThat(result.response().citations())
+                .containsExactly(new AiCitation(
+                        "award",
+                        "101",
+                        "A-100",
+                        1
+                ));
+    }
+
+    @Test
+    void rejectsCitationWithMismatchedSequence() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(family());
+        when(provider.generate(any()))
+                .thenReturn(responseWithCitations(
+                        List.of(new AiCitation(
+                                "award",
+                                "101",
+                                "A-100",
+                                2
+                        ))
+                ));
+
+        assertThatThrownBy(() ->
+                service.summarize("A-100", "user-subject")
+        )
+                .isInstanceOf(AiSummaryExecutionException.class)
+                .hasCauseInstanceOf(AiProviderException.class)
+                .hasMessage(
+                        "AI provider returned an unsupported citation"
+                );
+    }
+
+    @Test
+    void rejectsResponseWithMissingCitations() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(family());
+        when(provider.generate(any()))
+                .thenReturn(responseWithCitations(List.of()));
+
+        assertThatThrownBy(() ->
+                service.summarize("A-100", "user-subject")
+        )
+                .isInstanceOf(AiSummaryExecutionException.class)
+                .hasCauseInstanceOf(AiProviderException.class)
+                .hasMessage(
+                        "AI provider returned an invalid response"
+                );
+    }
+
+    @Test
+    void rejectsUnsupportedCitationType() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(family());
+        when(provider.generate(any()))
+                .thenReturn(responseWithCitations(
+                        List.of(new AiCitation(
+                                "proposal",
+                                "101",
+                                "A-100",
+                                1
+                        ))
+                ));
+
+        assertThatThrownBy(() ->
+                service.summarize("A-100", "user-subject")
+        )
+                .isInstanceOf(AiSummaryExecutionException.class)
+                .hasCauseInstanceOf(AiProviderException.class)
+                .hasMessage(
+                        "AI provider returned an unsupported citation"
+                );
+    }
+
+    @Test
     void missingAwardNeverCallsTheProvider() {
         when(awardArchiveService.findFamily("UNKNOWN"))
                 .thenThrow(new NoSuchElementException(
@@ -187,16 +278,22 @@ class AwardAiSummaryServiceTest {
     private AiResponse validResponse(
             String recordId
     ) {
+        return responseWithCitations(List.of(
+                new AiCitation(
+                        "award",
+                        recordId,
+                        "A-100",
+                        1
+                )
+        ));
+    }
+
+    private AiResponse responseWithCitations(
+            List<AiCitation> citations
+    ) {
         return new AiResponse(
                 "Safe summary",
-                List.of(
-                        new AiCitation(
-                                "award",
-                                recordId,
-                                "A-100",
-                                1
-                        )
-                ),
+                citations,
                 "stub",
                 "deterministic-award-summary-v1",
                 null,

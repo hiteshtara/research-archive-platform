@@ -213,7 +213,9 @@ public class OpenAiProvider implements AiProvider {
         ObjectNode citationProperties =
                 citation.putObject("properties");
         citationProperties.putObject("recordType")
-                .put("type", "string");
+                .put("type", "string")
+                .putArray("enum")
+                .add("award");
         citationProperties.putObject("recordId")
                 .put("type", "string");
         citationProperties.putObject("awardNumber")
