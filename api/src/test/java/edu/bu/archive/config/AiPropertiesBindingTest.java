@@ -18,18 +18,32 @@ class AiPropertiesBindingTest {
     void bindsTheDocumentedEnvironmentVariableNames() {
         runner("application.yml")
                 .withPropertyValues(
-                        "AI_ENABLED=true",
-                        "AI_STUB_ENABLED=true",
-                        "AI_PROVIDER=stub"
+                        "APP_AI_ENABLED=true",
+                        "APP_AI_PROVIDER=openai",
+                        "APP_AI_OPENAI_ENABLED=true",
+                        "APP_AI_OPENAI_MODEL=gpt-5.1",
+                        "APP_AI_OPENAI_BASE_URL="
+                                + "https://gateway.example/v1",
+                        "APP_AI_OPENAI_TIMEOUT_SECONDS=45"
                 )
                 .run(context -> {
                     AiProperties properties =
                             context.getBean(AiProperties.class);
 
                     assertThat(properties.isEnabled()).isTrue();
-                    assertThat(properties.isStubEnabled()).isTrue();
+                    assertThat(properties.isStubEnabled()).isFalse();
+                    assertThat(properties.isOpenaiEnabled()).isTrue();
                     assertThat(properties.getProvider())
-                            .isEqualTo("stub");
+                            .isEqualTo("openai");
+                    assertThat(properties.getOpenAiModel())
+                            .isEqualTo("gpt-5.1");
+                    assertThat(properties.getOpenAiBaseUrl())
+                            .isEqualTo(
+                                    "https://gateway.example/v1"
+                            );
+                    assertThat(
+                            properties.getOpenAiTimeoutSeconds()
+                    ).isEqualTo(45);
                 });
     }
 
@@ -42,7 +56,17 @@ class AiPropertiesBindingTest {
 
                     assertThat(properties.isEnabled()).isFalse();
                     assertThat(properties.isStubEnabled()).isFalse();
+                    assertThat(properties.isOpenaiEnabled()).isFalse();
                     assertThat(properties.getProvider()).isEmpty();
+                    assertThat(properties.getOpenAiModel())
+                            .isEqualTo("gpt-5");
+                    assertThat(properties.getOpenAiBaseUrl())
+                            .isEqualTo(
+                                    "https://api.openai.com/v1"
+                            );
+                    assertThat(
+                            properties.getOpenAiTimeoutSeconds()
+                    ).isEqualTo(30);
                 });
     }
 

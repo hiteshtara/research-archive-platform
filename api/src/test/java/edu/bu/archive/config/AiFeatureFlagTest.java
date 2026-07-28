@@ -1,7 +1,9 @@
 package edu.bu.archive.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.bu.archive.adapter.in.web.AwardAiController;
 import edu.bu.archive.application.ai.AwardAiSummaryService;
+import edu.bu.archive.application.port.out.AiProvider;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -18,6 +20,11 @@ class AiFeatureFlagTest {
                             AwardAiSummaryService.class,
                             () -> mock(AwardAiSummaryService.class)
                     );
+
+    private final ApplicationContextRunner providerContextRunner =
+            new ApplicationContextRunner()
+                    .withUserConfiguration(AiConfiguration.class)
+                    .withBean(ObjectMapper.class, ObjectMapper::new);
 
     @Test
     void endpointBeanIsAbsentWhenFeatureIsDisabled() {
@@ -41,5 +48,51 @@ class AiFeatureFlagTest {
                                         AwardAiController.class
                                 )
                 );
+    }
+
+    @Test
+    void openAiProviderIsAbsentUnlessBothFlagsAreEnabled() {
+        providerContextRunner
+                .withPropertyValues(
+                        "app.ai.enabled=true",
+                        "app.ai.openai-enabled=false",
+                        "OPENAI_API_KEY=test-key"
+                )
+                .run(context ->
+                        assertThat(context)
+                                .doesNotHaveBean(AiProvider.class)
+                );
+
+        providerContextRunner
+                .withPropertyValues(
+                        "app.ai.enabled=false",
+                        "app.ai.openai-enabled=true",
+                        "OPENAI_API_KEY=test-key"
+                )
+                .run(context ->
+                        assertThat(context)
+                                .doesNotHaveBean(AiProvider.class)
+                );
+    }
+
+    @Test
+    void openAiProviderIsRegisteredWhenBothFlagsAreEnabled() {
+        providerContextRunner
+                .withPropertyValues(
+                        "app.ai.enabled=true",
+                        "app.ai.openai-enabled=true",
+                        "app.ai.open-ai-model=gpt-5.1",
+                        "OPENAI_API_KEY=test-key"
+                )
+                .run(context -> {
+                    assertThat(context)
+                            .hasSingleBean(AiProvider.class);
+                    AiProvider provider =
+                            context.getBean(AiProvider.class);
+                    assertThat(provider.providerName())
+                            .isEqualTo("openai");
+                    assertThat(provider.modelName())
+                            .isEqualTo("gpt-5.1");
+                });
     }
 }
