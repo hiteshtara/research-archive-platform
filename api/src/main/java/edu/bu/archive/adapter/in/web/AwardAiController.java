@@ -3,14 +3,15 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.ai.AwardAiSummaryResponse;
 import edu.bu.archive.application.ai.AwardAiSummaryService;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -19,11 +20,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class AwardAiController {
 
     private final AwardAiSummaryService service;
+    private final boolean securityEnabled;
 
     public AwardAiController(
-            AwardAiSummaryService service
+            AwardAiSummaryService service,
+            @Value("${app.security.enabled:true}")
+            boolean securityEnabled
     ) {
         this.service = service;
+        this.securityEnabled = securityEnabled;
     }
 
     @PostMapping("/{awardNumber}/summary")
@@ -35,14 +40,23 @@ public class AwardAiController {
             @RequestBody(required = false)
             byte[] requestBody
     ) {
-        if (jwt == null || jwt.getSubject() == null) {
-            throw new IllegalArgumentException(
-                    "Authenticated user identifier is required"
-            );
-        }
         if (requestBody != null && requestBody.length > 0) {
             throw new IllegalArgumentException(
                     "Request body is not allowed"
+            );
+        }
+
+        String authenticatedUserId;
+
+        if (jwt != null
+                && jwt.getSubject() != null
+                && !jwt.getSubject().isBlank()) {
+            authenticatedUserId = jwt.getSubject();
+        } else if (!securityEnabled) {
+            authenticatedUserId = "local-dev";
+        } else {
+            throw new IllegalArgumentException(
+                    "Authenticated user identifier is required"
             );
         }
 
@@ -50,7 +64,7 @@ public class AwardAiController {
                 AwardAiSummaryResponse.from(
                         service.summarize(
                                 awardNumber,
-                                jwt.getSubject()
+                                authenticatedUserId
                         )
                 )
         );

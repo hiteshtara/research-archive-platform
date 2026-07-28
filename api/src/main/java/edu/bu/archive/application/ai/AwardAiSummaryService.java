@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +41,7 @@ public class AwardAiSummaryService {
     private final AiMetadataLogger metadataLogger;
     private final Clock clock;
 
+    @Autowired
     public AwardAiSummaryService(
             AwardArchiveService awardArchiveService,
             AwardContextBuilder contextBuilder,
