@@ -55,24 +55,30 @@ class AiFeatureFlagTest {
         providerContextRunner
                 .withPropertyValues(
                         "app.ai.enabled=true",
+                        "app.ai.stub-enabled=true",
                         "app.ai.openai-enabled=false",
                         "OPENAI_API_KEY=test-key"
                 )
-                .run(context ->
-                        assertThat(context)
-                                .doesNotHaveBean(AiProvider.class)
-                );
+                .run(context -> {
+                    assertThat(context)
+                            .hasBean("stubAiProvider");
+                    assertThat(context)
+                            .doesNotHaveBean("openAiProvider");
+                });
 
         providerContextRunner
                 .withPropertyValues(
                         "app.ai.enabled=false",
+                        "app.ai.stub-enabled=true",
                         "app.ai.openai-enabled=true",
                         "OPENAI_API_KEY=test-key"
                 )
-                .run(context ->
-                        assertThat(context)
-                                .doesNotHaveBean(AiProvider.class)
-                );
+                .run(context -> {
+                    assertThat(context)
+                            .doesNotHaveBean("stubAiProvider");
+                    assertThat(context)
+                            .doesNotHaveBean("openAiProvider");
+                });
     }
 
     @Test
@@ -80,15 +86,21 @@ class AiFeatureFlagTest {
         providerContextRunner
                 .withPropertyValues(
                         "app.ai.enabled=true",
+                        "app.ai.stub-enabled=true",
                         "app.ai.openai-enabled=true",
                         "app.ai.open-ai-model=gpt-5.1",
                         "OPENAI_API_KEY=test-key"
                 )
                 .run(context -> {
                     assertThat(context)
-                            .hasSingleBean(AiProvider.class);
+                            .hasBean("stubAiProvider");
+                    assertThat(context)
+                            .hasBean("openAiProvider");
                     AiProvider provider =
-                            context.getBean(AiProvider.class);
+                            context.getBean(
+                                    "openAiProvider",
+                                    AiProvider.class
+                            );
                     assertThat(provider.providerName())
                             .isEqualTo("openai");
                     assertThat(provider.modelName())

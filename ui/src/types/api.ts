@@ -514,11 +514,44 @@ export interface AiCitation {
 }
 
 export interface AwardAiSummaryResponse {
-  summary: string;
+  overview: string;
+  currentRecord: AwardAiCurrentRecord;
+  timeline: AwardAiTimelineRecord[];
+  notableChanges: string[];
+  archiveAssessment: string;
   citations: AiCitation[];
   provider: string;
   model: string;
   correlationId: string;
+}
+
+export interface AwardAiCurrentRecord {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  title: string | null;
+  status: string | null;
+  sponsor: string | null;
+  leadUnit: string | null;
+  principalInvestigators: string[];
+  beginDate: string | null;
+  closeoutDate: string | null;
+  anticipatedTotalAmount: number | null;
+  obligatedTotalAmount: number | null;
+}
+
+export interface AwardAiTimelineRecord {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  current: boolean | null;
+  primaryCurrent: boolean | null;
+  status: string | null;
+  awardSequenceStatus: string | null;
+  sponsor: string | null;
+  leadUnit: string | null;
+  beginDate: string | null;
+  closeoutDate: string | null;
 }
 
 export interface SafeApiErrorResponse {

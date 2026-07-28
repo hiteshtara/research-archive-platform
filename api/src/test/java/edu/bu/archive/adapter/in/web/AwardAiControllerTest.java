@@ -5,8 +5,11 @@ import edu.bu.archive.application.ai.AiSummaryExecutionException;
 import edu.bu.archive.config.SecurityConfiguration;
 import edu.bu.archive.domain.model.ai.AiCitation;
 import edu.bu.archive.domain.model.ai.AiResponse;
+import edu.bu.archive.domain.model.ai.AwardAiCurrentRecord;
 import edu.bu.archive.domain.model.ai.AwardAiSummaryResult;
+import edu.bu.archive.domain.model.ai.AwardAiTimelineRecord;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -66,6 +69,8 @@ class AwardAiControllerTest {
                         new AwardAiSummaryResult(
                                 new AiResponse(
                                         "Award history summary",
+                                        List.of("Status changed"),
+                                        "Archive history is complete.",
                                         List.of(
                                                 new AiCitation(
                                                         "award",
@@ -79,6 +84,33 @@ class AwardAiControllerTest {
                                         null,
                                         null
                                 ),
+                                new AwardAiCurrentRecord(
+                                        101L,
+                                        "A-100",
+                                        1,
+                                        "Award title",
+                                        "ACTIVE",
+                                        "Sponsor",
+                                        "Unit",
+                                        List.of("Principal Investigator"),
+                                        LocalDate.of(2020, 1, 1),
+                                        null,
+                                        null,
+                                        null
+                                ),
+                                List.of(new AwardAiTimelineRecord(
+                                        101L,
+                                        "A-100",
+                                        1,
+                                        true,
+                                        true,
+                                        "ACTIVE",
+                                        "ACTIVE",
+                                        "Sponsor",
+                                        "Unit",
+                                        LocalDate.of(2020, 1, 1),
+                                        null
+                                )),
                                 correlationId
                         )
                 );
@@ -91,9 +123,17 @@ class AwardAiControllerTest {
                 )
                 .andExpect(status().isOk())
                 .andExpect(
-                        jsonPath("$.summary")
+                        jsonPath("$.overview")
                                 .value("Award history summary")
                 )
+                .andExpect(jsonPath("$.currentRecord.awardId")
+                        .value(101))
+                .andExpect(jsonPath("$.timeline[0].sequenceNumber")
+                        .value(1))
+                .andExpect(jsonPath("$.notableChanges[0]")
+                        .value("Status changed"))
+                .andExpect(jsonPath("$.archiveAssessment")
+                        .value("Archive history is complete."))
                 .andExpect(jsonPath("$.citations[0].recordType")
                         .value("award"))
                 .andExpect(jsonPath("$.citations[0].recordId")

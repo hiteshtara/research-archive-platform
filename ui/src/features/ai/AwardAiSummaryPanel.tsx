@@ -18,9 +18,27 @@ import {
   ApiRequestError,
   generateAwardAiSummary,
 } from "../../api/client";
+import {
+  orderAwardTimeline,
+  showDevelopmentMetadata,
+  timelineLabel,
+} from "./awardAiPresentation.mjs";
 
 interface AwardAiSummaryPanelProps {
   awardNumber: string;
+}
+
+function displayValue(value: string | number | null): string {
+  return value === null || value === "" ? "Not available" : String(value);
+}
+
+function displayAmount(value: number | null): string {
+  return value === null
+    ? "Not available"
+    : new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+      }).format(value);
 }
 
 function errorMessage(error: Error): string {
@@ -53,6 +71,13 @@ export function AwardAiSummaryPanel({
     (summaryMutation.error instanceof ApiRequestError
       ? summaryMutation.error.correlationId
       : undefined);
+  const orderedTimeline = summaryMutation.data
+    ? orderAwardTimeline(summaryMutation.data.timeline)
+    : [];
+  const earliestSequence =
+    orderedTimeline.length === 0
+      ? 0
+      : Math.min(...orderedTimeline.map((record) => record.sequenceNumber));
 
   return (
     <Card component="section" aria-labelledby="award-ai-summary-heading">
@@ -112,12 +137,154 @@ export function AwardAiSummaryPanel({
                 archived records and citations below.
               </Alert>
 
-              <Typography sx={{ whiteSpace: "pre-wrap" }}>
-                {summaryMutation.data.summary}
-              </Typography>
+              <Box>
+                <Typography variant="h6">Overview</Typography>
+                <Typography sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
+                  {summaryMutation.data.overview}
+                </Typography>
+              </Box>
 
               <Box>
-                <Typography variant="h6">Citations</Typography>
+                <Typography variant="h6">Current Record</Typography>
+                <List dense aria-label="Current Award record">
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={`Award ${summaryMutation.data.currentRecord.awardNumber}, sequence ${summaryMutation.data.currentRecord.sequenceNumber}`}
+                      secondary={`Archive record ID: ${summaryMutation.data.currentRecord.awardId}`}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={displayValue(
+                        summaryMutation.data.currentRecord.title,
+                      )}
+                      secondary="Title"
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={displayValue(
+                        summaryMutation.data.currentRecord.status,
+                      )}
+                      secondary="Status"
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={displayValue(
+                        summaryMutation.data.currentRecord.sponsor,
+                      )}
+                      secondary="Sponsor"
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={displayValue(
+                        summaryMutation.data.currentRecord.leadUnit,
+                      )}
+                      secondary="Lead unit"
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={
+                        summaryMutation.data.currentRecord
+                          .principalInvestigators.length > 0
+                          ? summaryMutation.data.currentRecord.principalInvestigators.join(
+                              ", ",
+                            )
+                          : "Not available"
+                      }
+                      secondary="Principal investigator(s)"
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={`${displayValue(summaryMutation.data.currentRecord.beginDate)} – ${displayValue(summaryMutation.data.currentRecord.closeoutDate)}`}
+                      secondary="Begin date – closeout date"
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={`${displayAmount(summaryMutation.data.currentRecord.anticipatedTotalAmount)} anticipated; ${displayAmount(summaryMutation.data.currentRecord.obligatedTotalAmount)} obligated`}
+                      secondary="Current amounts"
+                    />
+                  </ListItem>
+                </List>
+              </Box>
+
+              <Box>
+                <Typography variant="h6">Historical Timeline</Typography>
+                <List dense aria-label="Award history timeline">
+                  {orderedTimeline.map((record) => (
+                    <ListItem
+                      key={`${record.awardId}-${record.sequenceNumber}`}
+                      disableGutters
+                      sx={{
+                        alignItems: "flex-start",
+                        borderBottom: 1,
+                        borderColor: "divider",
+                        py: 1,
+                      }}
+                    >
+                      <ListItemText
+                        primary={
+                          <Stack spacing={0.25}>
+                            <Typography
+                              component="span"
+                              sx={{ fontWeight: 700 }}
+                              variant="body2"
+                            >
+                              {timelineLabel(
+                                record.sequenceNumber,
+                                summaryMutation.data.currentRecord
+                                  .sequenceNumber,
+                                earliestSequence,
+                              )}
+                            </Typography>
+                            <Typography component="span" variant="body1">
+                              Sequence {record.sequenceNumber}
+                            </Typography>
+                            <Typography component="span" variant="body2">
+                              Status: {displayValue(record.status)}
+                            </Typography>
+                          </Stack>
+                        }
+                        secondary={`Record ${record.awardId}; ${displayValue(record.sponsor)}; ${displayValue(record.beginDate)} – ${displayValue(record.closeoutDate)}`}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+
+              <Box>
+                <Typography variant="h6">Notable Changes</Typography>
+                {summaryMutation.data.notableChanges.length === 0 ? (
+                  <Typography color="text.secondary" sx={{ mt: 1 }}>
+                    No notable changes were identified.
+                  </Typography>
+                ) : (
+                  <List dense aria-label="Notable Award changes">
+                    {summaryMutation.data.notableChanges.map(
+                      (change, index) => (
+                        <ListItem key={`${index}-${change}`} disableGutters>
+                          <ListItemText primary={change} />
+                        </ListItem>
+                      ),
+                    )}
+                  </List>
+                )}
+              </Box>
+
+              <Box>
+                <Typography variant="h6">Archive Assessment</Typography>
+                <Typography sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
+                  {summaryMutation.data.archiveAssessment}
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography variant="h6">Sources</Typography>
                 {summaryMutation.data.citations.length === 0 ? (
                   <Typography color="text.secondary" sx={{ mt: 1 }}>
                     No supporting archive records were cited.
@@ -143,29 +310,31 @@ export function AwardAiSummaryPanel({
                 Support reference: {summaryMutation.data.correlationId}
               </Typography>
 
-              <Box
-                component="details"
-                sx={{
-                  "& summary": {
-                    cursor: "pointer",
-                    width: "fit-content",
-                  },
-                }}
-              >
-                <Typography component="summary" variant="body2">
-                  Technical details
-                </Typography>
-                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                  <Chip
-                    size="small"
-                    label={`Provider: ${summaryMutation.data.provider}`}
-                  />
-                  <Chip
-                    size="small"
-                    label={`Model: ${summaryMutation.data.model}`}
-                  />
-                </Stack>
-              </Box>
+              {showDevelopmentMetadata(import.meta.env.DEV) && (
+                <Box
+                  component="details"
+                  sx={{
+                    "& summary": {
+                      cursor: "pointer",
+                      width: "fit-content",
+                    },
+                  }}
+                >
+                  <Typography component="summary" variant="body2">
+                    Development details
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                    <Chip
+                      size="small"
+                      label={`Provider: ${summaryMutation.data.provider}`}
+                    />
+                    <Chip
+                      size="small"
+                      label={`Model: ${summaryMutation.data.model}`}
+                    />
+                  </Stack>
+                </Box>
+              )}
             </Stack>
           )}
         </Stack>

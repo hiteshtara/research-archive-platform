@@ -64,8 +64,12 @@ class OpenAiProviderTest {
 
         AiResponse response = provider.generate(request());
 
-        assertThat(response.summary())
+        assertThat(response.overview())
                 .isEqualTo("Award A-100 has one archived record.");
+        assertThat(response.notableChanges())
+                .containsExactly("Status changed.");
+        assertThat(response.archiveAssessment())
+                .isEqualTo("The supplied archive is internally consistent.");
         assertThat(response.citations()).singleElement()
                 .satisfies(citation -> {
                     assertThat(citation.recordType())
@@ -110,6 +114,21 @@ class OpenAiProviderTest {
         assertThat(body.at(
                 "/text/format/schema/additionalProperties"
         ).asBoolean()).isFalse();
+        assertThat(body.at(
+                "/text/format/schema/properties/overview/type"
+        ).asText()).isEqualTo("string");
+        assertThat(body.at(
+                "/text/format/schema/properties/notableChanges/type"
+        ).asText()).isEqualTo("array");
+        assertThat(body.at(
+                "/text/format/schema/properties/archiveAssessment/type"
+        ).asText()).isEqualTo("string");
+        assertThat(body.at(
+                "/text/format/schema/properties/currentRecord"
+        ).isMissingNode()).isTrue();
+        assertThat(body.at(
+                "/text/format/schema/properties/timeline"
+        ).isMissingNode()).isTrue();
         assertThat(body.at(
                 "/text/format/schema/properties/citations"
                         + "/items/properties/recordType/enum/0"
@@ -222,6 +241,46 @@ class OpenAiProviderTest {
                 .hasMessage("OpenAI returned an invalid response");
     }
 
+    @Test
+    void rejectsModelSuppliedDeterministicFields()
+            throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn(
+                responseWithOutput("""
+                        {
+                          "overview": "Narrative",
+                          "notableChanges": [],
+                          "archiveAssessment": "Assessment",
+                          "citations": [
+                            {
+                              "recordType": "award",
+                              "recordId": "101",
+                              "awardNumber": "A-100",
+                              "sequenceNumber": 2
+                            }
+                          ],
+                          "currentRecord": {
+                            "status": "MODEL STATUS",
+                            "sponsor": "MODEL SPONSOR",
+                            "pi": "MODEL PI",
+                            "amounts": 999999
+                          },
+                          "timeline": [
+                            {"sequenceNumber": 999}
+                          ]
+                        }
+                        """)
+        );
+        when(httpClient.send(
+                any(HttpRequest.class),
+                any(HttpResponse.BodyHandler.class)
+        )).thenReturn(httpResponse);
+
+        assertThatThrownBy(() -> provider.generate(request()))
+                .isInstanceOf(AiProviderException.class)
+                .hasMessage("OpenAI returned an invalid response");
+    }
+
     private AiProperties properties() {
         AiProperties properties = new AiProperties();
         properties.setOpenAiModel("gpt-5");
@@ -264,7 +323,9 @@ class OpenAiProviderTest {
             throws Exception {
         return responseWithOutput("""
                 {
-                  "summary": "Award A-100 has one archived record.",
+                  "overview": "Award A-100 has one archived record.",
+                  "notableChanges": ["Status changed."],
+                  "archiveAssessment": "The supplied archive is internally consistent.",
                   "citations": [
                     {
                       "recordType": "award",

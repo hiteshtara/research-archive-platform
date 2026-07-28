@@ -32,6 +32,9 @@ public class StubAiProvider implements AiProvider {
                     "The supplied archive context is insufficient "
                             + "to summarize this award.",
                     List.of(),
+                    "The supplied archive context is insufficient "
+                            + "for an archive assessment.",
+                    List.of(),
                     providerName(),
                     modelName(),
                     null,
@@ -71,6 +74,14 @@ public class StubAiProvider implements AiProvider {
 
         return new AiResponse(
                 summary,
+                List.of(
+                        "The deterministic stub detected "
+                                + records.size()
+                                + " supplied historical record(s)."
+                ),
+                request.awardContext().truncated()
+                        ? "The supplied archive context was truncated."
+                        : "The supplied archive context was complete.",
                 citations,
                 providerName(),
                 modelName(),

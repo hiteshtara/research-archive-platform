@@ -25,7 +25,10 @@ class AiPropertiesBindingTest {
                         "APP_AI_OPENAI_BASE_URL="
                                 + "https://gateway.example/v1",
                         "APP_AI_OPENAI_TIMEOUT_SECONDS=45",
-                        "APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS=9"
+                        "APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS=9",
+                        "APP_AI_PROMPT_VERSION=award-summary-v3",
+                        "APP_AI_CACHE_ENABLED=true",
+                        "APP_AI_CACHE_MAX_ENTRIES=75"
                 )
                 .run(context -> {
                     AiProperties properties =
@@ -48,6 +51,11 @@ class AiPropertiesBindingTest {
                             properties
                                     .getOpenAiConnectTimeoutSeconds()
                     ).isEqualTo(9);
+                    assertThat(properties.getPromptVersion())
+                            .isEqualTo("award-summary-v3");
+                    assertThat(properties.isCacheEnabled()).isTrue();
+                    assertThat(properties.getCacheMaxEntries())
+                            .isEqualTo(75);
                 });
     }
 
@@ -75,6 +83,11 @@ class AiPropertiesBindingTest {
                             properties
                                     .getOpenAiConnectTimeoutSeconds()
                     ).isEqualTo(10);
+                    assertThat(properties.getPromptVersion())
+                            .isEqualTo("award-summary-v2");
+                    assertThat(properties.isCacheEnabled()).isFalse();
+                    assertThat(properties.getCacheMaxEntries())
+                            .isEqualTo(250);
                 });
     }
 

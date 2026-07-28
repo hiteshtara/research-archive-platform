@@ -56,6 +56,9 @@ app:
     open-ai-base-url: ${APP_AI_OPENAI_BASE_URL:https://api.openai.com/v1}
     open-ai-timeout-seconds: ${APP_AI_OPENAI_TIMEOUT_SECONDS:60}
     open-ai-connect-timeout-seconds: ${APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS:10}
+    prompt-version: ${APP_AI_PROMPT_VERSION:award-summary-v2}
+    cache-enabled: ${APP_AI_CACHE_ENABLED:false}
+    cache-max-entries: ${APP_AI_CACHE_MAX_ENTRIES:250}
     max-records: ${AI_MAX_RECORDS:100}
     max-serialized-context-chars: ${AI_MAX_CONTEXT_CHARS:20000}
 
