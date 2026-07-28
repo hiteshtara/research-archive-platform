@@ -13,6 +13,9 @@ public class AiProperties {
     private String openAiBaseUrl = "https://api.openai.com/v1";
     private int openAiTimeoutSeconds = 60;
     private int openAiConnectTimeoutSeconds = 10;
+    private String promptVersion = "award-summary-v2";
+    private boolean cacheEnabled;
+    private int cacheMaxEntries = 250;
     private int maxRecords = 100;
     private int maxSerializedContextChars = 20_000;
 
@@ -95,6 +98,36 @@ public class AiProperties {
     ) {
         this.openAiConnectTimeoutSeconds =
                 openAiConnectTimeoutSeconds;
+    }
+
+    public String getPromptVersion() {
+        return promptVersion;
+    }
+
+    public void setPromptVersion(
+            String promptVersion
+    ) {
+        this.promptVersion = promptVersion;
+    }
+
+    public boolean isCacheEnabled() {
+        return cacheEnabled;
+    }
+
+    public void setCacheEnabled(
+            boolean cacheEnabled
+    ) {
+        this.cacheEnabled = cacheEnabled;
+    }
+
+    public int getCacheMaxEntries() {
+        return cacheMaxEntries;
+    }
+
+    public void setCacheMaxEntries(
+            int cacheMaxEntries
+    ) {
+        this.cacheMaxEntries = cacheMaxEntries;
     }
 
     public int getMaxRecords() {

@@ -21,9 +21,19 @@ public class AiMetadataLogger {
             String awardNumber,
             String provider,
             String model,
-            long elapsedTimeMs,
-            String status
+            long durationMs,
+            int sequenceCount,
+            String category,
+            Long inputTokenCount,
+            Long outputTokenCount,
+            boolean cacheHit,
+            String promptVersion,
+            String promptHash
     ) {
+        Long totalTokens = totalTokens(
+                inputTokenCount,
+                outputTokenCount
+        );
         LOG.atInfo()
                 .addKeyValue("correlationId", correlationId)
                 .addKeyValue(
@@ -34,8 +44,26 @@ public class AiMetadataLogger {
                 .addKeyValue("awardNumber", awardNumber)
                 .addKeyValue("provider", provider)
                 .addKeyValue("model", model)
-                .addKeyValue("elapsedTimeMs", elapsedTimeMs)
-                .addKeyValue("status", status)
+                .addKeyValue("durationMs", durationMs)
+                .addKeyValue("sequenceCount", sequenceCount)
+                .addKeyValue("category", category)
+                .addKeyValue("inputTokens", inputTokenCount)
+                .addKeyValue("outputTokens", outputTokenCount)
+                .addKeyValue("totalTokens", totalTokens)
+                .addKeyValue("cacheHit", cacheHit)
+                .addKeyValue("promptVersion", promptVersion)
+                .addKeyValue("promptHash", promptHash)
                 .log("AI award summary request");
+    }
+
+    private Long totalTokens(
+            Long inputTokens,
+            Long outputTokens
+    ) {
+        if (inputTokens == null && outputTokens == null) {
+            return null;
+        }
+        return (inputTokens == null ? 0 : inputTokens)
+                + (outputTokens == null ? 0 : outputTokens);
     }
 }
