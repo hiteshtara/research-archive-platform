@@ -52,6 +52,7 @@ The adapter:
 - treats archive text as untrusted data rather than instructions;
 - disables OpenAI response storage with `store=false`;
 - requests strict JSON Schema output for `summary` and `citations`;
+- constrains `recordType` to `award`;
 - never logs prompts, archive context, credentials, authorization headers, or
   raw provider responses;
 - returns sanitized failures for timeouts, HTTP errors, malformed JSON, and
@@ -59,3 +60,5 @@ The adapter:
 
 The existing `AwardAiSummaryService` still validates each returned citation
 against the exact physical Award record and sequence supplied to the provider.
+It tolerates only case and surrounding-whitespace presentation differences,
+then returns canonical citation values from the supplied archive context.

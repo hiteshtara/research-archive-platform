@@ -110,6 +110,10 @@ class OpenAiProviderTest {
         assertThat(body.at(
                 "/text/format/schema/additionalProperties"
         ).asBoolean()).isFalse();
+        assertThat(body.at(
+                "/text/format/schema/properties/citations"
+                        + "/items/properties/recordType/enum/0"
+        ).asText()).isEqualTo("award");
         assertThat(body.at("/input/0/content/0/text").asText())
                 .contains("\"awardId\":101")
                 .contains("\"awardNumber\":\"A-100\"")
