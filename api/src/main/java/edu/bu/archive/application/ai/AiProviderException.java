@@ -7,4 +7,11 @@ public class AiProviderException extends RuntimeException {
     ) {
         super(message);
     }
+
+    public AiProviderException(
+            String message,
+            Throwable cause
+    ) {
+        super(message, cause);
+    }
 }

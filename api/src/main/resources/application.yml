@@ -48,9 +48,13 @@ springdoc:
 
 app:
   ai:
-    enabled: ${AI_ENABLED:false}
-    stub-enabled: ${AI_STUB_ENABLED:false}
-    provider: ${AI_PROVIDER:}
+    enabled: ${APP_AI_ENABLED:${AI_ENABLED:false}}
+    stub-enabled: ${APP_AI_STUB_ENABLED:${AI_STUB_ENABLED:false}}
+    openai-enabled: ${APP_AI_OPENAI_ENABLED:false}
+    provider: ${APP_AI_PROVIDER:${AI_PROVIDER:}}
+    open-ai-model: ${APP_AI_OPENAI_MODEL:gpt-5}
+    open-ai-base-url: ${APP_AI_OPENAI_BASE_URL:https://api.openai.com/v1}
+    open-ai-timeout-seconds: ${APP_AI_OPENAI_TIMEOUT_SECONDS:30}
     max-records: ${AI_MAX_RECORDS:100}
     max-serialized-context-chars: ${AI_MAX_CONTEXT_CHARS:20000}
 

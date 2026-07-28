@@ -7,7 +7,11 @@ public class AiProperties {
 
     private boolean enabled;
     private boolean stubEnabled;
+    private boolean openaiEnabled;
     private String provider = "";
+    private String openAiModel = "gpt-5";
+    private String openAiBaseUrl = "https://api.openai.com/v1";
+    private int openAiTimeoutSeconds = 30;
     private int maxRecords = 100;
     private int maxSerializedContextChars = 20_000;
 
@@ -35,10 +39,50 @@ public class AiProperties {
         this.stubEnabled = stubEnabled;
     }
 
+    public boolean isOpenaiEnabled() {
+        return openaiEnabled;
+    }
+
+    public void setOpenaiEnabled(
+            boolean openaiEnabled
+    ) {
+        this.openaiEnabled = openaiEnabled;
+    }
+
     public void setProvider(
             String provider
     ) {
         this.provider = provider;
+    }
+
+    public String getOpenAiModel() {
+        return openAiModel;
+    }
+
+    public void setOpenAiModel(
+            String openAiModel
+    ) {
+        this.openAiModel = openAiModel;
+    }
+
+    public String getOpenAiBaseUrl() {
+        return openAiBaseUrl;
+    }
+
+    public void setOpenAiBaseUrl(
+            String openAiBaseUrl
+    ) {
+        this.openAiBaseUrl = openAiBaseUrl;
+    }
+
+    public int getOpenAiTimeoutSeconds() {
+        return openAiTimeoutSeconds;
+    }
+
+    public void setOpenAiTimeoutSeconds(
+            int openAiTimeoutSeconds
+    ) {
+        this.openAiTimeoutSeconds = openAiTimeoutSeconds;
     }
 
     public int getMaxRecords() {

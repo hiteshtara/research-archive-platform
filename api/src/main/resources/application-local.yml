@@ -1,6 +1,6 @@
 app:
   ai:
-    provider: ${AI_PROVIDER:stub}
+    provider: ${APP_AI_PROVIDER:${AI_PROVIDER:stub}}
 
   security:
     enabled: false
