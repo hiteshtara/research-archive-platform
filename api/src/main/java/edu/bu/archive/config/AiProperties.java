@@ -11,7 +11,8 @@ public class AiProperties {
     private String provider = "";
     private String openAiModel = "gpt-5";
     private String openAiBaseUrl = "https://api.openai.com/v1";
-    private int openAiTimeoutSeconds = 30;
+    private int openAiTimeoutSeconds = 60;
+    private int openAiConnectTimeoutSeconds = 10;
     private int maxRecords = 100;
     private int maxSerializedContextChars = 20_000;
 
@@ -83,6 +84,17 @@ public class AiProperties {
             int openAiTimeoutSeconds
     ) {
         this.openAiTimeoutSeconds = openAiTimeoutSeconds;
+    }
+
+    public int getOpenAiConnectTimeoutSeconds() {
+        return openAiConnectTimeoutSeconds;
+    }
+
+    public void setOpenAiConnectTimeoutSeconds(
+            int openAiConnectTimeoutSeconds
+    ) {
+        this.openAiConnectTimeoutSeconds =
+                openAiConnectTimeoutSeconds;
     }
 
     public int getMaxRecords() {

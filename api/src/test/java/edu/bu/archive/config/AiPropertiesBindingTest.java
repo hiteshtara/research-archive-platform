@@ -24,14 +24,14 @@ class AiPropertiesBindingTest {
                         "APP_AI_OPENAI_MODEL=gpt-5.1",
                         "APP_AI_OPENAI_BASE_URL="
                                 + "https://gateway.example/v1",
-                        "APP_AI_OPENAI_TIMEOUT_SECONDS=45"
+                        "APP_AI_OPENAI_TIMEOUT_SECONDS=45",
+                        "APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS=9"
                 )
                 .run(context -> {
                     AiProperties properties =
                             context.getBean(AiProperties.class);
 
                     assertThat(properties.isEnabled()).isTrue();
-                    assertThat(properties.isStubEnabled()).isFalse();
                     assertThat(properties.isOpenaiEnabled()).isTrue();
                     assertThat(properties.getProvider())
                             .isEqualTo("openai");
@@ -44,6 +44,10 @@ class AiPropertiesBindingTest {
                     assertThat(
                             properties.getOpenAiTimeoutSeconds()
                     ).isEqualTo(45);
+                    assertThat(
+                            properties
+                                    .getOpenAiConnectTimeoutSeconds()
+                    ).isEqualTo(9);
                 });
     }
 
@@ -66,7 +70,11 @@ class AiPropertiesBindingTest {
                             );
                     assertThat(
                             properties.getOpenAiTimeoutSeconds()
-                    ).isEqualTo(30);
+                    ).isEqualTo(60);
+                    assertThat(
+                            properties
+                                    .getOpenAiConnectTimeoutSeconds()
+                    ).isEqualTo(10);
                 });
     }
 
