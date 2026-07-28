@@ -14,9 +14,7 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
 
     public WebCorsConfiguration(
             @Value(
-                    "${app.cors.allowed-origins:"
-                            + "http://localhost:5173,"
-                            + "https://main.d33qc0afy3ltcj.amplifyapp.com"
+                    "${app.cors.allowed-origins:http://localhost:5173,https://main.d33qc0afy3ltcj.amplifyapp.com}"
             )
             List<String> allowedOrigins
     ) {
@@ -24,14 +22,10 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
     }
 
     @Override
-    public void addCorsMappings(
-            CorsRegistry registry
-    ) {
+    public void addCorsMappings(CorsRegistry registry) {
         registry
                 .addMapping("/api/**")
-                .allowedOrigins(
-                        allowedOrigins.toArray(String[]::new)
-                )
+                .allowedOrigins(allowedOrigins.toArray(String[]::new))
                 .allowedMethods(
                         "GET",
                         "POST",
@@ -45,9 +39,7 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
                         "Content-Type",
                         "Accept"
                 )
-                .exposedHeaders(
-                        "Location"
-                )
+                .exposedHeaders("Location")
                 .allowCredentials(true)
                 .maxAge(3600);
     }
