@@ -6,6 +6,8 @@ import edu.bu.archive.application.ai.AiSummaryExecutionException;
 import java.time.Instant;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +15,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(assignableTypes = AwardAiController.class)
 public class AiExceptionHandler {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(AiExceptionHandler.class);
 
     @ExceptionHandler(AiSummaryExecutionException.class)
     public ResponseEntity<Map<String, Object>> handleExecutionFailure(
@@ -39,6 +44,12 @@ public class AiExceptionHandler {
                     ));
         }
 
+        LOG.error(
+                "AI summary execution failed. correlationId={}",
+                exception.correlationId(),
+                cause
+        );
+
         return ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(error(
@@ -49,7 +60,11 @@ public class AiExceptionHandler {
     }
 
     @ExceptionHandler(AiProviderException.class)
-    public ResponseEntity<Map<String, Object>> handleProviderFailure() {
+    public ResponseEntity<Map<String, Object>> handleProviderFailure(
+            AiProviderException exception
+    ) {
+        LOG.error("AI provider request failed", exception);
+
         return ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(error(
