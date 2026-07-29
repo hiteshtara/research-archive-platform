@@ -3,6 +3,7 @@
 
 # Java
 target/
+api/target/
 *.class
 *.jar
 *.war
@@ -13,6 +14,9 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+etl/.venv/
+etl/__pycache__/
+etl/exports/
 
 # IDEs
 .idea/
@@ -36,15 +40,6 @@ exports/
 *.parquet
 *.xlsx
 
-# Secrets and environment files
-.env
-.env.*
-*.pem
-*.key
-
-# Logs
-*.log
-
 !data/
 !data/**/
 !data/**/.gitkeep
@@ -53,29 +48,30 @@ exports/
 !exports/**/
 !exports/**/.gitkeep
 
-# Environment files
+# Secrets and environment files
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+.envrc
+ui/.env.development.local
+
+# Local development
+research_archive.dump
+*.dump
+
+# Local scripts
+scripts/run-local.sh
+
+# Logs
+*.log
 
 # Frontend
 ui/node_modules/
 ui/dist/
 
-# Java
-api/target/
-
-# Python
-etl/.venv/
-etl/__pycache__/
-etl/exports/
-
-# Terraform
-**/.terraform/
-*.tfstate
-*.tfstate.*
-*.tfplan
-
-# macOS
-.DS_Store
-ui/.env.development.local
+# Deployment artifacts / one-off local files (not source)
+taskdef*.json
+screenshots/
+*-policy.json
