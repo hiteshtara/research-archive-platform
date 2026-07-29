@@ -1,4 +1,7 @@
-import type { AwardAiTimelineRecord } from "../../types/api";
+import type {
+  AwardAiCurrentRecord,
+  AwardAiTimelineRecord,
+} from "../../types/api";
 
 export function orderAwardTimeline(
   timeline: AwardAiTimelineRecord[],
@@ -11,3 +14,18 @@ export function timelineLabel(
 ): "Current" | "Previous" | "Original";
 
 export function showDevelopmentMetadata(isDevelopment: boolean): boolean;
+
+export function estimatedReadingSeconds(textParts: string[]): number;
+
+export function sequenceLabelFromChange(change: string): string | null;
+
+export function currentAwardFacts(
+  currentRecord: AwardAiCurrentRecord,
+  formatAmount: (amount: number) => string,
+): Array<{ label: string; value: string }>;
+
+export function visibleAwardTimeline(
+  orderedTimeline: AwardAiTimelineRecord[],
+  expanded: boolean,
+  recentCount?: number,
+): AwardAiTimelineRecord[];
