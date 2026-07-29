@@ -1,22 +1,14 @@
 # Research Archive Platform
 ## Engineering Memory
 
-This document is the long-term memory of the project.
+This document is the long-term memory of the project: status history, data
+grain validation, and incident lessons. For architecture, commands, and
+coding conventions, see `CLAUDE.md` (or `AGENTS.md` for non-Claude agents) —
+this file intentionally does not repeat that content.
 
-Every AI assistant (ChatGPT, Codex, GitHub Copilot, Claude Code, Gemini, etc.) should read this file before making changes.
-
--------------------------------------------------------------------------------
-PROJECT
--------------------------------------------------------------------------------
-
-Boston University Research Archive Platform
-
-Purpose
-
-Preserve historical Kuali Research Administration data after retirement of the
-legacy Kuali system.
-
-The archive is read-only.
+Boston University Research Archive Platform. Preserve historical Kuali
+Research Administration data after retirement of the legacy Kuali system. The
+archive is read-only.
 
 -------------------------------------------------------------------------------
 CURRENT STATUS
@@ -86,189 +78,17 @@ Proposal Search
 
 Award → Proposal navigation
 
--------------------------------------------------------------------------------
-ARCHITECTURE
--------------------------------------------------------------------------------
-
-Hexagonal Architecture
-
-adapter/
-
-application/
-
-domain/
-
-Spring Boot
-
-React
-
-JdbcClient
-
-Custom SQL migration runner (`public.schema_migration`)
-
-PostgreSQL
-
-Oracle
-
-Terraform
-
-AWS ECS
-
-AWS RDS
+(Architecture, research object model, development order, coding rules, and
+commands now live in `CLAUDE.md` — not repeated here.)
 
 -------------------------------------------------------------------------------
-RESEARCH OBJECT MODEL
+DATA GRAIN VALIDATION
 -------------------------------------------------------------------------------
 
-Proposal
-
-↓
-
-Award
-
-↓
-
-Funding
-
-↓
-
-Protocol
-
-↓
-
-Negotiation
-
-↓
-
-Investigator
-
-Proposal is the backbone of the archive.
-
-Every major object should eventually connect to Proposal.
-
--------------------------------------------------------------------------------
-DATABASE
--------------------------------------------------------------------------------
-
-Current Archive Tables
-
-Protocol
-
-Award
-
-Proposal
-
-Future
-
-Negotiation
-
-Subaward
-
-Agreement
-
-Investigator
-
--------------------------------------------------------------------------------
-DEVELOPMENT ORDER
--------------------------------------------------------------------------------
-
-Always implement features in this order.
-
-1 Database migration
-
-2 Oracle extraction SQL
-
-3 CSV export
-
-4 ETL
-
-5 Repository
-
-6 Service
-
-7 Controller
-
-8 React UI
-
-Never skip steps.
-
--------------------------------------------------------------------------------
-CODING RULES
--------------------------------------------------------------------------------
-
-Mirror Award implementation.
-
-Never invent Oracle columns.
-
-Never invent package names.
-
-Inspect existing implementation before writing new code.
-
-Use JdbcClient.
-
-Compile after every commit.
-
-Push after successful compile.
-
-Keep commits small.
-
-Prefer cat <<'EOF' examples.
-
--------------------------------------------------------------------------------
-DEPLOYMENT
--------------------------------------------------------------------------------
-
-Development
-
-Local Oracle
-
-↓
-
-CSV
-
-↓
-
-PostgreSQL
-
-↓
-
-Spring Boot
-
-↓
-
-React
-
-↓
-
-AWS ECS
-
-Deploy only after feature completion.
-
--------------------------------------------------------------------------------
-COMMON COMMANDS
--------------------------------------------------------------------------------
-
-Backend
-
-cd api
-
-mvn test
-
-Frontend
-
-cd ui
-
-npm run build
-
-Git
-
-git status
-
-git add
-
-git commit
-
-git push
+Award (validated): 281,591 raw rows in `archive.award_version`; 43,057
+distinct `award_number`; 281,455 distinct (`award_number`, `sequence_number`);
+0 duplicate `award_id` rows. See `CLAUDE.md` for the grain rules this
+validates.
 
 -------------------------------------------------------------------------------
 KNOWN LESSONS
