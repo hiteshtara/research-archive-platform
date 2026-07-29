@@ -1,32 +1,143 @@
 # Research Archive Platform
 
-Read-only archive and reporting platform for legacy BU research administration data.
+Read-only historical archive for Boston University research administration
+data, preserved after the retirement of the legacy Kuali Research
+Administration system. The platform never writes back to source data — it
+exists to make decades of Award, Proposal, Protocol, Negotiation, and
+Subaward history permanently searchable after the system of record goes
+away.
 
-## Data domains
+## Contents
 
-- Protocols
-- Awards
-- Institutional Proposals
-- Negotiations
-- Subawards
-- Documents
+- [About](#about)
+- [Architecture](#architecture)
+- [Repository layout](#repository-layout)
+- [Getting started](#getting-started)
+- [Testing](#testing)
+- [Documentation map](#documentation-map)
+- [Security](#security)
+- [Contributing](#contributing)
+- [Status](#status)
 
-## Data flow
+## About
 
-BU Oracle and BU files are accessible only from a local computer connected to the BU VPN.
+**Data domains**: Protocols, Awards, Institutional Proposals, Negotiations,
+Subawards, Documents.
 
-1. Python runs locally and extracts approved data.
-2. Data is validated and written to CSV or Parquet.
-3. Approved exports are uploaded to Amazon S3.
-4. Data is loaded into Amazon RDS PostgreSQL.
-5. A Spring Boot application provides search, reporting, and document access.
+**Core model**: Proposal is the backbone of the archive — Award, Protocol,
+Negotiation, and Subaward each connect back to it. An optional, read-only AI
+layer (Award summaries and Q&A, disabled by default) sits on top of the
+archived data; see [Documentation map](#documentation-map) for its design.
 
-## Technology
+## Architecture
 
-- Python ETL
-- Spring Boot
-- PostgreSQL
-- Amazon S3
-- Amazon RDS
-- Amazon ECS Fargate
-- Terraform
+```text
+Oracle (BU VPN-only, source of truth until retirement)
+    │  Python ETL: extract, validate
+    ▼
+CSV / Parquet
+    │  upload
+    ▼
+Amazon S3
+    │  load
+    ▼
+PostgreSQL (archive schema, Amazon RDS)
+    │  JdbcClient, no writes back to Oracle
+    ▼
+Spring Boot API
+    │  Cognito-authenticated REST
+    ▼
+React UI
+```
+
+The API and UI never talk to Oracle directly — only the ETL does, and only
+to read. Database migrations use Flyway's file-naming convention
+(`database/migrations/V###__description.sql`) but are applied by the Python
+ETL, not Spring Boot; `spring.flyway.enabled` is intentionally `false`. See
+[`CLAUDE.md`](CLAUDE.md) for the full architectural detail, including where
+the package layout departs from strict hexagonal architecture.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `api/` | Spring Boot backend (Java 21) — REST API, business logic, persistence |
+| `ui/` | React + TypeScript + Vite frontend |
+| `etl/` | Python extraction/validation/load pipeline (Oracle → S3 → PostgreSQL) |
+| `database/migrations/` | Versioned SQL schema migrations |
+| `terraform/` | AWS infrastructure as code (VPC, RDS, ECS, ECR, S3, Secrets Manager) |
+| `ops/` | Operational scripts and the AWS operations manual |
+| `docs/` | Architecture, AI feature design, and per-domain ETL data-contract/reconciliation docs |
+| `scripts/` | Local development helper scripts |
+
+## Getting started
+
+Two supported local setups (see
+[`docs/runbooks/LOCAL_SETUP.md`](docs/runbooks/LOCAL_SETUP.md) for the full
+walkthrough, including the BU VPN and AWS SSM tunnel steps):
+
+```bash
+# Local Postgres, no AWS dependency
+./scripts/run-local.sh
+
+# Or: tunnel to the real dev RDS instance via SSM (needs direnv + AWS creds)
+./api/scripts/dev.sh   # in one terminal
+cd ui && npm run dev   # in another
+```
+
+Backend and frontend commands:
+
+```bash
+cd api && mvn compile && mvn test      # backend: build + test
+cd ui && npm run dev                    # frontend: dev server
+cd ui && npm run build                  # frontend: type-check + build
+cd etl && uv sync && uv run pytest      # ETL: install + test
+```
+
+Full command reference (single-test invocations, linting, etc.) is in
+[`CLAUDE.md`](CLAUDE.md).
+
+## Testing
+
+| Layer | Command |
+|---|---|
+| API | `cd api && mvn test` |
+| UI | `cd ui && npm run test` (presentation-helper unit tests) |
+| UI types | `cd ui && npx tsc -b` |
+| ETL | `cd etl && uv run pytest` |
+
+Run the relevant suite before every commit; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
+
+## Documentation map
+
+| Document | Purpose |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | Architecture, commands, and coding conventions for anyone (human or AI agent) working in this repo |
+| [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) | Long-term memory: status history, validated data-grain numbers, incident lessons |
+| [`docs/development/MASTER_ROADMAP.md`](docs/development/MASTER_ROADMAP.md) | Current status and planned phases |
+| [`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md), [`docs/AI_OPENAI_PROVIDER.md`](docs/AI_OPENAI_PROVIDER.md) | AI feature design and provider integration |
+| [`docs/AI_TROUBLESHOOTING.md`](docs/AI_TROUBLESHOOTING.md), [`docs/runbooks/ecs-ai-deployment.md`](docs/runbooks/ecs-ai-deployment.md) | AI feature deployment and incident postmortems |
+| [`docs/runbooks/`](docs/runbooks/) | Local setup, ETL, Oracle, and troubleshooting quick references |
+| [`ops/AWS_OPERATIONS.md`](ops/AWS_OPERATIONS.md) | AWS account, Amplify, ECR, ECS operations manual |
+| `docs/*_CSV_CONTRACT.md`, `docs/*_RECONCILIATION.md` | Per-domain (Protocol/Negotiation/Subaward) ETL data contracts and validation |
+
+## Security
+
+The archive's core security property is that it is **read-only** end to end.
+See [`SECURITY.md`](SECURITY.md) for the authentication model, data-handling
+guarantees (including the AI feature's redaction and citation-validation
+design), and how to report a security concern.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the required development order,
+coding conventions, and commit expectations before making a change.
+
+## Status
+
+Award, Proposal, Negotiation, and Subaward archives are complete; Protocol
+Archive is in progress and is the current canonical replacement for the
+deprecated legacy IRB compatibility path. See
+[`docs/development/MASTER_ROADMAP.md`](docs/development/MASTER_ROADMAP.md)
+and [`docs/CURRENT_SPRINT.md`](docs/CURRENT_SPRINT.md) for details.
