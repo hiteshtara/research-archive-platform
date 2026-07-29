@@ -1,3 +1,7 @@
+import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
+import AutoAwesomeOutlinedIcon from "@mui/icons-material/AutoAwesomeOutlined";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutlineOutlined";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import {
   Alert,
   Box,
@@ -6,12 +10,10 @@ import {
   CardContent,
   Chip,
   CircularProgress,
-  List,
-  ListItem,
-  ListItemText,
   Stack,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useMutation } from "@tanstack/react-query";
 
 import {
@@ -28,6 +30,52 @@ interface AwardAiSummaryPanelProps {
   awardNumber: string;
 }
 
+interface FactCardProps {
+  label: string;
+  value: string;
+}
+
+function FactCard({ label, value }: FactCardProps) {
+  return (
+    <Card
+      variant="outlined"
+      sx={{
+        borderColor: "divider",
+        borderRadius: 3,
+        boxShadow: "0 4px 18px rgba(0, 0, 0, 0.04)",
+        height: "100%",
+      }}
+    >
+      <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
+        <Typography
+          color="text.secondary"
+          component="dt"
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
+          {label}
+        </Typography>
+        <Typography
+          component="dd"
+          variant="body1"
+          sx={{
+            fontWeight: 650,
+            m: 0,
+            mt: 0.75,
+            overflowWrap: "anywhere",
+          }}
+        >
+          {value}
+        </Typography>
+      </CardContent>
+    </Card>
+  );
+}
+
 function displayValue(value: string | number | null): string {
   return value === null || value === "" ? "Not available" : String(value);
 }
@@ -39,6 +87,24 @@ function displayAmount(value: number | null): string {
         style: "currency",
         currency: "USD",
       }).format(value);
+}
+
+function readingTime(
+  overview: string,
+  notableChanges: string[],
+  archiveAssessment: string,
+): number {
+  const wordCount = [overview, ...notableChanges, archiveAssessment]
+    .join(" ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return Math.max(10, Math.ceil((wordCount / 200) * 12) * 5);
+}
+
+function sequenceFromChange(change: string): string {
+  const match = /\bsequence\s+(\d+)\b/i.exec(change);
+  return match ? `Sequence ${match[1]}` : "Award history";
 }
 
 function errorMessage(error: Error): string {
@@ -66,45 +132,74 @@ export function AwardAiSummaryPanel({
     retry: false,
   });
 
+  const summary = summaryMutation.data;
   const correlationId =
-    summaryMutation.data?.correlationId ||
+    summary?.correlationId ||
     (summaryMutation.error instanceof ApiRequestError
       ? summaryMutation.error.correlationId
       : undefined);
-  const orderedTimeline = summaryMutation.data
-    ? orderAwardTimeline(summaryMutation.data.timeline)
+  const orderedTimeline = summary
+    ? orderAwardTimeline(summary.timeline)
     : [];
   const earliestSequence =
     orderedTimeline.length === 0
       ? 0
       : Math.min(...orderedTimeline.map((record) => record.sequenceNumber));
+  const orderedCitations = summary
+    ? [...summary.citations].sort(
+        (left, right) =>
+          right.sequenceNumber - left.sequenceNumber ||
+          Number(right.recordId) - Number(left.recordId),
+      )
+    : [];
 
   return (
-    <Card component="section" aria-labelledby="award-ai-summary-heading">
-      <CardContent>
-        <Stack spacing={2}>
-          <Box>
-            <Typography id="award-ai-summary-heading" variant="h5">
-              AI Award History Summary
-            </Typography>
-            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-              Generate a read-only summary from archived Award history records.
-            </Typography>
-          </Box>
+    <Card
+      component="section"
+      aria-labelledby="award-ai-summary-heading"
+      sx={{
+        borderRadius: 4,
+        boxShadow: "0 10px 32px rgba(0, 0, 0, 0.08)",
+        overflow: "hidden",
+      }}
+    >
+      <CardContent sx={{ p: { xs: 2.5, md: 4 }, "&:last-child": { pb: 4 } }}>
+        <Stack spacing={{ xs: 3, md: 4 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            sx={{
+              alignItems: { xs: "flex-start", sm: "center" },
+              justifyContent: "space-between",
+            }}
+          >
+            <Box>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <AutoAwesomeOutlinedIcon color="primary" aria-hidden="true" />
+                <Typography id="award-ai-summary-heading" variant="h4">
+                  Award Summary
+                </Typography>
+              </Stack>
+              <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                AI-generated overview of archived Award history.
+              </Typography>
+            </Box>
 
-          <Box>
             <Button
               variant="contained"
               onClick={() => summaryMutation.mutate()}
               disabled={summaryMutation.isPending}
+              sx={{ borderRadius: 999, px: 2.5 }}
             >
               {summaryMutation.isPending
-                ? "Generating summary…"
+                ? "Generating…"
                 : summaryMutation.isError
-                  ? "Retry AI Summary"
-                  : "Generate AI Summary"}
+                  ? "Try again"
+                  : summary
+                    ? "Regenerate summary"
+                    : "Generate summary"}
             </Button>
-          </Box>
+          </Stack>
 
           {summaryMutation.isPending && (
             <Stack
@@ -130,211 +225,382 @@ export function AwardAiSummaryPanel({
             </Alert>
           )}
 
-          {summaryMutation.data && (
-            <Stack spacing={2}>
-              <Alert severity="warning">
-                AI-generated summary. Verify important details against the
-                archived records and citations below.
-              </Alert>
-
-              <Box>
-                <Typography variant="h6">Overview</Typography>
-                <Typography sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
-                  {summaryMutation.data.overview}
+          {summary && (
+            <Stack spacing={{ xs: 3, md: 4 }}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1.5}
+                sx={{
+                  alignItems: { xs: "flex-start", sm: "center" },
+                  justifyContent: "space-between",
+                }}
+              >
+                <Stack
+                  direction="row"
+                  spacing={0.75}
+                  sx={{ alignItems: "center" }}
+                >
+                  <AccessTimeOutlinedIcon
+                    color="action"
+                    fontSize="small"
+                    aria-hidden="true"
+                  />
+                  <Typography color="text.secondary" variant="body2">
+                    Estimated reading time ≈{" "}
+                    {readingTime(
+                      summary.overview,
+                      summary.notableChanges,
+                      summary.archiveAssessment,
+                    )}{" "}
+                    sec
+                  </Typography>
+                </Stack>
+                <Typography color="text.secondary" variant="caption">
+                  Read-only AI narrative — verify against archive sources.
                 </Typography>
+              </Stack>
+
+              <Card
+                variant="outlined"
+                sx={{
+                  bgcolor: (theme) =>
+                    alpha(theme.palette.primary.main, 0.045),
+                  borderColor: (theme) =>
+                    alpha(theme.palette.primary.main, 0.22),
+                  borderRadius: 3.5,
+                  boxShadow: "0 6px 24px rgba(0, 0, 0, 0.05)",
+                }}
+              >
+                <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
+                  <Typography
+                    color="primary.main"
+                    variant="overline"
+                    sx={{ fontWeight: 800, letterSpacing: "0.08em" }}
+                  >
+                    Overview
+                  </Typography>
+                  <Typography
+                    sx={{
+                      fontSize: { xs: "1rem", md: "1.125rem" },
+                      lineHeight: 1.75,
+                      mt: 1,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {summary.overview}
+                  </Typography>
+                </CardContent>
+              </Card>
+
+              <Box component="section" aria-labelledby="current-record-heading">
+                <Typography id="current-record-heading" variant="h5">
+                  Current Record
+                </Typography>
+                <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                  Authoritative values from the current archived sequence.
+                </Typography>
+                <Box
+                  component="dl"
+                  sx={{
+                    display: "grid",
+                    gap: 2,
+                    gridTemplateColumns: {
+                      xs: "1fr",
+                      sm: "repeat(2, minmax(0, 1fr))",
+                    },
+                    m: 0,
+                    mt: 2,
+                  }}
+                >
+                  <FactCard
+                    label="Status"
+                    value={displayValue(summary.currentRecord.status)}
+                  />
+                  <FactCard
+                    label="Sponsor"
+                    value={displayValue(summary.currentRecord.sponsor)}
+                  />
+                  <FactCard
+                    label="Lead Unit"
+                    value={displayValue(summary.currentRecord.leadUnit)}
+                  />
+                  <FactCard
+                    label="Principal PI"
+                    value={
+                      summary.currentRecord.principalInvestigators.length > 0
+                        ? summary.currentRecord.principalInvestigators.join(", ")
+                        : "Not available"
+                    }
+                  />
+                  <FactCard
+                    label="Sequence"
+                    value={String(summary.currentRecord.sequenceNumber)}
+                  />
+                  <FactCard
+                    label="Amount"
+                    value={displayAmount(
+                      summary.currentRecord.anticipatedTotalAmount,
+                    )}
+                  />
+                </Box>
               </Box>
 
-              <Box>
-                <Typography variant="h6">Current Record</Typography>
-                <List dense aria-label="Current Award record">
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={`Award ${summaryMutation.data.currentRecord.awardNumber}, sequence ${summaryMutation.data.currentRecord.sequenceNumber}`}
-                      secondary={`Archive record ID: ${summaryMutation.data.currentRecord.awardId}`}
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={displayValue(
-                        summaryMutation.data.currentRecord.title,
-                      )}
-                      secondary="Title"
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={displayValue(
-                        summaryMutation.data.currentRecord.status,
-                      )}
-                      secondary="Status"
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={displayValue(
-                        summaryMutation.data.currentRecord.sponsor,
-                      )}
-                      secondary="Sponsor"
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={displayValue(
-                        summaryMutation.data.currentRecord.leadUnit,
-                      )}
-                      secondary="Lead unit"
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={
-                        summaryMutation.data.currentRecord
-                          .principalInvestigators.length > 0
-                          ? summaryMutation.data.currentRecord.principalInvestigators.join(
-                              ", ",
-                            )
-                          : "Not available"
-                      }
-                      secondary="Principal investigator(s)"
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={`${displayValue(summaryMutation.data.currentRecord.beginDate)} – ${displayValue(summaryMutation.data.currentRecord.closeoutDate)}`}
-                      secondary="Begin date – closeout date"
-                    />
-                  </ListItem>
-                  <ListItem disableGutters>
-                    <ListItemText
-                      primary={`${displayAmount(summaryMutation.data.currentRecord.anticipatedTotalAmount)} anticipated; ${displayAmount(summaryMutation.data.currentRecord.obligatedTotalAmount)} obligated`}
-                      secondary="Current amounts"
-                    />
-                  </ListItem>
-                </List>
+              <Box component="section" aria-labelledby="timeline-heading">
+                <Typography id="timeline-heading" variant="h5">
+                  Historical Timeline
+                </Typography>
+                <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                  Award records shown from the current sequence to the original.
+                </Typography>
+                <Box
+                  component="ol"
+                  aria-label="Award history timeline"
+                  sx={{ listStyle: "none", m: 0, mt: 2, p: 0 }}
+                >
+                  {orderedTimeline.map((record, index) => {
+                    const label = timelineLabel(
+                      record.sequenceNumber,
+                      summary.currentRecord.sequenceNumber,
+                      earliestSequence,
+                    );
+                    return (
+                      <Box
+                        component="li"
+                        key={`${record.awardId}-${record.sequenceNumber}`}
+                        sx={{
+                          display: "grid",
+                          gridTemplateColumns: "28px minmax(0, 1fr)",
+                          minHeight: index < orderedTimeline.length - 1 ? 104 : 72,
+                        }}
+                      >
+                        <Box
+                          aria-hidden="true"
+                          sx={{ position: "relative", pt: 0.5 }}
+                        >
+                          <Box
+                            sx={{
+                              bgcolor:
+                                label === "Current"
+                                  ? "primary.main"
+                                  : "background.paper",
+                              border: "3px solid",
+                              borderColor:
+                                label === "Current"
+                                  ? "primary.main"
+                                  : "text.secondary",
+                              borderRadius: "50%",
+                              height: 14,
+                              width: 14,
+                            }}
+                          />
+                          {index < orderedTimeline.length - 1 && (
+                            <Box
+                              sx={{
+                                borderLeft: "2px solid",
+                                borderColor: "divider",
+                                bottom: 0,
+                                left: 6,
+                                position: "absolute",
+                                top: 18,
+                              }}
+                            />
+                          )}
+                        </Box>
+                        <Box sx={{ pb: 2 }}>
+                          <Typography
+                            color={
+                              label === "Current"
+                                ? "primary.main"
+                                : "text.secondary"
+                            }
+                            variant="caption"
+                            sx={{
+                              fontWeight: 800,
+                              letterSpacing: "0.05em",
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            {label}
+                          </Typography>
+                          <Typography variant="h6">
+                            Sequence {record.sequenceNumber}
+                          </Typography>
+                          <Typography sx={{ mt: 0.25 }}>
+                            {displayValue(record.status)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </Box>
               </Box>
 
-              <Box>
-                <Typography variant="h6">Historical Timeline</Typography>
-                <List dense aria-label="Award history timeline">
-                  {orderedTimeline.map((record) => (
-                    <ListItem
-                      key={`${record.awardId}-${record.sequenceNumber}`}
-                      disableGutters
+              <Box component="section" aria-labelledby="major-changes-heading">
+                <Typography id="major-changes-heading" variant="h5">
+                  Major Changes
+                </Typography>
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 2,
+                    gridTemplateColumns: {
+                      xs: "1fr",
+                      md: "repeat(2, minmax(0, 1fr))",
+                    },
+                    mt: 2,
+                  }}
+                >
+                  {summary.notableChanges.map((change, index) => (
+                    <Card
+                      key={`${index}-${change}`}
+                      variant="outlined"
                       sx={{
-                        alignItems: "flex-start",
-                        borderBottom: 1,
-                        borderColor: "divider",
-                        py: 1,
+                        borderColor: (theme) =>
+                          alpha(theme.palette.success.main, 0.35),
+                        borderRadius: 3,
+                        boxShadow: "0 5px 20px rgba(0, 0, 0, 0.04)",
                       }}
                     >
-                      <ListItemText
-                        primary={
-                          <Stack spacing={0.25}>
+                      <CardContent sx={{ p: 2.5 }}>
+                        <Stack
+                          direction="row"
+                          spacing={1.25}
+                          sx={{ alignItems: "flex-start" }}
+                        >
+                          <CheckCircleOutlineIcon
+                            color="success"
+                            aria-label="Major change"
+                          />
+                          <Box>
                             <Typography
-                              component="span"
-                              sx={{ fontWeight: 700 }}
-                              variant="body2"
+                              color="success.dark"
+                              variant="caption"
+                              sx={{
+                                fontWeight: 800,
+                                letterSpacing: "0.05em",
+                                textTransform: "uppercase",
+                              }}
                             >
-                              {timelineLabel(
-                                record.sequenceNumber,
-                                summaryMutation.data.currentRecord
-                                  .sequenceNumber,
-                                earliestSequence,
-                              )}
+                              Major Change
                             </Typography>
-                            <Typography component="span" variant="body1">
-                              Sequence {record.sequenceNumber}
+                            <Typography sx={{ fontWeight: 700, mt: 0.5 }}>
+                              {sequenceFromChange(change)}
                             </Typography>
-                            <Typography component="span" variant="body2">
-                              Status: {displayValue(record.status)}
+                            <Typography sx={{ lineHeight: 1.65, mt: 1 }}>
+                              {change}
                             </Typography>
-                          </Stack>
-                        }
-                        secondary={`Record ${record.awardId}; ${displayValue(record.sponsor)}; ${displayValue(record.beginDate)} – ${displayValue(record.closeoutDate)}`}
-                      />
-                    </ListItem>
+                          </Box>
+                        </Stack>
+                      </CardContent>
+                    </Card>
                   ))}
-                </List>
+                </Box>
               </Box>
 
-              <Box>
-                <Typography variant="h6">Notable Changes</Typography>
-                {summaryMutation.data.notableChanges.length === 0 ? (
-                  <Typography color="text.secondary" sx={{ mt: 1 }}>
-                    No notable changes were identified.
-                  </Typography>
-                ) : (
-                  <List dense aria-label="Notable Award changes">
-                    {summaryMutation.data.notableChanges.map(
-                      (change, index) => (
-                        <ListItem key={`${index}-${change}`} disableGutters>
-                          <ListItemText primary={change} />
-                        </ListItem>
-                      ),
-                    )}
-                  </List>
-                )}
-              </Box>
-
-              <Box>
-                <Typography variant="h6">Archive Assessment</Typography>
-                <Typography sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
-                  {summaryMutation.data.archiveAssessment}
-                </Typography>
-              </Box>
-
-              <Box>
-                <Typography variant="h6">Sources</Typography>
-                {summaryMutation.data.citations.length === 0 ? (
-                  <Typography color="text.secondary" sx={{ mt: 1 }}>
-                    No supporting archive records were cited.
-                  </Typography>
-                ) : (
-                  <List dense aria-label="Award summary citations">
-                    {summaryMutation.data.citations.map((citation) => (
-                      <ListItem
-                        key={`${citation.recordId}-${citation.sequenceNumber}`}
-                        disableGutters
+              <Card
+                component="section"
+                aria-labelledby="archive-assessment-heading"
+                variant="outlined"
+                sx={{
+                  bgcolor: (theme) => alpha(theme.palette.info.main, 0.055),
+                  borderColor: (theme) =>
+                    alpha(theme.palette.info.main, 0.3),
+                  borderRadius: 3.5,
+                }}
+              >
+                <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
+                  <Stack
+                    direction="row"
+                    spacing={1.5}
+                    sx={{ alignItems: "flex-start" }}
+                  >
+                    <InfoOutlinedIcon color="info" aria-hidden="true" />
+                    <Box>
+                      <Typography
+                        id="archive-assessment-heading"
+                        variant="h5"
                       >
-                        <ListItemText
-                          primary={`Award ${citation.awardNumber}, sequence ${citation.sequenceNumber}`}
-                          secondary={`Archive record ID: ${citation.recordId}`}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                )}
-              </Box>
+                        Archive Assessment
+                      </Typography>
+                      <Typography
+                        sx={{ lineHeight: 1.75, mt: 1, whiteSpace: "pre-wrap" }}
+                      >
+                        {summary.archiveAssessment}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </Card>
 
               <Typography color="text.secondary" variant="caption">
-                Support reference: {summaryMutation.data.correlationId}
+                Support reference: {summary.correlationId}
               </Typography>
 
               {showDevelopmentMetadata(import.meta.env.DEV) && (
-                <Box
-                  component="details"
-                  sx={{
-                    "& summary": {
-                      cursor: "pointer",
-                      width: "fit-content",
-                    },
-                  }}
-                >
+                <Box component="details">
                   <Typography component="summary" variant="body2">
                     Development details
                   </Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                    <Chip
-                      size="small"
-                      label={`Provider: ${summaryMutation.data.provider}`}
-                    />
-                    <Chip
-                      size="small"
-                      label={`Model: ${summaryMutation.data.model}`}
-                    />
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1}
+                    sx={{ alignItems: "flex-start", mt: 1 }}
+                  >
+                    <Chip size="small" label={`Provider: ${summary.provider}`} />
+                    <Chip size="small" label={`Model: ${summary.model}`} />
                   </Stack>
                 </Box>
               )}
+
+              <Card
+                variant="outlined"
+                sx={{ borderRadius: 3, overflow: "hidden" }}
+              >
+                <Box component="details">
+                  <Box
+                    component="summary"
+                    sx={{
+                      cursor: "pointer",
+                      fontWeight: 750,
+                      px: 2.5,
+                      py: 2,
+                      "&:focus-visible": {
+                        outline: "3px solid",
+                        outlineColor: "primary.main",
+                        outlineOffset: -3,
+                      },
+                    }}
+                  >
+                    Sources ({orderedCitations.length})
+                  </Box>
+                  <Stack
+                    component="ul"
+                    spacing={0}
+                    aria-label="Award summary sources"
+                    sx={{ listStyle: "none", m: 0, p: 0 }}
+                  >
+                    {orderedCitations.map((citation) => (
+                      <Box
+                        component="li"
+                        key={`${citation.recordId}-${citation.sequenceNumber}`}
+                        sx={{
+                          borderTop: 1,
+                          borderColor: "divider",
+                          px: 2.5,
+                          py: 1.75,
+                        }}
+                      >
+                        <Typography sx={{ fontWeight: 700 }}>
+                          Sequence {citation.sequenceNumber}
+                        </Typography>
+                        <Typography color="text.secondary" variant="body2">
+                          Archive Record ID: {citation.recordId}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              </Card>
             </Stack>
           )}
         </Stack>
