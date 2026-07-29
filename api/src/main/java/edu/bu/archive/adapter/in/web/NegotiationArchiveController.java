@@ -3,9 +3,10 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationActivityResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationNotificationResponse;
-import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationPageResponse;
+import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationUnassociatedDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.application.negotiation.NegotiationArchiveService;
 
 import org.springframework.http.ResponseEntity;
@@ -30,7 +31,7 @@ public class NegotiationArchiveController {
     }
 
     @GetMapping
-    public ResponseEntity<NegotiationPageResponse> search(
+    public ResponseEntity<PageResponse<NegotiationSummaryResponse>> search(
             @RequestParam(required = false)
             String query,
 

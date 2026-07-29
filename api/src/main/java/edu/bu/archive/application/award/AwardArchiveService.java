@@ -3,11 +3,11 @@ package edu.bu.archive.application.award;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardSequencePageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 
@@ -51,7 +51,7 @@ public class AwardArchiveService {
         );
     }
 
-    public AwardSequencePageResponse findSequencePage(
+    public PageResponse<AwardSequenceSummaryResponse> findSequencePage(
             String awardNumber,
             int page,
             int size
@@ -90,7 +90,7 @@ public class AwardArchiveService {
                         offset
                 );
 
-        return new AwardSequencePageResponse(
+        return new PageResponse<>(
                 content,
                 safePage,
                 safeSize,

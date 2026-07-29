@@ -1,8 +1,8 @@
 package edu.bu.archive.application.negotiation;
 
-import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationPageResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.NegotiationArchiveRepository;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
+import static edu.bu.archive.testsupport.NegotiationFixtures.negotiationRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -38,7 +39,7 @@ class NegotiationArchiveServiceTest {
         when(repository.findNegotiations("award", 100, 0))
                 .thenReturn(List.of(summary));
 
-        NegotiationPageResponse result = service.findPage(
+        PageResponse<NegotiationSummaryResponse> result = service.findPage(
                 "award",
                 -1,
                 500
@@ -104,34 +105,4 @@ class NegotiationArchiveServiceTest {
         );
     }
 
-    private NegotiationRowResponse negotiationRow() {
-        return new NegotiationRowResponse(
-                101L,
-                "DOC-101",
-                1L,
-                "ACTIVE",
-                "Active",
-                2L,
-                "AGREEMENT",
-                "Agreement",
-                3L,
-                "AWARD",
-                "Award",
-                "PERSON-1",
-                "Negotiator",
-                null,
-                null,
-                null,
-                null,
-                "00001234",
-                null,
-                null,
-                1L,
-                "OBJECT-1",
-                null,
-                null,
-                1L,
-                "DOCUMENT-OBJECT-1"
-        );
-    }
 }

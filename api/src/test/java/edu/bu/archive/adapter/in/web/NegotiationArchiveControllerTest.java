@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
-import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationPageResponse;
+import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.application.negotiation.NegotiationArchiveService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +38,7 @@ class NegotiationArchiveControllerTest {
     @Test
     void searchUsesTheRootRouteAndDelegatesPagination()
             throws Exception {
-        NegotiationPageResponse page = new NegotiationPageResponse(
+        PageResponse<NegotiationSummaryResponse> page = new PageResponse<>(
                 List.of(),
                 2,
                 10,

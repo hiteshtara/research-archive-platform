@@ -3,11 +3,11 @@ package edu.bu.archive.application.negotiation;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationActivityResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationNotificationResponse;
-import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationPageResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationUnassociatedDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.NegotiationArchiveRepository;
 
@@ -27,7 +27,7 @@ public class NegotiationArchiveService {
         this.repository = repository;
     }
 
-    public NegotiationPageResponse findPage(
+    public PageResponse<NegotiationSummaryResponse> findPage(
             String query,
             int page,
             int size
@@ -51,7 +51,7 @@ public class NegotiationArchiveService {
                         offset
                 );
 
-        return new NegotiationPageResponse(
+        return new PageResponse<>(
                 content,
                 safePage,
                 safeSize,

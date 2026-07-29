@@ -408,15 +408,8 @@ export interface AwardSequenceSummary {
   representativeAwardId: number;
 }
 
-export interface AwardSequencePageResponse {
-  content: AwardSequenceSummary[];
-  page: number;
-  size: number;
-  totalElements: number;
-  totalPages: number;
-  first: boolean;
-  last: boolean;
-}
+export interface AwardSequencePageResponse
+  extends PageResponse<AwardSequenceSummary> {}
 
 export interface AwardSequenceDetailResponse {
   awardNumber: string;
@@ -612,15 +605,8 @@ export interface ProposalWorkspaceResponse {
   current: ProposalRow;
 }
 
-export interface ProposalVersionPageResponse {
-  content: ProposalRow[];
-  page: number;
-  size: number;
-  totalElements: number;
-  totalPages: number;
-  first: boolean;
-  last: boolean;
-}
+export interface ProposalVersionPageResponse
+  extends PageResponse<ProposalRow> {}
 
 export interface ProposalPerson {
   proposalId: number;
@@ -666,15 +652,8 @@ export interface NegotiationSummary {
   anticipatedAwardDate: string | null;
 }
 
-export interface NegotiationPageResponse {
-  content: NegotiationSummary[];
-  page: number;
-  size: number;
-  totalElements: number;
-  totalPages: number;
-  first: boolean;
-  last: boolean;
-}
+export interface NegotiationPageResponse
+  extends PageResponse<NegotiationSummary> {}
 
 export interface NegotiationRow extends NegotiationSummary {
   documentFolder: string | null;

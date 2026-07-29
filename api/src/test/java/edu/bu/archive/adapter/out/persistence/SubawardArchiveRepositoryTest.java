@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import java.util.List;
 import java.util.Optional;
 
+import static edu.bu.archive.testsupport.SubawardFixtures.subawardRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -204,13 +205,4 @@ class SubawardArchiveRepositoryTest {
                 .replaceAll("\\s+", " ");
     }
 
-    private SubawardRowResponse subawardRow() {
-        return new SubawardRowResponse(
-                101L, "DOC-101", 4, "1004", null, null, null, null,
-                null, "Subaward title", null, "Active", null, null, null,
-                null, null, null, null, null, null, null, null, null, null,
-                null, "ACTIVE", null, null, null, null, null, null, null,
-                1L, "OBJECT-1", null, null, 1L, "DOCUMENT-OBJECT-1"
-        );
-    }
 }
