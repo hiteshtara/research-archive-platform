@@ -10,6 +10,10 @@ import edu.bu.archive.domain.model.ai.AiResponse;
 import edu.bu.archive.domain.model.ai.AwardAiContext;
 import edu.bu.archive.domain.model.ai.AwardAiContextChanges;
 import edu.bu.archive.domain.model.ai.AwardAiContextRecord;
+import edu.bu.archive.domain.model.ai.AiCitation;
+import edu.bu.archive.domain.model.ai.AwardQuestionProviderRequest;
+import edu.bu.archive.domain.model.ai.AwardQuestionProviderResponse;
+import edu.bu.archive.domain.model.ai.AwardQuestionSupport;
 
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -301,6 +305,95 @@ class OpenAiProviderTest {
                 .hasMessage("OpenAI returned an invalid response");
     }
 
+    @Test
+    void sendsStrictQuestionSupportsAndMapsSelection()
+            throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn(
+                responseWithOutput("""
+                        {
+                          "supportIds": [
+                            "status:sequence-1:sequence-2"
+                          ],
+                          "citations": [
+                            {
+                              "recordType": "award",
+                              "recordId": "102",
+                              "awardNumber": "A-100",
+                              "sequenceNumber": 2
+                            }
+                          ]
+                        }
+                        """)
+        );
+        when(httpClient.send(
+                any(HttpRequest.class),
+                any(HttpResponse.BodyHandler.class)
+        )).thenReturn(httpResponse);
+
+        AwardQuestionProviderResponse response =
+                provider.answerQuestion(questionRequest());
+
+        assertThat(response.supportIds()).containsExactly(
+                "status:sequence-1:sequence-2"
+        );
+        assertThat(response.citations()).containsExactly(
+                new AiCitation("award", "102", "A-100", 2)
+        );
+        assertThat(response.provider()).isEqualTo("openai");
+        assertThat(response.inputTokenCount()).isEqualTo(120L);
+
+        JsonNode body = objectMapper.readTree(
+                provider.questionRequestBody(questionRequest())
+        );
+        assertThat(body.path("store").asBoolean()).isFalse();
+        assertThat(body.at("/text/format/strict").asBoolean())
+                .isTrue();
+        assertThat(body.at(
+                "/text/format/schema/additionalProperties"
+        ).asBoolean()).isFalse();
+        assertThat(body.at(
+                "/text/format/schema/properties/citations/items"
+                        + "/additionalProperties"
+        ).asBoolean()).isFalse();
+        assertThat(body.at("/input/0/content/0/text").asText())
+                .contains("untrusted")
+                .contains("status:sequence-1:sequence-2")
+                .doesNotContain(API_KEY);
+    }
+
+    @Test
+    void rejectsQuestionOutputWithUnsupportedFields()
+            throws Exception {
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.body()).thenReturn(
+                responseWithOutput("""
+                        {
+                          "supportIds": ["support"],
+                          "citations": [
+                            {
+                              "recordType": "award",
+                              "recordId": "102",
+                              "awardNumber": "A-100",
+                              "sequenceNumber": 2
+                            }
+                          ],
+                          "answer": "Model-authored fact"
+                        }
+                        """)
+        );
+        when(httpClient.send(
+                any(HttpRequest.class),
+                any(HttpResponse.BodyHandler.class)
+        )).thenReturn(httpResponse);
+
+        assertThatThrownBy(() ->
+                provider.answerQuestion(questionRequest())
+        )
+                .isInstanceOf(AiProviderException.class)
+                .hasMessage("OpenAI returned an invalid response");
+    }
+
     private AiProperties properties() {
         AiProperties properties = new AiProperties();
         properties.setOpenAiModel("gpt-5");
@@ -337,6 +430,33 @@ class OpenAiProviderTest {
                         List.of(record),
                         false
                 )
+        );
+    }
+
+    private AwardQuestionProviderRequest questionRequest() {
+        return new AwardQuestionProviderRequest(
+                "Select only supplied support IDs.",
+                "Compare sequence 1 and sequence 2",
+                "A-100",
+                List.of(new AwardQuestionSupport(
+                        "status:sequence-1:sequence-2",
+                        "Status changed from Active to Closed.",
+                        List.of(
+                                new AiCitation(
+                                        "award",
+                                        "101",
+                                        "A-100",
+                                        1
+                                ),
+                                new AiCitation(
+                                        "award",
+                                        "102",
+                                        "A-100",
+                                        2
+                                )
+                        )
+                )),
+                false
         );
     }
 

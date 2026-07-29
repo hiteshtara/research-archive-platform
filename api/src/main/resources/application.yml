@@ -56,12 +56,14 @@ app:
     enabled: ${APP_AI_ENABLED:${AI_ENABLED:false}}
     stub-enabled: ${APP_AI_STUB_ENABLED:${AI_STUB_ENABLED:false}}
     openai-enabled: ${APP_AI_OPENAI_ENABLED:false}
+    questions-enabled: ${APP_AI_QUESTIONS_ENABLED:false}
     provider: ${APP_AI_PROVIDER:${AI_PROVIDER:}}
     open-ai-model: ${APP_AI_OPENAI_MODEL:gpt-5-mini}
     open-ai-base-url: ${APP_AI_OPENAI_BASE_URL:https://api.openai.com/v1}
     open-ai-timeout-seconds: ${APP_AI_OPENAI_TIMEOUT_SECONDS:60}
     open-ai-connect-timeout-seconds: ${APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS:10}
     prompt-version: ${APP_AI_PROMPT_VERSION:award-summary-v2}
+    question-prompt-version: ${APP_AI_QUESTION_PROMPT_VERSION:award-question-v1}
     cache-enabled: ${APP_AI_CACHE_ENABLED:false}
     cache-max-entries: ${APP_AI_CACHE_MAX_ENTRIES:250}
     max-records: ${AI_MAX_RECORDS:100}

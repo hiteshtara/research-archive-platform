@@ -35,8 +35,11 @@ import {
   getAwardWorkspace,
 } from "../api/client";
 import { AwardAiSummaryPanel } from "../features/ai/AwardAiSummaryPanel";
+import { AwardAiQuestionPanel } from "../features/ai/AwardAiQuestionPanel";
 
 const AI_SUMMARY_ENABLED = import.meta.env.VITE_AI_ENABLED === "true";
+const AI_QUESTIONS_ENABLED =
+  import.meta.env.VITE_AI_QUESTIONS_ENABLED === "true";
 
 const tabs = [
   "General",
@@ -207,6 +210,10 @@ export function AwardHistoryPage() {
 
       {AI_SUMMARY_ENABLED && (
         <AwardAiSummaryPanel awardNumber={current.awardNumber} />
+      )}
+
+      {AI_QUESTIONS_ENABLED && (
+        <AwardAiQuestionPanel awardNumber={current.awardNumber} />
       )}
 
       <Card>

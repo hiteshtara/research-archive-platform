@@ -5,6 +5,8 @@ import edu.bu.archive.domain.model.ai.AiCitation;
 import edu.bu.archive.domain.model.ai.AiRequest;
 import edu.bu.archive.domain.model.ai.AiResponse;
 import edu.bu.archive.domain.model.ai.AwardAiContextRecord;
+import edu.bu.archive.domain.model.ai.AwardQuestionProviderRequest;
+import edu.bu.archive.domain.model.ai.AwardQuestionProviderResponse;
 
 import java.util.List;
 
@@ -89,6 +91,29 @@ public class StubAiProvider implements AiProvider {
                         ? "The supplied archive context was truncated."
                         : "The supplied archive context was complete.",
                 citations,
+                providerName(),
+                modelName(),
+                null,
+                null
+        );
+    }
+
+    @Override
+    public AwardQuestionProviderResponse answerQuestion(
+            AwardQuestionProviderRequest request
+    ) {
+        return new AwardQuestionProviderResponse(
+                request.supports()
+                        .stream()
+                        .map(support -> support.supportId())
+                        .toList(),
+                request.supports()
+                        .stream()
+                        .flatMap(support ->
+                                support.citations().stream()
+                        )
+                        .distinct()
+                        .toList(),
                 providerName(),
                 modelName(),
                 null,

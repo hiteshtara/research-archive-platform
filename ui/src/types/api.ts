@@ -525,6 +525,15 @@ export interface AwardAiSummaryResponse {
   correlationId: string;
 }
 
+export interface AwardAiQuestionResponse {
+  answer: string;
+  answerType: string;
+  citations: AiCitation[];
+  provider: string;
+  model: string;
+  correlationId: string;
+}
+
 export interface AwardAiCurrentRecord {
   awardId: number;
   awardNumber: string;
