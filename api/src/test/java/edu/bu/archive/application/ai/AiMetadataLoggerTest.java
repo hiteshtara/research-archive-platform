@@ -84,4 +84,72 @@ class AiMetadataLoggerTest {
             appender.stop();
         }
     }
+
+    @Test
+    void logsQuestionIdentityAndSafeMetadataWithoutQuestionText() {
+        Logger logger = (Logger) LoggerFactory.getLogger(
+                AiMetadataLogger.class
+        );
+        ListAppender<ILoggingEvent> appender =
+                new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try {
+            new AiMetadataLogger().logQuestion(
+                    UUID.fromString(
+                            "22222222-2222-2222-2222-222222222222"
+                    ),
+                    "jwt-subject",
+                    "A-100",
+                    "deterministic",
+                    "none",
+                    4L,
+                    0,
+                    2,
+                    "deterministic_question_success",
+                    null,
+                    null,
+                    "award-question-v1",
+                    "question-prompt-hash",
+                    "deterministic_fact",
+                    27
+            );
+
+            ILoggingEvent event =
+                    appender.list.getFirst();
+            Map<String, Object> metadata =
+                    event.getKeyValuePairs()
+                            .stream()
+                            .collect(Collectors.toMap(
+                                    pair -> pair.key,
+                                    pair -> pair.value
+                            ));
+
+            assertThat(metadata)
+                    .containsEntry("operation", "award_question")
+                    .containsEntry(
+                            "authenticatedUserId",
+                            "jwt-subject"
+                    )
+                    .containsEntry("questionCharacters", 27)
+                    .containsEntry(
+                            "promptVersion",
+                            "award-question-v1"
+                    )
+                    .containsEntry(
+                            "promptHash",
+                            "question-prompt-hash"
+                    );
+            assertThat(event.getFormattedMessage())
+                    .doesNotContain(
+                            "What is",
+                            "Bearer",
+                            "OPENAI_API_KEY"
+                    );
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
 }

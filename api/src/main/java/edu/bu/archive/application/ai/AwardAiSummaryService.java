@@ -20,12 +20,9 @@ import edu.bu.archive.domain.model.ai.AwardAiTimelineRecord;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -69,6 +66,7 @@ public class AwardAiSummaryService {
     private final AiModelRouter modelRouter;
     private final AiMetadataLogger metadataLogger;
     private final AwardAiSummaryCache summaryCache;
+    private final AwardCitationValidator citationValidator;
     private final AiProperties properties;
     private final Clock clock;
 
@@ -79,6 +77,7 @@ public class AwardAiSummaryService {
             AiModelRouter modelRouter,
             AiMetadataLogger metadataLogger,
             AwardAiSummaryCache summaryCache,
+            AwardCitationValidator citationValidator,
             AiProperties properties
     ) {
         this(
@@ -87,6 +86,7 @@ public class AwardAiSummaryService {
                 modelRouter,
                 metadataLogger,
                 summaryCache,
+                citationValidator,
                 properties,
                 Clock.systemUTC()
         );
@@ -98,6 +98,7 @@ public class AwardAiSummaryService {
             AiModelRouter modelRouter,
             AiMetadataLogger metadataLogger,
             AwardAiSummaryCache summaryCache,
+            AwardCitationValidator citationValidator,
             AiProperties properties,
             Clock clock
     ) {
@@ -106,6 +107,7 @@ public class AwardAiSummaryService {
         this.modelRouter = modelRouter;
         this.metadataLogger = metadataLogger;
         this.summaryCache = summaryCache;
+        this.citationValidator = citationValidator;
         this.properties = properties;
         this.clock = clock;
     }
@@ -350,64 +352,11 @@ public class AwardAiSummaryService {
             );
         }
 
-        Map<String, AwardAiContextRecord> suppliedRecords =
-                new HashMap<>();
-        context.records().forEach(record ->
-                suppliedRecords.put(
-                        String.valueOf(record.awardId()),
-                        record
-                )
-        );
-
-        if (response.citations().isEmpty()) {
-            throw new AiProviderException(
-                    "AI provider returned an invalid response"
-            );
-        }
-
         List<AiCitation> validatedCitations =
-                new ArrayList<>();
-        for (AiCitation citation : response.citations()) {
-            if (citation == null) {
-                throw new AiProviderException(
-                        "AI provider returned an unsupported citation"
+                citationValidator.validateRequired(
+                        response.citations(),
+                        citationsFrom(context)
                 );
-            }
-
-            String recordId = normalizeCitationValue(
-                    citation.recordId()
-            );
-            AwardAiContextRecord supplied =
-                    suppliedRecords.get(recordId);
-
-            if (supplied == null
-                    || !"award".equalsIgnoreCase(
-                            normalizeCitationValue(
-                                    citation.recordType()
-                            )
-                    )
-                    || !Objects.equals(
-                            context.awardNumber(),
-                            normalizeCitationValue(
-                                    citation.awardNumber()
-                            )
-                    )
-                    || !Objects.equals(
-                            supplied.sequenceNumber(),
-                            citation.sequenceNumber()
-                    )) {
-                throw new AiProviderException(
-                        "AI provider returned an unsupported citation"
-                );
-            }
-
-            validatedCitations.add(new AiCitation(
-                    "award",
-                    String.valueOf(supplied.awardId()),
-                    context.awardNumber(),
-                    supplied.sequenceNumber()
-            ));
-        }
 
         return new AiResponse(
                 response.overview(),
