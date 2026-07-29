@@ -13,7 +13,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice(assignableTypes = AwardAiController.class)
+@RestControllerAdvice(assignableTypes = {
+        AwardAiController.class,
+        AwardAiQuestionController.class
+})
 public class AiExceptionHandler {
 
     private static final Logger LOG =

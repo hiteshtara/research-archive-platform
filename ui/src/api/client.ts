@@ -1,6 +1,7 @@
 import { accessToken } from "../auth";
 
 import type {
+  AwardAiQuestionResponse,
   AwardAiSummaryResponse,
   DashboardSummary,
   IrbProtocol,
@@ -61,6 +62,7 @@ async function request<T>(
   path: string,
   signal?: AbortSignal,
   method: "GET" | "POST" = "GET",
+  body?: unknown,
 ): Promise<T> {
   const token = await accessToken();
 
@@ -74,7 +76,11 @@ async function request<T>(
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
+      ...(body === undefined
+        ? {}
+        : { "Content-Type": "application/json" }),
     },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -423,6 +429,19 @@ export function generateAwardAiSummary(
     `/api/ai/awards/${encodeURIComponent(awardNumber)}/summary`,
     signal,
     "POST",
+  );
+}
+
+export function askAwardQuestion(
+  awardNumber: string,
+  question: string,
+  signal?: AbortSignal,
+): Promise<AwardAiQuestionResponse> {
+  return request(
+    `/api/ai/awards/${encodeURIComponent(awardNumber)}/questions`,
+    signal,
+    "POST",
+    { question },
   );
 }
 

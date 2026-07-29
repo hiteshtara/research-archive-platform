@@ -8,12 +8,14 @@ public class AiProperties {
     private boolean enabled;
     private boolean stubEnabled;
     private boolean openaiEnabled;
+    private boolean questionsEnabled;
     private String provider = "";
     private String openAiModel = "gpt-5-mini";
     private String openAiBaseUrl = "https://api.openai.com/v1";
     private int openAiTimeoutSeconds = 60;
     private int openAiConnectTimeoutSeconds = 10;
     private String promptVersion = "award-summary-v2";
+    private String questionPromptVersion = "award-question-v1";
     private boolean cacheEnabled;
     private int cacheMaxEntries = 250;
     private int maxRecords = 100;
@@ -45,6 +47,16 @@ public class AiProperties {
 
     public boolean isOpenaiEnabled() {
         return openaiEnabled;
+    }
+
+    public boolean isQuestionsEnabled() {
+        return questionsEnabled;
+    }
+
+    public void setQuestionsEnabled(
+            boolean questionsEnabled
+    ) {
+        this.questionsEnabled = questionsEnabled;
     }
 
     public void setOpenaiEnabled(
@@ -108,6 +120,16 @@ public class AiProperties {
             String promptVersion
     ) {
         this.promptVersion = promptVersion;
+    }
+
+    public String getQuestionPromptVersion() {
+        return questionPromptVersion;
+    }
+
+    public void setQuestionPromptVersion(
+            String questionPromptVersion
+    ) {
+        this.questionPromptVersion = questionPromptVersion;
     }
 
     public boolean isCacheEnabled() {

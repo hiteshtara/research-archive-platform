@@ -2,6 +2,8 @@ package edu.bu.archive.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.bu.archive.adapter.in.web.AwardAiController;
+import edu.bu.archive.adapter.in.web.AwardAiQuestionController;
+import edu.bu.archive.application.ai.AwardAiQuestionService;
 import edu.bu.archive.application.ai.AwardAiSummaryService;
 import edu.bu.archive.application.port.out.AiProvider;
 
@@ -26,6 +28,16 @@ class AiFeatureFlagTest {
                     .withUserConfiguration(AiConfiguration.class)
                     .withBean(ObjectMapper.class, ObjectMapper::new);
 
+    private final ApplicationContextRunner questionContextRunner =
+            new ApplicationContextRunner()
+                    .withUserConfiguration(
+                            AwardAiQuestionController.class
+                    )
+                    .withBean(
+                            AwardAiQuestionService.class,
+                            () -> mock(AwardAiQuestionService.class)
+                    );
+
     @Test
     void endpointBeanIsAbsentWhenFeatureIsDisabled() {
         contextRunner
@@ -46,6 +58,45 @@ class AiFeatureFlagTest {
                         assertThat(context)
                                 .hasSingleBean(
                                         AwardAiController.class
+                                )
+                );
+    }
+
+    @Test
+    void questionEndpointRequiresBothFeatureFlags() {
+        questionContextRunner
+                .withPropertyValues(
+                        "app.ai.enabled=true",
+                        "app.ai.questions-enabled=false"
+                )
+                .run(context ->
+                        assertThat(context)
+                                .doesNotHaveBean(
+                                        AwardAiQuestionController.class
+                                )
+                );
+
+        questionContextRunner
+                .withPropertyValues(
+                        "app.ai.enabled=false",
+                        "app.ai.questions-enabled=true"
+                )
+                .run(context ->
+                        assertThat(context)
+                                .doesNotHaveBean(
+                                        AwardAiQuestionController.class
+                                )
+                );
+
+        questionContextRunner
+                .withPropertyValues(
+                        "app.ai.enabled=true",
+                        "app.ai.questions-enabled=true"
+                )
+                .run(context ->
+                        assertThat(context)
+                                .hasSingleBean(
+                                        AwardAiQuestionController.class
                                 )
                 );
     }
