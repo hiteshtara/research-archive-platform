@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.ai;
 import edu.bu.archive.domain.model.ai.AiRequest;
 import edu.bu.archive.domain.model.ai.AiResponse;
 import edu.bu.archive.domain.model.ai.AwardAiContext;
+import edu.bu.archive.domain.model.ai.AwardAiContextChanges;
 import edu.bu.archive.domain.model.ai.AwardAiContextRecord;
 
 import java.util.List;
@@ -20,20 +21,21 @@ class StubAiProviderTest {
                 "Fixed system prompt",
                 new AwardAiContext(
                         "A-100",
+                        101L,
                         List.of(
                                 new AwardAiContextRecord(
                                         101L,
-                                        "A-100",
                                         1,
-                                        true,
-                                        true,
-                                        "Title",
-                                        "ACTIVE",
-                                        "ACTIVE",
-                                        "Sponsor",
-                                        null,
-                                        "Unit",
-                                        null,
+                                        new AwardAiContextChanges(
+                                                "Title",
+                                                "ACTIVE",
+                                                "ACTIVE",
+                                                "Sponsor",
+                                                null,
+                                                "Unit",
+                                                null,
+                                                null
+                                        ),
                                         null
                                 )
                         ),

@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -126,7 +127,7 @@ class AwardAiSummaryServiceTest {
     @Test
     void modelNarrativeCannotOverrideDeterministicFacts() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(familyWithStatus("ACTIVE"));
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any())).thenReturn(new AiResponse(
                 """
                 {"currentRecord":{"status":"MODEL STATUS"},\
@@ -149,23 +150,18 @@ class AwardAiSummaryServiceTest {
         assertThat(result.currentRecord().status())
                 .isEqualTo("ACTIVE");
         assertThat(result.currentRecord().sponsor())
-                .isEqualTo("Authoritative sponsor");
+                .isEqualTo("Sponsor");
         assertThat(result.currentRecord().leadUnit())
-                .isEqualTo("Authoritative unit");
+                .isEqualTo("Unit");
         assertThat(result.timeline())
-                .singleElement()
-                .satisfies(record -> {
-                    assertThat(record.sequenceNumber())
-                            .isEqualTo(1);
-                    assertThat(record.status())
-                            .isEqualTo("ACTIVE");
-                });
+                .extracting(record -> record.sequenceNumber())
+                .containsExactly(1, 2);
     }
 
     @Test
     void rejectsBlankNarrativeSections() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(family());
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any())).thenReturn(new AiResponse(
                 "Overview",
                 List.of(" "),
@@ -205,8 +201,8 @@ class AwardAiSummaryServiceTest {
         );
         when(awardArchiveService.findFamily("A-100"))
                 .thenReturn(
-                        family(),
-                        familyWithStatus("CLOSED")
+                        multiSequenceFamilyWithStatus("ACTIVE"),
+                        multiSequenceFamilyWithStatus("CLOSED")
                 );
         when(awardArchiveService.findCurrentPeople("A-100"))
                 .thenReturn(
@@ -233,7 +229,7 @@ class AwardAiSummaryServiceTest {
         assertThat(second.currentRecord().principalInvestigators())
                 .containsExactly("Updated PI");
         assertThat(second.timeline())
-                .singleElement()
+                .last()
                 .satisfies(record ->
                         assertThat(record.status())
                                 .isEqualTo("CLOSED")
@@ -248,7 +244,7 @@ class AwardAiSummaryServiceTest {
     @Test
     void usesHyphenatedAwardFamilyWithoutPhysicalIdResolution() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(family());
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any()))
                 .thenReturn(validResponse("101"));
 
@@ -266,11 +262,11 @@ class AwardAiSummaryServiceTest {
         assertThat(result.response().overview())
                 .isEqualTo("Safe summary");
         assertThat(request.getValue().awardContext().records())
-                .hasSize(1);
+                .hasSize(2);
         assertThat(request.getValue().awardContext().records().getFirst())
                 .satisfies(record -> {
                     assertThat(record.awardId()).isEqualTo(101L);
-                    assertThat(record.title())
+                    assertThat(record.changes().title())
                             .doesNotContain("person@example.edu")
                             .doesNotContain("TOP-SECRET")
                             .doesNotContain("jdbc:postgresql");
@@ -290,8 +286,11 @@ class AwardAiSummaryServiceTest {
                 eq("stub"),
                 eq("deterministic-award-summary-v1"),
                 eq(0L),
-                eq(1),
-                eq("SUCCESS"),
+                eq(serializedLength(
+                        request.getValue().awardContext()
+                )),
+                eq(2),
+                eq("ai_success"),
                 eq(null),
                 eq(null),
                 eq(false),
@@ -301,9 +300,162 @@ class AwardAiSummaryServiceTest {
     }
 
     @Test
-    void rejectsFabricatedCitationsAndLogsSafeFailure() {
+    void singleSequenceUsesImmediateDeterministicPath() {
         when(awardArchiveService.findFamily("A-100"))
                 .thenReturn(family());
+
+        AwardAiSummaryResult result =
+                service.summarize("A-100", "user-subject");
+
+        verify(provider, never()).generate(any());
+        assertThat(result.response().provider())
+                .isEqualTo("deterministic");
+        assertThat(result.response().model()).isEqualTo("none");
+        assertThat(result.response().overview())
+                .contains(
+                        "Award A-100 has 1 archived sequence.",
+                        "Current status: ACTIVE.",
+                        "Sponsor: Sponsor.",
+                        "Prime sponsor: Prime.",
+                        "Lead unit: Unit.",
+                        "Begin date: 2020-01-01."
+                )
+                .doesNotContain("Closeout date");
+        assertThat(result.response().notableChanges())
+                .containsExactly(
+                        "There are no historical sequence changes "
+                                + "to summarize."
+                );
+        assertThat(result.response().citations())
+                .containsExactly(citation("101", 1));
+        assertThat(result.timeline())
+                .extracting(record -> record.awardId())
+                .containsExactly(101L);
+        verify(metadataLogger).log(
+                eq(result.correlationId()),
+                eq("user-subject"),
+                eq("AWARD"),
+                eq("A-100"),
+                eq("deterministic"),
+                eq("none"),
+                eq(0L),
+                anyInt(),
+                eq(1),
+                eq("deterministic_single_sequence"),
+                eq(null),
+                eq(null),
+                eq(false),
+                eq("award-summary-v2"),
+                eq(AwardAiSummaryService.SYSTEM_PROMPT_HASH)
+        );
+    }
+
+    @Test
+    void deterministicSummaryOmitsUnavailableFacts() {
+        AwardRowResponse row = new AwardRowResponse(
+                201L, "B-200", 1, "Title", null, null,
+                null, null, null, null, null, null, null,
+                true, true
+        );
+        when(awardArchiveService.findFamily("B-200"))
+                .thenReturn(new AwardFamilyResponse(
+                        "B-200",
+                        row,
+                        List.of(new AwardSequenceResponse(
+                                1, true, List.of(row)
+                        ))
+                ));
+
+        AwardAiSummaryResult result =
+                service.summarize("B-200", "user-subject");
+
+        assertThat(result.response().overview())
+                .isEqualTo(
+                        "Award B-200 has 1 archived sequence."
+                )
+                .doesNotContain(
+                        "null",
+                        "Current status",
+                        "Sponsor",
+                        "Lead unit",
+                        "date"
+                );
+        verify(provider, never()).generate(any());
+    }
+
+    @Test
+    void multiSequenceStillInvokesConfiguredProvider() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(familyWithOutOfOrderRows());
+        when(provider.generate(any()))
+                .thenReturn(validResponse("101"));
+
+        AwardAiSummaryResult result =
+                service.summarize("A-100", "user-subject");
+
+        verify(provider).generate(any());
+        assertThat(result.response().provider()).isEqualTo("stub");
+        assertThat(result.response().overview())
+                .isEqualTo("Safe summary");
+    }
+
+    @Test
+    void blankValidAiNarrativeUsesDeterministicFallback() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(familyWithOutOfOrderRows());
+        when(provider.generate(any())).thenReturn(new AiResponse(
+                " ",
+                List.of(),
+                "",
+                List.of(citation("101", 1)),
+                "stub",
+                "deterministic-award-summary-v1",
+                12L,
+                3L
+        ));
+
+        AwardAiSummaryResult result =
+                service.summarize("A-100", "user-subject");
+
+        assertThat(result.response().provider())
+                .isEqualTo("deterministic");
+        assertThat(result.response().model()).isEqualTo("none");
+        assertThat(result.response().overview())
+                .contains(
+                        "Award A-100 has 2 archived sequences.",
+                        "Current status: ACTIVE.",
+                        "Sponsor: Sponsor."
+                );
+        assertThat(result.response().citations())
+                .containsExactly(citation("101", 1));
+        assertThat(result.currentRecord().awardId())
+                .isEqualTo(102L);
+        assertThat(result.timeline())
+                .extracting(record -> record.awardId())
+                .containsExactly(101L, 102L);
+        verify(metadataLogger).log(
+                eq(result.correlationId()),
+                eq("user-subject"),
+                eq("AWARD"),
+                eq("A-100"),
+                eq("stub"),
+                eq("deterministic-award-summary-v1"),
+                eq(0L),
+                anyInt(),
+                eq(2),
+                eq("deterministic_empty_narrative_fallback"),
+                eq(12L),
+                eq(3L),
+                eq(false),
+                eq("award-summary-v2"),
+                eq(AwardAiSummaryService.SYSTEM_PROMPT_HASH)
+        );
+    }
+
+    @Test
+    void rejectsFabricatedCitationsAndLogsSafeFailure() {
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any()))
                 .thenReturn(validResponse("999"));
 
@@ -329,8 +481,9 @@ class AwardAiSummaryServiceTest {
                 eq("stub"),
                 eq("deterministic-award-summary-v1"),
                 eq(0L),
-                eq(1),
-                eq("PROVIDER_FAILURE"),
+                anyInt(),
+                eq(2),
+                eq("ai_failure"),
                 eq(null),
                 eq(null),
                 eq(false),
@@ -344,7 +497,7 @@ class AwardAiSummaryServiceTest {
     @Test
     void acceptsAndCanonicalizesGptCitationPresentation() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(family());
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any()))
                 .thenReturn(responseWithCitations(
                         List.of(new AiCitation(
@@ -370,7 +523,7 @@ class AwardAiSummaryServiceTest {
     @Test
     void rejectsCitationWithMismatchedSequence() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(family());
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any()))
                 .thenReturn(responseWithCitations(
                         List.of(new AiCitation(
@@ -394,7 +547,7 @@ class AwardAiSummaryServiceTest {
     @Test
     void rejectsResponseWithMissingCitations() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(family());
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any()))
                 .thenReturn(responseWithCitations(List.of()));
 
@@ -411,7 +564,7 @@ class AwardAiSummaryServiceTest {
     @Test
     void rejectsUnsupportedCitationType() {
         when(awardArchiveService.findFamily("A-100"))
-                .thenReturn(family());
+                .thenReturn(familyWithOutOfOrderRows());
         when(provider.generate(any()))
                 .thenReturn(responseWithCitations(
                         List.of(new AiCitation(
@@ -452,11 +605,12 @@ class AwardAiSummaryServiceTest {
                 eq("user-subject"),
                 eq("AWARD"),
                 eq("UNKNOWN"),
-                eq("stub"),
-                eq("deterministic-award-summary-v1"),
+                eq("unresolved"),
+                eq("unresolved"),
                 eq(0L),
+                anyInt(),
                 eq(0),
-                eq("NOT_FOUND"),
+                eq("ai_failure"),
                 eq(null),
                 eq(null),
                 eq(false),
@@ -476,6 +630,19 @@ class AwardAiSummaryServiceTest {
                         1
                 )
         ));
+    }
+
+    private int serializedLength(
+            edu.bu.archive.domain.model.ai.AwardAiContext context
+    ) {
+        try {
+            return new ObjectMapper()
+                    .findAndRegisterModules()
+                    .writeValueAsString(context)
+                    .length();
+        } catch (Exception exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     private AiResponse responseWithCitations(
@@ -648,6 +815,47 @@ class AwardAiSummaryServiceTest {
                         true,
                         List.of(row)
                 ))
+        );
+    }
+
+    private AwardFamilyResponse multiSequenceFamilyWithStatus(
+            String status
+    ) {
+        AwardRowResponse historical = row(
+                101L,
+                1,
+                false,
+                false,
+                LocalDate.of(2020, 1, 1)
+        );
+        AwardRowResponse current = new AwardRowResponse(
+                102L,
+                "A-100",
+                2,
+                "Authoritative updated title",
+                status,
+                status,
+                "Authoritative sponsor",
+                "Prime",
+                "Authoritative unit",
+                null,
+                null,
+                LocalDate.of(2021, 1, 1),
+                null,
+                true,
+                true
+        );
+        return new AwardFamilyResponse(
+                "A-100",
+                current,
+                List.of(
+                        new AwardSequenceResponse(
+                                1, false, List.of(historical)
+                        ),
+                        new AwardSequenceResponse(
+                                2, true, List.of(current)
+                        )
+                )
         );
     }
 }

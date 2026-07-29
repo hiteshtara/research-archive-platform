@@ -9,7 +9,7 @@ public class AiProperties {
     private boolean stubEnabled;
     private boolean openaiEnabled;
     private String provider = "";
-    private String openAiModel = "gpt-5";
+    private String openAiModel = "gpt-5-mini";
     private String openAiBaseUrl = "https://api.openai.com/v1";
     private int openAiTimeoutSeconds = 60;
     private int openAiConnectTimeoutSeconds = 10;

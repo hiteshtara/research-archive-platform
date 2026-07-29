@@ -71,7 +71,7 @@ class AiPropertiesBindingTest {
                     assertThat(properties.isOpenaiEnabled()).isFalse();
                     assertThat(properties.getProvider()).isEmpty();
                     assertThat(properties.getOpenAiModel())
-                            .isEqualTo("gpt-5");
+                            .isEqualTo("gpt-5-mini");
                     assertThat(properties.getOpenAiBaseUrl())
                             .isEqualTo(
                                     "https://api.openai.com/v1"

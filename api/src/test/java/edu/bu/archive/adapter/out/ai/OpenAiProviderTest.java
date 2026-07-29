@@ -8,6 +8,7 @@ import edu.bu.archive.config.AiProperties;
 import edu.bu.archive.domain.model.ai.AiRequest;
 import edu.bu.archive.domain.model.ai.AiResponse;
 import edu.bu.archive.domain.model.ai.AwardAiContext;
+import edu.bu.archive.domain.model.ai.AwardAiContextChanges;
 import edu.bu.archive.domain.model.ai.AwardAiContextRecord;
 
 import java.net.http.HttpClient;
@@ -136,6 +137,11 @@ class OpenAiProviderTest {
         assertThat(body.at("/input/0/content/0/text").asText())
                 .contains("\"awardId\":101")
                 .contains("\"awardNumber\":\"A-100\"")
+                .contains("\"currentAwardId\":101")
+                .contains("\"changes\":{")
+                .containsOnlyOnce("\"awardNumber\":\"A-100\"")
+                .doesNotContain("\"current\":")
+                .doesNotContain("\"primaryCurrent\":")
                 .doesNotContain(API_KEY);
     }
 
@@ -296,23 +302,24 @@ class OpenAiProviderTest {
         AwardAiContextRecord record =
                 new AwardAiContextRecord(
                         101L,
-                        "A-100",
                         2,
-                        true,
-                        true,
-                        "Archived title",
-                        "Active",
-                        "Final",
-                        "Sponsor",
-                        null,
-                        "Lead unit",
-                        LocalDate.of(2020, 1, 1),
+                        new AwardAiContextChanges(
+                                "Archived title",
+                                "Active",
+                                "Final",
+                                "Sponsor",
+                                null,
+                                "Lead unit",
+                                LocalDate.of(2020, 1, 1),
+                                null
+                        ),
                         null
                 );
         return new AiRequest(
                 "Use only the supplied context.",
                 new AwardAiContext(
                         "A-100",
+                        101L,
                         List.of(record),
                         false
                 )

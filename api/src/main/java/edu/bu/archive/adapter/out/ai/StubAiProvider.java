@@ -44,20 +44,26 @@ public class StubAiProvider implements AiProvider {
 
         AwardAiContextRecord current = records.stream()
                 .filter(record ->
-                        Boolean.TRUE.equals(record.primaryCurrent())
+                        record.awardId().equals(
+                                request.awardContext()
+                                        .currentAwardId()
+                        )
                 )
                 .findFirst()
-                .orElse(records.getFirst());
+                .orElse(records.getLast());
 
         String summary = "Award "
-                + current.awardNumber()
+                + request.awardContext().awardNumber()
                 + " has "
                 + records.size()
                 + " supplied historical archive record(s). "
                 + "The primary current record is sequence "
                 + current.sequenceNumber()
                 + " with status "
-                + valueOrUnknown(current.status())
+                + valueOrUnknown(currentStatus(
+                        records,
+                        current.awardId()
+                ))
                 + "."
                 + (request.awardContext().truncated()
                         ? " The supplied context was truncated."
@@ -67,7 +73,7 @@ public class StubAiProvider implements AiProvider {
                 new AiCitation(
                         "award",
                         String.valueOf(current.awardId()),
-                        current.awardNumber(),
+                        request.awardContext().awardNumber(),
                         current.sequenceNumber()
                 )
         );
@@ -96,5 +102,26 @@ public class StubAiProvider implements AiProvider {
         return value == null || value.isBlank()
                 ? "unknown"
                 : value;
+    }
+
+    private String currentStatus(
+            List<AwardAiContextRecord> records,
+            Long currentAwardId
+    ) {
+        String status = null;
+        for (AwardAiContextRecord record : records) {
+            if (record.clearedFields() != null
+                    && record.clearedFields().contains("status")) {
+                status = null;
+            }
+            if (record.changes() != null
+                    && record.changes().status() != null) {
+                status = record.changes().status();
+            }
+            if (record.awardId().equals(currentAwardId)) {
+                return status;
+            }
+        }
+        return status;
     }
 }

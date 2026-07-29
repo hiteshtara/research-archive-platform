@@ -1,20 +1,19 @@
 package edu.bu.archive.domain.model.ai;
 
-import java.time.LocalDate;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
+import java.util.List;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record AwardAiContextRecord(
         Long awardId,
-        String awardNumber,
         Integer sequenceNumber,
-        Boolean current,
-        Boolean primaryCurrent,
-        String title,
-        String status,
-        String awardSequenceStatus,
-        String sponsor,
-        String primeSponsor,
-        String leadUnit,
-        LocalDate beginDate,
-        LocalDate closeoutDate
+        AwardAiContextChanges changes,
+        List<String> clearedFields
 ) {
+    public AwardAiContextRecord {
+        clearedFields = clearedFields == null
+                ? null
+                : List.copyOf(clearedFields);
+    }
 }
