@@ -15,15 +15,20 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
   ApiRequestError,
   generateAwardAiSummary,
 } from "../../api/client";
 import {
+  currentAwardFacts,
+  estimatedReadingSeconds,
   orderAwardTimeline,
+  sequenceLabelFromChange,
   showDevelopmentMetadata,
   timelineLabel,
+  visibleAwardTimeline,
 } from "./awardAiPresentation.mjs";
 
 interface AwardAiSummaryPanelProps {
@@ -89,24 +94,6 @@ function displayAmount(value: number | null): string {
       }).format(value);
 }
 
-function readingTime(
-  overview: string,
-  notableChanges: string[],
-  archiveAssessment: string,
-): number {
-  const wordCount = [overview, ...notableChanges, archiveAssessment]
-    .join(" ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
-  return Math.max(10, Math.ceil((wordCount / 200) * 12) * 5);
-}
-
-function sequenceFromChange(change: string): string {
-  const match = /\bsequence\s+(\d+)\b/i.exec(change);
-  return match ? `Sequence ${match[1]}` : "Award history";
-}
-
 function errorMessage(error: Error): string {
   if (error instanceof ApiRequestError) {
     switch (error.status) {
@@ -127,6 +114,7 @@ function errorMessage(error: Error): string {
 export function AwardAiSummaryPanel({
   awardNumber,
 }: AwardAiSummaryPanelProps) {
+  const [showAllSequences, setShowAllSequences] = useState(false);
   const summaryMutation = useMutation({
     mutationFn: () => generateAwardAiSummary(awardNumber),
     retry: false,
@@ -145,6 +133,12 @@ export function AwardAiSummaryPanel({
     orderedTimeline.length === 0
       ? 0
       : Math.min(...orderedTimeline.map((record) => record.sequenceNumber));
+  const displayedTimeline = visibleAwardTimeline(
+    orderedTimeline,
+    showAllSequences,
+  );
+  const timelineIsCollapsible =
+    displayedTimeline.length < orderedTimeline.length || showAllSequences;
   const orderedCitations = summary
     ? [...summary.citations].sort(
         (left, right) =>
@@ -152,6 +146,21 @@ export function AwardAiSummaryPanel({
           Number(right.recordId) - Number(left.recordId),
       )
     : [];
+  const currentFacts = summary
+    ? currentAwardFacts(summary.currentRecord, displayAmount)
+    : [];
+  const readingSeconds = summary
+    ? estimatedReadingSeconds([
+        summary.overview,
+        ...summary.notableChanges,
+        summary.archiveAssessment,
+      ])
+    : 10;
+
+  function generateSummary() {
+    setShowAllSequences(false);
+    summaryMutation.mutate();
+  }
 
   return (
     <Card
@@ -187,7 +196,7 @@ export function AwardAiSummaryPanel({
 
             <Button
               variant="contained"
-              onClick={() => summaryMutation.mutate()}
+              onClick={generateSummary}
               disabled={summaryMutation.isPending}
               sx={{ borderRadius: 999, px: 2.5 }}
             >
@@ -246,13 +255,7 @@ export function AwardAiSummaryPanel({
                     aria-hidden="true"
                   />
                   <Typography color="text.secondary" variant="body2">
-                    Estimated reading time ≈{" "}
-                    {readingTime(
-                      summary.overview,
-                      summary.notableChanges,
-                      summary.archiveAssessment,
-                    )}{" "}
-                    sec
+                    Estimated reading time: about {readingSeconds} seconds
                   </Typography>
                 </Stack>
                 <Typography color="text.secondary" variant="caption">
@@ -277,7 +280,7 @@ export function AwardAiSummaryPanel({
                     variant="overline"
                     sx={{ fontWeight: 800, letterSpacing: "0.08em" }}
                   >
-                    Overview
+                    Executive Summary
                   </Typography>
                   <Typography
                     sx={{
@@ -307,41 +310,19 @@ export function AwardAiSummaryPanel({
                     gridTemplateColumns: {
                       xs: "1fr",
                       sm: "repeat(2, minmax(0, 1fr))",
+                      lg: "repeat(3, minmax(0, 1fr))",
                     },
                     m: 0,
                     mt: 2,
                   }}
                 >
-                  <FactCard
-                    label="Status"
-                    value={displayValue(summary.currentRecord.status)}
-                  />
-                  <FactCard
-                    label="Sponsor"
-                    value={displayValue(summary.currentRecord.sponsor)}
-                  />
-                  <FactCard
-                    label="Lead Unit"
-                    value={displayValue(summary.currentRecord.leadUnit)}
-                  />
-                  <FactCard
-                    label="Principal PI"
-                    value={
-                      summary.currentRecord.principalInvestigators.length > 0
-                        ? summary.currentRecord.principalInvestigators.join(", ")
-                        : "Not available"
-                    }
-                  />
-                  <FactCard
-                    label="Sequence"
-                    value={String(summary.currentRecord.sequenceNumber)}
-                  />
-                  <FactCard
-                    label="Amount"
-                    value={displayAmount(
-                      summary.currentRecord.anticipatedTotalAmount,
-                    )}
-                  />
+                  {currentFacts.map((fact) => (
+                    <FactCard
+                      key={fact.label}
+                      label={fact.label}
+                      value={fact.value}
+                    />
+                  ))}
                 </Box>
               </Box>
 
@@ -357,7 +338,7 @@ export function AwardAiSummaryPanel({
                   aria-label="Award history timeline"
                   sx={{ listStyle: "none", m: 0, mt: 2, p: 0 }}
                 >
-                  {orderedTimeline.map((record, index) => {
+                  {displayedTimeline.map((record, index) => {
                     const label = timelineLabel(
                       record.sequenceNumber,
                       summary.currentRecord.sequenceNumber,
@@ -370,7 +351,8 @@ export function AwardAiSummaryPanel({
                         sx={{
                           display: "grid",
                           gridTemplateColumns: "28px minmax(0, 1fr)",
-                          minHeight: index < orderedTimeline.length - 1 ? 104 : 72,
+                          minHeight:
+                            index < displayedTimeline.length - 1 ? 84 : 64,
                         }}
                       >
                         <Box
@@ -393,7 +375,7 @@ export function AwardAiSummaryPanel({
                               width: 14,
                             }}
                           />
-                          {index < orderedTimeline.length - 1 && (
+                          {index < displayedTimeline.length - 1 && (
                             <Box
                               sx={{
                                 borderLeft: "2px solid",
@@ -426,18 +408,65 @@ export function AwardAiSummaryPanel({
                             Sequence {record.sequenceNumber}
                           </Typography>
                           <Typography sx={{ mt: 0.25 }}>
-                            {displayValue(record.status)}
+                            <Chip
+                              label={displayValue(record.status)}
+                              size="small"
+                              variant={
+                                label === "Current" ? "filled" : "outlined"
+                              }
+                              color={
+                                label === "Current" ? "primary" : "default"
+                              }
+                            />
+                          </Typography>
+                          {(index === 0 ||
+                            record.sponsor !==
+                              displayedTimeline[index - 1]?.sponsor) &&
+                            record.sponsor && (
+                              <Typography
+                                color="text.secondary"
+                                variant="body2"
+                                sx={{ mt: 0.75 }}
+                              >
+                                Sponsor: {record.sponsor}
+                              </Typography>
+                            )}
+                          {(record.beginDate || record.closeoutDate) && (
+                            <Typography color="text.secondary" variant="body2">
+                              Dates:{" "}
+                              {record.beginDate && record.closeoutDate
+                                ? `${record.beginDate} – ${record.closeoutDate}`
+                                : record.beginDate
+                                  ? `begins ${record.beginDate}`
+                                  : `closeout ${record.closeoutDate}`}
+                            </Typography>
+                          )}
+                          <Typography color="text.secondary" variant="caption">
+                            Award record ID: {record.awardId}
                           </Typography>
                         </Box>
                       </Box>
                     );
                   })}
                 </Box>
+                {timelineIsCollapsible && (
+                  <Button
+                    aria-expanded={showAllSequences}
+                    onClick={() =>
+                      setShowAllSequences((currentlyShown) => !currentlyShown)
+                    }
+                    size="small"
+                    variant="text"
+                    sx={{ mt: 1 }}
+                  >
+                    {showAllSequences ? "Show fewer" : "Show all sequences"}
+                  </Button>
+                )}
               </Box>
 
               <Box component="section" aria-labelledby="major-changes-heading">
                 <Typography id="major-changes-heading" variant="h5">
-                  Major Changes
+                  Key Changes
                 </Typography>
                 <Box
                   sx={{
@@ -481,10 +510,11 @@ export function AwardAiSummaryPanel({
                                 textTransform: "uppercase",
                               }}
                             >
-                              Major Change
+                              Key Change
                             </Typography>
                             <Typography sx={{ fontWeight: 700, mt: 0.5 }}>
-                              {sequenceFromChange(change)}
+                              {sequenceLabelFromChange(change) ??
+                                "Award history"}
                             </Typography>
                             <Typography sx={{ lineHeight: 1.65, mt: 1 }}>
                               {change}
@@ -579,6 +609,21 @@ export function AwardAiSummaryPanel({
                     aria-label="Award summary sources"
                     sx={{ listStyle: "none", m: 0, p: 0 }}
                   >
+                    {orderedCitations.length > 0 && (
+                      <Box
+                        component="li"
+                        sx={{
+                          borderTop: 1,
+                          borderColor: "divider",
+                          px: 2.5,
+                          py: 1.25,
+                        }}
+                      >
+                        <Typography color="text.secondary" variant="body2">
+                          Award {orderedCitations[0].awardNumber}
+                        </Typography>
+                      </Box>
+                    )}
                     {orderedCitations.map((citation) => (
                       <Box
                         component="li"
