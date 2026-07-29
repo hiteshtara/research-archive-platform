@@ -3,6 +3,11 @@ output "alb_dns_name" {
   value       = aws_lb.api.dns_name
 }
 
+output "alb_url" {
+  description = "Public base URL of the API (https if certificate_arn is set, otherwise http)."
+  value       = "${var.certificate_arn == null ? "http" : "https"}://${aws_lb.api.dns_name}"
+}
+
 output "cluster_name" {
   description = "API ECS cluster name."
   value       = aws_ecs_cluster.api.name

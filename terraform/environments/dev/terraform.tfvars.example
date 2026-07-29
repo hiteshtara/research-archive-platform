@@ -1,3 +1,100 @@
+# Copy to terraform.tfvars and fill in real values for your account.
+# terraform.tfvars for this "dev" environment is already tracked in git
+# (it contains no secrets - see README), but if you are standing up your
+# own environment, start from this file instead.
+#
+# Never put amplify_github_access_token, or any other secret, in this file
+# or in terraform.tfvars. Pass secrets via TF_VAR_<name> environment
+# variables instead.
+
+# --- Account safety --------------------------------------------------------
+
+# Run `aws sts get-caller-identity` and confirm this matches before applying.
+expected_account_id = "REPLACE_WITH_YOUR_12_DIGIT_ACCOUNT_ID"
+
+# --- Core --------------------------------------------------------------
+
 aws_region   = "us-east-1"
 project_name = "research-archive-platform"
-environment  = "dev"
+environment  = "dev" # one of: dev, test, prod
+
+# --- Networking ----------------------------------------------------------
+
+vpc_cidr = "10.30.0.0/16"
+
+public_subnet_cidrs = [
+  "10.30.1.0/24",
+  "10.30.2.0/24"
+]
+
+private_subnet_cidrs = [
+  "10.30.11.0/24",
+  "10.30.12.0/24"
+]
+
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b"
+]
+
+database_allowed_cidrs = []
+
+# Only needed if use_private_subnets_for_api = true below.
+enable_nat_gateway          = false
+use_private_subnets_for_api = false
+
+# --- Database ------------------------------------------------------------
+
+database_name             = "research_archive"
+database_master_username  = "archive_admin"
+database_instance_class   = "db.t4g.micro"
+database_deletion_protection    = false
+database_skip_final_snapshot    = true
+database_backup_retention_days  = 7
+
+# --- Container images ------------------------------------------------------
+
+# Avoid "latest" beyond initial bring-up - pin to a real tag (git SHA or
+# release) once you have a build pipeline producing one.
+api_image_tag            = "latest"
+loader_image_tag         = "latest"
+ecr_image_tag_mutability = "MUTABLE"
+ecr_force_delete         = true
+
+# --- API service -----------------------------------------------------------
+
+api_container_port      = 8080
+api_desired_count       = 1
+alb_deletion_protection = false
+
+# --- Domain / TLS ------------------------------------------------------
+
+# Leave both null to bring up the ALB on plain HTTP first; add both once
+# you have a domain and an ACM certificate for it.
+api_domain_name     = null
+api_certificate_arn = null
+
+# --- Cognito -------------------------------------------------------------
+
+# Option A (shown here): bring your own existing User Pool.
+manage_cognito     = false
+cognito_issuer_uri = "https://cognito-idp.REGION.amazonaws.com/REPLACE_WITH_USER_POOL_ID"
+cognito_client_id  = "REPLACE_WITH_APP_CLIENT_ID"
+
+# Option B: let Terraform create the pool - set manage_cognito = true and
+# fill these in instead (delete the two lines above):
+# manage_cognito         = true
+# cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
+# cognito_logout_urls    = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
+
+# --- Amplify / UI hosting --------------------------------------------------
+
+# Option A (shown here): UI is hosted some other way; nothing to configure.
+manage_amplify = false
+
+# Option B: let Terraform create the Amplify app - set manage_amplify = true
+# and fill these in (never put the token in this file - export
+# TF_VAR_amplify_github_access_token instead):
+# manage_amplify          = true
+# amplify_repository_url  = "https://github.com/REPLACE_WITH_ORG/REPLACE_WITH_REPO"
+# amplify_branch_name     = "main"

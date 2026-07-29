@@ -1,0 +1,64 @@
+# Copy to terraform.tfvars and fill in real values. Never put
+# amplify_github_access_token or any other secret here - export
+# TF_VAR_amplify_github_access_token instead.
+
+expected_account_id = "REPLACE_WITH_YOUR_12_DIGIT_ACCOUNT_ID"
+
+aws_region   = "us-east-1"
+project_name = "research-archive-platform"
+environment  = "test"
+
+# Distinct from dev's 10.30.0.0/16 and prod's 10.32.0.0/16 in case these
+# VPCs are ever peered or connected via Transit Gateway.
+vpc_cidr = "10.31.0.0/16"
+
+public_subnet_cidrs = [
+  "10.31.1.0/24",
+  "10.31.2.0/24"
+]
+
+private_subnet_cidrs = [
+  "10.31.11.0/24",
+  "10.31.12.0/24"
+]
+
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b"
+]
+
+database_allowed_cidrs = []
+
+enable_nat_gateway          = false
+use_private_subnets_for_api = false
+
+database_name                  = "research_archive"
+database_master_username       = "archive_admin"
+database_instance_class        = "db.t4g.small"
+database_deletion_protection   = true
+database_skip_final_snapshot   = false
+database_backup_retention_days = 14
+
+api_image_tag            = "REPLACE_WITH_A_REAL_IMAGE_TAG"
+loader_image_tag         = "REPLACE_WITH_A_REAL_IMAGE_TAG"
+ecr_image_tag_mutability = "IMMUTABLE"
+ecr_force_delete         = false
+
+api_container_port      = 8080
+api_desired_count       = 1
+alb_deletion_protection = true
+
+api_domain_name     = null
+api_certificate_arn = null
+
+manage_cognito = true
+cognito_callback_urls = [
+  "https://REPLACE_WITH_YOUR_TEST_UI_DOMAIN/"
+]
+cognito_logout_urls = [
+  "https://REPLACE_WITH_YOUR_TEST_UI_DOMAIN/"
+]
+
+manage_amplify         = true
+amplify_repository_url = "https://github.com/REPLACE_WITH_ORG/REPLACE_WITH_REPO"
+amplify_branch_name    = "test"

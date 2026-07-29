@@ -32,6 +32,7 @@ etl/exports/
 *.tfplan
 terraform.tfvars
 *.auto.tfvars
+backend.hcl
 
 # Local data exports
 data/
