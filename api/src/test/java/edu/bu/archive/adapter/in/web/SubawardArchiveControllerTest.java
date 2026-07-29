@@ -33,7 +33,7 @@ class SubawardArchiveControllerTest {
                 new SubawardArchiveController(service);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
-                .setControllerAdvice(new AwardExceptionHandler())
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 

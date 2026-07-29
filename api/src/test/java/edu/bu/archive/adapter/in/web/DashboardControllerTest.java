@@ -1,6 +1,6 @@
 package edu.bu.archive.adapter.in.web;
 
-import edu.bu.archive.dto.DashboardDto;
+import edu.bu.archive.adapter.in.web.dto.DashboardDto;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;

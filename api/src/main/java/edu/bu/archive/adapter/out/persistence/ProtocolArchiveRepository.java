@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolActionResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolAmendRenewalResponse;
 import edu.bu.archive.adapter.in.web.dto.protocol.ProtocolFundingResponse;
@@ -247,17 +248,16 @@ public class ProtocolArchiveRepository {
                 .filter(FamilySearchRow::hasProtocol)
                 .map(FamilySearchRow::toResponse)
                 .toList();
-        int pages = total == 0
-                ? 0
-                : (int) Math.ceil((double) total / size);
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(page, size, total);
         return new PageResponse<>(
                 content,
                 page,
                 size,
                 total,
-                pages,
-                page == 0,
-                pages == 0 || page >= pages - 1
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
         );
     }
 

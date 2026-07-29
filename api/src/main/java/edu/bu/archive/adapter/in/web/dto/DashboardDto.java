@@ -1,4 +1,4 @@
-package edu.bu.archive.dto;
+package edu.bu.archive.adapter.in.web.dto;
 
 public record DashboardDto(
         long irb,

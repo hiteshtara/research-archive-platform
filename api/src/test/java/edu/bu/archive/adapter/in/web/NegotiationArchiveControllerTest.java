@@ -30,7 +30,7 @@ class NegotiationArchiveControllerTest {
                 new NegotiationArchiveController(service);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
-                .setControllerAdvice(new AwardExceptionHandler())
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 

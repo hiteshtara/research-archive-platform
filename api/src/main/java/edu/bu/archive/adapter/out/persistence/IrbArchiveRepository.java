@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.IrbFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.IrbHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 
 import java.util.List;
 
@@ -304,18 +305,17 @@ public class IrbArchiveRepository {
             int size,
             long total
     ) {
-        int totalPages = total == 0
-                ? 0
-                : (int) Math.ceil((double) total / size);
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(page, size, total);
 
         return new PageResponse<>(
                 content,
                 page,
                 size,
                 total,
-                totalPages,
-                page == 0,
-                totalPages == 0 || page >= totalPages - 1
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
         );
     }
 }

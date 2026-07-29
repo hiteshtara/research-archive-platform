@@ -2,10 +2,5 @@
 
 set -e
 
-URL="https://main.d33qc0afy3ltcj.amplifyapp.com"
-
-echo "$URL"
-
-if command -v open >/dev/null 2>&1; then
-    open "$URL"
-fi
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$REPO_ROOT/ops/open-ui.sh"
