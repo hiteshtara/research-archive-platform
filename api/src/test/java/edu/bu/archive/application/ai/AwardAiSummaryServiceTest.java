@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -397,6 +398,53 @@ class AwardAiSummaryServiceTest {
         assertThat(result.response().provider()).isEqualTo("stub");
         assertThat(result.response().overview())
                 .isEqualTo("Safe summary");
+    }
+
+    @Test
+    void preservesNarrativeForTwentyOneSequenceAward() {
+        AwardFamilyResponse family =
+                familyWithSequenceCount(21);
+        when(awardArchiveService.findFamily("A-100"))
+                .thenReturn(family);
+        when(provider.generate(any())).thenReturn(new AiResponse(
+                "Twenty-one sequence overview",
+                List.of(
+                        "Status changed across archived sequences.",
+                        "Sponsor information changed."
+                ),
+                "Twenty-one archived sequences were supplied.",
+                List.of(
+                        citation("101", 1),
+                        citation("121", 21)
+                ),
+                "stub",
+                "deterministic-award-summary-v1",
+                500L,
+                80L
+        ));
+
+        AwardAiSummaryResult result =
+                service.summarize("A-100", "user-subject");
+
+        verify(provider).generate(any());
+        assertThat(result.response().overview())
+                .isEqualTo("Twenty-one sequence overview");
+        assertThat(result.response().notableChanges())
+                .containsExactly(
+                        "Status changed across archived sequences.",
+                        "Sponsor information changed."
+                );
+        assertThat(result.response().archiveAssessment())
+                .isEqualTo(
+                        "Twenty-one archived sequences were supplied."
+                );
+        assertThat(result.response().citations())
+                .containsExactly(
+                        citation("101", 1),
+                        citation("121", 21)
+                );
+        assertThat(result.timeline()).hasSize(21);
+        assertThat(result.response().provider()).isEqualTo("stub");
     }
 
     @Test
@@ -856,6 +904,43 @@ class AwardAiSummaryServiceTest {
                                 2, true, List.of(current)
                         )
                 )
+        );
+    }
+
+    private AwardFamilyResponse familyWithSequenceCount(
+            int sequenceCount
+    ) {
+        List<AwardSequenceResponse> sequences =
+                IntStream.rangeClosed(1, sequenceCount)
+                        .mapToObj(sequenceNumber -> {
+                            boolean current =
+                                    sequenceNumber == sequenceCount;
+                            AwardRowResponse row = row(
+                                    100L + sequenceNumber,
+                                    sequenceNumber,
+                                    current,
+                                    current,
+                                    LocalDate.of(
+                                            2020,
+                                            1,
+                                            1
+                                    ).plusYears(
+                                            sequenceNumber - 1L
+                                    )
+                            );
+                            return new AwardSequenceResponse(
+                                    sequenceNumber,
+                                    current,
+                                    List.of(row)
+                            );
+                        })
+                        .toList();
+        AwardRowResponse current =
+                sequences.getLast().rows().getFirst();
+        return new AwardFamilyResponse(
+                "A-100",
+                current,
+                sequences
         );
     }
 }

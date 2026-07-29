@@ -24,8 +24,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class OpenAiProvider implements AiProvider {
 
+    private static final Logger LOG =
+            LoggerFactory.getLogger(OpenAiProvider.class);
     private static final String PROVIDER_NAME = "openai";
     private static final String RESPONSE_SCHEMA_NAME =
             "award_ai_summary";
@@ -209,14 +214,18 @@ public class OpenAiProvider implements AiProvider {
 
         ObjectNode properties = schema.putObject("properties");
         properties.putObject("overview")
-                .put("type", "string");
+                .put("type", "string")
+                .put("minLength", 1);
         ObjectNode notableChanges =
                 properties.putObject("notableChanges");
-        notableChanges.put("type", "array");
+        notableChanges.put("type", "array")
+                .put("minItems", 1);
         notableChanges.putObject("items")
-                .put("type", "string");
+                .put("type", "string")
+                .put("minLength", 1);
         properties.putObject("archiveAssessment")
-                .put("type", "string");
+                .put("type", "string")
+                .put("minLength", 1);
 
         ObjectNode citations = properties.putObject("citations");
         citations.put("type", "array");
@@ -267,6 +276,7 @@ public class OpenAiProvider implements AiProvider {
             if (output == null || !output.isObject()) {
                 throw invalidResponse();
             }
+            logNarrativeShape(output);
             output.fieldNames().forEachRemaining(field -> {
                 if (!RESPONSE_FIELDS.contains(field)) {
                     throw invalidResponse();
@@ -327,6 +337,36 @@ public class OpenAiProvider implements AiProvider {
                     exception
             );
         }
+    }
+
+    private void logNarrativeShape(
+            JsonNode output
+    ) {
+        LOG.debug(
+                "OpenAI structured output shape. "
+                        + "overviewLength={} notableChangesCount={} "
+                        + "archiveAssessmentLength={} citationsCount={}",
+                textLength(output.get("overview")),
+                arraySize(output.get("notableChanges")),
+                textLength(output.get("archiveAssessment")),
+                arraySize(output.get("citations"))
+        );
+    }
+
+    private int textLength(
+            JsonNode value
+    ) {
+        return value != null && value.isTextual()
+                ? value.textValue().length()
+                : -1;
+    }
+
+    private int arraySize(
+            JsonNode value
+    ) {
+        return value != null && value.isArray()
+                ? value.size()
+                : -1;
     }
 
     private String outputText(

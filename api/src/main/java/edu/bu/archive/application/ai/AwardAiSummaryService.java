@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -37,6 +39,8 @@ import org.springframework.stereotype.Service;
 @ConditionalOnProperty(name = "app.ai.enabled", havingValue = "true")
 public class AwardAiSummaryService {
 
+    private static final Logger LOG =
+            LoggerFactory.getLogger(AwardAiSummaryService.class);
     static final String SYSTEM_PROMPT = """
             Use only the supplied Award archive context.
             Do not invent or infer missing facts.
@@ -44,6 +48,10 @@ public class AwardAiSummaryService {
             Cite claims only with supplied award record identifiers.
             Write a concise overview, meaningful historical changes, unusual
             transitions, and an archive completeness assessment.
+            Always return a non-empty overview, at least one non-empty
+            notableChanges entry, and a non-empty archiveAssessment.
+            If context is insufficient or truncated, state that limitation in
+            those narrative fields instead of leaving any section empty.
             Do not repeat exact current-record fields as model-generated facts;
             the application renders those fields from authoritative records.
             State clearly when the context is insufficient or truncated.
@@ -197,6 +205,11 @@ public class AwardAiSummaryService {
                 inputTokenCount = response.inputTokenCount();
                 outputTokenCount = response.outputTokenCount();
             }
+            logNarrativeShape(
+                    "provider_response",
+                    correlationId,
+                    response
+            );
             response = validateResponse(
                     response,
                     context,
@@ -216,6 +229,13 @@ public class AwardAiSummaryService {
                         AwardAiNarrative.from(response)
                 );
             }
+            logNarrativeShape(
+                    emptyNarrative
+                            ? "deterministic_fallback_response"
+                            : "validated_ai_response",
+                    correlationId,
+                    response
+            );
 
             metadataLogger.log(
                     correlationId,
@@ -265,6 +285,33 @@ public class AwardAiSummaryService {
                     exception
             );
         }
+    }
+
+    private void logNarrativeShape(
+            String stage,
+            UUID correlationId,
+            AiResponse response
+    ) {
+        LOG.debug(
+                "AI narrative shape. stage={} correlationId={} "
+                        + "overviewLength={} notableChangesCount={} "
+                        + "archiveAssessmentLength={} citationsCount={}",
+                stage,
+                correlationId,
+                response == null || response.overview() == null
+                        ? -1
+                        : response.overview().length(),
+                response == null || response.notableChanges() == null
+                        ? -1
+                        : response.notableChanges().size(),
+                response == null
+                        || response.archiveAssessment() == null
+                        ? -1
+                        : response.archiveAssessment().length(),
+                response == null || response.citations() == null
+                        ? -1
+                        : response.citations().size()
+        );
     }
 
     private AiResponse validateResponse(

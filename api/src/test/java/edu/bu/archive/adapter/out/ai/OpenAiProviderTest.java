@@ -119,11 +119,25 @@ class OpenAiProviderTest {
                 "/text/format/schema/properties/overview/type"
         ).asText()).isEqualTo("string");
         assertThat(body.at(
+                "/text/format/schema/properties/overview/minLength"
+        ).asInt()).isEqualTo(1);
+        assertThat(body.at(
                 "/text/format/schema/properties/notableChanges/type"
         ).asText()).isEqualTo("array");
         assertThat(body.at(
+                "/text/format/schema/properties/notableChanges/minItems"
+        ).asInt()).isEqualTo(1);
+        assertThat(body.at(
+                "/text/format/schema/properties/notableChanges/items"
+                        + "/minLength"
+        ).asInt()).isEqualTo(1);
+        assertThat(body.at(
                 "/text/format/schema/properties/archiveAssessment/type"
         ).asText()).isEqualTo("string");
+        assertThat(body.at(
+                "/text/format/schema/properties/archiveAssessment"
+                        + "/minLength"
+        ).asInt()).isEqualTo(1);
         assertThat(body.at(
                 "/text/format/schema/properties/currentRecord"
         ).isMissingNode()).isTrue();
