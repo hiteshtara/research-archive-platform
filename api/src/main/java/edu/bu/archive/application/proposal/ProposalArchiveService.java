@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionPageResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 
 import org.springframework.stereotype.Service;
@@ -61,23 +62,19 @@ public class ProposalArchiveService {
             );
         }
 
-        int safePage = Math.max(page, 0);
-        int safeSize = Math.min(
-                Math.max(size, 1),
-                100
-        );
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
 
         long totalElements = repository.countVersions(
                 normalizedProposalNumber
         );
 
-        int totalPages =
-                totalElements == 0
-                        ? 0
-                        : (int) Math.ceil(
-                                (double) totalElements
-                                        / safeSize
-                        );
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
 
         int offset = safePage * safeSize;
 
@@ -93,10 +90,9 @@ public class ProposalArchiveService {
                 safePage,
                 safeSize,
                 totalElements,
-                totalPages,
-                safePage == 0,
-                totalPages == 0
-                        || safePage >= totalPages - 1
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
         );
     }
 

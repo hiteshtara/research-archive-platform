@@ -73,3 +73,6 @@ app:
     cognito:
       issuer-uri: ${COGNITO_ISSUER_URI}
       client-id: ${COGNITO_CLIENT_ID}
+
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,https://main.d33qc0afy3ltcj.amplifyapp.com}

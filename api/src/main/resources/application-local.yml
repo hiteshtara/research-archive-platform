@@ -1,8 +1,11 @@
+# Local Homebrew Postgres defaults to a superuser role matching your OS
+# username, not "postgres" - override POSTGRES_USER/POSTGRES_PASSWORD if
+# yours differs.
 spring:
   datasource:
     url: jdbc:postgresql://127.0.0.1:5432/research_archive
-    username: mukadder
-    password: ""
+    username: ${POSTGRES_USER:mukadder}
+    password: ${POSTGRES_PASSWORD:}
 
 app:
   ai:

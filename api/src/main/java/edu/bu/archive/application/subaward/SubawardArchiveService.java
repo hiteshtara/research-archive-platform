@@ -14,6 +14,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.SubawardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.SubawardArchivedAttachment;
 import edu.bu.archive.adapter.out.persistence.SubawardAttachmentStorage;
@@ -42,12 +43,15 @@ public class SubawardArchiveService {
             int page,
             int size
     ) {
-        int safePage = Math.max(page, 0);
-        int safeSize = Math.min(Math.max(size, 1), 100);
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
         long totalElements = repository.countSubawards(query);
-        int totalPages = totalElements == 0
-                ? 0
-                : (int) Math.ceil((double) totalElements / safeSize);
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
         int offset = safePage * safeSize;
 
         List<SubawardSummaryResponse> content =
@@ -62,9 +66,9 @@ public class SubawardArchiveService {
                 safePage,
                 safeSize,
                 totalElements,
-                totalPages,
-                safePage == 0,
-                totalPages == 0 || safePage >= totalPages - 1
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
         );
     }
 
