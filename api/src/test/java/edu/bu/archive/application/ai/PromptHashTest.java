@@ -13,8 +13,8 @@ class PromptHashTest {
         )).isEqualTo(AwardAiSummaryService.SYSTEM_PROMPT_HASH);
         assertThat(AwardAiSummaryService.SYSTEM_PROMPT_HASH)
                 .isEqualTo(
-                        "c3834892e8606e33bc26cdfdf0a7dd2f"
-                                + "c8417d664b55df7a46c8fb2772ad893a"
+                        "eccd966a9aafddac59517816439f5006"
+                                + "db6ef4ae6f2dc7e844a5026e0fdd7b3f"
                 );
     }
 

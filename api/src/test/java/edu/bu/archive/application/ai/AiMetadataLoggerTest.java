@@ -36,6 +36,7 @@ class AiMetadataLoggerTest {
                     "openai",
                     "gpt-5",
                     250L,
+                    640,
                     9,
                     "SUCCESS",
                     120L,
@@ -57,6 +58,7 @@ class AiMetadataLoggerTest {
 
             assertThat(metadata)
                     .containsEntry("durationMs", 250L)
+                    .containsEntry("contextCharacters", 640)
                     .containsEntry("inputTokens", 120L)
                     .containsEntry("outputTokens", 35L)
                     .containsEntry("totalTokens", 155L)

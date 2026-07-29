@@ -22,6 +22,7 @@ public class AiMetadataLogger {
             String provider,
             String model,
             long durationMs,
+            int contextCharacters,
             int sequenceCount,
             String category,
             Long inputTokenCount,
@@ -45,6 +46,10 @@ public class AiMetadataLogger {
                 .addKeyValue("provider", provider)
                 .addKeyValue("model", model)
                 .addKeyValue("durationMs", durationMs)
+                .addKeyValue(
+                        "contextCharacters",
+                        contextCharacters
+                )
                 .addKeyValue("sequenceCount", sequenceCount)
                 .addKeyValue("category", category)
                 .addKeyValue("inputTokens", inputTokenCount)

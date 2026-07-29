@@ -4,6 +4,7 @@ import java.util.List;
 
 public record AwardAiContext(
         String awardNumber,
+        Long currentAwardId,
         List<AwardAiContextRecord> records,
         boolean truncated
 ) {

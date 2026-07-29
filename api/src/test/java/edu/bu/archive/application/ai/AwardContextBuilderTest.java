@@ -75,7 +75,7 @@ class AwardContextBuilderTest {
         assertThat(first).isEqualTo(second);
         assertThat(first.records())
                 .extracting(record -> record.awardId())
-                .containsExactly(101L, 102L);
+                .containsExactly(102L, 101L);
         assertThat(first.truncated()).isTrue();
     }
 
@@ -111,6 +111,91 @@ class AwardContextBuilderTest {
                 .isLessThanOrEqualTo(exactFirstLength + 10);
     }
 
+    @Test
+    void createsChronologicalChangeOrientedCitationContext() {
+        List<AwardRowResponse> rows = representativeRows();
+        AwardAiContext context = builder(100, 20_000)
+                .build(familyBySequence(rows));
+
+        assertThat(context.awardNumber()).isEqualTo("A-100");
+        assertThat(context.currentAwardId()).isEqualTo(104L);
+        assertThat(context.records())
+                .extracting(record -> record.awardId())
+                .containsExactly(101L, 102L, 103L, 104L);
+        assertThat(context.records())
+                .extracting(record -> record.sequenceNumber())
+                .containsExactly(1, 2, 3, 4);
+
+        assertThat(context.records().get(0).changes())
+                .satisfies(changes -> {
+                    assertThat(changes.title())
+                            .isEqualTo("Research project");
+                    assertThat(changes.status())
+                            .isEqualTo("APPROVED");
+                    assertThat(changes.sponsor())
+                            .isEqualTo("Sponsor");
+                    assertThat(changes.leadUnit())
+                            .isEqualTo("Lead Unit");
+                });
+        assertThat(context.records().get(1).changes())
+                .isNull();
+        assertThat(context.records().get(1).clearedFields())
+                .isNull();
+        assertThat(context.records().get(2).changes())
+                .satisfies(changes -> {
+                    assertThat(changes.status())
+                            .isEqualTo("ACTIVE");
+                    assertThat(changes.closeoutDate())
+                            .isEqualTo(LocalDate.of(2026, 1, 1));
+                    assertThat(changes.title()).isNull();
+                    assertThat(changes.sponsor()).isNull();
+                });
+        assertThat(context.records().get(3).changes())
+                .isNull();
+        assertThat(context.records().get(3).clearedFields())
+                .containsExactly("sponsor");
+
+        String serialized = serialize(context);
+        assertThat(serialized)
+                .contains("\"awardId\":102")
+                .contains("\"sequenceNumber\":2")
+                .doesNotContain("\"current\":")
+                .doesNotContain("\"primaryCurrent\":")
+                .doesNotContain("\"accountNumber\":")
+                .doesNotContain("\"sponsorAwardNumber\":");
+    }
+
+    @Test
+    void compactContextReducesRepresentativePayloadSizes() {
+        AwardFamilyResponse oneSequence = familyBySequence(
+                List.of(representativeRows().getFirst())
+        );
+        AwardFamilyResponse multiSequence =
+                familyBySequence(representativeRows());
+
+        int oneBefore = legacySerializedLength(oneSequence);
+        int oneAfter = builder(100, 20_000)
+                .serializedLength(
+                        builder(100, 20_000).build(oneSequence)
+                );
+        int multiBefore = legacySerializedLength(multiSequence);
+        int multiAfter = builder(100, 20_000)
+                .serializedLength(
+                        builder(100, 20_000).build(multiSequence)
+                );
+
+        System.out.printf(
+                "Award AI context sizes: oneSequence=%d->%d, "
+                        + "multiSequence=%d->%d%n",
+                oneBefore,
+                oneAfter,
+                multiBefore,
+                multiAfter
+        );
+        assertThat(oneAfter).isLessThan(oneBefore);
+        assertThat(multiAfter).isLessThan(multiBefore);
+    }
+
     private AwardContextBuilder builder(
             int maxRecords,
             int maxChars
@@ -132,6 +217,42 @@ class AwardContextBuilderTest {
             return new ObjectMapper()
                     .findAndRegisterModules()
                     .writeValueAsString(context);
+        } catch (Exception exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
+    private int legacySerializedLength(
+            AwardFamilyResponse family
+    ) {
+        List<LegacyRecord> records = family.sequences()
+                .stream()
+                .flatMap(sequence -> sequence.rows().stream())
+                .map(row -> new LegacyRecord(
+                        row.awardId(),
+                        row.awardNumber(),
+                        row.sequenceNumber(),
+                        row.current(),
+                        row.primaryCurrent(),
+                        row.title(),
+                        row.status(),
+                        row.awardSequenceStatus(),
+                        row.sponsor(),
+                        row.primeSponsor(),
+                        row.leadUnit(),
+                        row.beginDate(),
+                        row.closeoutDate()
+                ))
+                .toList();
+        try {
+            return new ObjectMapper()
+                    .findAndRegisterModules()
+                    .writeValueAsString(new LegacyContext(
+                            family.awardNumber(),
+                            records,
+                            false
+                    ))
+                    .length();
         } catch (Exception exception) {
             throw new AssertionError(exception);
         }
@@ -173,5 +294,94 @@ class AwardContextBuilderTest {
                 true,
                 awardId == 101L
         );
+    }
+
+    private List<AwardRowResponse> representativeRows() {
+        return List.of(
+                detailedRow(
+                        101L, 1, "APPROVED", "Sponsor",
+                        LocalDate.of(2025, 1, 1), false
+                ),
+                detailedRow(
+                        102L, 2, "APPROVED", "Sponsor",
+                        LocalDate.of(2025, 1, 1), false
+                ),
+                detailedRow(
+                        103L, 3, "ACTIVE", "Sponsor",
+                        LocalDate.of(2026, 1, 1), false
+                ),
+                detailedRow(
+                        104L, 4, "ACTIVE", null,
+                        LocalDate.of(2026, 1, 1), true
+                )
+        );
+    }
+
+    private AwardFamilyResponse familyBySequence(
+            List<AwardRowResponse> rows
+    ) {
+        AwardRowResponse current = rows.getLast();
+        return new AwardFamilyResponse(
+                "A-100",
+                current,
+                rows.stream()
+                        .map(row -> new AwardSequenceResponse(
+                                row.sequenceNumber(),
+                                row.current(),
+                                List.of(row)
+                        ))
+                        .toList()
+        );
+    }
+
+    private AwardRowResponse detailedRow(
+            Long awardId,
+            int sequenceNumber,
+            String status,
+            String sponsor,
+            LocalDate closeoutDate,
+            boolean current
+    ) {
+        return new AwardRowResponse(
+                awardId,
+                "A-100",
+                sequenceNumber,
+                "Research project",
+                status,
+                "FINAL",
+                sponsor,
+                null,
+                "Lead Unit",
+                null,
+                null,
+                LocalDate.of(2020, 1, 1),
+                closeoutDate,
+                current,
+                current
+        );
+    }
+
+    private record LegacyContext(
+            String awardNumber,
+            List<LegacyRecord> records,
+            boolean truncated
+    ) {
+    }
+
+    private record LegacyRecord(
+            Long awardId,
+            String awardNumber,
+            Integer sequenceNumber,
+            Boolean current,
+            Boolean primaryCurrent,
+            String title,
+            String status,
+            String awardSequenceStatus,
+            String sponsor,
+            String primeSponsor,
+            String leadUnit,
+            LocalDate beginDate,
+            LocalDate closeoutDate
+    ) {
     }
 }

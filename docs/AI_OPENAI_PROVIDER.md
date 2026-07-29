@@ -14,13 +14,13 @@ Enable the provider explicitly:
 APP_AI_ENABLED=true
 APP_AI_PROVIDER=openai
 APP_AI_OPENAI_ENABLED=true
-APP_AI_OPENAI_MODEL=gpt-5
+APP_AI_OPENAI_MODEL=gpt-5-mini
 APP_AI_PROMPT_VERSION=award-summary-v2
 APP_AI_CACHE_ENABLED=false
 OPENAI_API_KEY=<injected from AWS Secrets Manager>
 ```
 
-`APP_AI_OPENAI_MODEL` is configurable and defaults to `gpt-5`.
+`APP_AI_OPENAI_MODEL` is configurable and defaults to `gpt-5-mini`.
 `APP_AI_OPENAI_BASE_URL` optionally overrides the default
 `https://api.openai.com/v1`, and `APP_AI_OPENAI_TIMEOUT_SECONDS` optionally
 overrides the 60-second request timeout.
@@ -61,7 +61,7 @@ resources.
 
 The adapter:
 
-- sends only the already-approved `AwardAiContext`;
+- sends only the already-approved compact `AwardAiContext`;
 - treats archive text as untrusted data rather than instructions;
 - disables OpenAI response storage with `store=false`;
 - requests strict JSON Schema output for `overview`, `notableChanges`,
@@ -81,6 +81,25 @@ The model does not supply the `currentRecord` or `timeline` response sections.
 The application builds those deterministic sections from the authoritative
 Award family, current Award people, and current Award amounts. PI names and
 amounts are not added to the provider context.
+
+## Compact provider context
+
+The exact JSON sent to the provider contains the Award number once, the
+physical current Award ID, a chronological list of physical record shells,
+and the truncation indicator. Each record shell always retains `awardId` and
+`sequenceNumber` for citation validation.
+
+The first retained record supplies non-null baseline narrative values.
+Subsequent records contain only values that changed from the preceding
+physical record. An unchanged physical record therefore contains only its
+Award ID and sequence. `clearedFields` explicitly represents values removed
+in a later record without sending empty or null values.
+
+The change-oriented values are limited to title, status, Award sequence
+status, sponsor, prime sponsor, lead unit, begin date, and closeout date.
+Repeated Award numbers, current flags, primary-current flags, unchanged
+values, nulls, empty strings, PI data, amounts, account numbers, sponsor Award
+numbers, and persistence metadata are not sent.
 
 The optional cache value has a narrative-only type containing `overview`,
 `notableChanges`, `archiveAssessment`, and already-validated citations. It
@@ -134,12 +153,12 @@ are rebuilt from archive services on both cache misses and cache hits.
     }
   ],
   "provider": "openai",
-  "model": "gpt-5",
+  "model": "gpt-5-mini",
   "correlationId": "11111111-1111-1111-1111-111111111111"
 }
 ```
 
-Operational logs contain metadata only: `durationMs`, `inputTokens`,
+Operational logs contain metadata only: `contextCharacters`, `durationMs`, `inputTokens`,
 `outputTokens`, `totalTokens`, `cacheHit`, provider, model, prompt version,
 prompt hash, sequence count, success/failure category, correlation ID, JWT
 subject, domain, and Award number. They never contain prompts, complete

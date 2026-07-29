@@ -17,18 +17,22 @@ AwardAiSummaryService
         |
         +--> AwardContextBuilder
         |
-        v
-AiModelRouter
+        +--> one physical sequence: deterministic narrative
         |
-        v
-AiProvider
-   +----+----+
-   |         |
-   v         v
-Stub       OpenAiProvider
-              |
-              v
-      OpenAI Responses API
+        +--> multiple sequences
+                  |
+                  v
+            AiModelRouter
+                  |
+                  v
+             AiProvider
+             +----+----+
+             |         |
+             v         v
+           Stub       OpenAiProvider
+                         |
+                         v
+                 OpenAI Responses API
 ```
 
 ## Components
@@ -49,10 +53,22 @@ Stub       OpenAiProvider
 ### AwardAiSummaryService
 
 - builds the authoritative Award context;
-- invokes the selected provider;
+- returns an archive-derived narrative without routing to a provider when the
+  Award has one physical sequence;
+- invokes the selected provider only for multi-sequence Awards;
 - validates the returned summary and citations;
 - rejects unsupported or fabricated citations;
-- canonicalizes accepted citations using source data.
+- canonicalizes accepted citations using source data;
+- falls back to an archive-derived narrative only when a provider response has
+  valid citations but all narrative sections are empty.
+
+Deterministic responses identify themselves as provider `deterministic` and
+model `none`. They are never written to the model narrative cache. On every
+path, the current record and timeline are rebuilt from archive services.
+
+Operational log categories distinguish `deterministic_single_sequence`,
+`ai_success`, `deterministic_empty_narrative_fallback`, and `ai_failure`
+without logging Award context or narrative text.
 
 ### AwardContextBuilder
 
