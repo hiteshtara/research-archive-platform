@@ -1,39 +1,55 @@
 variable "project_name" {
-  type = string
+  description = "Project name used in resource names."
+  type        = string
 }
 
 variable "environment" {
-  type = string
+  description = "Environment name."
+  type        = string
 }
 
 variable "aws_region" {
-  type = string
+  description = "AWS region."
+  type        = string
 }
 
 variable "vpc_id" {
-  type = string
+  description = "VPC ID."
+  type        = string
 }
 
 variable "private_subnet_ids" {
-  type = list(string)
+  description = "Private subnets used by the ETL loader task."
+  type        = list(string)
 }
 
 variable "loader_image" {
-  type = string
+  description = "Complete loader container image reference, including tag."
+  type        = string
 }
 
 variable "data_bucket_arn" {
-  type = string
+  description = "ARN of the S3 bucket the loader reads/writes ETL exports from."
+  type        = string
 }
 
 variable "data_bucket_name" {
-  type = string
+  description = "Name of the S3 bucket the loader reads/writes ETL exports from."
+  type        = string
 }
 
 variable "database_secret_arn" {
-  type = string
+  description = "Secrets Manager ARN containing PostgreSQL connection details."
+  type        = string
 }
 
 variable "database_security_group_id" {
-  type = string
+  description = "RDS security group ID."
+  type        = string
+}
+
+variable "log_retention_days" {
+  description = "CloudWatch Logs retention for the loader log group."
+  type        = number
+  default     = 14
 }

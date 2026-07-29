@@ -1,0 +1,72 @@
+# Copy to terraform.tfvars and fill in real values. Never put
+# amplify_github_access_token or any other secret here - export
+# TF_VAR_amplify_github_access_token instead.
+
+# BU's target account for this platform, per the deployment request this
+# environment was built for. Confirm with `aws sts get-caller-identity`
+# before every apply regardless.
+expected_account_id = "770203350335"
+
+aws_region   = "us-east-1"
+project_name = "research-archive-platform"
+environment  = "prod"
+
+# Distinct from dev's 10.30.0.0/16 and test's 10.31.0.0/16 in case these
+# VPCs are ever peered or connected via Transit Gateway.
+vpc_cidr = "10.32.0.0/16"
+
+public_subnet_cidrs = [
+  "10.32.1.0/24",
+  "10.32.2.0/24"
+]
+
+private_subnet_cidrs = [
+  "10.32.11.0/24",
+  "10.32.12.0/24"
+]
+
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b"
+]
+
+database_allowed_cidrs = []
+
+# Recommended for production: tasks in private subnets, egress via NAT.
+enable_nat_gateway          = true
+use_private_subnets_for_api = true
+
+database_name             = "research_archive"
+database_master_username  = "archive_admin"
+database_instance_class   = "db.r6g.large"
+# database_deletion_protection, database_skip_final_snapshot, and
+# database_backup_retention_days already default to safe production
+# values in this environment's variables.tf - override here only if you
+# need something different.
+
+api_image_tag    = "REPLACE_WITH_A_REAL_IMAGE_TAG"
+loader_image_tag = "REPLACE_WITH_A_REAL_IMAGE_TAG"
+# ecr_image_tag_mutability and ecr_force_delete already default to
+# IMMUTABLE / false in this environment.
+
+api_container_port = 8080
+api_desired_count  = 2
+# alb_deletion_protection already defaults to true in this environment.
+
+# Required for production - do not run prod on plain HTTP.
+api_domain_name     = "REPLACE_WITH_YOUR_API_DOMAIN"
+api_certificate_arn = "REPLACE_WITH_YOUR_ACM_CERTIFICATE_ARN"
+
+manage_cognito = true
+cognito_callback_urls = [
+  "https://REPLACE_WITH_YOUR_PROD_UI_DOMAIN/"
+]
+cognito_logout_urls = [
+  "https://REPLACE_WITH_YOUR_PROD_UI_DOMAIN/"
+]
+cognito_hosted_ui_domain_prefix = "REPLACE_WITH_A_UNIQUE_PREFIX"
+
+manage_amplify         = true
+amplify_repository_url = "https://github.com/REPLACE_WITH_ORG/REPLACE_WITH_REPO"
+amplify_branch_name    = "main"
+amplify_custom_domain  = "REPLACE_WITH_YOUR_UI_DOMAIN"

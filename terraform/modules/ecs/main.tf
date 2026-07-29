@@ -22,7 +22,7 @@ resource "aws_ecs_cluster" "this" {
 
 resource "aws_cloudwatch_log_group" "loader" {
   name              = "/ecs/${var.project_name}-${var.environment}-loader"
-  retention_in_days = 14
+  retention_in_days = var.log_retention_days
 }
 
 resource "aws_security_group" "loader" {

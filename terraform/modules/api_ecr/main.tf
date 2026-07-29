@@ -1,7 +1,7 @@
 resource "aws_ecr_repository" "api" {
   name                 = "${var.project_name}-${var.environment}-api"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
+  image_tag_mutability = var.image_tag_mutability
+  force_delete         = var.force_delete
 
   image_scanning_configuration {
     scan_on_push = true

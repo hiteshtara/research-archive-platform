@@ -14,7 +14,7 @@ variable "aws_account_id" {
 }
 
 variable "force_destroy" {
-  description = "Allow Terraform to delete bucket contents during development teardown."
+  description = "Allow Terraform to delete bucket contents if the bucket itself is ever destroyed. Note the bucket resources also carry prevent_destroy = true, so a normal 'terraform destroy' will refuse regardless; this only matters if that lifecycle block is deliberately removed first."
   type        = bool
-  default     = true
+  default     = false
 }

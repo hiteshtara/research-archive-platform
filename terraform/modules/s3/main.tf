@@ -18,6 +18,15 @@ resource "aws_s3_bucket" "data" {
     DataType    = "StructuredData"
     Environment = var.environment
   }
+
+  # Terraform's lifecycle arguments must be static literals (they cannot
+  # reference a variable), so this cannot be toggled per environment here.
+  # To intentionally allow `terraform destroy` to remove this bucket (e.g.
+  # a genuine dev teardown), comment this block out for that run, or use
+  # `terraform state rm` first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "data" {
@@ -120,6 +129,11 @@ resource "aws_s3_bucket" "documents" {
     Purpose     = "Legacy research administration documents"
     DataType    = "Documents"
     Environment = var.environment
+  }
+
+  # See the comment on aws_s3_bucket.data above re: intentional dev teardown.
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

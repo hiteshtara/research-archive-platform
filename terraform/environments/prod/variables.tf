@@ -99,7 +99,7 @@ variable "database_master_username" {
 variable "database_instance_class" {
   description = "RDS instance class (e.g. db.t4g.micro for dev, db.r6g.large or larger for production)."
   type        = string
-  default     = "db.t4g.micro"
+  default     = "db.r6g.large"
 }
 
 variable "database_allocated_storage" {
@@ -117,19 +117,19 @@ variable "database_max_allocated_storage" {
 variable "database_backup_retention_days" {
   description = "Automated RDS backup retention, in days. Use a longer window (e.g. 30) in production."
   type        = number
-  default     = 7
+  default     = 30
 }
 
 variable "database_deletion_protection" {
   description = "Protect the RDS instance from accidental deletion. Should be true in test/prod."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "database_skip_final_snapshot" {
   description = "Skip the final RDS snapshot on destroy. Should be false in test/prod so a snapshot is always taken before teardown."
   type        = bool
-  default     = true
+  default     = false
 }
 
 #
@@ -137,21 +137,29 @@ variable "database_skip_final_snapshot" {
 #
 
 variable "api_image_tag" {
-  description = "Tag of the API container image to deploy (e.g. a git SHA or release tag). Avoid \"latest\" for anything beyond a quick dev bring-up - it is a mutable tag and gives no guarantee of what is actually running."
+  description = "Tag of the API container image to deploy (e.g. a git SHA or release tag). No default in production - you must pin an explicit tag; \"latest\" is a mutable tag and gives no guarantee of what is actually running."
   type        = string
-  default     = "latest"
+
+  validation {
+    condition     = var.api_image_tag != "latest"
+    error_message = "api_image_tag must not be \"latest\" in production. Pin an explicit tag (git SHA or release version)."
+  }
 }
 
 variable "loader_image_tag" {
-  description = "Tag of the ETL loader container image to deploy."
+  description = "Tag of the ETL loader container image to deploy. No default in production - pin an explicit tag."
   type        = string
-  default     = "latest"
+
+  validation {
+    condition     = var.loader_image_tag != "latest"
+    error_message = "loader_image_tag must not be \"latest\" in production. Pin an explicit tag (git SHA or release version)."
+  }
 }
 
 variable "ecr_image_tag_mutability" {
   description = "MUTABLE or IMMUTABLE for both ECR repositories. Use IMMUTABLE in production so a tag can never silently be repointed at a different image after push."
   type        = string
-  default     = "MUTABLE"
+  default     = "IMMUTABLE"
 
   validation {
     condition     = contains(["MUTABLE", "IMMUTABLE"], var.ecr_image_tag_mutability)
@@ -162,7 +170,7 @@ variable "ecr_image_tag_mutability" {
 variable "ecr_force_delete" {
   description = "Allow ECR repositories to be destroyed even if they still contain images. Recommended false in production."
   type        = bool
-  default     = true
+  default     = false
 }
 
 #
@@ -196,7 +204,7 @@ variable "loader_log_retention_days" {
 variable "alb_deletion_protection" {
   description = "Protect the API load balancer from accidental deletion. Should be true in test/prod."
   type        = bool
-  default     = false
+  default     = true
 }
 
 #

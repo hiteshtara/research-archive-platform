@@ -11,13 +11,49 @@ data "aws_iam_policy_document" "ecs_task_assume_role" {
   }
 }
 
+locals {
+  # Additional secret ARNs referenced by additional_secrets, derived by
+  # stripping the trailing ":<json-key>::" suffix each valueFrom string
+  # carries (e.g. "<arn>:apiKey::" -> "<arn>").
+  additional_secret_arns = distinct([
+    for value in values(var.additional_secrets) :
+    replace(value, "/:[^:]+::$/", "")
+  ])
+
+  base_environment = {
+    SPRING_PROFILES_ACTIVE = "aws"
+    COGNITO_ISSUER_URI     = var.cognito_issuer_uri
+    COGNITO_CLIENT_ID      = var.cognito_client_id
+  }
+
+  container_environment = [
+    for key, value in merge(local.base_environment, var.additional_environment_variables) :
+    { name = key, value = value }
+  ]
+
+  base_secrets = {
+    POSTGRES_HOST     = "${var.database_secret_arn}:host::"
+    POSTGRES_PORT     = "${var.database_secret_arn}:port::"
+    POSTGRES_DB       = "${var.database_secret_arn}:dbname::"
+    POSTGRES_USER     = "${var.database_secret_arn}:username::"
+    POSTGRES_PASSWORD = "${var.database_secret_arn}:password::"
+  }
+
+  container_secrets = [
+    for key, value in merge(local.base_secrets, var.additional_secrets) :
+    { name = key, valueFrom = value }
+  ]
+
+  service_subnet_ids = var.use_private_subnets ? var.private_subnet_ids : var.public_subnet_ids
+}
+
 #
 # CloudWatch
 #
 
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/ecs/${var.project_name}-${var.environment}-api"
-  retention_in_days = 14
+  retention_in_days = var.log_retention_days
 
   tags = {
     Name = "${var.project_name}-${var.environment}-api-logs"
@@ -29,7 +65,9 @@ resource "aws_cloudwatch_log_group" "api" {
 #
 
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-${var.environment}-api-alb-sg"
+  name = "${var.project_name}-${var.environment}-api-alb-sg"
+  # Do not change this description: it is a ForceNew attribute in AWS, so
+  # editing it replaces the security group instead of updating in place.
   description = "Allow public HTTP traffic to the API load balancer"
   vpc_id      = var.vpc_id
 
@@ -39,6 +77,18 @@ resource "aws_security_group" "alb" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  dynamic "ingress" {
+    for_each = var.certificate_arn == null ? [] : [1]
+
+    content {
+      description = "HTTPS from the internet"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
   egress {
@@ -107,7 +157,7 @@ resource "aws_lb" "api" {
   security_groups = [aws_security_group.alb.id]
   subnets         = var.public_subnet_ids
 
-  enable_deletion_protection = false
+  enable_deletion_protection = var.alb_deletion_protection
 
   tags = {
     Name = "${var.project_name}-${var.environment}-api-alb"
@@ -139,10 +189,38 @@ resource "aws_lb_target_group" "api" {
   }
 }
 
+# Plain HTTP forwarding until a certificate is available; once certificate_arn
+# is set, this becomes a redirect to HTTPS instead (see aws_lb_listener.https).
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.api.arn
   port              = 80
   protocol          = "HTTP"
+
+  default_action {
+    type = var.certificate_arn == null ? "forward" : "redirect"
+
+    target_group_arn = var.certificate_arn == null ? aws_lb_target_group.api.arn : null
+
+    dynamic "redirect" {
+      for_each = var.certificate_arn == null ? [] : [1]
+
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  count = var.certificate_arn == null ? 0 : 1
+
+  load_balancer_arn = aws_lb.api.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.certificate_arn
 
   default_action {
     type             = "forward"
@@ -172,9 +250,10 @@ data "aws_iam_policy_document" "execution_secret_access" {
       "secretsmanager:GetSecretValue"
     ]
 
-    resources = [
-      var.database_secret_arn
-    ]
+    resources = concat(
+      [var.database_secret_arn],
+      local.additional_secret_arns
+    )
   }
 }
 
@@ -187,6 +266,30 @@ resource "aws_iam_role_policy" "execution_secret_access" {
 resource "aws_iam_role" "task" {
   name               = "${var.project_name}-${var.environment}-api-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
+}
+
+data "aws_iam_policy_document" "task_documents" {
+  count = var.documents_bucket_arn == null ? 0 : 1
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [var.documents_bucket_arn]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.documents_bucket_arn}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task_documents" {
+  count = var.documents_bucket_arn == null ? 0 : 1
+
+  name   = "${var.project_name}-${var.environment}-api-documents"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_documents[0].json
 }
 
 #
@@ -232,43 +335,8 @@ resource "aws_ecs_task_definition" "api" {
         }
       ]
 
-      environment = [
-        {
-          name  = "SPRING_PROFILES_ACTIVE"
-          value = "aws"
-        },
-        {
-          name  = "COGNITO_ISSUER_URI"
-          value = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_KnifXAgWm"
-        },
-        {
-          name  = "COGNITO_CLIENT_ID"
-          value = "4svvnli76o8j2qtekkvasq7agc"
-        }
-      ]
-
-      secrets = [
-        {
-          name      = "POSTGRES_HOST"
-          valueFrom = "${var.database_secret_arn}:host::"
-        },
-        {
-          name      = "POSTGRES_PORT"
-          valueFrom = "${var.database_secret_arn}:port::"
-        },
-        {
-          name      = "POSTGRES_DB"
-          valueFrom = "${var.database_secret_arn}:dbname::"
-        },
-        {
-          name      = "POSTGRES_USER"
-          valueFrom = "${var.database_secret_arn}:username::"
-        },
-        {
-          name      = "POSTGRES_PASSWORD"
-          valueFrom = "${var.database_secret_arn}:password::"
-        }
-      ]
+      environment = local.container_environment
+      secrets     = local.container_secrets
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -294,9 +362,9 @@ resource "aws_ecs_service" "api" {
   platform_version = "LATEST"
 
   network_configuration {
-    subnets          = var.public_subnet_ids
+    subnets          = local.service_subnet_ids
     security_groups  = [aws_security_group.api.id]
-    assign_public_ip = true
+    assign_public_ip = !var.use_private_subnets
   }
 
   load_balancer {

@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values, or pass
+# these as -var flags. Contains no secrets - only an account ID and a
+# bucket-naming choice - but is still kept out of git to avoid anyone
+# reusing another account's values by accident.
+
+expected_account_id = "REPLACE_WITH_YOUR_12_DIGIT_ACCOUNT_ID"
+aws_region          = "us-east-1"
+state_bucket_name   = "research-archive-platform-tfstate-REPLACE_WITH_YOUR_ACCOUNT_ID"

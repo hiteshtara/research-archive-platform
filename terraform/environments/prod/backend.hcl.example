@@ -1,0 +1,4 @@
+# Copy to backend.hcl (gitignored) and fill in the bucket created by
+# terraform/bootstrap/. Then: terraform init -backend-config=backend.hcl
+
+bucket = "REPLACE_WITH_YOUR_STATE_BUCKET_NAME"

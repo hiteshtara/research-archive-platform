@@ -78,13 +78,13 @@ resource "aws_db_instance" "this" {
   multi_az            = false
 
   backup_retention_period = var.backup_retention_days
-  copy_tags_to_snapshot    = true
+  copy_tags_to_snapshot   = true
 
   deletion_protection = var.deletion_protection
   skip_final_snapshot = var.skip_final_snapshot
 
   auto_minor_version_upgrade = true
-  apply_immediately           = true
+  apply_immediately          = true
 
   performance_insights_enabled = false
 

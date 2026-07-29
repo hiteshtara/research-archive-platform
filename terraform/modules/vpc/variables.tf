@@ -42,3 +42,9 @@ variable "aws_region" {
   description = "AWS region used for VPC endpoint service names."
   type        = string
 }
+
+variable "enable_nat_gateway" {
+  description = "Create a NAT Gateway and route private-subnet egress through it. Required if any workload runs in the private subnets and needs general internet access (e.g. calling third-party APIs) beyond the AWS services already reachable via VPC endpoints. Adds an hourly + per-GB cost."
+  type        = bool
+  default     = false
+}
