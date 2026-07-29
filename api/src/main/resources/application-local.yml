@@ -1,6 +1,14 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/research_archive
+    username: mukadder
+    password: ""
+
 app:
   ai:
-    provider: ${APP_AI_PROVIDER:${AI_PROVIDER:stub}}
+    enabled: true
+    stub-enabled: true
+    provider: stub
 
   security:
     enabled: false
