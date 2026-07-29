@@ -27,6 +27,9 @@ class AiPropertiesBindingTest {
                         "APP_AI_OPENAI_TIMEOUT_SECONDS=45",
                         "APP_AI_OPENAI_CONNECT_TIMEOUT_SECONDS=9",
                         "APP_AI_PROMPT_VERSION=award-summary-v3",
+                        "APP_AI_QUESTIONS_ENABLED=true",
+                        "APP_AI_QUESTION_PROMPT_VERSION="
+                                + "award-question-v2",
                         "APP_AI_CACHE_ENABLED=true",
                         "APP_AI_CACHE_MAX_ENTRIES=75"
                 )
@@ -53,6 +56,11 @@ class AiPropertiesBindingTest {
                     ).isEqualTo(9);
                     assertThat(properties.getPromptVersion())
                             .isEqualTo("award-summary-v3");
+                    assertThat(properties.isQuestionsEnabled())
+                            .isTrue();
+                    assertThat(
+                            properties.getQuestionPromptVersion()
+                    ).isEqualTo("award-question-v2");
                     assertThat(properties.isCacheEnabled()).isTrue();
                     assertThat(properties.getCacheMaxEntries())
                             .isEqualTo(75);
@@ -69,6 +77,8 @@ class AiPropertiesBindingTest {
                     assertThat(properties.isEnabled()).isFalse();
                     assertThat(properties.isStubEnabled()).isFalse();
                     assertThat(properties.isOpenaiEnabled()).isFalse();
+                    assertThat(properties.isQuestionsEnabled())
+                            .isFalse();
                     assertThat(properties.getProvider()).isEmpty();
                     assertThat(properties.getOpenAiModel())
                             .isEqualTo("gpt-5-mini");
@@ -85,6 +95,9 @@ class AiPropertiesBindingTest {
                     ).isEqualTo(10);
                     assertThat(properties.getPromptVersion())
                             .isEqualTo("award-summary-v2");
+                    assertThat(
+                            properties.getQuestionPromptVersion()
+                    ).isEqualTo("award-question-v1");
                     assertThat(properties.isCacheEnabled()).isFalse();
                     assertThat(properties.getCacheMaxEntries())
                             .isEqualTo(250);
@@ -92,7 +105,7 @@ class AiPropertiesBindingTest {
     }
 
     @Test
-    void localProfileDefaultsOnlyTheProviderToStub() {
+    void localProfileEnablesTheStubProviderByDefault() {
         runner(
                 "application.yml",
                 "application-local.yml"
@@ -100,8 +113,8 @@ class AiPropertiesBindingTest {
             AiProperties properties =
                     context.getBean(AiProperties.class);
 
-            assertThat(properties.isEnabled()).isFalse();
-            assertThat(properties.isStubEnabled()).isFalse();
+            assertThat(properties.isEnabled()).isTrue();
+            assertThat(properties.isStubEnabled()).isTrue();
             assertThat(properties.getProvider())
                     .isEqualTo("stub");
         });
