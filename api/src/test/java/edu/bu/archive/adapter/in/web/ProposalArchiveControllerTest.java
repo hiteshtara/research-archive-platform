@@ -1,7 +1,8 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionPageResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 import edu.bu.archive.application.proposal.ProposalArchiveService;
 
@@ -79,8 +80,8 @@ class ProposalArchiveControllerTest {
 
     @Test
     void historyDelegatesPaginationToTheService() {
-        ProposalVersionPageResponse page =
-                new ProposalVersionPageResponse(
+        PageResponse<ProposalRowResponse> page =
+                new PageResponse<>(
                         List.of(),
                         2,
                         10,
@@ -96,7 +97,7 @@ class ProposalArchiveControllerTest {
                 10
         )).thenReturn(page);
 
-        ProposalVersionPageResponse result =
+        PageResponse<ProposalRowResponse> result =
                 controller.history(
                         "P-100",
                         2,

@@ -1,8 +1,8 @@
 package edu.bu.archive.application.proposal;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionPageResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
+import static edu.bu.archive.testsupport.ProposalFixtures.proposalRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -57,7 +58,7 @@ class ProposalArchiveServiceTest {
                 0
         )).thenReturn(List.of(current));
 
-        ProposalVersionPageResponse result =
+        PageResponse<ProposalRowResponse> result =
                 service.findVersionPage(
                         "P-100",
                         -1,
@@ -103,31 +104,4 @@ class ProposalArchiveServiceTest {
                 .hasMessage("Proposal number is required");
     }
 
-    private ProposalRowResponse proposalRow() {
-        return new ProposalRowResponse(
-                10L,
-                "P-100",
-                3,
-                "Proposal title",
-                "ACTIVE",
-                "New",
-                "Research",
-                "SP-1",
-                "Sponsor",
-                "UNIT-1",
-                "Unit",
-                "PERSON-1",
-                "Principal Investigator",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
-    }
 }

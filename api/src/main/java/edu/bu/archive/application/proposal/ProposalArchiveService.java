@@ -3,8 +3,8 @@ package edu.bu.archive.application.proposal;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionPageResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 
@@ -45,7 +45,7 @@ public class ProposalArchiveService {
         );
     }
 
-    public ProposalVersionPageResponse findVersionPage(
+    public PageResponse<ProposalRowResponse> findVersionPage(
             String proposalNumber,
             int page,
             int size
@@ -85,7 +85,7 @@ public class ProposalArchiveService {
                         offset
                 );
 
-        return new ProposalVersionPageResponse(
+        return new PageResponse<>(
                 content,
                 safePage,
                 safeSize,

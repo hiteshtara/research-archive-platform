@@ -3,8 +3,9 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionPageResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 import edu.bu.archive.application.proposal.ProposalArchiveService;
 
@@ -62,7 +63,7 @@ public class ProposalArchiveController {
     }
 
     @GetMapping("/{proposalNumber}/history")
-    public ResponseEntity<ProposalVersionPageResponse> history(
+    public ResponseEntity<PageResponse<ProposalRowResponse>> history(
             @PathVariable
             String proposalNumber,
 

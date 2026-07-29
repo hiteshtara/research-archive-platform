@@ -3,7 +3,8 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardSequencePageResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
@@ -71,7 +72,7 @@ public class AwardArchiveController {
      * Paginated sequence summaries.
      */
     @GetMapping("/{awardNumber}/history")
-    public ResponseEntity<AwardSequencePageResponse> historyPage(
+    public ResponseEntity<PageResponse<AwardSequenceSummaryResponse>> historyPage(
             @PathVariable
             String awardNumber,
 

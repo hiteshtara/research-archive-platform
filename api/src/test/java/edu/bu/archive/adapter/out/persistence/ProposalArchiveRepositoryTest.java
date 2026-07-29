@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import java.util.List;
 import java.util.Optional;
 
+import static edu.bu.archive.testsupport.ProposalFixtures.proposalRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -154,31 +155,4 @@ class ProposalArchiveRepositoryTest {
                 .contains("WHERE row_rank = 1");
     }
 
-    private ProposalRowResponse proposalRow() {
-        return new ProposalRowResponse(
-                10L,
-                "P-100",
-                3,
-                "Proposal title",
-                "ACTIVE",
-                "New",
-                "Research",
-                "SP-1",
-                "Sponsor",
-                "UNIT-1",
-                "Unit",
-                "PERSON-1",
-                "Principal Investigator",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
-    }
 }

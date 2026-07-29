@@ -5,7 +5,8 @@ import edu.bu.archive.application.port.out.IrbQueryPort;
 import edu.bu.archive.domain.model.IrbProtocol;
 import edu.bu.archive.domain.model.IrbSearchQuery;
 import edu.bu.archive.domain.model.PageResult;
-import edu.bu.archive.exception.RecordNotFoundException;
+
+import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +35,7 @@ public class IrbQueryService implements IrbQueryUseCase {
         }
 
         return queryPort.findByStudyId(studyId.trim())
-                .orElseThrow(() -> new RecordNotFoundException(
+                .orElseThrow(() -> new NoSuchElementException(
                         "IRB study not found: " + studyId
                 ));
     }
@@ -48,7 +49,7 @@ public class IrbQueryService implements IrbQueryUseCase {
         }
 
         return queryPort.findByRecordId(recordId)
-                .orElseThrow(() -> new RecordNotFoundException(
+                .orElseThrow(() -> new NoSuchElementException(
                         "IRB record not found: " + recordId
                 ));
     }

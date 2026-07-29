@@ -5,11 +5,11 @@ import edu.bu.archive.adapter.in.web.dto.workspace.IrbProtocolVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.workspace.IrbSubmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.workspace.IrbTimelineResponse;
 import edu.bu.archive.adapter.in.web.dto.workspace.IrbWorkspaceResponse;
-import edu.bu.archive.exception.RecordNotFoundException;
 
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -76,7 +76,7 @@ public class IrbWorkspaceRepository {
                 )
                 .optional()
                 .orElseThrow(() ->
-                        new RecordNotFoundException(
+                        new NoSuchElementException(
                                 "IRB record not found: " + recordId
                         )
                 );
