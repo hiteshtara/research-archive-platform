@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -31,11 +32,93 @@ public class AiMetadataLogger {
             String promptVersion,
             String promptHash
     ) {
+        log(
+                "award_summary",
+                correlationId,
+                authenticatedUserId,
+                archiveDomain,
+                awardNumber,
+                provider,
+                model,
+                durationMs,
+                contextCharacters,
+                sequenceCount,
+                category,
+                inputTokenCount,
+                outputTokenCount,
+                cacheHit,
+                promptVersion,
+                promptHash,
+                null,
+                null
+        );
+    }
+
+    void logQuestion(
+            UUID correlationId,
+            String authenticatedUserId,
+            String awardNumber,
+            String provider,
+            String model,
+            long durationMs,
+            int contextCharacters,
+            int sequenceCount,
+            String category,
+            Long inputTokenCount,
+            Long outputTokenCount,
+            String promptVersion,
+            String promptHash,
+            String answerType,
+            int questionCharacters
+    ) {
+        log(
+                "award_question",
+                correlationId,
+                authenticatedUserId,
+                "AWARD",
+                awardNumber,
+                provider,
+                model,
+                durationMs,
+                contextCharacters,
+                sequenceCount,
+                category,
+                inputTokenCount,
+                outputTokenCount,
+                false,
+                promptVersion,
+                promptHash,
+                answerType,
+                questionCharacters
+        );
+    }
+
+    private void log(
+            String operation,
+            UUID correlationId,
+            String authenticatedUserId,
+            String archiveDomain,
+            String awardNumber,
+            String provider,
+            String model,
+            long durationMs,
+            int contextCharacters,
+            int sequenceCount,
+            String category,
+            Long inputTokenCount,
+            Long outputTokenCount,
+            boolean cacheHit,
+            String promptVersion,
+            String promptHash,
+            String answerType,
+            Integer questionCharacters
+    ) {
         Long totalTokens = totalTokens(
                 inputTokenCount,
                 outputTokenCount
         );
-        LOG.atInfo()
+        LoggingEventBuilder event = LOG.atInfo()
+                .addKeyValue("operation", operation)
                 .addKeyValue("correlationId", correlationId)
                 .addKeyValue(
                         "authenticatedUserId",
@@ -52,13 +135,32 @@ public class AiMetadataLogger {
                 )
                 .addKeyValue("sequenceCount", sequenceCount)
                 .addKeyValue("category", category)
-                .addKeyValue("inputTokens", inputTokenCount)
-                .addKeyValue("outputTokens", outputTokenCount)
-                .addKeyValue("totalTokens", totalTokens)
                 .addKeyValue("cacheHit", cacheHit)
                 .addKeyValue("promptVersion", promptVersion)
-                .addKeyValue("promptHash", promptHash)
-                .log("AI award summary request");
+                .addKeyValue("promptHash", promptHash);
+        if (inputTokenCount != null) {
+            event.addKeyValue("inputTokens", inputTokenCount);
+        }
+        if (outputTokenCount != null) {
+            event.addKeyValue("outputTokens", outputTokenCount);
+        }
+        if (totalTokens != null) {
+            event.addKeyValue("totalTokens", totalTokens);
+        }
+        if (answerType != null) {
+            event.addKeyValue("answerType", answerType);
+        }
+        if (questionCharacters != null) {
+            event.addKeyValue(
+                    "questionCharacters",
+                    questionCharacters
+            );
+        }
+        event.log(
+                "award_question".equals(operation)
+                        ? "AI award question request"
+                        : "AI award summary request"
+        );
     }
 
     private Long totalTokens(

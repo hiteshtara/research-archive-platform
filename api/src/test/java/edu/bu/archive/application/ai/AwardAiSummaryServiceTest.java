@@ -75,6 +75,7 @@ class AwardAiSummaryServiceTest {
                 router,
                 metadataLogger,
                 new AwardAiSummaryCache(properties),
+                new AwardCitationValidator(),
                 properties,
                 Clock.fixed(
                         Instant.parse("2026-07-28T12:00:00Z"),
@@ -194,6 +195,7 @@ class AwardAiSummaryServiceTest {
                 router,
                 metadataLogger,
                 new AwardAiSummaryCache(properties),
+                new AwardCitationValidator(),
                 properties,
                 Clock.fixed(
                         Instant.parse("2026-07-28T12:00:00Z"),
