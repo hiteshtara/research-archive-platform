@@ -1,0 +1,173 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Boston University Research Archive Platform: a **read-only** historical archive of
+Kuali Research Administration data, preserved after the legacy Kuali system's
+retirement. It is not a system of record and never writes back to source data.
+
+Monorepo: `api/` (Spring Boot backend), `ui/` (React frontend), `etl/` (Python
+extraction/load pipeline), `database/migrations/` (schema), `terraform/` (AWS
+infra), `ops/` (deployment scripts).
+
+## Commands
+
+**Backend** (`api/`, Java 21 / Spring Boot 3.5, Maven):
+```
+mvn compile                          # compile
+mvn test                             # run all tests
+mvn test -Dtest=ClassName            # run a single test class
+mvn test -Dtest=ClassName#methodName # run a single test method
+mvn spring-boot:run                  # run the API (see "Local dev" below re: profile)
+```
+
+**Frontend** (`ui/`, React + TypeScript + Vite):
+```
+npm run dev      # Vite dev server
+npm run build    # tsc -b && vite build
+npm run lint      # oxlint
+npm run test      # runs node --test against src/features/ai/*.test.mjs
+```
+There is no component-render test setup (no `@testing-library/react`) — existing
+`*.test.mjs` files are plain `node:test` unit tests of presentation-helper
+functions, not rendered-component tests.
+
+**ETL** (`etl/`, Python, managed with `uv`):
+```
+uv sync
+uv run pytest
+uv run pytest tests/test_x.py::test_name   # single test
+```
+
+## Local development
+
+Two supported ways to run the API locally — they're not interchangeable:
+- `scripts/run-local.sh`: starts a local Homebrew Postgres and runs API+UI against it. Sets `SPRING_PROFILES_ACTIVE=local` itself.
+- `api/scripts/dev.sh` + `scripts/start-db-tunnel.sh`: opens an SSM tunnel to the real dev RDS instance (needs `.envrc`/direnv with AWS credentials), then runs the API against that.
+
+Either way, the `local` Spring profile must be active for `application-local.yml`
+to take effect (it isn't picked up automatically — there's no `.idea`/`.vscode`
+run config committed to this repo). `application-local.yml` is what makes AI
+features work locally with the deterministic stub provider and disables Cognito
+auth in favor of permit-all (`app.security.enabled=false`).
+
+## Architecture
+
+### Data flow and the read-only boundary
+Oracle (legacy Kuali, BU VPN-only) → Python ETL extracts, validates, writes
+CSV/Parquet → upload to S3 → load into Postgres (`archive` schema) → Spring
+Boot API (JdbcClient, no writes back to Oracle) → React UI. The API and UI
+never talk to Oracle directly; only the ETL does, and only for reading.
+
+### Migrations are not run by Spring Boot
+SQL files in `database/migrations/` use Flyway's `V###__description.sql`
+naming convention, but `spring.flyway.enabled: false` in `application.yml` —
+Spring's Flyway integration is intentionally disabled. Migrations are instead
+applied by the **Python ETL** (`etl/archive_etl/upload/migrations.py`), which
+tracks applied versions in `public.schema_migration` and is invoked from the
+`load_*` scripts. If you add a migration, it takes effect via the ETL loaders,
+not via `mvn spring-boot:run`.
+
+### Hexagonal layout is only fully implemented for IRB
+The package layout (`adapter/in/web`, `adapter/out/*`, `application/*`,
+`domain/model/*`) suggests ports-and-adapters throughout, but in practice only
+the IRB domain has a formal ports/use-case layer
+(`application/port/in/IrbQueryUseCase`, `application/port/out/IrbQueryPort`,
+`application/service/IrbQueryService`). Every other domain — Award,
+Negotiation, Proposal, Protocol, Subaward — has its controller call a concrete
+`*ArchiveService` that calls a `*ArchiveRepository` directly, with no port
+interface in between. When adding a new domain, mirror the concrete-service
+pattern (the five non-IRB domains), not the IRB ports pattern, unless you're
+deliberately extending that pattern everywhere.
+
+Not-found handling is also split: IRB throws a custom
+`edu.bu.archive.exception.RecordNotFoundException`; every other domain throws
+plain `java.util.NoSuchElementException` from the service layer. Both end up
+as 404s via `GlobalExceptionHandler` (an unscoped `@RestControllerAdvice` —
+despite living in the same file history as Award, it handles every
+controller in the app, not just Award's).
+
+### Research object model and business grain
+Proposal is the backbone of the archive — every major object should
+eventually connect to it. Conceptual chain: Proposal → Award → Funding →
+Protocol → Negotiation → Investigator (Subaward hangs off Award/Proposal).
+
+**Never treat a raw archive row count as a business-object count.** Identify
+the business grain (the real-world entity count) and the historical grain
+(every archived version/row) separately, and preserve both when they serve
+different purposes — do not silently deduplicate valid historical rows. Don't
+infer meaning from a table name or a bare `COUNT(*)`; inspect migrations,
+schema, and source mappings before deciding the grain. The Award
+implementation is the reference/mirror point for new domains (Proposal was
+built to mirror it) — when in doubt about how to structure a new domain,
+read Award's repository/service/controller first.
+
+- **Award**: business grain is `COUNT(DISTINCT award_number)`; `Historical
+  Award Records` = every row in `archive.award_version`. Multiple rows may
+  legitimately share `award_number` and `sequence_number` when `award_id`
+  differs — never delete/merge rows just to make counts align.
+- **Proposal**: don't assume `archive.proposal` exists — inspect
+  `information_schema`/migrations for the real table or view. Don't use
+  `archive.award_funding_proposal` as the Proposal count; use the stable
+  institutional Proposal business identifier instead. Don't assign meaning to
+  ad-hoc profiling numbers unless the exact SQL and column order are known.
+- **Protocol**: resolve amendment/renewal parents by `protocol_number` +
+  `sequence_number` (the validated method — see `PROJECT_MEMORY.md` for the
+  investigation behind it), not by Oracle `PROTOCOL_ID` alone; keep
+  `PROTOCOL_ID` only as audit metadata where it disagrees with the resolved
+  parent.
+- Dashboard count labels must match their grain exactly: `Awards` = distinct
+  `award_number`; `Historical Award Records` = version-row `COUNT(*)`;
+  `Funding Relationships` = relationship-row count; `Protocol Families` =
+  distinct protocol base; `Historical Versions` = version-row count.
+
+### AI features (Award Summary / Award Questions)
+Everything AI-related lives behind `app.ai.*` feature flags that default OFF,
+and is architected so a misbehaving or prompt-injected model **cannot**
+fabricate facts that reach the user:
+- `AiProvider` is an interface with `StubAiProvider` (deterministic, no
+  network) and `OpenAiProvider` (real OpenAI Responses API, structured JSON
+  output, `store=false`); `AiModelRouter` selects one by
+  `app.ai.provider` name.
+- `AwardContextBuilder` redacts sensitive-looking patterns
+  (`SensitiveFieldRedactor`) and truncates context to
+  `app.ai.max-records`/`max-serialized-context-chars` before anything is sent
+  to a provider. Fields like `accountNumber`/`sponsorAwardNumber` are simply
+  never included in the AI context at all.
+- Every citation the model returns is checked against the citations legally
+  derivable from the archive context (`AwardCitationValidator`) — a citation
+  or support ID the model invents is rejected and the whole request fails
+  closed (503), it does not get silently dropped.
+- For Award Questions specifically, the model **never writes the user-facing
+  answer text**. `AwardQuestionRouter` classifies the question into a fixed
+  intent; deterministic intents (current status/sponsor/PI/etc.) are answered
+  straight from the database with no model call at all
+  (`AwardDeterministicFactResolver`); the remaining intents
+  (comparison/history/likely-administrative-changes) have the model pick
+  which of a pre-built, citation-backed set of diff sentences
+  (`AwardSequenceDiffBuilder`) are relevant — the model selects IDs, it never
+  generates prose.
+- Providers never get direct database access — they only ever receive the
+  already-built, already-redacted `AwardAiContext`. Don't bypass
+  `AwardArchiveService`/`AwardContextBuilder` to hand a provider raw
+  repository data.
+
+### Auth
+Cognito JWT resource server (`SecurityConfiguration`) in real deployments;
+`LocalSecurityConfiguration` (permit-all) when `app.security.enabled=false`,
+which is how local dev and most controller-level `@WebMvcTest`s run.
+
+## Coding conventions specific to this repo
+
+- Development order for a new feature/domain: DB migration → Oracle
+  extraction SQL → CSV export → ETL → Repository → Service → Controller →
+  React UI. Don't skip ahead (e.g. don't write a Service against a table that
+  doesn't exist in a migration yet).
+- Mirror the Award implementation when building out a new domain rather than
+  inventing a new shape.
+- Never invent Oracle table/column names — verify against
+  `information_schema` or existing extraction SQL first.
+- Use `JdbcClient` for repository-layer queries (not Spring Data JPA query
+  derivation), consistent with the rest of the codebase.
