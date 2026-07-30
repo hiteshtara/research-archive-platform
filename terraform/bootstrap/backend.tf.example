@@ -1,0 +1,22 @@
+# After the FIRST successful `terraform apply` here (using local state)
+# has created the state bucket, copy this file to backend.tf and run:
+#
+#   terraform init -migrate-state
+#
+# This moves bootstrap's own state into the bucket it just created, using
+# a dedicated key so it doesn't collide with any environment's state.
+# Doing this turns bootstrap's state from a single local file (a silent
+# single point of failure - if that laptop is lost before this migration,
+# recovery requires the terraform import procedure in terraform/README.md)
+# into a durable, versioned, shared backend, matching how every
+# environment under terraform/environments/ already stores its state.
+#
+# Fill in the same bucket name terraform.tfvars uses for state_bucket_name.
+terraform {
+  backend "s3" {
+    bucket  = "REPLACE_WITH_STATE_BUCKET_NAME"
+    key     = "bootstrap/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
+}

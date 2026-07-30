@@ -71,3 +71,27 @@ variable "skip_final_snapshot" {
   type        = bool
   default     = true
 }
+
+variable "multi_az" {
+  description = "Run a synchronously-replicated standby in a second availability zone for automatic failover. Should be true in production; the extra cost is not usually justified in dev/test."
+  type        = bool
+  default     = false
+}
+
+variable "apply_immediately" {
+  description = "Apply modifications immediately instead of waiting for the next maintenance window. Should be false in production, so disruptive changes (e.g. instance class resize) land at a predictable, low-traffic time instead of immediately during business hours."
+  type        = bool
+  default     = true
+}
+
+variable "maintenance_window" {
+  description = "Preferred weekly maintenance window, e.g. \"sun:06:00-sun:07:00\" (UTC). Leave null to let AWS assign a random window - fine for dev/test, but production should pin this to a known low-traffic time so deferred (apply_immediately = false) changes are predictable."
+  type        = string
+  default     = null
+}
+
+variable "backup_window" {
+  description = "Preferred daily automated-backup window, e.g. \"05:00-05:30\" (UTC). Must not overlap maintenance_window. Leave null to let AWS assign a random window."
+  type        = string
+  default     = null
+}

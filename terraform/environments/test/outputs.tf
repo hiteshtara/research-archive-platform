@@ -59,8 +59,8 @@ output "documents_bucket_name" {
 }
 
 output "openai_secret_name" {
-  description = "Secrets Manager secret name to populate with 'aws secretsmanager put-secret-value' (see README)."
-  value       = module.openai_secret.openai_secret_name
+  description = "Secrets Manager secret name to populate with 'aws secretsmanager put-secret-value' (see README). Null when enable_openai_secret = false."
+  value       = var.enable_openai_secret ? module.openai_secret[0].openai_secret_name : null
 }
 
 output "loader_ecr_repository_url" {
@@ -84,8 +84,8 @@ output "api_ecr_repository_url" {
 }
 
 output "api_url" {
-  description = "Public base URL of the Research Archive API."
-  value       = module.api_service.alb_url
+  description = "Public base URL of the Research Archive API - uses api_domain_name (HTTPS) when configured, otherwise the ALB's own DNS name."
+  value       = local.api_url
 }
 
 output "api_alb_dns_name" {
@@ -105,8 +105,8 @@ output "api_task_definition_arn" {
 }
 
 output "cognito_user_pool_id" {
-  description = "Cognito User Pool ID (only when manage_cognito = true; null otherwise, since the pool is externally managed)."
-  value       = var.manage_cognito ? module.cognito[0].user_pool_id : null
+  description = "Cognito User Pool ID in effect (created pool if manage_cognito = true, otherwise the supplied existing pool)."
+  value       = local.cognito_user_pool_id
 }
 
 output "cognito_issuer_uri" {
@@ -117,6 +117,21 @@ output "cognito_issuer_uri" {
 output "cognito_client_id" {
   description = "Cognito app client ID in effect."
   value       = local.cognito_client_id
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Cognito Hosted UI domain in effect (created pool if manage_cognito = true, otherwise the supplied existing pool). Null if no Hosted UI domain is configured."
+  value       = local.cognito_hosted_ui_domain
+}
+
+output "ui_redirect_url" {
+  description = "Value baked into the UI build as VITE_COGNITO_REDIRECT_URL - must also be present in cognito_callback_urls."
+  value       = var.manage_amplify ? local.ui_redirect_url : null
+}
+
+output "ui_logout_url" {
+  description = "Value baked into the UI build as VITE_COGNITO_LOGOUT_URL - must also be present in cognito_logout_urls."
+  value       = var.manage_amplify ? local.ui_logout_url : null
 }
 
 output "ui_url" {
