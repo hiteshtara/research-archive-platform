@@ -15,3 +15,9 @@ app:
 
   security:
     enabled: false
+
+  attachments:
+    storage: local
+    # mvn spring-boot:run (both scripts/run-local.sh and api/scripts/dev.sh)
+    # runs with CWD = api/, so this points up to the repo root.
+    local-directory: ../local-data/attachments

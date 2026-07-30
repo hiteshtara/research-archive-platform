@@ -134,8 +134,16 @@ uv run --project etl python etl/archive_attachments.py \
 ```
 
 `etl/archive_subaward_attachments.py` remains available as a
-backward-compatible wrapper. The generic runner currently registers only the
-Subaward plugin; no other archive module is enabled.
+backward-compatible wrapper. The generic runner's `PLUGINS` registry
+(`etl/archive_etl/attachments/runner.py`) registers six modules today:
+`award`, `irb`, `irb-personnel`, `negotiation`, `proposal`, and `subaward`.
+Subaward is the only one whose plugin defaults to a real (non-`test/`-
+prefixed) S3 prefix (`default_s3_prefix = "subawards"`); the other five
+default to a `test/`-prefixed path (e.g. `test/awards`, `test/proposals`) -
+see `etl/archive_etl/attachments/plugins/` for each plugin's exact default.
+Treat that as a signal the other five are still pilot/unapproved for a real
+archival run, not a guarantee - confirm current approval status with
+whoever owns each module before running a non-`test/`-prefixed job for it.
 
 The generic framework separates Oracle BLOB streaming, S3 storage, SQLite
 manifest handling, and orchestration under

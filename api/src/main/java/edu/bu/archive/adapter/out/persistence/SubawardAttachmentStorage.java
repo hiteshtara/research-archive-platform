@@ -1,73 +1,19 @@
 package edu.bu.archive.adapter.out.persistence;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.InputStream;
-import java.util.NoSuchElementException;
 
-import software.amazon.awssdk.core.ResponseInputStream;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
-import software.amazon.awssdk.services.s3.model.S3Exception;
+/**
+ * Reads the underlying object for an archived Subaward attachment.
+ * Implementations: {@link S3SubawardAttachmentStorage} (production,
+ * reads from the private documents S3 bucket) and
+ * {@link LocalSubawardAttachmentStorage} (local dev, reads synthetic
+ * fixtures from disk) - selected via app.attachments.storage.
+ */
+public interface SubawardAttachmentStorage {
 
-@Component
-public class SubawardAttachmentStorage {
+    StoredObject open(SubawardArchivedAttachment attachment);
 
-    private final S3Client s3;
-    private final String documentsBucket;
-
-    public SubawardAttachmentStorage(
-            S3Client s3,
-            @Value("${ARCHIVE_DOCUMENTS_BUCKET:}")
-            String documentsBucket
-    ) {
-        this.s3 = s3;
-        this.documentsBucket = documentsBucket;
-    }
-
-    public StoredObject open(SubawardArchivedAttachment attachment) {
-        if (documentsBucket.isBlank()) {
-            throw new IllegalStateException(
-                    "ARCHIVE_DOCUMENTS_BUCKET is not configured"
-            );
-        }
-        if (!documentsBucket.equals(attachment.s3Bucket())) {
-            throw new NoSuchElementException(
-                    "Archived attachment object not found"
-            );
-        }
-
-        try {
-            ResponseInputStream<GetObjectResponse> stream = s3.getObject(
-                    GetObjectRequest.builder()
-                            .bucket(documentsBucket)
-                            .key(attachment.s3Key())
-                            .build()
-            );
-            return new StoredObject(
-                    stream,
-                    stream.response().contentLength()
-            );
-        } catch (NoSuchKeyException exception) {
-            throw new NoSuchElementException(
-                    "Archived attachment object not found",
-                    exception
-            );
-        } catch (S3Exception exception) {
-            if (exception.statusCode() == 404) {
-                throw new NoSuchElementException(
-                        "Archived attachment object not found",
-                        exception
-                );
-            }
-            throw exception;
-        }
-    }
-
-    public record StoredObject(
+    record StoredObject(
             InputStream stream,
             long contentLength
     ) {
