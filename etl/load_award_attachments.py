@@ -1,5 +1,5 @@
-"""Award attachment loader - metadata (Sprint 1) and resumable S3 upload
-of distinct physical files (Sprint 2).
+"""Award attachment loader - metadata (Sprint 1), resumable S3 upload of
+distinct physical files (Sprint 2), and ECS production execution (Sprint 3).
 
 Sprint 1 reads Award attachment references (KCOEUS.AWARD_ATTACHMENT) and
 deduplicated physical-file metadata (KCOEUS.ATTACHMENT_FILE, with a
@@ -10,8 +10,17 @@ incrementally, and uploads it to S3 - ordinary upload for small files,
 manual multipart (aborted on any failure) above --multipart-threshold-bytes.
 Uploads are resumable: already-UPLOADED rows with a matching bucket/key are
 skipped, upload_attempts is tracked, and status only advances to UPLOADED
-after S3 confirms the write. An API, a UI, presigned URLs, and download
-endpoints remain out of scope. See docs/DECISIONS.md,
+after S3 confirms the write.
+
+Sprint 3 (--ecs) is a production execution mode intended for the ECS loader
+task (see terraform/modules/ecs/main.tf - not modified here): it resolves
+PostgreSQL/Oracle credentials without requiring local exports (Secrets
+Manager or ECS environment variables - see archive_etl/config/ecs.py),
+switches to CloudWatch-friendly structured JSON logging (see
+archive_etl/utils/structured_logging.py), and runs read-only startup
+validation (see archive_etl/config/startup_validation.py) before processing
+anything. An API, a UI, presigned URLs, and download endpoints remain out
+of scope. See docs/DECISIONS.md,
 database/migrations/V035__create_award_attachment_archive.sql, and
 database/migrations/V036__extend_award_attachment_upload_status.sql for the
 schema this loader populates.
@@ -21,8 +30,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import time
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,14 +47,37 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from archive_etl.attachments.models import sanitize_file_name
-from archive_etl.config.settings import require_oracle_environment
+from archive_etl.config.ecs import configure_ecs_environment
+from archive_etl.config.settings import (
+    ConfigurationError,
+    get_data_bucket_name,
+    require_oracle_environment,
+)
+from archive_etl.config.startup_validation import run_startup_validation
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
+from archive_etl.utils.structured_logging import configure_structured_logging
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+def _resolve_project_root() -> Path:
+    """Locate the directory containing oracle/ and database/migrations/
+    relative to this file. Two layouts are supported: the local repo
+    checkout (this file at <repo>/etl/load_award_attachments.py, so the
+    project root is two levels up) and the ECS loader container image
+    (this file copied flatly to /app/load_award_attachments.py alongside
+    oracle/ and database/migrations/ copied directly under /app - see
+    etl/Dockerfile.loader), where the project root is this file's own
+    parent directory."""
+    container_root = Path(__file__).resolve().parent
+    if (container_root / "oracle").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 _ORACLE_DIR = PROJECT_ROOT / "oracle" / "award"
 REFERENCES_ORACLE_SQL = _ORACLE_DIR / "export_award_attachments.sql"
@@ -841,7 +876,9 @@ def mark_file_missing_source_content(engine: Engine, file_id: int) -> None:
         )
 
 
-def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
+def _run_upload(
+    arguments: argparse.Namespace, run_id: str | None = None
+) -> dict[str, Any]:
     """Upload every selected candidate physical file's BLOB content to
     S3. Never called unless --upload was explicitly given (see main()).
     Each row's status transition (UPLOADING -> UPLOADED/FAILED) is its
@@ -849,6 +886,9 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
     transaction for the whole batch, unlike the metadata load, since the
     whole point of --upload is that a crash partway through must leave
     durable, resumable progress rather than rolling everything back."""
+    run_id = run_id or str(uuid.uuid4())
+    run_logger = logger.bind(stage="upload", run_id=run_id)
+
     if not arguments.bucket:
         raise RuntimeError(
             "--bucket is required with --upload - refusing to guess an "
@@ -856,7 +896,7 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
         )
 
     identity = validate_aws_identity()
-    logger.info(
+    run_logger.info(
         "AWS identity validated for upload: account={}",
         identity["account"],
     )
@@ -874,7 +914,11 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
             retry_failed=arguments.retry_failed,
         )
 
-    report = {
+    start_time = datetime.now(UTC)
+    start_monotonic = time.monotonic()
+
+    report: dict[str, Any] = {
+        "run_id": run_id,
         "physical_files_selected": len(candidates),
         "uploaded": 0,
         "skipped_already_uploaded": 0,
@@ -894,6 +938,8 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
     try:
         for row in candidates.itertuples(index=False):
             file_id = int(row.file_id)
+            file_start = time.monotonic()
+            file_logger = run_logger.bind(file_id=file_id)
             target_key = build_s3_key(
                 prefix, file_id, getattr(row, "file_name", None)
             )
@@ -903,7 +949,7 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
                 and row.s3_bucket == arguments.bucket
                 and row.s3_key == target_key
             ):
-                logger.info(
+                file_logger.bind(status="skipped").info(
                     "SKIP file_id={} already uploaded to s3://{}/{}",
                     file_id,
                     arguments.bucket,
@@ -919,6 +965,9 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
             )
             if location is None:
                 mark_file_missing_source_content(engine, file_id)
+                file_logger.bind(status="missing_source_content").info(
+                    "file_id={} has no source content to upload", file_id
+                )
                 report["missing_source_content"] += 1
                 continue
 
@@ -926,6 +975,9 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
                 oracle_connection = _connect_oracle()
 
             mark_file_uploading(engine, file_id)
+            file_logger.bind(status="uploading").info(
+                "file_id={} upload starting", file_id
+            )
             try:
                 byte_size, sha256 = stream_upload(
                     oracle_connection,
@@ -938,7 +990,10 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
                     multipart_threshold=multipart_threshold,
                 )
             except Exception as error:
-                logger.exception("Upload failed for file_id={}", file_id)
+                elapsed_ms = round((time.monotonic() - file_start) * 1000, 2)
+                file_logger.bind(
+                    status="failed", elapsed_ms=elapsed_ms
+                ).error("file_id={} upload failed", file_id)
                 mark_file_upload_failed(engine, file_id, str(error))
                 report["failed"] += 1
                 continue
@@ -951,6 +1006,10 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
                 sha256=sha256,
                 byte_size=byte_size,
             )
+            elapsed_ms = round((time.monotonic() - file_start) * 1000, 2)
+            file_logger.bind(status="uploaded", elapsed_ms=elapsed_ms).info(
+                "file_id={} upload succeeded ({:,} bytes)", file_id, byte_size
+            )
             report["uploaded"] += 1
             report["bytes_uploaded"] += byte_size
             if location.table == "ATTACHMENT_FILE":
@@ -961,7 +1020,24 @@ def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
         if oracle_connection is not None:
             oracle_connection.close()
 
-    logger.info("Award attachment upload reconciliation: {}", report)
+    finish_time = datetime.now(UTC)
+    duration_seconds = time.monotonic() - start_monotonic
+    average_throughput = (
+        report["bytes_uploaded"] / duration_seconds if duration_seconds > 0 else 0.0
+    )
+
+    report.update(
+        {
+            "start_time": start_time.isoformat(),
+            "finish_time": finish_time.isoformat(),
+            "duration_seconds": round(duration_seconds, 3),
+            "average_throughput_bytes_per_second": round(average_throughput, 2),
+        }
+    )
+
+    run_logger.bind(stage="summary").info(
+        "Award attachment upload run summary: {}", report
+    )
     return report
 
 
@@ -1053,6 +1129,22 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "With --upload, files at or above this size use multipart "
             "upload; smaller files use a single put_object (default: "
             f"{DEFAULT_MULTIPART_THRESHOLD_BYTES:,} bytes = 16 MiB)."
+        ),
+    )
+    parser.add_argument(
+        "--ecs",
+        action="store_true",
+        help=(
+            "Production execution mode for the ECS loader task: resolve "
+            "PostgreSQL/Oracle credentials via Secrets Manager or ECS "
+            "environment variables (never requires a local .env export), "
+            "switch to structured JSON logging for CloudWatch, apply "
+            "production defaults (--bucket defaults to DATA_BUCKET_NAME "
+            "if not given), and run read-only startup validation "
+            "(PostgreSQL/Oracle reachable, S3 bucket exists, Award "
+            "attachment tables present, upload_status schema matches "
+            "V036) before processing anything - aborts immediately on "
+            "any failure."
         ),
     )
     return parser.parse_args(arguments)
@@ -1167,11 +1259,44 @@ def _read_coherent_sample(
     return references, files, report
 
 
+def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> None:
+    """--ecs mode setup: structured logging, credential resolution
+    (never requires a local export), production defaults, and read-only
+    startup validation. Aborts immediately (lets the raised exception
+    propagate) if any of it fails."""
+    configure_structured_logging(run_id)
+    logger.bind(stage="startup").info(
+        "Starting in --ecs mode: run_id={}", run_id
+    )
+
+    secrets_client = boto3.client("secretsmanager")
+    configure_ecs_environment(secrets_client)
+
+    if not arguments.bucket:
+        try:
+            arguments.bucket = get_data_bucket_name()
+        except ConfigurationError:
+            pass
+
+    engine = create_postgres_engine()
+    s3_client = create_s3_client() if arguments.bucket else None
+    run_startup_validation(
+        engine=engine,
+        connect_oracle=_connect_oracle,
+        s3_client=s3_client,
+        bucket=arguments.bucket,
+    )
+
+
 def main() -> None:
     arguments = parse_args()
+    run_id = str(uuid.uuid4())
+
+    if arguments.ecs:
+        _run_ecs_setup(arguments, run_id)
 
     if arguments.upload:
-        _run_upload(arguments)
+        _run_upload(arguments, run_id=run_id)
         return
 
     if arguments.file_id is not None:
@@ -1214,7 +1339,7 @@ def main() -> None:
 
     apply_migrations(
         engine,
-        Path(__file__).resolve().parents[1] / "database" / "migrations",
+        PROJECT_ROOT / "database" / "migrations",
     )
 
     # The STARTED load_run row is committed in its own transaction, before

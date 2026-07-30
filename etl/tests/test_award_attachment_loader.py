@@ -337,7 +337,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             patch.object(attachment_loader, "apply_migrations") as apply_migrations,
         ):
             parse_args.return_value = MagicMock(
-                limit=None, dry_run=True, upload=False, file_id=None
+                limit=None, dry_run=True, upload=False, file_id=None, ecs=False
             )
             attachment_loader.main()
 
@@ -359,7 +359,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 attachment_loader, "create_postgres_engine"
             ) as create_engine,
         ):
-            parse_args.return_value = MagicMock(limit=10, dry_run=True, upload=False, file_id=None)
+            parse_args.return_value = MagicMock(
+                limit=10, dry_run=True, upload=False, file_id=None, ecs=False
+            )
             attachment_loader.main()
 
         create_engine.assert_not_called()
@@ -384,7 +386,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             ) as create_s3_client,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False, file_id=None
+                limit=10, dry_run=True, upload=False, file_id=None, ecs=False
             )
             attachment_loader.main()
 
@@ -421,7 +423,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             patch.object(attachment_loader, "mark_load_complete") as mark_complete,
         ):
             parse_args.return_value = MagicMock(
-                limit=None, dry_run=False, upload=False, file_id=None
+                limit=None, dry_run=False, upload=False, file_id=None, ecs=False
             )
             create_engine.return_value = MagicMock()
             attachment_loader.main()
@@ -1240,7 +1242,7 @@ class UploadGatingTest(unittest.TestCase):
             patch.object(attachment_loader, "_run_upload") as run_upload,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False, file_id=None
+                limit=10, dry_run=True, upload=False, file_id=None, ecs=False
             )
             attachment_loader.main()
 
@@ -1251,7 +1253,7 @@ class UploadGatingTest(unittest.TestCase):
             patch.object(attachment_loader, "parse_args") as parse_args,
             patch.object(attachment_loader, "_run_upload") as run_upload,
         ):
-            parse_args.return_value = MagicMock(upload=True)
+            parse_args.return_value = MagicMock(upload=True, ecs=False)
             attachment_loader.main()
 
         run_upload.assert_called_once()
@@ -1382,7 +1384,7 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
             ) as create_engine,
         ):
             parse_args.return_value = MagicMock(
-                upload=False, file_id=9001, limit=None, dry_run=True
+                upload=False, file_id=9001, limit=None, dry_run=True, ecs=False
             )
             attachment_loader.main()
 
@@ -1401,7 +1403,7 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
             ) as read_sample,
         ):
             parse_args.return_value = MagicMock(
-                upload=False, file_id=9001, limit=10, dry_run=True
+                upload=False, file_id=9001, limit=10, dry_run=True, ecs=False
             )
             attachment_loader.main()
 
