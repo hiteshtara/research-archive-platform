@@ -3,6 +3,11 @@ output "alb_dns_name" {
   value       = aws_lb.api.dns_name
 }
 
+output "alb_zone_id" {
+  description = "Route53 hosted zone ID of the ALB itself, needed for an ALIAS record pointing a custom domain at it."
+  value       = aws_lb.api.zone_id
+}
+
 output "alb_url" {
   description = "Public base URL of the API (https if certificate_arn is set, otherwise http)."
   value       = "${var.certificate_arn == null ? "http" : "https"}://${aws_lb.api.dns_name}"
