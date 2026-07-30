@@ -19,10 +19,6 @@ from archive_etl.attachments.models import (
 from archive_etl.attachments.oracle_blob import OracleBlobReader
 from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
 from archive_etl.attachments.plugins.base import AttachmentPlugin
-from archive_etl.attachments.plugins.irb import (
-    IrbPersonnelAttachmentPlugin,
-    IrbProtocolAttachmentPlugin,
-)
 from archive_etl.attachments.plugins.negotiation import (
     NegotiationAttachmentPlugin,
 )
@@ -41,8 +37,6 @@ from archive_etl.attachments.s3_storage import (
 
 PLUGINS: dict[str, AttachmentPlugin] = {
     "award": AwardAttachmentPlugin(),
-    "irb": IrbProtocolAttachmentPlugin(),
-    "irb-personnel": IrbPersonnelAttachmentPlugin(),
     "negotiation": NegotiationAttachmentPlugin(),
     "proposal": ProposalAttachmentPlugin(),
     "subaward": SubawardAttachmentPlugin(),
