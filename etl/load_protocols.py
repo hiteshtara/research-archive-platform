@@ -423,65 +423,14 @@ def prepare_units(dataframe: pd.DataFrame) -> pd.DataFrame:
 def resolve_person_parents(
     persons: pd.DataFrame,
     versions: pd.DataFrame,
-) -> int:
-    """Resolve each person's protocol_id in place. Returns the count of rows
-    whose resolved protocol_id differs from their raw source_protocol_id."""
-    resolver = NumberSequenceParentResolver(versions.to_dict("records"))
-
-    resolved_protocol_ids: list[int] = []
-    mismatches = 0
-    for row in persons.itertuples(index=False):
-        try:
-            resolved = resolver.resolve(
-                protocol_number=str(row.protocol_number),
-                sequence_number=int(row.sequence_number),
-                source_protocol_id=int(row.source_protocol_id),
-            )
-        except (MissingParentError, AmbiguousParentError) as error:
-            raise RuntimeError(
-                "protocol persons parent resolution failed: "
-                f"{redact_error_message(error)}"
-            ) from error
-        resolved_protocol_ids.append(resolved.protocol_id)
-        mismatches += int(resolved.source_protocol_id_differs)
-
-    persons["protocol_id"] = resolved_protocol_ids
-
-    logger.info(
-        "Protocol personnel parent resolution: total={} "
-        "source_protocol_id_mismatches={}",
-        len(persons),
-        mismatches,
-    )
-    return mismatches
-
-
-def resolve_unit_parents(units: pd.DataFrame, persons: pd.DataFrame) -> None:
-    resolver = OwnerChainParentResolver(persons.to_dict("records"))
-
-    resolved_protocol_ids: list[int] = []
-    for row in units.itertuples(index=False):
-        try:
-            resolved_protocol_ids.append(
-                resolver.resolve(protocol_person_id=int(row.protocol_person_id))
-            )
-        except MissingParentError as error:
-            raise RuntimeError(
-                "protocol units parent resolution failed: "
-                f"{redact_error_message(error)}"
-            ) from error
-
-    units["protocol_id"] = resolved_protocol_ids
-
-
-def sample_resolve_person_parents(
-    persons: pd.DataFrame,
-    versions: pd.DataFrame,
 ) -> dict[str, int]:
-    """Like resolve_person_parents, but counts missing/ambiguous parents
-    instead of raising. Used only for --limit reporting on a sample - never
-    for a real load, where a missing/ambiguous parent must still fail
-    closed via resolve_person_parents."""
+    """Resolve each person's protocol_id in place. Never raises: a row whose
+    parent is missing or ambiguous gets protocol_id=None and is counted
+    instead, so a caller can see the *full* extent of a resolution problem
+    (every affected row) rather than aborting on the first one encountered.
+    Used by both the --limit sample path and the full load, which is what
+    lets the full load report exact unresolved/ambiguous counts in
+    load_run.validation_report before deciding whether to proceed."""
     resolver = NumberSequenceParentResolver(versions.to_dict("records"))
 
     resolved_protocol_ids: list[int | None] = []
@@ -508,6 +457,15 @@ def sample_resolve_person_parents(
 
     persons["protocol_id"] = resolved_protocol_ids
 
+    logger.info(
+        "Protocol personnel parent resolution: total={} "
+        "source_protocol_id_mismatches={} missing_parents={} "
+        "ambiguous_parents={}",
+        len(persons),
+        mismatches,
+        missing,
+        ambiguous,
+    )
     return {
         "source_protocol_id_mismatches": mismatches,
         "missing_parents": missing,
@@ -515,12 +473,11 @@ def sample_resolve_person_parents(
     }
 
 
-def sample_resolve_unit_parents(
-    units: pd.DataFrame, persons: pd.DataFrame
-) -> dict[str, int]:
-    """Like resolve_unit_parents, but tolerant: a unit whose owning person
-    failed to resolve (missing/ambiguous) is counted as unresolved instead
-    of raising. Used only for --limit reporting on a sample."""
+def resolve_unit_parents(units: pd.DataFrame, persons: pd.DataFrame) -> dict[str, int]:
+    """Resolve each unit's protocol_id from its owning person in place. Never
+    raises: a unit whose owning person is itself unresolved (protocol_id is
+    None) is counted as missing instead of raising - see
+    resolve_person_parents for why this is tolerant rather than fail-fast."""
     resolved_persons = persons[persons["protocol_id"].notna()]
     resolver = OwnerChainParentResolver(resolved_persons.to_dict("records"))
 
@@ -536,6 +493,12 @@ def sample_resolve_unit_parents(
             missing += 1
 
     units["protocol_id"] = resolved_protocol_ids
+
+    logger.info(
+        "Protocol unit parent resolution: total={} missing_parents={}",
+        len(units),
+        missing,
+    )
     return {"missing_parents": missing}
 
 
@@ -592,7 +555,19 @@ def mark_load_complete(
     )
 
 
-def mark_load_failed(engine: Engine, load_id: int, error_message: str) -> None:
+def mark_load_failed(
+    engine: Engine,
+    load_id: int,
+    error_message: str,
+    validation_report: dict[str, int] | None = None,
+) -> None:
+    # validation_report is optional here (unlike mark_load_complete, where
+    # it is required) because a failure can happen before any reconciliation
+    # counts exist at all. When it is available - e.g. a parent-resolution
+    # failure, which always has full read/unresolved/ambiguous counts by
+    # the time it raises - persisting it lets an operator see *why* the
+    # load failed from load_run alone, without grepping logs. COALESCE
+    # leaves any existing validation_report untouched when none is given.
     with engine.begin() as connection:
         connection.execute(
             text(
@@ -600,13 +575,21 @@ def mark_load_failed(engine: Engine, load_id: int, error_message: str) -> None:
                 UPDATE archive.load_run
                    SET status = 'FAILED',
                        completed_at = CURRENT_TIMESTAMP,
-                       error_message = :error_message
+                       error_message = :error_message,
+                       validation_report = COALESCE(
+                           :validation_report, validation_report
+                       )
                  WHERE load_id = :load_id
                 """
             ),
             {
                 "load_id": load_id,
                 "error_message": redact_error_message(error_message),
+                "validation_report": (
+                    pd.Series(validation_report).to_json()
+                    if validation_report is not None
+                    else None
+                ),
             },
         )
 
@@ -789,11 +772,11 @@ def _run_limited_sample(limit: int) -> dict[str, int]:
         "ambiguous_parents": 0,
     }
     if not persons_matching.empty:
-        person_stats = sample_resolve_person_parents(persons_matching, versions)
+        person_stats = resolve_person_parents(persons_matching, versions)
 
     unit_stats = {"missing_parents": 0}
     if not units_matching.empty and not persons_matching.empty:
-        unit_stats = sample_resolve_unit_parents(units_matching, persons_matching)
+        unit_stats = resolve_unit_parents(units_matching, persons_matching)
 
     report.update(
         {
@@ -861,22 +844,6 @@ def main() -> None:
     persons = prepare_persons(OracleDataSource(PERSONS_ORACLE_SQL).read())
     units = prepare_units(OracleDataSource(UNITS_ORACLE_SQL).read())
 
-    mismatches = resolve_person_parents(persons, versions)
-    resolve_unit_parents(units, persons)
-
-    missing_email = int(persons["email_address"].isna().sum())
-    missing_role_description = int(
-        persons["protocol_person_role_description"].isna().sum()
-    )
-    missing_unit_name = int(units["unit_name"].isna().sum())
-
-    validation_report = {
-        "personnel_source_protocol_id_mismatches": mismatches,
-        "personnel_missing_email": missing_email,
-        "personnel_missing_role_description": missing_role_description,
-        "unit_missing_unit_name": missing_unit_name,
-    }
-
     total_rows = len(versions) + len(persons) + len(units)
 
     logger.info(
@@ -900,7 +867,51 @@ def main() -> None:
     with engine.begin() as connection:
         load_id = create_load_run(connection, total_rows)
 
+    # Built up incrementally so that even a failure raised before the write
+    # transaction (e.g. unresolved/ambiguous parents) still has read counts
+    # available for mark_load_failed to persist below.
+    validation_report: dict[str, int] = {
+        "versions_read": len(versions),
+        "personnel_read": len(persons),
+        "units_read": len(units),
+    }
+
     try:
+        person_stats = resolve_person_parents(persons, versions)
+        unit_stats = resolve_unit_parents(units, persons)
+
+        unresolved_parents = (
+            person_stats["missing_parents"] + unit_stats["missing_parents"]
+        )
+        ambiguous_parents = person_stats["ambiguous_parents"]
+
+        validation_report.update(
+            {
+                "unresolved_parents": unresolved_parents,
+                "ambiguous_parents": ambiguous_parents,
+                "personnel_source_protocol_id_mismatches": person_stats[
+                    "source_protocol_id_mismatches"
+                ],
+                "missing_email": int(persons["email_address"].isna().sum()),
+                "missing_role_description": int(
+                    persons["protocol_person_role_description"].isna().sum()
+                ),
+                "missing_unit_name": int(units["unit_name"].isna().sum()),
+            }
+        )
+
+        if unresolved_parents or ambiguous_parents:
+            # Never silently drop the affected rows, and never write a
+            # partial archive: abort the entire load before anything is
+            # truncated or copied. The full counts are already in
+            # validation_report for mark_load_failed to persist below.
+            raise RuntimeError(
+                "Protocol parent resolution failed: "
+                f"{unresolved_parents} unresolved and {ambiguous_parents} "
+                "ambiguous parent relationships - aborting load without "
+                "writing any rows"
+            )
+
         with engine.begin() as connection:
             clear_existing_protocol_data(connection)
 
@@ -924,6 +935,13 @@ def main() -> None:
             )
 
             rows_loaded = version_rows + person_rows + unit_rows
+            validation_report.update(
+                {
+                    "versions_loaded": version_rows,
+                    "personnel_loaded": person_rows,
+                    "units_loaded": unit_rows,
+                }
+            )
             mark_load_complete(connection, load_id, rows_loaded, validation_report)
 
         logger.success(
@@ -936,7 +954,7 @@ def main() -> None:
             rows_loaded,
         )
     except Exception as error:
-        mark_load_failed(engine, load_id, str(error))
+        mark_load_failed(engine, load_id, str(error), validation_report)
         logger.exception("Protocol load failed")
         raise
 
