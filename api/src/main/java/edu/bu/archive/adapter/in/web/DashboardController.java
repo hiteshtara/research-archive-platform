@@ -22,14 +22,7 @@ public class DashboardController {
     @GetMapping
     public DashboardDto dashboard() {
         return jdbcClient.sql("""
-                WITH protocol_counts AS (
-                    SELECT
-                        COUNT(DISTINCT protocol_number)
-                            AS protocol_families,
-                        COUNT(*) AS protocol_versions
-                    FROM archive.protocol_version
-                ),
-                award_counts AS (
+                WITH award_counts AS (
                     SELECT
                         COUNT(DISTINCT award_number) AS awards,
                         COUNT(*) AS award_history_records
@@ -44,8 +37,6 @@ public class DashboardController {
                 SELECT
                     (SELECT COUNT(*)
                      FROM archive.irb_protocol) AS irb,
-                    protocol_counts.protocol_families,
-                    protocol_counts.protocol_versions,
                     (SELECT COUNT(*)
                      FROM archive.irb_submission) AS submissions,
                     (SELECT COUNT(*)
@@ -63,8 +54,7 @@ public class DashboardController {
                     (SELECT COUNT(DISTINCT subaward_code)
                      FROM archive.subaward) AS subawards,
                     0 AS documents
-                FROM protocol_counts
-                CROSS JOIN award_counts
+                FROM award_counts
                 CROSS JOIN proposal_counts
                 """)
                 .query(DashboardDto.class)
