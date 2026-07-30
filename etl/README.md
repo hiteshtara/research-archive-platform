@@ -36,6 +36,7 @@ process environment.
 | `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN` | Any Oracle read (`--oracle` loaders, `load_protocol_*.py`, `archive_attachments.py`, `export_protocol_versions.py`) | `ORACLE_DSN` is an Easy Connect string, e.g. `kuali-oracle.bu.edu:1521/KCPROD` |
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Every `load_*.py` script, both reconciliation scripts | — |
 | `POSTGRES_SSLMODE` | Optional | Defaults to `prefer`. Use `require` or `verify-full` against BU's RDS once TLS is configured |
+| `SOURCE_MODE` | Optional | `oracle` (default) or `csv`. Sets the default source for Award/Negotiation/Subaward/Proposal when neither `--oracle` nor `--csv` is passed explicitly on the command line — an explicit flag always wins. See `archive_etl/config/settings.py`'s `use_oracle_source()`. |
 | `DATA_BUCKET_NAME` | `load_from_s3.py`, `load_composite_from_s3.py`, `run_export.py`, `run_composite_export.py` | S3 bucket holding IRB Parquet/validation exports |
 | `AWS_REGION` | Optional | Defaults to `us-east-1` |
 | `IRB_S3_PREFIX` | Optional | Defaults to `landing/irb/`; only read by `load_from_s3.py` |
@@ -51,6 +52,8 @@ time from a new machine or network:
 ```
 uv run python scripts/test_oracle_connection.py
 uv run python scripts/test_postgres_connection.py
+# or both together:
+uv run python -m archive_etl check
 ```
 
 `test_postgres_connection.py` also reports how many migrations are on disk
@@ -90,13 +93,34 @@ exists.
 - `tests/` — pytest test suite; none of it requires live Oracle/Postgres
   credentials (Oracle/Postgres/S3 clients are mocked).
 
-## Running a loader
+## Unified CLI
 
-Each loader is a standalone script:
+`archive_etl/__main__.py` is a thin dispatcher over the same per-domain
+scripts described below — it exists for a single consistent command shape,
+not a replacement for running a script directly (both work identically):
 
 ```
-uv run python load_awards_from_csv.py            # Oracle (default)
-uv run python load_awards_from_csv.py --csv       # CSV export set fallback
+uv run python -m archive_etl check                          # Oracle + Postgres connectivity, no secrets printed
+uv run python -m archive_etl award --source oracle           # same as: load_awards_from_csv.py --oracle
+uv run python -m archive_etl award --source csv --csv-dir ~/Downloads
+uv run python -m archive_etl subaward --limit 10              # bounded dry run - reads + validates 10 rows per dataset, skips the database write
+```
+
+Covers `award`, `negotiation`, `subaward`, and `proposal` (the four domains
+with a `--source oracle`/`--source csv` choice). `--limit N` truncates every
+dataset to at most `N` rows after reading, skips cross-dataset referential
+validation (which would otherwise spuriously fail against independently
+truncated datasets), and returns before any database write — use it to
+exercise Oracle/CSV connectivity and the transform/prepare logic without
+touching PostgreSQL. It is not a partial-load mechanism.
+
+## Running a loader
+
+Each loader is also a standalone script, exactly as before:
+
+```
+uv run python load_awards_from_csv.py            # Oracle (default; or SOURCE_MODE=csv)
+uv run python load_awards_from_csv.py --csv       # CSV export set fallback (explicit, always overrides SOURCE_MODE)
 uv run python load_protocol_actions.py
 uv run python load_from_s3.py
 ```

@@ -10,6 +10,7 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.config.settings import use_oracle_source
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -720,12 +721,26 @@ def parse_args(
             f"Defaults to {DOWNLOAD_DIR}."
         ),
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Truncate every dataset to at most this many rows after "
+            "reading, skip cross-dataset validation, and skip the "
+            "database write entirely (a bounded dry run for testing "
+            "connectivity/transform logic - not a partial load)."
+        ),
+    )
     return parser.parse_args(arguments)
 
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = not arguments.csv
+    use_oracle = use_oracle_source(
+        oracle_flag=arguments.oracle,
+        csv_flag=arguments.csv,
+    )
     csv_dir = arguments.csv_dir
 
     require_files([csv_dir / "award_unit_contacts.csv"])
@@ -768,6 +783,25 @@ def main() -> None:
         proposals = prepare_proposals(
             read_csv(csv_dir / "award_proposals.csv")
         )
+
+    if arguments.limit is not None:
+        versions = versions.head(arguments.limit)
+        amounts = amounts.head(arguments.limit)
+        people = people.head(arguments.limit)
+        proposals = proposals.head(arguments.limit)
+        unit_contacts = unit_contacts.head(arguments.limit)
+        logger.info(
+            "Dry run (--limit {}): read versions={} amounts={} people={} "
+            "proposals={} unit_contacts={} - skipping validation and "
+            "database write.",
+            arguments.limit,
+            len(versions),
+            len(amounts),
+            len(people),
+            len(proposals),
+            len(unit_contacts),
+        )
+        return
 
     validate_child_award_ids(
         versions,

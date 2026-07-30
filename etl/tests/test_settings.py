@@ -6,8 +6,10 @@ from archive_etl.config.settings import (
     ConfigurationError,
     get_aws_region,
     get_data_bucket_name,
+    get_source_mode,
     require_oracle_environment,
     require_postgres_environment,
+    use_oracle_source,
 )
 
 
@@ -80,3 +82,40 @@ def test_get_data_bucket_name_returns_configured_value() -> None:
     environ = {"DATA_BUCKET_NAME": "my-bucket"}
 
     assert get_data_bucket_name(environ) == "my-bucket"
+
+
+def test_get_source_mode_defaults_to_oracle() -> None:
+    assert get_source_mode({}) == "oracle"
+
+
+def test_get_source_mode_honors_explicit_csv() -> None:
+    assert get_source_mode({"SOURCE_MODE": "csv"}) == "csv"
+
+
+def test_get_source_mode_rejects_an_invalid_value() -> None:
+    with pytest.raises(ConfigurationError) as excinfo:
+        get_source_mode({"SOURCE_MODE": "parquet"})
+
+    assert "parquet" in str(excinfo.value)
+
+
+def test_use_oracle_source_defaults_to_oracle_with_no_flags_and_no_env() -> None:
+    assert use_oracle_source(oracle_flag=False, csv_flag=False, environ={}) is True
+
+
+def test_use_oracle_source_falls_back_to_source_mode_when_no_flags_given() -> None:
+    assert use_oracle_source(
+        oracle_flag=False, csv_flag=False, environ={"SOURCE_MODE": "csv"}
+    ) is False
+
+
+def test_use_oracle_source_explicit_csv_flag_overrides_source_mode() -> None:
+    assert use_oracle_source(
+        oracle_flag=False, csv_flag=True, environ={"SOURCE_MODE": "oracle"}
+    ) is False
+
+
+def test_use_oracle_source_explicit_oracle_flag_overrides_source_mode() -> None:
+    assert use_oracle_source(
+        oracle_flag=True, csv_flag=False, environ={"SOURCE_MODE": "csv"}
+    ) is True

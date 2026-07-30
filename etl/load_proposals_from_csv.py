@@ -9,6 +9,7 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.config.settings import use_oracle_source
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -150,6 +151,17 @@ def parse_args(
             "Directory containing the CSV export set. Used for --csv, "
             "and always for proposal_people.csv. "
             f"Defaults to {DOWNLOAD_DIR}."
+        ),
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Truncate every dataset to at most this many rows after "
+            "reading, skip cross-dataset validation, and skip the "
+            "database write entirely (a bounded dry run for testing "
+            "connectivity/transform logic - not a partial load)."
         ),
     )
     return parser.parse_args(arguments)
@@ -626,7 +638,10 @@ def load_proposal_awards(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = not arguments.csv
+    use_oracle = use_oracle_source(
+        oracle_flag=arguments.oracle,
+        csv_flag=arguments.csv,
+    )
     people_path = arguments.csv_dir / "proposal_people.csv"
 
     if use_oracle:
@@ -641,6 +656,20 @@ def main() -> None:
         awards = prepare_awards(read_csv(awards_path))
 
     people = prepare_people(read_csv(people_path))
+
+    if arguments.limit is not None:
+        versions = versions.head(arguments.limit)
+        people = people.head(arguments.limit)
+        awards = awards.head(arguments.limit)
+        logger.info(
+            "Dry run (--limit {}): read versions={} people={} awards={} - "
+            "skipping database write.",
+            arguments.limit,
+            len(versions),
+            len(people),
+            len(awards),
+        )
+        return
 
     logger.info(
         "Prepared Proposal rows: versions={:,} people={:,} awards={:,}",

@@ -9,6 +9,7 @@ from pandas.errors import EmptyDataError
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.config.settings import use_oracle_source
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -180,6 +181,17 @@ def parse_args(
         type=Path,
         default=DOWNLOAD_DIR,
         help=f"Directory containing the CSV export set. Defaults to {DOWNLOAD_DIR}.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Truncate every dataset to at most this many rows after "
+            "reading, skip cross-dataset validation, and skip the "
+            "database write entirely (a bounded dry run for testing "
+            "connectivity/transform logic - not a partial load)."
+        ),
     )
     return parser.parse_args(arguments)
 
@@ -724,7 +736,10 @@ def mark_load_complete(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = not arguments.csv
+    use_oracle = use_oracle_source(
+        oracle_flag=arguments.oracle,
+        csv_flag=arguments.csv,
+    )
     csv_dir = arguments.csv_dir
 
     if use_oracle:
@@ -772,6 +787,25 @@ def main() -> None:
         unassociated = prepare_unassociated(
             read_csv(csv_dir / "negotiation_unassociated.csv", UNASSOCIATED_COLUMNS)
         )
+
+    if arguments.limit is not None:
+        negotiations = negotiations.head(arguments.limit)
+        activities = activities.head(arguments.limit)
+        custom_data = custom_data.head(arguments.limit)
+        notifications = notifications.head(arguments.limit)
+        unassociated = unassociated.head(arguments.limit)
+        logger.info(
+            "Dry run (--limit {}): read negotiations={} activities={} "
+            "custom_data={} notifications={} unassociated={} - skipping "
+            "validation and database write.",
+            arguments.limit,
+            len(negotiations),
+            len(activities),
+            len(custom_data),
+            len(notifications),
+            len(unassociated),
+        )
+        return
 
     validate_parent_ids(
         negotiations,
