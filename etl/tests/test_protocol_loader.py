@@ -243,6 +243,20 @@ class VerifyLoadedDataTest(unittest.TestCase):
             protocol_loader.verify_loaded_data(connection, {"protocol_version": 1})
 
 
+def _oracle_source_stub(batches: list[pd.DataFrame]) -> MagicMock:
+    """A OracleDataSource-shaped mock whose read_batches() yields the given
+    DataFrames lazily, so tests can assert on how many were consumed. Uses a
+    real generator (not iter(list)) so it has a .close() method, matching
+    OracleDataSource.read_batches()'s actual return type."""
+
+    def _generator():
+        yield from batches
+
+    stub = MagicMock()
+    stub.read_batches.side_effect = _generator
+    return stub
+
+
 class LimitIsReadOnlyTest(unittest.TestCase):
     def test_limit_never_creates_a_postgres_engine(self) -> None:
         versions = pd.DataFrame(
@@ -255,6 +269,9 @@ class LimitIsReadOnlyTest(unittest.TestCase):
                     "source_protocol_id": 1,
                     "protocol_number": "P-1",
                     "sequence_number": 0,
+                    "person_email_address": None,
+                    "rolodex_email_address": None,
+                    "protocol_person_role_description": None,
                 }
             ]
         )
@@ -265,6 +282,7 @@ class LimitIsReadOnlyTest(unittest.TestCase):
                     "protocol_person_id": 1,
                     "protocol_number": "P-1",
                     "sequence_number": 0,
+                    "unit_name": None,
                 }
             ]
         )
@@ -274,9 +292,9 @@ class LimitIsReadOnlyTest(unittest.TestCase):
                 protocol_loader,
                 "OracleDataSource",
                 side_effect=[
-                    MagicMock(read=MagicMock(return_value=versions)),
-                    MagicMock(read=MagicMock(return_value=persons)),
-                    MagicMock(read=MagicMock(return_value=units)),
+                    _oracle_source_stub([versions]),
+                    _oracle_source_stub([persons]),
+                    _oracle_source_stub([units]),
                 ],
             ),
             patch.object(protocol_loader, "parse_args") as parse_args,
@@ -286,6 +304,163 @@ class LimitIsReadOnlyTest(unittest.TestCase):
             protocol_loader.main()
 
         create_engine.assert_not_called()
+
+
+class ReadBoundedByRowCountTest(unittest.TestCase):
+    def test_stops_reading_once_the_limit_is_reached(self) -> None:
+        produced = {"batches": 0}
+
+        def fake_batches():
+            for i in range(1000):
+                produced["batches"] += 1
+                yield pd.DataFrame(
+                    [
+                        {
+                            "protocol_id": i,
+                            "protocol_number": str(i),
+                            "sequence_number": 0,
+                        }
+                    ]
+                )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = protocol_loader.read_bounded_by_row_count(source, 5)
+
+        self.assertEqual(len(result), 5)
+        # The whole point of this helper: it must never exhaust a
+        # 1,000-batch generator just to satisfy a --limit of 5.
+        self.assertLess(produced["batches"], 1000)
+
+
+class ReadBoundedByProtocolNumberTest(unittest.TestCase):
+    def test_stops_reading_once_the_boundary_is_exceeded(self) -> None:
+        produced = {"batches": 0}
+
+        def fake_batches():
+            for number in range(1000):
+                produced["batches"] += 1
+                yield pd.DataFrame(
+                    [
+                        {
+                            "protocol_person_id": number,
+                            "protocol_number": f"{number:04d}",
+                            "sequence_number": 0,
+                        }
+                    ]
+                )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = protocol_loader.read_bounded_by_protocol_number(source, "0002")
+
+        self.assertEqual(
+            result["protocol_number"].tolist(), ["0000", "0001", "0002"]
+        )
+        self.assertLess(produced["batches"], 1000)
+
+
+class SampleFilteringPreservesRelationshipsTest(unittest.TestCase):
+    def test_filter_to_sample_keys_drops_rows_outside_the_sampled_versions(
+        self,
+    ) -> None:
+        versions = pd.DataFrame(
+            [
+                {"protocol_id": 1, "protocol_number": "P-1", "sequence_number": 0},
+                {"protocol_id": 2, "protocol_number": "P-2", "sequence_number": 0},
+            ]
+        )
+        sample_keys = protocol_loader._sample_version_keys(versions)
+
+        # person_b belongs to a sampled version; person_stale shares a
+        # protocol_number with a sampled version but at a sequence_number
+        # that was never actually sampled, and must be excluded.
+        persons = pd.DataFrame(
+            [
+                {"protocol_person_id": 10, "protocol_number": "P-1", "sequence_number": 0},
+                {"protocol_person_id": 11, "protocol_number": "P-1", "sequence_number": 5},
+                {"protocol_person_id": 12, "protocol_number": "P-2", "sequence_number": 0},
+            ]
+        )
+
+        matching = protocol_loader._filter_to_sample_keys(persons, sample_keys)
+
+        self.assertEqual(
+            sorted(matching["protocol_person_id"].tolist()), [10, 12]
+        )
+
+    def test_run_limited_sample_only_retains_coherent_person_and_unit_rows(
+        self,
+    ) -> None:
+        versions = pd.DataFrame(
+            [{"protocol_id": 1, "protocol_number": "P-1", "sequence_number": 0}]
+        )
+
+        # person_match belongs to the sampled version; person_other belongs
+        # to a protocol_number that was read (within the boundary) but was
+        # never actually sampled as a protocol version.
+        persons = pd.DataFrame(
+            [
+                {
+                    "protocol_person_id": 100,
+                    "source_protocol_id": 1,
+                    "protocol_number": "P-1",
+                    "sequence_number": 0,
+                    "person_email_address": "match@bu.edu",
+                    "rolodex_email_address": None,
+                    "protocol_person_role_description": "Principal Investigator",
+                },
+                {
+                    "protocol_person_id": 101,
+                    "source_protocol_id": 2,
+                    "protocol_number": "P-0",
+                    "sequence_number": 0,
+                    "person_email_address": "other@bu.edu",
+                    "rolodex_email_address": None,
+                    "protocol_person_role_description": "Co-Investigator",
+                },
+            ]
+        )
+
+        # unit_match belongs to person_match (retained); unit_other belongs
+        # to person_other, who is not part of the sample, so unit_other
+        # must not appear in the final matching units even though its
+        # (protocol_number, sequence_number) alone would not exclude it.
+        units = pd.DataFrame(
+            [
+                {
+                    "protocol_units_id": 900,
+                    "protocol_person_id": 100,
+                    "protocol_number": "P-1",
+                    "sequence_number": 0,
+                    "unit_name": "Chemistry",
+                },
+                {
+                    "protocol_units_id": 901,
+                    "protocol_person_id": 101,
+                    "protocol_number": "P-1",
+                    "sequence_number": 0,
+                    "unit_name": "Biology",
+                },
+            ]
+        )
+
+        with patch.object(
+            protocol_loader,
+            "OracleDataSource",
+            side_effect=[
+                _oracle_source_stub([versions]),
+                _oracle_source_stub([persons]),
+                _oracle_source_stub([units]),
+            ],
+        ):
+            report = protocol_loader._run_limited_sample(1)
+
+        self.assertEqual(report["sampled_versions"], 1)
+        self.assertEqual(report["matching_personnel"], 1)
+        self.assertEqual(report["matching_units"], 1)
 
 
 if __name__ == "__main__":

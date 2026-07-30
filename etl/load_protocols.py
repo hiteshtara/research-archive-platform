@@ -124,6 +124,97 @@ UNIT_COLUMNS = [
 _PI_DESCRIPTION_PATTERN = "principal investigator"
 
 
+def read_bounded_by_row_count(
+    source: OracleDataSource, limit: int
+) -> pd.DataFrame:
+    """Read at most `limit` rows from an Oracle source, stopping the fetch
+    as soon as enough rows have been collected instead of reading the full
+    result set. Used only for --limit sampling (protocol versions, the
+    root of the sample) - never for a real load."""
+    collected: list[pd.DataFrame] = []
+    total = 0
+    batches = source.read_batches()
+    try:
+        for batch in batches:
+            collected.append(batch)
+            total += len(batch)
+            if total >= limit:
+                break
+    finally:
+        batches.close()
+
+    if not collected:
+        return pd.DataFrame()
+    return pd.concat(collected, ignore_index=True).head(limit)
+
+
+def read_bounded_by_protocol_number(
+    source: OracleDataSource, max_protocol_number: str
+) -> pd.DataFrame:
+    """Read rows from an Oracle source ordered ascending by protocol_number
+    (true of every Protocol extraction query), stopping the fetch as soon
+    as a row's protocol_number exceeds max_protocol_number instead of
+    reading the full result set. Used to bound the personnel/units reads to
+    the protocol_number range covered by a sampled set of protocol
+    versions, without taking an independent, potentially incoherent
+    head(limit) of each dataset.
+
+    This assumes the source query's ORDER BY and Python's string comparison
+    agree on ordering, which holds for the fixed-width numeric protocol
+    numbers observed in this dataset. It is only ever used for --limit
+    sampling, never for a real load, so a rare ordering disagreement would
+    at worst affect a --limit report, not the actual archive data.
+    """
+    collected: list[pd.DataFrame] = []
+    batches = source.read_batches()
+    try:
+        for batch in batches:
+            within_bound = batch["protocol_number"].astype(str) <= max_protocol_number
+            if within_bound.all():
+                collected.append(batch)
+                continue
+            collected.append(batch[within_bound])
+            break
+    finally:
+        batches.close()
+
+    if not collected:
+        return pd.DataFrame()
+    return pd.concat(collected, ignore_index=True)
+
+
+def _sample_version_keys(versions: pd.DataFrame) -> pd.DataFrame:
+    keys = versions[["protocol_number", "sequence_number"]].copy()
+    keys["protocol_number"] = keys["protocol_number"].astype(str)
+    keys["sequence_number"] = pd.to_numeric(
+        keys["sequence_number"], errors="coerce"
+    )
+    return keys.drop_duplicates()
+
+
+def _filter_to_sample_keys(
+    dataframe: pd.DataFrame, sample_keys: pd.DataFrame
+) -> pd.DataFrame:
+    """Keep only rows whose (protocol_number, sequence_number) exactly
+    matches a sampled protocol version. A protocol_number-boundary bounded
+    read can include rows for protocol_number/sequence_number combinations
+    that fall within the boundary but were never actually sampled (e.g. a
+    different sequence_number of the boundary protocol_number, or a version
+    row-count cutoff that split a protocol_number's family) - this exact-key
+    filter is what guarantees the retained rows genuinely belong to the
+    sampled versions rather than merely sharing a protocol_number range."""
+    if dataframe.empty:
+        return dataframe
+    working = dataframe.copy()
+    working["protocol_number"] = working["protocol_number"].astype(str)
+    working["sequence_number"] = pd.to_numeric(
+        working["sequence_number"], errors="coerce"
+    )
+    return working.merge(
+        sample_keys, on=["protocol_number", "sequence_number"], how="inner"
+    )
+
+
 def require_columns(
     dataframe: pd.DataFrame,
     required_columns: set[str],
@@ -383,6 +474,71 @@ def resolve_unit_parents(units: pd.DataFrame, persons: pd.DataFrame) -> None:
     units["protocol_id"] = resolved_protocol_ids
 
 
+def sample_resolve_person_parents(
+    persons: pd.DataFrame,
+    versions: pd.DataFrame,
+) -> dict[str, int]:
+    """Like resolve_person_parents, but counts missing/ambiguous parents
+    instead of raising. Used only for --limit reporting on a sample - never
+    for a real load, where a missing/ambiguous parent must still fail
+    closed via resolve_person_parents."""
+    resolver = NumberSequenceParentResolver(versions.to_dict("records"))
+
+    resolved_protocol_ids: list[int | None] = []
+    mismatches = 0
+    missing = 0
+    ambiguous = 0
+    for row in persons.itertuples(index=False):
+        try:
+            resolved = resolver.resolve(
+                protocol_number=str(row.protocol_number),
+                sequence_number=int(row.sequence_number),
+                source_protocol_id=int(row.source_protocol_id),
+            )
+        except MissingParentError:
+            resolved_protocol_ids.append(None)
+            missing += 1
+            continue
+        except AmbiguousParentError:
+            resolved_protocol_ids.append(None)
+            ambiguous += 1
+            continue
+        resolved_protocol_ids.append(resolved.protocol_id)
+        mismatches += int(resolved.source_protocol_id_differs)
+
+    persons["protocol_id"] = resolved_protocol_ids
+
+    return {
+        "source_protocol_id_mismatches": mismatches,
+        "missing_parents": missing,
+        "ambiguous_parents": ambiguous,
+    }
+
+
+def sample_resolve_unit_parents(
+    units: pd.DataFrame, persons: pd.DataFrame
+) -> dict[str, int]:
+    """Like resolve_unit_parents, but tolerant: a unit whose owning person
+    failed to resolve (missing/ambiguous) is counted as unresolved instead
+    of raising. Used only for --limit reporting on a sample."""
+    resolved_persons = persons[persons["protocol_id"].notna()]
+    resolver = OwnerChainParentResolver(resolved_persons.to_dict("records"))
+
+    resolved_protocol_ids: list[int | None] = []
+    missing = 0
+    for row in units.itertuples(index=False):
+        try:
+            resolved_protocol_ids.append(
+                resolver.resolve(protocol_person_id=int(row.protocol_person_id))
+            )
+        except MissingParentError:
+            resolved_protocol_ids.append(None)
+            missing += 1
+
+    units["protocol_id"] = resolved_protocol_ids
+    return {"missing_parents": missing}
+
+
 def create_load_run(connection: Connection, total_rows: int) -> int:
     load_id = connection.execute(
         text(
@@ -559,36 +715,151 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "Truncate every dataset to at most this many rows after "
-            "reading, skip parent resolution/validation, and skip the "
-            "database write entirely (a bounded dry run for testing "
-            "connectivity/transform logic - not a partial load)."
+            "Sample at most this many protocol versions from Oracle "
+            "(stopping the fetch early rather than reading the full "
+            "table), then retain only personnel belonging to those "
+            "versions and units belonging to those personnel. Runs parent "
+            "resolution and validation on this coherent sample and reports "
+            "the results, but never connects to, writes to, or migrates "
+            "PostgreSQL (a bounded, read-only dry run - not a partial "
+            "load)."
         ),
     )
     return parser.parse_args(arguments)
 
 
+def _run_limited_sample(limit: int) -> dict[str, int]:
+    """Bounded, read-only --limit sampling: sample up to `limit` protocol
+    versions, then keep only the personnel/units that genuinely belong to
+    those versions, run parent resolution/validation on that coherent
+    sample, and report the result. Never opens a PostgreSQL connection."""
+    logger.info(
+        "Sampling up to {} Protocol versions from Oracle (bounded read, "
+        "no PostgreSQL connection will be made)",
+        limit,
+    )
+
+    versions = prepare_versions(
+        read_bounded_by_row_count(OracleDataSource(VERSIONS_ORACLE_SQL), limit)
+    )
+
+    report = {
+        "sampled_versions": len(versions),
+        "matching_personnel": 0,
+        "matching_units": 0,
+        "unresolved_parents": 0,
+        "ambiguous_parents": 0,
+        "missing_email": 0,
+        "missing_role_description": 0,
+        "missing_unit_name": 0,
+    }
+
+    if versions.empty:
+        logger.info("Dry run (--limit {}): no protocol versions found.", limit)
+        return report
+
+    sample_keys = _sample_version_keys(versions)
+    boundary_protocol_number = str(versions["protocol_number"].astype(str).max())
+
+    persons_raw = read_bounded_by_protocol_number(
+        OracleDataSource(PERSONS_ORACLE_SQL), boundary_protocol_number
+    )
+    persons_matching = _filter_to_sample_keys(persons_raw, sample_keys)
+    if not persons_matching.empty:
+        persons_matching = prepare_persons(persons_matching)
+
+    units_raw = read_bounded_by_protocol_number(
+        OracleDataSource(UNITS_ORACLE_SQL), boundary_protocol_number
+    )
+    units_matching = _filter_to_sample_keys(units_raw, sample_keys)
+    if not units_matching.empty and not persons_matching.empty:
+        # "units belonging to those retained personnel" - independent of
+        # the (protocol_number, sequence_number) key match above.
+        units_matching = units_matching[
+            units_matching["protocol_person_id"].isin(
+                persons_matching["protocol_person_id"]
+            )
+        ]
+    if not units_matching.empty:
+        units_matching = prepare_units(units_matching)
+
+    person_stats = {
+        "source_protocol_id_mismatches": 0,
+        "missing_parents": 0,
+        "ambiguous_parents": 0,
+    }
+    if not persons_matching.empty:
+        person_stats = sample_resolve_person_parents(persons_matching, versions)
+
+    unit_stats = {"missing_parents": 0}
+    if not units_matching.empty and not persons_matching.empty:
+        unit_stats = sample_resolve_unit_parents(units_matching, persons_matching)
+
+    report.update(
+        {
+            "matching_personnel": len(persons_matching),
+            "matching_units": len(units_matching),
+            "unresolved_parents": (
+                person_stats["missing_parents"] + unit_stats["missing_parents"]
+            ),
+            "ambiguous_parents": person_stats["ambiguous_parents"],
+            "missing_email": (
+                int(persons_matching["email_address"].isna().sum())
+                if not persons_matching.empty
+                else 0
+            ),
+            "missing_role_description": (
+                int(
+                    persons_matching["protocol_person_role_description"]
+                    .isna()
+                    .sum()
+                )
+                if not persons_matching.empty
+                else 0
+            ),
+            "missing_unit_name": (
+                int(units_matching["unit_name"].isna().sum())
+                if not units_matching.empty
+                else 0
+            ),
+        }
+    )
+
+    logger.info(
+        "Dry run (--limit {}) - bounded, coherent sample, no PostgreSQL "
+        "connection made:\n"
+        "  sampled protocol versions: {}\n"
+        "  matching personnel:        {}\n"
+        "  matching units:            {}\n"
+        "  unresolved parents:        {}\n"
+        "  ambiguous parents:         {}\n"
+        "  missing email:             {}\n"
+        "  missing role description:  {}\n"
+        "  missing unit name:         {}",
+        limit,
+        report["sampled_versions"],
+        report["matching_personnel"],
+        report["matching_units"],
+        report["unresolved_parents"],
+        report["ambiguous_parents"],
+        report["missing_email"],
+        report["missing_role_description"],
+        report["missing_unit_name"],
+    )
+    return report
+
+
 def main() -> None:
     arguments = parse_args()
+
+    if arguments.limit is not None:
+        _run_limited_sample(arguments.limit)
+        return
 
     logger.info("Reading Protocol versions/personnel/units from Oracle")
     versions = prepare_versions(OracleDataSource(VERSIONS_ORACLE_SQL).read())
     persons = prepare_persons(OracleDataSource(PERSONS_ORACLE_SQL).read())
     units = prepare_units(OracleDataSource(UNITS_ORACLE_SQL).read())
-
-    if arguments.limit is not None:
-        versions = versions.head(arguments.limit)
-        persons = persons.head(arguments.limit)
-        units = units.head(arguments.limit)
-        logger.info(
-            "Dry run (--limit {}): read versions={} persons={} units={} - "
-            "skipping parent resolution, validation, and database write.",
-            arguments.limit,
-            len(versions),
-            len(persons),
-            len(units),
-        )
-        return
 
     mismatches = resolve_person_parents(persons, versions)
     resolve_unit_parents(units, persons)
