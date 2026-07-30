@@ -39,10 +39,12 @@ use_private_subnets_for_api = true
 database_name             = "research_archive"
 database_master_username  = "archive_admin"
 database_instance_class   = "db.r6g.large"
-# database_deletion_protection, database_skip_final_snapshot, and
-# database_backup_retention_days already default to safe production
-# values in this environment's variables.tf - override here only if you
-# need something different.
+# database_deletion_protection, database_skip_final_snapshot,
+# database_backup_retention_days, database_multi_az,
+# database_apply_immediately, database_maintenance_window, and
+# database_backup_window already default to safe production values in
+# this environment's variables.tf - override here only if you need
+# something different.
 
 api_image_tag    = "REPLACE_WITH_A_REAL_IMAGE_TAG"
 loader_image_tag = "REPLACE_WITH_A_REAL_IMAGE_TAG"
@@ -53,9 +55,14 @@ api_container_port = 8080
 api_desired_count  = 2
 # alb_deletion_protection already defaults to true in this environment.
 
-# Required for production - do not run prod on plain HTTP.
+# Required for production - config_guard refuses to apply without these.
+# api_route53_zone_id is the Route53 hosted zone that api_domain_name
+# belongs to (e.g. bu.edu or a delegated subdomain) - Terraform creates an
+# ALIAS record in it pointing at the ALB. Confirm api_certificate_arn
+# actually covers api_domain_name before applying (see README).
 api_domain_name     = "REPLACE_WITH_YOUR_API_DOMAIN"
 api_certificate_arn = "REPLACE_WITH_YOUR_ACM_CERTIFICATE_ARN"
+api_route53_zone_id = "REPLACE_WITH_YOUR_ROUTE53_ZONE_ID"
 
 manage_cognito = true
 cognito_callback_urls = [
@@ -65,8 +72,30 @@ cognito_logout_urls = [
   "https://REPLACE_WITH_YOUR_PROD_UI_DOMAIN/"
 ]
 cognito_hosted_ui_domain_prefix = "REPLACE_WITH_A_UNIQUE_PREFIX"
+# cognito_advanced_security_mode, cognito_deletion_protection, and
+# cognito_mfa_configuration already default to ENFORCED / ACTIVE / OPTIONAL
+# in this environment's variables.tf - override here only if you need
+# something different.
 
+# Leave amplify_repository_url/amplify_github_access_token BOTH unset
+# (recommended) to connect the repo manually via the AWS Console's GitHub
+# App flow after the first apply - see README's "Amplify repository
+# connection" section. Shown here is the legacy PAT-based alternative
+# (never put the token in this file - export
+# TF_VAR_amplify_github_access_token instead).
 manage_amplify         = true
 amplify_repository_url = "https://github.com/REPLACE_WITH_ORG/REPLACE_WITH_REPO"
 amplify_branch_name    = "main"
 amplify_custom_domain  = "REPLACE_WITH_YOUR_UI_DOMAIN"
+# ui_redirect_url/ui_logout_url are not needed here since
+# amplify_custom_domain is set - they default to
+# https://<amplify_custom_domain>/ automatically.
+
+# Leave false (the default) to deploy without ever requiring an OpenAI
+# secret. See README's "Enable and populate the OpenAI secret" section.
+# enable_openai_secret = true
+# additional_api_environment_variables = {
+#   APP_AI_ENABLED        = "true"
+#   APP_AI_PROVIDER       = "openai"
+#   APP_AI_OPENAI_ENABLED = "true"
+# }

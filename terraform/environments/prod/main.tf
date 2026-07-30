@@ -5,18 +5,46 @@ data "aws_caller_identity" "current" {}
 resource "terraform_data" "config_guard" {
   lifecycle {
     precondition {
-      condition     = var.manage_cognito || (var.cognito_issuer_uri != null && var.cognito_client_id != null)
-      error_message = "manage_cognito is false, so cognito_issuer_uri and cognito_client_id must both be set to an existing user pool's values."
+      condition     = var.manage_cognito || (var.cognito_issuer_uri != null && var.cognito_client_id != null && var.cognito_user_pool_id != null)
+      error_message = "manage_cognito is false, so cognito_issuer_uri, cognito_client_id, and cognito_user_pool_id must all be set to an existing user pool's values."
     }
 
     precondition {
-      condition     = !var.manage_amplify || (var.amplify_repository_url != null && var.amplify_github_access_token != null)
-      error_message = "manage_amplify is true, so amplify_repository_url and amplify_github_access_token must both be set."
+      condition     = var.manage_cognito || !var.manage_amplify || var.cognito_hosted_ui_domain != null
+      error_message = "manage_cognito is false and manage_amplify is true, so cognito_hosted_ui_domain must be set to the existing user pool's Hosted UI domain (https://<domain>.auth.<region>.amazoncognito.com) so the UI build can configure Amplify's OAuth login."
+    }
+
+    precondition {
+      condition = !var.manage_amplify || (
+        (var.amplify_repository_url != null && var.amplify_github_access_token != null) ||
+        (var.amplify_repository_url == null && var.amplify_github_access_token == null)
+      )
+      error_message = "manage_amplify is true: either set both amplify_repository_url and amplify_github_access_token (legacy PAT-based connection), or leave both unset and connect the repository manually via the AWS Console after the first apply (recommended - see README, avoids storing a GitHub token in Terraform state)."
+    }
+
+    precondition {
+      condition     = !var.manage_amplify || var.amplify_custom_domain != null || (var.ui_redirect_url != null && var.ui_logout_url != null)
+      error_message = "manage_amplify is true and amplify_custom_domain is not set, so Amplify's own URL is only known after the first apply (it's a randomly-assigned *.amplifyapp.com domain) - set ui_redirect_url/ui_logout_url explicitly (see README) or set amplify_custom_domain to a domain you control."
     }
 
     precondition {
       condition     = !var.use_private_subnets_for_api || var.enable_nat_gateway
       error_message = "use_private_subnets_for_api requires enable_nat_gateway = true, or the API will have no route to the public internet (needed for the live OpenAI provider)."
+    }
+
+    precondition {
+      condition     = var.environment != "prod" || var.api_certificate_arn != null
+      error_message = "api_certificate_arn is required in production - HTTP-only is not permitted for prod. Provide an ACM certificate ARN covering api_domain_name."
+    }
+
+    precondition {
+      condition     = var.api_certificate_arn == null || var.api_domain_name != null
+      error_message = "api_certificate_arn is set but api_domain_name is not - the ACM certificate must cover a real domain name, since the ALB's own DNS name is never a valid ACM certificate subject."
+    }
+
+    precondition {
+      condition     = var.api_domain_name == null || var.api_route53_zone_id != null
+      error_message = "api_domain_name is set but api_route53_zone_id is not - provide the Route53 hosted zone ID that api_domain_name belongs to, so Terraform can create the DNS record pointing it at the ALB."
     }
   }
 }
@@ -57,6 +85,11 @@ module "rds" {
   backup_retention_days = var.database_backup_retention_days
   deletion_protection   = var.database_deletion_protection
   skip_final_snapshot   = var.database_skip_final_snapshot
+
+  multi_az           = var.database_multi_az
+  apply_immediately  = var.database_apply_immediately
+  maintenance_window = var.database_maintenance_window
+  backup_window      = var.database_backup_window
 }
 
 module "archive_s3" {
@@ -68,6 +101,7 @@ module "archive_s3" {
 }
 
 module "openai_secret" {
+  count  = var.enable_openai_secret ? 1 : 0
   source = "../../modules/secrets"
 
   project_name = var.project_name
@@ -127,14 +161,46 @@ module "cognito" {
   callback_urls           = var.cognito_callback_urls
   logout_urls             = var.cognito_logout_urls
   hosted_ui_domain_prefix = var.cognito_hosted_ui_domain_prefix
+
+  advanced_security_mode = var.cognito_advanced_security_mode
+  deletion_protection    = var.cognito_deletion_protection
+  mfa_configuration      = var.cognito_mfa_configuration
 }
 
 locals {
   # When manage_cognito is true, use the pool this configuration just
   # created; otherwise fall back to the existing pool's IDs supplied as
   # variables.
-  cognito_issuer_uri = var.manage_cognito ? module.cognito[0].issuer_uri : var.cognito_issuer_uri
-  cognito_client_id  = var.manage_cognito ? module.cognito[0].app_client_id : var.cognito_client_id
+  cognito_issuer_uri       = var.manage_cognito ? module.cognito[0].issuer_uri : var.cognito_issuer_uri
+  cognito_client_id        = var.manage_cognito ? module.cognito[0].app_client_id : var.cognito_client_id
+  cognito_user_pool_id     = var.manage_cognito ? module.cognito[0].user_pool_id : var.cognito_user_pool_id
+  cognito_hosted_ui_domain = var.manage_cognito ? module.cognito[0].hosted_ui_domain : var.cognito_hosted_ui_domain
+
+  # Amplify.configure()'s OAuth `domain` field (and the manual Hosted UI
+  # logout URL the UI builds) both expect a bare hostname, not a URL -
+  # strip the https:// scheme carried by the value above.
+  cognito_hosted_ui_domain_hostname = (
+    local.cognito_hosted_ui_domain == null
+    ? null
+    : replace(local.cognito_hosted_ui_domain, "https://", "")
+  )
+
+  # Amplify's own default *.amplifyapp.com domain is only known after the
+  # app is created (Terraform can't reference a resource's own computed
+  # output as one of its own inputs), so it can only be auto-derived here
+  # when a predictable custom_domain is configured. Otherwise the operator
+  # must supply ui_redirect_url/ui_logout_url explicitly - see the
+  # precondition above and the README.
+  ui_redirect_url = coalesce(
+    var.ui_redirect_url,
+    var.amplify_custom_domain != null ? "https://${var.amplify_custom_domain}/" : null
+  )
+  ui_logout_url = coalesce(
+    var.ui_logout_url,
+    var.amplify_custom_domain != null ? "https://${var.amplify_custom_domain}/" : null
+  )
+
+  api_url = var.api_domain_name != null ? "https://${var.api_domain_name}" : module.api_service.alb_url
 }
 
 module "amplify" {
@@ -150,7 +216,13 @@ module "amplify" {
   custom_domain       = var.amplify_custom_domain
 
   environment_variables = {
-    VITE_API_BASE_URL = coalesce(var.ui_api_base_url, module.api_service.alb_url)
+    VITE_API_BASE_URL         = coalesce(var.ui_api_base_url, local.api_url)
+    VITE_AWS_REGION           = var.aws_region
+    VITE_COGNITO_USER_POOL_ID = local.cognito_user_pool_id
+    VITE_COGNITO_CLIENT_ID    = local.cognito_client_id
+    VITE_COGNITO_DOMAIN       = local.cognito_hosted_ui_domain_hostname
+    VITE_COGNITO_REDIRECT_URL = local.ui_redirect_url
+    VITE_COGNITO_LOGOUT_URL   = local.ui_logout_url
   }
 }
 
@@ -186,7 +258,21 @@ module "api_service" {
 
   additional_environment_variables = var.additional_api_environment_variables
 
-  additional_secrets = {
-    OPENAI_API_KEY = "${module.openai_secret.openai_secret_arn}:apiKey::"
+  additional_secrets = var.enable_openai_secret ? {
+    OPENAI_API_KEY = "${module.openai_secret[0].openai_secret_arn}:apiKey::"
+  } : {}
+}
+
+resource "aws_route53_record" "api" {
+  count = var.api_domain_name != null ? 1 : 0
+
+  zone_id = var.api_route53_zone_id
+  name    = var.api_domain_name
+  type    = "A"
+
+  alias {
+    name                   = module.api_service.alb_dns_name
+    zone_id                = module.api_service.alb_zone_id
+    evaluate_target_health = true
   }
 }

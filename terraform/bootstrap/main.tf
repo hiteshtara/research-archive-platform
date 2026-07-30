@@ -1,12 +1,16 @@
-# One-time bootstrap: creates the S3 bucket that every environment's
-# backend.tf uses for remote state. This config intentionally uses LOCAL
-# state (there is no backend block below) - it solves the chicken-and-egg
-# problem of "the remote backend needs a bucket that Terraform itself
-# would normally track in that same remote backend."
+# Bootstrap: creates the S3 bucket that every environment's backend.tf
+# uses for remote state. This config starts on LOCAL state (there is no
+# backend block below) - it solves the chicken-and-egg problem of "the
+# remote backend needs a bucket that Terraform itself would normally
+# track in that same remote backend."
 #
-# Run this ONCE per AWS account, then never touch it again unless you are
-# deliberately changing the state bucket itself. See terraform/README.md
-# for the full workflow.
+# This is NOT "run once and forget": after the first apply succeeds,
+# migrate this config's own state into the bucket it just created (see
+# backend.tf.example and terraform/README.md's "Backend bootstrap" section
+# for the exact steps and the recovery procedure if state is ever lost).
+# Never destroy or recreate the resources below outside that documented
+# recovery procedure - every other environment's remote state depends on
+# this bucket continuing to exist untouched.
 
 terraform {
   required_version = ">= 1.8.0"

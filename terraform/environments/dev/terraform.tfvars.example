@@ -51,6 +51,8 @@ database_instance_class   = "db.t4g.micro"
 database_deletion_protection    = false
 database_skip_final_snapshot    = true
 database_backup_retention_days  = 7
+database_multi_az               = false
+database_apply_immediately      = true
 
 # --- Container images ------------------------------------------------------
 
@@ -69,23 +71,32 @@ alb_deletion_protection = false
 
 # --- Domain / TLS ------------------------------------------------------
 
-# Leave both null to bring up the ALB on plain HTTP first; add both once
-# you have a domain and an ACM certificate for it.
-api_domain_name     = null
-api_certificate_arn = null
+# Leave all three null to bring up the ALB on plain HTTP first (fine in
+# dev/test; prod requires a certificate - see README's "Production HTTPS
+# and DNS" section). Once you have a domain, its Route53 zone, and an ACM
+# certificate covering it, set all three together.
+api_domain_name      = null
+api_certificate_arn  = null
+api_route53_zone_id  = null
 
 # --- Cognito -------------------------------------------------------------
 
 # Option A (shown here): bring your own existing User Pool.
-manage_cognito     = false
-cognito_issuer_uri = "https://cognito-idp.REGION.amazonaws.com/REPLACE_WITH_USER_POOL_ID"
-cognito_client_id  = "REPLACE_WITH_APP_CLIENT_ID"
+manage_cognito           = false
+cognito_issuer_uri       = "https://cognito-idp.REGION.amazonaws.com/REPLACE_WITH_USER_POOL_ID"
+cognito_client_id        = "REPLACE_WITH_APP_CLIENT_ID"
+cognito_user_pool_id     = "REPLACE_WITH_USER_POOL_ID"
+# Only needed if manage_amplify = true below.
+# cognito_hosted_ui_domain = "https://REPLACE_WITH_DOMAIN.auth.REGION.amazoncognito.com"
 
 # Option B: let Terraform create the pool - set manage_cognito = true and
-# fill these in instead (delete the two lines above):
+# fill these in instead (delete the four lines above):
 # manage_cognito         = true
 # cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
 # cognito_logout_urls    = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
+# cognito_advanced_security_mode = "AUDIT"   # OFF, AUDIT, or ENFORCED
+# cognito_deletion_protection    = false     # ACTIVE or INACTIVE (as a string)
+# cognito_mfa_configuration      = "OFF"     # OFF, ON, or OPTIONAL
 
 # --- Amplify / UI hosting --------------------------------------------------
 
@@ -93,8 +104,26 @@ cognito_client_id  = "REPLACE_WITH_APP_CLIENT_ID"
 manage_amplify = false
 
 # Option B: let Terraform create the Amplify app - set manage_amplify = true
-# and fill these in (never put the token in this file - export
-# TF_VAR_amplify_github_access_token instead):
+# and fill these in. Leave amplify_repository_url/amplify_github_access_token
+# BOTH unset (recommended) to connect the repo manually via the AWS Console's
+# GitHub App flow after the first apply - see README's "Amplify repository
+# connection" section. If you use the legacy PAT-based flow instead, set
+# both (never put the token in this file - export
+# TF_VAR_amplify_github_access_token instead).
 # manage_amplify          = true
 # amplify_repository_url  = "https://github.com/REPLACE_WITH_ORG/REPLACE_WITH_REPO"
 # amplify_branch_name     = "main"
+# ui_redirect_url         = "http://localhost:5173/"  # see README bring-up note
+# ui_logout_url           = "http://localhost:5173/"
+
+# --- AI feature (optional) --------------------------------------------------
+
+# Leave false (the default) to deploy without ever requiring an OpenAI
+# secret - the API falls back to the deterministic stub AI provider. See
+# README's "Enable and populate the OpenAI secret" section to turn this on.
+# enable_openai_secret = true
+# additional_api_environment_variables = {
+#   APP_AI_ENABLED        = "true"
+#   APP_AI_PROVIDER       = "openai"
+#   APP_AI_OPENAI_ENABLED = "true"
+# }

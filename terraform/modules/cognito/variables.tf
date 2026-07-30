@@ -49,3 +49,25 @@ variable "advanced_security_mode" {
     error_message = "advanced_security_mode must be one of: OFF, AUDIT, ENFORCED."
   }
 }
+
+variable "deletion_protection" {
+  description = "Protect the User Pool from accidental deletion via the Cognito API/console (independent of, and in addition to, this module's own prevent_destroy lifecycle block). ACTIVE or INACTIVE."
+  type        = string
+  default     = "INACTIVE"
+
+  validation {
+    condition     = contains(["ACTIVE", "INACTIVE"], var.deletion_protection)
+    error_message = "deletion_protection must be one of: ACTIVE, INACTIVE."
+  }
+}
+
+variable "mfa_configuration" {
+  description = "Require multi-factor authentication: OFF, ON (required for every user), or OPTIONAL (user can enable it). Only TOTP (software token) MFA is configured here - no SMS/Pinpoint setup."
+  type        = string
+  default     = "OFF"
+
+  validation {
+    condition     = contains(["OFF", "ON", "OPTIONAL"], var.mfa_configuration)
+    error_message = "mfa_configuration must be one of: OFF, ON, OPTIONAL."
+  }
+}
