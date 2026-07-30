@@ -1028,8 +1028,13 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "With --upload, upload only this specific file_id (for "
-            "targeted testing/debugging)."
+            "Without --upload: look up and report a single physical file "
+            "by its exact FILE_ID (filename, content type, source "
+            "location, size) - read-only, never touches PostgreSQL, "
+            "never reads or logs BLOB content, and takes priority over "
+            "--limit (never just samples the first reference). Fails "
+            "cleanly if the FILE_ID isn't found. With --upload, instead "
+            "restricts the upload to just this file_id."
         ),
     )
     parser.add_argument(
@@ -1051,6 +1056,64 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     return parser.parse_args(arguments)
+
+
+def _run_file_id_lookup(file_id: int) -> dict[str, Any]:
+    """Look up a single physical file by its exact FILE_ID - a targeted,
+    read-only diagnostic for --file-id (without --upload). Unlike --limit,
+    this never samples an arbitrary reference and hopes it matches: it
+    scans the physical-file source with an exact file_id filter (the same
+    read_files_matching_ids() used for coherent --limit sampling, here
+    with a single-element target set), and fails cleanly if nothing
+    matches. Never connects to PostgreSQL, and never reads or logs BLOB
+    content - the underlying query never selects a blob column value at
+    all, only NULL-checks and DBMS_LOB.GETLENGTH()."""
+    logger.info(
+        "Looking up Award attachment physical file: requested file_id={}",
+        file_id,
+    )
+
+    files_raw = read_files_matching_ids(
+        OracleDataSource(FILES_ORACLE_SQL), {file_id}
+    )
+
+    if files_raw.empty:
+        logger.error(
+            "Requested file_id={} was not found among Award attachment "
+            "physical files (KCOEUS.ATTACHMENT_FILE, scoped to files "
+            "referenced by KCOEUS.AWARD_ATTACHMENT)",
+            file_id,
+        )
+        raise RuntimeError(
+            f"file_id {file_id} was not found - no matching physical "
+            "file to report"
+        )
+
+    files = prepare_files(files_raw)
+    row = files.iloc[0]
+    matched_file_id = int(row["file_id"])
+
+    logger.info(
+        "Requested file_id={} matched file_id={}", file_id, matched_file_id
+    )
+    logger.info(
+        "file_id={} file_name={} content_type={} source_location={} "
+        "file_size_bytes={}",
+        matched_file_id,
+        row.get("file_name"),
+        row.get("content_type"),
+        row.get("blob_source"),
+        row.get("file_size_bytes"),
+    )
+
+    return {
+        "requested_file_id": file_id,
+        "matched_file_id": matched_file_id,
+        "file_name": row.get("file_name"),
+        "content_type": row.get("content_type"),
+        "source_location": row.get("blob_source"),
+        "file_size_bytes": row.get("file_size_bytes"),
+    }
 
 
 def _read_coherent_sample(
@@ -1109,6 +1172,10 @@ def main() -> None:
 
     if arguments.upload:
         _run_upload(arguments)
+        return
+
+    if arguments.file_id is not None:
+        _run_file_id_lookup(arguments.file_id)
         return
 
     if arguments.limit is not None:

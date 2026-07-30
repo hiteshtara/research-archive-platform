@@ -336,7 +336,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             ) as create_engine,
             patch.object(attachment_loader, "apply_migrations") as apply_migrations,
         ):
-            parse_args.return_value = MagicMock(limit=None, dry_run=True, upload=False)
+            parse_args.return_value = MagicMock(
+                limit=None, dry_run=True, upload=False, file_id=None
+            )
             attachment_loader.main()
 
         create_engine.assert_not_called()
@@ -357,7 +359,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 attachment_loader, "create_postgres_engine"
             ) as create_engine,
         ):
-            parse_args.return_value = MagicMock(limit=10, dry_run=True, upload=False)
+            parse_args.return_value = MagicMock(limit=10, dry_run=True, upload=False, file_id=None)
             attachment_loader.main()
 
         create_engine.assert_not_called()
@@ -382,7 +384,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             ) as create_s3_client,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False
+                limit=10, dry_run=True, upload=False, file_id=None
             )
             attachment_loader.main()
 
@@ -418,7 +420,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             patch.object(attachment_loader, "verify_loaded_data"),
             patch.object(attachment_loader, "mark_load_complete") as mark_complete,
         ):
-            parse_args.return_value = MagicMock(limit=None, dry_run=False, upload=False)
+            parse_args.return_value = MagicMock(
+                limit=None, dry_run=False, upload=False, file_id=None
+            )
             create_engine.return_value = MagicMock()
             attachment_loader.main()
 
@@ -1236,7 +1240,7 @@ class UploadGatingTest(unittest.TestCase):
             patch.object(attachment_loader, "_run_upload") as run_upload,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False
+                limit=10, dry_run=True, upload=False, file_id=None
             )
             attachment_loader.main()
 
@@ -1251,6 +1255,158 @@ class UploadGatingTest(unittest.TestCase):
             attachment_loader.main()
 
         run_upload.assert_called_once()
+
+
+class RunFileIdLookupTest(unittest.TestCase):
+    def _files_batch(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "file_id": 1001,
+                    "file_data_id": None,
+                    "file_name": "unrelated.pdf",
+                    "content_type": "application/pdf",
+                    "blob_source": "INLINE",
+                    "file_size_bytes": 111,
+                    "oracle_update_timestamp": "2025-01-01 00:00:00",
+                    "oracle_update_user": "kcuser",
+                },
+                {
+                    "file_id": 9001,
+                    "file_data_id": None,
+                    "file_name": "Agreement Final.pdf",
+                    "content_type": "application/pdf",
+                    "blob_source": "INLINE",
+                    "file_size_bytes": 424242,
+                    "oracle_update_timestamp": "2025-01-02 03:04:05",
+                    "oracle_update_user": "kcuser",
+                },
+                {
+                    "file_id": 1002,
+                    "file_data_id": None,
+                    "file_name": "also-unrelated.pdf",
+                    "content_type": "application/pdf",
+                    "blob_source": "EXTERNAL",
+                    "file_size_bytes": 222,
+                    "oracle_update_timestamp": "2025-01-01 00:00:00",
+                    "oracle_update_user": "kcuser",
+                },
+            ]
+        )
+
+    def test_finds_exact_file_id_and_reports_details(self) -> None:
+        # Only ONE OracleDataSource is ever instantiated (the files
+        # source) - a second, unexpected instantiation (e.g. reading
+        # references) would raise StopIteration against this
+        # single-item side_effect list.
+        with patch.object(
+            attachment_loader,
+            "OracleDataSource",
+            side_effect=[_oracle_batches_stub([self._files_batch()])],
+        ):
+            report = attachment_loader._run_file_id_lookup(9001)
+
+        self.assertEqual(report["requested_file_id"], 9001)
+        self.assertEqual(report["matched_file_id"], 9001)
+        self.assertEqual(report["file_name"], "Agreement Final.pdf")
+        self.assertEqual(report["content_type"], "application/pdf")
+        self.assertEqual(report["source_location"], "INLINE")
+        self.assertEqual(report["file_size_bytes"], 424242)
+
+    def test_raises_cleanly_when_file_id_not_found(self) -> None:
+        with patch.object(
+            attachment_loader,
+            "OracleDataSource",
+            side_effect=[_oracle_batches_stub([self._files_batch()])],
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                attachment_loader._run_file_id_lookup(999999)
+
+        self.assertIn("999999", str(raised.exception))
+
+    def test_logs_requested_and_matched_file_id(self) -> None:
+        with (
+            patch.object(
+                attachment_loader,
+                "OracleDataSource",
+                side_effect=[_oracle_batches_stub([self._files_batch()])],
+            ),
+            patch.object(attachment_loader.logger, "info") as info,
+        ):
+            attachment_loader._run_file_id_lookup(9001)
+
+        logged = " ".join(str(call) for call in info.call_args_list)
+        self.assertIn("9001", logged)
+
+    def test_never_reads_or_logs_blob_content(self) -> None:
+        # The physical-file extraction query never selects a blob column
+        # value (only NULL-checks/DBMS_LOB.GETLENGTH()), so there is no
+        # blob content anywhere in the batch for this to leak - assert
+        # the reported fields are exactly the metadata fields, nothing
+        # blob-shaped.
+        with patch.object(
+            attachment_loader,
+            "OracleDataSource",
+            side_effect=[_oracle_batches_stub([self._files_batch()])],
+        ):
+            report = attachment_loader._run_file_id_lookup(9001)
+
+        self.assertEqual(
+            set(report.keys()),
+            {
+                "requested_file_id",
+                "matched_file_id",
+                "file_name",
+                "content_type",
+                "source_location",
+                "file_size_bytes",
+            },
+        )
+
+
+class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
+    def test_main_never_connects_to_postgres_for_file_id_lookup(self) -> None:
+        with (
+            patch.object(
+                attachment_loader,
+                "OracleDataSource",
+                side_effect=[
+                    _oracle_batches_stub(
+                        [pd.DataFrame([{"file_id": 9001, "blob_source": "INLINE"}])]
+                    )
+                ],
+            ),
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine"
+            ) as create_engine,
+        ):
+            parse_args.return_value = MagicMock(
+                upload=False, file_id=9001, limit=None, dry_run=True
+            )
+            attachment_loader.main()
+
+        create_engine.assert_not_called()
+
+    def test_file_id_takes_priority_over_limit_not_a_reference_sample(
+        self,
+    ) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_lookup,
+            patch.object(
+                attachment_loader, "_read_coherent_sample"
+            ) as read_sample,
+        ):
+            parse_args.return_value = MagicMock(
+                upload=False, file_id=9001, limit=10, dry_run=True
+            )
+            attachment_loader.main()
+
+        run_lookup.assert_called_once_with(9001)
+        read_sample.assert_not_called()
 
 
 class OracleExtractionSqlFilesExistTest(unittest.TestCase):
