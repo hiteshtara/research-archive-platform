@@ -16,10 +16,36 @@ from archive_etl.pipeline.sources import (
     CsvDataSource,
     OracleDataSource,
     _materialize_oracle_value,
+    _strip_sqlplus_directives,
 )
 
 
 class PipelineSourceTest(unittest.TestCase):
+    def test_strips_leading_sqlplus_set_directives(self) -> None:
+        sql_text = (
+            "SET PAGESIZE 50000\n"
+            "SET LINESIZE 32767\n"
+            "SET FEEDBACK ON\n"
+            "\n"
+            "SELECT a.AWARD_ID\n"
+            "FROM AWARD a\n"
+        )
+
+        result = _strip_sqlplus_directives(sql_text)
+
+        self.assertEqual(
+            result,
+            "SELECT a.AWARD_ID\nFROM AWARD a",
+        )
+
+    def test_leaves_sql_without_directives_unchanged(self) -> None:
+        sql_text = "/* comment */\nSELECT 1 FROM DUAL"
+
+        self.assertEqual(
+            _strip_sqlplus_directives(sql_text),
+            sql_text,
+        )
+
     def test_oracle_lob_is_materialized_while_connected(self) -> None:
         lob = MagicMock()
         lob.read.return_value = "comments"
@@ -101,6 +127,58 @@ class PostgreSQLPipelineTest(unittest.TestCase):
         operation.assert_called_once()
         self.assertEqual(operation.call_args.args[0].load_id, 42)
         reconciler.assert_called_once_with(connection)
+
+    def test_failed_load_is_still_recorded_in_load_run(self) -> None:
+        # Regression test: the STARTED load_run row must be committed in
+        # its own transaction, separate from the transaction wrapping the
+        # risky work - otherwise a failure rolls back the STARTED row
+        # along with everything else, and the later mark-failed UPDATE
+        # silently matches zero rows, leaving no trace of the failure.
+        load_run_connection = MagicMock()
+        load_run_connection.execute.return_value.scalar_one.return_value = 99
+        load_run_transaction = MagicMock()
+        load_run_transaction.__enter__.return_value = load_run_connection
+
+        work_transaction = MagicMock()
+        work_transaction.__enter__.return_value = MagicMock()
+
+        mark_failed_connection = MagicMock()
+        mark_failed_transaction = MagicMock()
+        mark_failed_transaction.__enter__.return_value = (
+            mark_failed_connection
+        )
+
+        engine = MagicMock()
+        engine.begin.side_effect = [
+            load_run_transaction,
+            work_transaction,
+            mark_failed_transaction,
+        ]
+
+        def operation(context: object) -> int:
+            raise RuntimeError("simulated failure, password=hunter2")
+
+        with self.assertRaises(RuntimeError):
+            PostgreSQLLoader(engine, "/migrations").load(
+                domain="TEST",
+                source_system="KUALI",
+                source_name="source",
+                rows_read=7,
+                operation=operation,
+            )
+
+        # create_load_run opens and exits its own transaction before the
+        # risky work's transaction is even opened.
+        self.assertEqual(engine.begin.call_count, 3)
+        load_run_connection.execute.assert_called_once()
+
+        # mark_failed uses the load_id create_load_run produced, and the
+        # persisted message is redacted rather than containing the raw
+        # exception text verbatim.
+        mark_failed_connection.execute.assert_called_once()
+        params = mark_failed_connection.execute.call_args.args[1]
+        self.assertEqual(params["load_id"], 99)
+        self.assertNotIn("hunter2", params["error_message"])
 
     def test_table_count_reconciliation_reports_differences(self) -> None:
         connection = MagicMock()

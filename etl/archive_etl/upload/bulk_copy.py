@@ -62,6 +62,7 @@ def bulk_copy_dataframe(
     buffer.seek(0)
 
     raw_connection = connection.connection.driver_connection
+    assert raw_connection is not None, "connection has no active driver connection"
 
     columns = ", ".join(
         f'"{column}"'

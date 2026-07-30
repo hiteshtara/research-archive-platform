@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import sqlite3
 import json
+import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
-
+from typing import Any
 
 MANIFEST_COLUMNS = (
     "attachment_id",

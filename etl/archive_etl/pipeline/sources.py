@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,27 @@ import oracledb
 import pandas as pd
 from loguru import logger
 
+from archive_etl.config.settings import require_oracle_environment
 from archive_etl.pipeline.validation import normalize_columns
+
+# Some extraction SQL files are shared with a manual SQL*Plus export
+# workflow and begin with SQL*Plus session directives (SET PAGESIZE, SET
+# LINESIZE, ...) that format that tool's console output. These aren't SQL
+# statements at all, so a DB-API cursor can't execute them - strip any
+# leading lines that look like a SQL*Plus SET command before running the
+# query through oracledb. This never touches the SELECT statement itself.
+_SQLPLUS_SET_LINE = re.compile(r"^\s*SET\s+\w+.*$", re.IGNORECASE)
+
+
+def _strip_sqlplus_directives(sql_text: str) -> str:
+    lines = sql_text.splitlines()
+    index = 0
+    while index < len(lines) and (
+        not lines[index].strip()
+        or _SQLPLUS_SET_LINE.match(lines[index])
+    ):
+        index += 1
+    return "\n".join(lines[index:])
 
 
 def _materialize_oracle_value(value: Any) -> Any:
@@ -72,19 +93,11 @@ class OracleDataSource:
         self.name = f"oracle:{sql_path.name}"
 
     def read(self) -> pd.DataFrame:
-        required = ["ORACLE_USER", "ORACLE_PASSWORD", "ORACLE_DSN"]
-        missing = [
-            name
-            for name in required
-            if not self.environ.get(name)
-        ]
-        if missing:
-            raise RuntimeError(
-                "Missing Oracle environment variables: "
-                + ", ".join(missing)
-            )
+        credentials = require_oracle_environment(self.environ)
 
-        sql_text = self.sql_path.read_text(encoding="utf-8").strip()
+        sql_text = _strip_sqlplus_directives(
+            self.sql_path.read_text(encoding="utf-8")
+        ).strip()
         if sql_text.endswith(";"):
             sql_text = sql_text[:-1].rstrip()
 
@@ -92,9 +105,9 @@ class OracleDataSource:
         rows: list[tuple[Any, ...]] = []
 
         with self.connect(
-            user=self.environ["ORACLE_USER"],
-            password=self.environ["ORACLE_PASSWORD"],
-            dsn=self.environ["ORACLE_DSN"],
+            user=credentials["ORACLE_USER"],
+            password=credentials["ORACLE_PASSWORD"],
+            dsn=credentials["ORACLE_DSN"],
         ) as connection:
             with connection.cursor() as cursor:
                 cursor.arraysize = self.fetch_size

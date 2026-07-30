@@ -31,7 +31,7 @@ class FakeCursor:
     def __init__(self, payload: bytes) -> None:
         self.payload = payload
         self.sql = ""
-        self.parameters = {}
+        self.parameters: dict[str, object] = {}
 
     def __enter__(self):
         return self

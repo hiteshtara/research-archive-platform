@@ -29,7 +29,6 @@ from archive_etl.pipeline.validation import (
 )
 from archive_etl.upload.postgres import create_postgres_engine
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPORT_SQL = (
     PROJECT_ROOT / "oracle/protocol/export_proto_amend_renewals.sql"

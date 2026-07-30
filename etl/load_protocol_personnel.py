@@ -10,14 +10,14 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from archive_etl.pipeline.postgres import (
-    PostgreSQLLoadContext,
-    PostgreSQLLoader,
-)
 from archive_etl.pipeline.parent_resolution import (
     AmbiguousParentError,
     MissingParentError,
     NumberSequenceParentResolver,
+)
+from archive_etl.pipeline.postgres import (
+    PostgreSQLLoadContext,
+    PostgreSQLLoader,
 )
 from archive_etl.pipeline.reconciliation import ReconciliationResult
 from archive_etl.pipeline.reporting import report_load
@@ -28,7 +28,6 @@ from archive_etl.pipeline.validation import (
     require_columns,
 )
 from archive_etl.upload.postgres import create_postgres_engine
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PERSON_SQL = (

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-
 DATE_COLUMNS = [
     "irb_recv_dt",
     "irb_claim_dt",

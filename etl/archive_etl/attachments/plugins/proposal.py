@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from archive_etl.attachments.models import AttachmentRecord
-from archive_etl.attachments.oracle_blob import FileDataBlobReader
+from archive_etl.attachments.oracle_blob import FileDataBlobReader, OracleBlobReader
 from archive_etl.attachments.plugins.attachment_file import (
     AttachmentFilePlugin,
 )
@@ -43,7 +43,7 @@ class ProposalAttachmentPlugin(AttachmentFilePlugin):
         self,
         attempts: int,
         chunk_size: int,
-    ) -> FileDataBlobReader:
+    ) -> OracleBlobReader:
         return FileDataBlobReader(attempts, chunk_size)
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:

@@ -1,21 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
 
 import oracledb
 from loguru import logger
 
 from archive_etl.attachments.models import MissingBlobError
+from archive_etl.config.settings import require_oracle_environment
 
 
-T = TypeVar("T")
-
-
-def retry(
+def retry[T](
     operation: Callable[[], T],
     *,
     attempts: int,
@@ -53,16 +50,11 @@ class OracleBlobReader:
         self.connection: oracledb.Connection | None = None
 
     def connect(self) -> None:
-        required = ["ORACLE_USER", "ORACLE_PASSWORD", "ORACLE_DSN"]
-        missing = [name for name in required if not os.getenv(name)]
-        if missing:
-            raise RuntimeError(
-                "Missing Oracle environment variables: " + ", ".join(missing)
-            )
+        credentials = require_oracle_environment()
         self.connection = oracledb.connect(
-            user=os.environ["ORACLE_USER"],
-            password=os.environ["ORACLE_PASSWORD"],
-            dsn=os.environ["ORACLE_DSN"],
+            user=credentials["ORACLE_USER"],
+            password=credentials["ORACLE_PASSWORD"],
+            dsn=credentials["ORACLE_DSN"],
         )
 
     def close(self) -> None:

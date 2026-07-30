@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,13 +8,15 @@ import pandas as pd
 from loguru import logger
 from pandas.errors import EmptyDataError
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
+from archive_etl.utils.redaction import redact_error_message
 
-
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
 SOURCE_COLUMN_RENAMES = {
@@ -36,14 +39,18 @@ class DatasetSpec:
     columns: tuple[str, ...]
     primary_key: str
     required_values: tuple[str, ...]
+    oracle_sql_file: str
     numeric_columns: tuple[str, ...] = ()
     date_columns: tuple[str, ...] = ()
     allow_empty: bool = False
     parent_column: str | None = "subaward_id"
 
+    def csv_path(self, csv_dir: Path) -> Path:
+        return csv_dir / self.file_name
+
     @property
-    def path(self) -> Path:
-        return DOWNLOAD_DIR / self.file_name
+    def oracle_path(self) -> Path:
+        return PROJECT_ROOT / "oracle" / "subaward" / self.oracle_sql_file
 
 
 DATASETS = (
@@ -69,6 +76,7 @@ DATASETS = (
         ),
         primary_key="subaward_id",
         required_values=("subaward_id", "subaward_code", "sequence_number"),
+        oracle_sql_file="export_subawards.sql",
         numeric_columns=(
             "subaward_id", "sequence_number", "subaward_type_code",
             "status_code", "site_investigator", "f_and_a_rate", "ver_nbr",
@@ -103,6 +111,7 @@ DATASETS = (
             "subaward_amount_info_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_amounts.sql",
         numeric_columns=(
             "subaward_amount_info_id", "subaward_id", "sequence_number",
             "obligated_amount", "obligated_change",
@@ -132,6 +141,7 @@ DATASETS = (
             "subaward_contact_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_contacts.sql",
         numeric_columns=(
             "subaward_contact_id", "subaward_id", "sequence_number",
             "rolodex_id", "ver_nbr",
@@ -152,6 +162,7 @@ DATASETS = (
             "subaward_custom_data_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_custom_data.sql",
         numeric_columns=(
             "subaward_custom_data_id", "subaward_id", "sequence_number",
             "custom_attribute_id", "ver_nbr",
@@ -172,6 +183,7 @@ DATASETS = (
             "subaward_funding_source_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_funding.sql",
         numeric_columns=(
             "subaward_funding_source_id", "subaward_id", "sequence_number",
             "award_id", "ver_nbr",
@@ -195,6 +207,7 @@ DATASETS = (
             "attachment_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_attachments.sql",
         numeric_columns=(
             "attachment_id", "subaward_id", "sequence_number",
             "attachment_type_code", "document_id", "ver_nbr",
@@ -216,6 +229,7 @@ DATASETS = (
             "subaward_closeout_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_closeout.sql",
         numeric_columns=(
             "subaward_closeout_id", "subaward_id", "sequence_number",
             "closeout_number", "closeout_type_code", "ver_nbr",
@@ -240,6 +254,7 @@ DATASETS = (
             "subaward_report_id", "subaward_id", "subaward_code",
             "sequence_number",
         ),
+        oracle_sql_file="export_subaward_reports.sql",
         numeric_columns=("subaward_id", "sequence_number", "ver_nbr"),
         date_columns=("update_timestamp",),
         allow_empty=True,
@@ -258,6 +273,7 @@ DATASETS = (
         required_values=(
             "subaward_notepad_id", "subaward_id", "subaward_code",
         ),
+        oracle_sql_file="export_subaward_notepad.sql",
         numeric_columns=(
             "subaward_notepad_id", "subaward_id", "entry_number", "ver_nbr",
         ),
@@ -276,6 +292,7 @@ DATASETS = (
         ),
         primary_key="notification_id",
         required_values=("notification_id", "owning_document_id_fk"),
+        oracle_sql_file="export_subaward_notifications.sql",
         numeric_columns=(
             "notification_id", "owning_document_id_fk",
             "notification_type_id", "ver_nbr",
@@ -315,6 +332,7 @@ DATASETS = (
         ),
         primary_key="subaward_id",
         required_values=("subaward_id", "subaward_code", "sequence_number"),
+        oracle_sql_file="export_subaward_template_info.sql",
         numeric_columns=(
             "subaward_id", "sequence_number", "invoice_or_payment_contact",
             "irb_iacuc_contact", "final_stmt_of_costs_contact",
@@ -338,11 +356,39 @@ def empty_dataframe(spec: DatasetSpec) -> pd.DataFrame:
     return pd.DataFrame(columns=list(spec.columns))
 
 
-def require_files() -> None:
+def parse_args(
+    arguments: list[str] | None = None,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Load Subaward data from Oracle (default) or a CSV export set."
+        )
+    )
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--oracle",
+        action="store_true",
+        help="Read all datasets directly from Oracle (the default).",
+    )
+    source.add_argument(
+        "--csv",
+        action="store_true",
+        help="Read all datasets from the existing CSV export set.",
+    )
+    parser.add_argument(
+        "--csv-dir",
+        type=Path,
+        default=DOWNLOAD_DIR,
+        help=f"Directory containing the CSV export set. Defaults to {DOWNLOAD_DIR}.",
+    )
+    return parser.parse_args(arguments)
+
+
+def require_files(csv_dir: Path) -> None:
     missing = [
-        str(spec.path)
+        str(spec.csv_path(csv_dir))
         for spec in DATASETS
-        if not spec.allow_empty and not spec.path.exists()
+        if not spec.allow_empty and not spec.csv_path(csv_dir).exists()
     ]
     if missing:
         raise RuntimeError(
@@ -350,21 +396,26 @@ def require_files() -> None:
         )
 
 
-def read_csv(spec: DatasetSpec) -> pd.DataFrame:
-    logger.info("Reading {}", spec.path)
+def read_oracle(spec: DatasetSpec) -> pd.DataFrame:
+    return OracleDataSource(spec.oracle_path).read()
 
-    if not spec.path.exists():
+
+def read_csv(spec: DatasetSpec, csv_dir: Path) -> pd.DataFrame:
+    path = spec.csv_path(csv_dir)
+    logger.info("Reading {}", path)
+
+    if not path.exists():
         if spec.allow_empty:
             logger.info(
                 "{} is absent; treating it as a valid empty dataset",
                 spec.file_name,
             )
             return empty_dataframe(spec)
-        raise RuntimeError(f"Missing required CSV file: {spec.path}")
+        raise RuntimeError(f"Missing required CSV file: {path}")
 
     try:
         dataframe = pd.read_csv(
-            spec.path,
+            path,
             dtype=str,
             keep_default_na=True,
             na_values=["", "NULL", "null"],
@@ -467,6 +518,29 @@ def create_load_run(connection: Connection, total_rows: int) -> int:
         {"rows_read": total_rows},
     ).scalar_one()
     return int(load_id)
+
+
+def mark_load_failed(
+    engine: Engine,
+    load_id: int,
+    error_message: str,
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.load_run
+                   SET status = 'FAILED',
+                       completed_at = CURRENT_TIMESTAMP,
+                       error_message = :error_message
+                 WHERE load_id = :load_id
+                """
+            ),
+            {
+                "load_id": load_id,
+                "error_message": redact_error_message(error_message),
+            },
+        )
 
 
 def clear_existing_data(connection: Connection) -> None:
@@ -587,11 +661,22 @@ def mark_load_complete(
 
 
 def main() -> None:
-    require_files()
-    datasets = {
-        spec.key: prepare_dataset(spec, read_csv(spec))
-        for spec in DATASETS
-    }
+    arguments = parse_args()
+    use_oracle = not arguments.csv
+    csv_dir = arguments.csv_dir
+
+    if use_oracle:
+        logger.info("Reading Subaward data from Oracle")
+        datasets = {
+            spec.key: prepare_dataset(spec, read_oracle(spec))
+            for spec in DATASETS
+        }
+    else:
+        require_files(csv_dir)
+        datasets = {
+            spec.key: prepare_dataset(spec, read_csv(spec, csv_dir))
+            for spec in DATASETS
+        }
 
     subawards = datasets["subawards"]
     validate_parent_relationships(subawards, datasets)
@@ -616,34 +701,45 @@ def main() -> None:
         Path(__file__).resolve().parents[1] / "database" / "migrations",
     )
 
+    # The STARTED load_run row is committed in its own transaction, before
+    # the risky work below begins - otherwise a failure would roll back
+    # the STARTED row along with everything else, and mark_load_failed
+    # would silently update zero rows, leaving no trace of the failure.
     with engine.begin() as connection:
         load_id = create_load_run(connection, total_rows)
-        clear_existing_data(connection)
 
-        loaded_counts = {
-            spec.table_name: load_dataframe(
-                connection,
-                datasets[spec.key],
-                spec,
-                load_id,
-            )
-            for spec in DATASETS
-        }
-        verify_loaded_data(connection, expected_counts)
+    try:
+        with engine.begin() as connection:
+            clear_existing_data(connection)
 
-        rows_loaded = sum(loaded_counts.values())
-        if rows_loaded != total_rows:
-            raise RuntimeError(
-                f"Loaded row total mismatch: expected {total_rows}, "
-                f"loaded {rows_loaded}"
-            )
-        mark_load_complete(connection, load_id, rows_loaded)
+            loaded_counts = {
+                spec.table_name: load_dataframe(
+                    connection,
+                    datasets[spec.key],
+                    spec,
+                    load_id,
+                )
+                for spec in DATASETS
+            }
+            verify_loaded_data(connection, expected_counts)
 
-    logger.success(
-        "Subaward archive load complete: load_id={} rows_loaded={:,}",
-        load_id,
-        rows_loaded,
-    )
+            rows_loaded = sum(loaded_counts.values())
+            if rows_loaded != total_rows:
+                raise RuntimeError(
+                    f"Loaded row total mismatch: expected {total_rows}, "
+                    f"loaded {rows_loaded}"
+                )
+            mark_load_complete(connection, load_id, rows_loaded)
+
+        logger.success(
+            "Subaward archive load complete: load_id={} rows_loaded={:,}",
+            load_id,
+            rows_loaded,
+        )
+    except Exception as error:
+        mark_load_failed(engine, load_id, str(error))
+        logger.exception("Subaward load failed")
+        raise
 
 
 if __name__ == "__main__":

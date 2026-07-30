@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from archive_etl.attachments.manifest import ManifestStore
+from archive_etl.attachments.manifest import FlexibleManifestStore, ManifestStore
 from archive_etl.attachments.models import ArchiveCounts, AttachmentRecord
-from archive_etl.attachments.oracle_blob import FileDataBlobReader
+from archive_etl.attachments.oracle_blob import FileDataBlobReader, OracleBlobReader
 
 
 class AttachmentPlugin(ABC):
@@ -21,14 +22,14 @@ class AttachmentPlugin(ABC):
     kms_environment_variable: str
     file_reference_label = "FILE_DATA_ID"
 
-    def create_manifest(self, path: Path) -> ManifestStore:
+    def create_manifest(self, path: Path) -> ManifestStore | FlexibleManifestStore:
         return ManifestStore(path)
 
     def create_blob_reader(
         self,
         attempts: int,
         chunk_size: int,
-    ) -> FileDataBlobReader:
+    ) -> OracleBlobReader:
         return FileDataBlobReader(attempts, chunk_size)
 
     @abstractmethod
@@ -106,7 +107,7 @@ class AttachmentPlugin(ABC):
     @abstractmethod
     def sync_postgres(
         self,
-        manifest: ManifestStore,
+        manifest: ManifestStore | FlexibleManifestStore,
         record_id: int | None,
     ) -> int:
         pass

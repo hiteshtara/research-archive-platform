@@ -156,6 +156,7 @@ class ProtocolCoreLoaderTest(unittest.TestCase):
             parse_args(["--csv", "/tmp/protocols.csv"])
         )
         self.assertIsInstance(reader, CsvReader)
+        assert isinstance(reader, CsvReader)
         self.assertEqual(
             reader.path,
             Path("/tmp/protocols.csv"),

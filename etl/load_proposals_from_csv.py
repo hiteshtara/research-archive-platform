@@ -1,17 +1,37 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from loguru import logger
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
+from archive_etl.utils.redaction import redact_error_message
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Oracle extraction queries exist and match the loader's expected columns
+# for versions and awards. proposal_people.csv has no equivalent Oracle
+# query yet: oracle/proposal's only people-shaped query
+# (sql/extract/proposal/04_proposal_3892_people.sql) is a one-off diagnostic
+# hardcoded to a single proposal_id, and doesn't produce
+# academic_year_effort/calendar_year_effort/summer_effort/total_effort/
+# ver_nbr/source_update_user - columns the CSV path currently loads. Rather
+# than guess at Oracle columns that may not exist on PROPOSAL_PERSONS,
+# people is always read from CSV until a verified extraction query exists.
+VERSIONS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "01_proposal_versions.sql"
+)
+AWARDS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "04_award_proposals.sql"
+)
 
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
@@ -87,10 +107,10 @@ PERSON_COLUMNS = [
 ]
 
 
-def require_files() -> None:
+def require_files(paths: list[Path]) -> None:
     missing = [
         str(path)
-        for path in FILES.values()
+        for path in paths
         if not path.exists()
     ]
 
@@ -99,6 +119,40 @@ def require_files() -> None:
             "Missing required Proposal CSV files:\n"
             + "\n".join(missing)
         )
+
+
+def parse_args(
+    arguments: list[str] | None = None,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Load Proposal versions/awards from Oracle (default) or a CSV "
+            "export set. People has no Oracle extraction query yet and is "
+            "always read from CSV."
+        )
+    )
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--oracle",
+        action="store_true",
+        help="Read versions/awards directly from Oracle (the default).",
+    )
+    source.add_argument(
+        "--csv",
+        action="store_true",
+        help="Read all three datasets from the existing CSV export set.",
+    )
+    parser.add_argument(
+        "--csv-dir",
+        type=Path,
+        default=DOWNLOAD_DIR,
+        help=(
+            "Directory containing the CSV export set. Used for --csv, "
+            "and always for proposal_people.csv. "
+            f"Defaults to {DOWNLOAD_DIR}."
+        ),
+    )
+    return parser.parse_args(arguments)
 
 
 def normalize_column_name(column: str) -> str:
@@ -399,6 +453,79 @@ def load_dataframe(
     )
 
 
+def create_load_run(connection: Connection, total_rows: int) -> int:
+    load_id = connection.execute(
+        text(
+            """
+            INSERT INTO archive.load_run (
+                domain,
+                source_system,
+                source_file_name,
+                rows_read,
+                status
+            )
+            VALUES (
+                'PROPOSAL',
+                'KUALI',
+                'proposal CSV export set',
+                :rows_read,
+                'STARTED'
+            )
+            RETURNING load_id
+            """
+        ),
+        {"rows_read": total_rows},
+    ).scalar_one()
+    return int(load_id)
+
+
+def mark_load_complete(
+    connection: Connection,
+    load_id: int,
+    rows_loaded: int,
+) -> None:
+    connection.execute(
+        text(
+            """
+            UPDATE archive.load_run
+               SET status = 'LOADED',
+                   rows_staged = :rows_loaded,
+                   rows_loaded = :rows_loaded,
+                   rows_rejected = 0,
+                   completed_at = CURRENT_TIMESTAMP
+             WHERE load_id = :load_id
+            """
+        ),
+        {
+            "load_id": load_id,
+            "rows_loaded": rows_loaded,
+        },
+    )
+
+
+def mark_load_failed(
+    engine: Engine,
+    load_id: int,
+    error_message: str,
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.load_run
+                   SET status = 'FAILED',
+                       completed_at = CURRENT_TIMESTAMP,
+                       error_message = :error_message
+                 WHERE load_id = :load_id
+                """
+            ),
+            {
+                "load_id": load_id,
+                "error_message": redact_error_message(error_message),
+            },
+        )
+
+
 def clear_existing_proposal_data(
     connection: Connection,
 ) -> None:
@@ -498,17 +625,22 @@ def load_proposal_awards(
 
 
 def main() -> None:
-    require_files()
+    arguments = parse_args()
+    use_oracle = not arguments.csv
+    people_path = arguments.csv_dir / "proposal_people.csv"
 
-    versions = prepare_versions(
-        read_csv(FILES["versions"])
-    )
-    people = prepare_people(
-        read_csv(FILES["people"])
-    )
-    awards = prepare_awards(
-        read_csv(FILES["awards"])
-    )
+    if use_oracle:
+        require_files([people_path])
+        versions = prepare_versions(OracleDataSource(VERSIONS_ORACLE_SQL).read())
+        awards = prepare_awards(OracleDataSource(AWARDS_ORACLE_SQL).read())
+    else:
+        versions_path = arguments.csv_dir / "proposal_versions.csv"
+        awards_path = arguments.csv_dir / "award_proposals.csv"
+        require_files([versions_path, people_path, awards_path])
+        versions = prepare_versions(read_csv(versions_path))
+        awards = prepare_awards(read_csv(awards_path))
+
+    people = prepare_people(read_csv(people_path))
 
     logger.info(
         "Prepared Proposal rows: versions={:,} people={:,} awards={:,}",
@@ -526,36 +658,57 @@ def main() -> None:
         / "migrations",
     )
 
+    total_rows = len(versions) + len(people) + len(awards)
+
+    # The STARTED load_run row is committed in its own transaction, before
+    # the risky work below begins - otherwise a failure would roll back
+    # the STARTED row along with everything else, and mark_load_failed
+    # would silently update zero rows, leaving no trace of the failure.
     with engine.begin() as connection:
-        clear_existing_proposal_data(connection)
+        load_id = create_load_run(connection, total_rows)
 
-        version_rows = load_dataframe(
-            connection,
-            versions,
-            "proposal_version",
-            VERSION_COLUMNS,
+    try:
+        with engine.begin() as connection:
+            clear_existing_proposal_data(connection)
+
+            version_rows = load_dataframe(
+                connection,
+                versions,
+                "proposal_version",
+                VERSION_COLUMNS,
+            )
+
+            person_rows = load_dataframe(
+                connection,
+                people,
+                "proposal_person",
+                PERSON_COLUMNS,
+            )
+
+            award_rows = load_proposal_awards(
+                connection,
+                awards,
+            )
+
+            mark_load_complete(
+                connection,
+                load_id,
+                version_rows + person_rows + award_rows,
+            )
+
+        logger.success(
+            "Proposal load completed. "
+            "load_id={} versions={} people={} awards={} total={}",
+            load_id,
+            version_rows,
+            person_rows,
+            award_rows,
+            version_rows + person_rows + award_rows,
         )
-
-        person_rows = load_dataframe(
-            connection,
-            people,
-            "proposal_person",
-            PERSON_COLUMNS,
-        )
-
-        award_rows = load_proposal_awards(
-            connection,
-            awards,
-        )
-
-    logger.success(
-        "Proposal load completed. "
-        "versions={} people={} awards={} total={}",
-        version_rows,
-        person_rows,
-        award_rows,
-        version_rows + person_rows + award_rows,
-    )
+    except Exception as error:
+        mark_load_failed(engine, load_id, str(error))
+        logger.exception("Proposal load failed")
+        raise
 
 
 if __name__ == "__main__":

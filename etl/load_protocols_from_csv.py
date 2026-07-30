@@ -5,7 +5,8 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Protocol as TypingProtocol
+from typing import Any
+from typing import Protocol as TypingProtocol
 
 import pandas as pd
 from loguru import logger
@@ -29,7 +30,6 @@ from archive_etl.pipeline.validation import (
     require_columns,
 )
 from archive_etl.upload.postgres import create_postgres_engine
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ORACLE_SQL = (

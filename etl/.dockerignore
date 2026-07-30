@@ -3,5 +3,4 @@ __pycache__/
 *.pyc
 exports/
 data/
-config/settings.yaml
 *.log

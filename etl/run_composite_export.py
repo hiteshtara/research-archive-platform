@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 from loguru import logger
 
-from archive_etl.config.settings import load_settings
+from archive_etl.config.settings import get_aws_region, get_data_bucket_name
 from archive_etl.transform.irb_composite import (
     transform_composite,
 )
@@ -61,7 +61,7 @@ def main() -> None:
     datasets = transform_composite(source)
 
     timestamp = datetime.now(
-        timezone.utc
+        UTC
     ).strftime("%Y%m%dT%H%M%SZ")
 
     export_directory = Path(
@@ -147,9 +147,8 @@ def main() -> None:
             "Composite protocol output contains duplicate protocol_id values."
         )
 
-    settings = load_settings()
-    bucket_name = settings["aws"]["data_bucket"]
-    region = settings["aws"]["region"]
+    bucket_name = get_data_bucket_name()
+    region = get_aws_region()
 
     prefix = f"landing/irb-composite/{timestamp}"
 

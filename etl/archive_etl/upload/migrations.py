@@ -7,7 +7,6 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-
 MIGRATION_PATTERN = re.compile(
     r"^V(?P<version>\d+)__(?P<description>.+)\.sql$"
 )
@@ -39,19 +38,15 @@ def get_applied_versions(engine: Engine) -> set[int]:
         return {int(row.version) for row in rows}
 
 
-def apply_migrations(
-    engine: Engine,
+def discover_migrations(
     migrations_directory: str | Path,
-) -> None:
+) -> list[tuple[int, str, Path]]:
     directory = Path(migrations_directory)
 
     if not directory.exists():
         raise FileNotFoundError(
             f"Migration directory not found: {directory}"
         )
-
-    ensure_migration_table(engine)
-    applied_versions = get_applied_versions(engine)
 
     migrations: list[tuple[int, str, Path]] = []
 
@@ -69,6 +64,43 @@ def apply_migrations(
         )
 
     migrations.sort(key=lambda item: item[0])
+    return migrations
+
+
+def find_missing_migration_versions(
+    migrations_directory: str | Path,
+) -> list[int]:
+    """Return version numbers with a gap in the on-disk migration sequence.
+
+    Renumbering or deleting a migration file after it has shipped can leave a
+    gap (e.g. V001, V002, V004 with V003 missing) that is easy to miss in
+    review. This checks the files present on disk; it does not look at what
+    has been applied to any particular database.
+    """
+    versions = [version for version, _, _ in discover_migrations(migrations_directory)]
+
+    if not versions:
+        return []
+
+    expected = set(range(versions[0], versions[-1] + 1))
+    return sorted(expected - set(versions))
+
+
+def apply_migrations(
+    engine: Engine,
+    migrations_directory: str | Path,
+) -> None:
+    migrations = discover_migrations(migrations_directory)
+
+    missing_versions = find_missing_migration_versions(migrations_directory)
+    if missing_versions:
+        logger.warning(
+            "Gap detected in migration sequence on disk - missing version(s): {}",
+            ", ".join(f"V{version:03d}" for version in missing_versions),
+        )
+
+    ensure_migration_table(engine)
+    applied_versions = get_applied_versions(engine)
 
     for version, description, migration_file in migrations:
         if version in applied_versions:

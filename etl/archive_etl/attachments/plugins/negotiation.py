@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from archive_etl.attachments.models import AttachmentRecord
 from archive_etl.attachments.plugins.attachment_file import (

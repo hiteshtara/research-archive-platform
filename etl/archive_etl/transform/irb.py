@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 COLUMN_ALIASES = {
     "STUDY_ID": "study_id",
     "PROTOCOL_BASE": "protocol_base",

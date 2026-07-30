@@ -16,6 +16,31 @@ from load_protocol_personnel import (
 
 
 class ProtocolPersonnelLoaderTest(unittest.TestCase):
+    def test_unit_contract_preserves_authoritative_unit_name(self) -> None:
+        prepared = prepare_units(
+            pd.DataFrame(
+                [
+                    {
+                        "protocol_units_id": "20",
+                        "protocol_person_id": "10",
+                        "protocol_number": "000100",
+                        "sequence_number": "2",
+                        "unit_number": "1202200000",
+                        "unit_name": (
+                            "CAS Psychological and Brain Sciences"
+                        ),
+                        "lead_unit_flag": "Y",
+                    }
+                ]
+            )
+        )
+
+        self.assertEqual(
+            prepared.loc[0, "unit_name"],
+            "CAS Psychological and Brain Sciences",
+        )
+        self.assertEqual(prepared.loc[0, "unit_number"], "1202200000")
+
     def test_person_contract_excludes_sensitive_columns(self) -> None:
         source = pd.DataFrame(
             [
