@@ -132,6 +132,30 @@ variable "database_skip_final_snapshot" {
   default     = false
 }
 
+variable "database_multi_az" {
+  description = "Run RDS with a synchronously-replicated standby in a second AZ for automatic failover. Should be true in production."
+  type        = bool
+  default     = true
+}
+
+variable "database_apply_immediately" {
+  description = "Apply RDS modifications immediately instead of waiting for the next maintenance window. Should be false in production so disruptive changes land at a predictable, low-traffic time."
+  type        = bool
+  default     = false
+}
+
+variable "database_maintenance_window" {
+  description = "Preferred weekly RDS maintenance window, e.g. \"sun:06:00-sun:07:00\" (UTC). Leave null to let AWS assign one."
+  type        = string
+  default     = "sun:06:00-sun:07:00"
+}
+
+variable "database_backup_window" {
+  description = "Preferred daily RDS automated-backup window, e.g. \"05:00-05:30\" (UTC). Must not overlap database_maintenance_window. Leave null to let AWS assign one."
+  type        = string
+  default     = "05:00-05:30"
+}
+
 #
 # Container images
 #
@@ -218,7 +242,13 @@ variable "api_domain_name" {
 }
 
 variable "api_certificate_arn" {
-  description = "ACM certificate ARN for the API load balancer's HTTPS listener, covering api_domain_name (or the ALB's default DNS name is not valid for ACM, so this is only usable with a custom domain). Leave null to serve HTTP only, which is only appropriate for initial bring-up before a certificate exists."
+  description = "ACM certificate ARN for the API load balancer's HTTPS listener, covering api_domain_name (the ALB's default DNS name is not valid for ACM, so this is only usable with a custom domain). Required in production - terraform plan/apply refuses to proceed with HTTP-only in prod (see the config_guard precondition in main.tf). Before applying, confirm the certificate actually covers api_domain_name: `aws acm describe-certificate --certificate-arn <arn> --query 'Certificate.SubjectAlternativeNames'` (Terraform cannot verify SAN coverage from an ARN alone - there is no AWS provider data source for it)."
+  type        = string
+  default     = null
+}
+
+variable "api_route53_zone_id" {
+  description = "Route53 hosted zone ID that api_domain_name belongs to. Required when api_domain_name is set (which is effectively always, in production - see the config_guard precondition) - Terraform creates an ALIAS record for api_domain_name in this zone pointing at the ALB. This zone must already exist (e.g. bu.edu or a delegated subdomain); Terraform does not create hosted zones for a domain it doesn't own."
   type        = string
   default     = null
 }
@@ -249,6 +279,18 @@ variable "cognito_client_id" {
   default     = null
 }
 
+variable "cognito_user_pool_id" {
+  description = "User Pool ID for an existing Cognito User Pool (e.g. us-east-1_abc123def). Required when manage_cognito = false; ignored when true. Needed separately from cognito_issuer_uri because the UI's Amplify.configure() call needs the bare pool ID, not the issuer URL."
+  type        = string
+  default     = null
+}
+
+variable "cognito_hosted_ui_domain" {
+  description = "Full Hosted UI domain URL for an existing Cognito User Pool, e.g. https://my-domain.auth.us-east-1.amazoncognito.com. Required when manage_cognito = false and manage_amplify = true; ignored otherwise."
+  type        = string
+  default     = null
+}
+
 variable "cognito_callback_urls" {
   description = "Allowed OAuth callback URLs for the Cognito app client. Only used when manage_cognito = true."
   type        = list(string)
@@ -265,6 +307,39 @@ variable "cognito_hosted_ui_domain_prefix" {
   description = "Domain prefix for the Cognito Hosted UI, if wanted. Only used when manage_cognito = true."
   type        = string
   default     = null
+}
+
+variable "cognito_advanced_security_mode" {
+  description = "Cognito advanced (threat-protection) security mode: OFF, AUDIT, or ENFORCED. Only used when manage_cognito = true."
+  type        = string
+  default     = "ENFORCED"
+
+  validation {
+    condition     = contains(["OFF", "AUDIT", "ENFORCED"], var.cognito_advanced_security_mode)
+    error_message = "cognito_advanced_security_mode must be one of: OFF, AUDIT, ENFORCED."
+  }
+}
+
+variable "cognito_deletion_protection" {
+  description = "Protect the Cognito User Pool from accidental deletion via the Cognito API/console. Should be ACTIVE in production. Only used when manage_cognito = true."
+  type        = string
+  default     = "ACTIVE"
+
+  validation {
+    condition     = contains(["ACTIVE", "INACTIVE"], var.cognito_deletion_protection)
+    error_message = "cognito_deletion_protection must be one of: ACTIVE, INACTIVE."
+  }
+}
+
+variable "cognito_mfa_configuration" {
+  description = "Require multi-factor authentication: OFF, ON, or OPTIONAL (TOTP/software-token only). Only used when manage_cognito = true."
+  type        = string
+  default     = "OPTIONAL"
+
+  validation {
+    condition     = contains(["OFF", "ON", "OPTIONAL"], var.cognito_mfa_configuration)
+    error_message = "cognito_mfa_configuration must be one of: OFF, ON, OPTIONAL."
+  }
 }
 
 #
@@ -312,9 +387,32 @@ variable "ui_api_base_url" {
   default     = null
 }
 
+variable "ui_redirect_url" {
+  description = "The UI's own URL, used as Cognito's OAuth sign-in redirect target (VITE_COGNITO_REDIRECT_URL) - must also be included in cognito_callback_urls. Defaults to https://<amplify_custom_domain>/ when that's set; otherwise required, since Amplify's own *.amplifyapp.com domain is only known after the first apply (a resource can't reference its own computed output as one of its own inputs)."
+  type        = string
+  default     = null
+}
+
+variable "ui_logout_url" {
+  description = "The UI's own URL, used as Cognito's OAuth sign-out redirect target (VITE_COGNITO_LOGOUT_URL) - must also be included in cognito_logout_urls. Same default/requirement rules as ui_redirect_url."
+  type        = string
+  default     = null
+}
+
 #
 # AI feature (optional)
 #
+# The OpenAI integration is off by default end-to-end: no secret is
+# created, no OPENAI_API_KEY is injected into the API task, and the
+# execution role is granted no access to it. Set enable_openai_secret =
+# true (and the matching additional_api_environment_variables APP_AI_*
+# flags below) only once you intend to actually use the live provider.
+
+variable "enable_openai_secret" {
+  description = "Create the OpenAI Secrets Manager secret and inject OPENAI_API_KEY into the API task. Leave false (the default) to deploy without ever requiring an OpenAI secret value - the API falls back to the deterministic stub AI provider."
+  type        = bool
+  default     = false
+}
 
 variable "openai_secret_recovery_window_days" {
   description = "Secrets Manager recovery window for the OpenAI API key secret. Use 0 only in non-production environments."

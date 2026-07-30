@@ -19,8 +19,29 @@ resource "aws_cognito_user_pool" "this" {
     advanced_security_mode = var.advanced_security_mode
   }
 
+  deletion_protection = var.deletion_protection
+
+  mfa_configuration = var.mfa_configuration
+
+  dynamic "software_token_mfa_configuration" {
+    for_each = var.mfa_configuration == "OFF" ? [] : [1]
+
+    content {
+      enabled = true
+    }
+  }
+
   tags = {
     Name = "${var.project_name}-${var.environment}-user-pool"
+  }
+
+  # Matches the same hardcoded protection already applied to the data/
+  # documents S3 buckets (modules/s3/main.tf) - lifecycle meta-arguments
+  # can't be driven by a variable, so this applies in every environment,
+  # including dev. To genuinely destroy a dev pool, comment this out for
+  # the run or `terraform state rm` it first.
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

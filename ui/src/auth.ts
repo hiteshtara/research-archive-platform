@@ -6,25 +6,50 @@ import {
   signOut,
 } from "aws-amplify/auth";
 
-const userPoolClientId = "4svvnli76o8j2qtekkvasq7agc";
-const cognitoDomain =
-  "rap-dev-589744711110-1784159433.auth.us-east-1.amazoncognito.com";
+// Every value here is environment-specific (dev/test/prod each have their
+// own Cognito User Pool and app client) and is injected at build time via
+// Terraform's Amplify environment_variables - see terraform/environments/
+// */main.tf. Nothing below should ever be a literal pool ID, client ID,
+// domain, or URL: that couples the built UI to one specific AWS account
+// and silently breaks whenever a different environment's build runs.
+const awsRegion = import.meta.env.VITE_AWS_REGION;
+const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID;
+const userPoolClientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
+const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
+const redirectSignInUrl = import.meta.env.VITE_COGNITO_REDIRECT_URL;
+const redirectSignOutUrl = import.meta.env.VITE_COGNITO_LOGOUT_URL;
 
-const productionUrl =
-  "https://main.d33qc0afy3ltcj.amplifyapp.com/";
-const localUrl = "http://localhost:5173/";
+for (const [name, value] of Object.entries({
+  VITE_AWS_REGION: awsRegion,
+  VITE_COGNITO_USER_POOL_ID: userPoolId,
+  VITE_COGNITO_CLIENT_ID: userPoolClientId,
+  VITE_COGNITO_DOMAIN: cognitoDomain,
+  VITE_COGNITO_REDIRECT_URL: redirectSignInUrl,
+  VITE_COGNITO_LOGOUT_URL: redirectSignOutUrl,
+})) {
+  if (!value) {
+    throw new Error(`${name} is not configured.`);
+  }
+}
+
+if (!userPoolId.startsWith(`${awsRegion}_`)) {
+  throw new Error(
+    `VITE_COGNITO_USER_POOL_ID (${userPoolId}) does not look like it belongs ` +
+      `to VITE_AWS_REGION (${awsRegion}) - check the two values were not swapped.`,
+  );
+}
 
 Amplify.configure({
   Auth: {
     Cognito: {
-      userPoolId: "us-east-1_KnifXAgWm",
+      userPoolId,
       userPoolClientId,
       loginWith: {
         oauth: {
           domain: cognitoDomain,
           scopes: ["openid", "email", "profile"],
-          redirectSignIn: [productionUrl, localUrl],
-          redirectSignOut: [productionUrl, localUrl],
+          redirectSignIn: [redirectSignInUrl],
+          redirectSignOut: [redirectSignOutUrl],
           responseType: "code",
         },
       },
@@ -39,14 +64,10 @@ export async function login(): Promise<void> {
 export async function logout(): Promise<void> {
   await signOut({ global: true });
 
-  const logoutUri = window.location.hostname === "localhost"
-    ? localUrl
-    : productionUrl;
-
   const logoutUrl =
     `https://${cognitoDomain}/logout` +
     `?client_id=${encodeURIComponent(userPoolClientId)}` +
-    `&logout_uri=${encodeURIComponent(logoutUri)}`;
+    `&logout_uri=${encodeURIComponent(redirectSignOutUrl)}`;
 
   window.location.assign(logoutUrl);
 }
