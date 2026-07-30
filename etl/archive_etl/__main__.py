@@ -27,11 +27,75 @@ DOMAIN_MODULES: dict[str, str] = {
     "award-attachment": "load_award_attachments",
 }
 
-# Domains whose loader supports --dry-run in addition to --limit. Only
-# award-attachment needs this today - --limit alone already implies "no
-# database write" for every other domain (see each domain's --limit help
-# text), so a separate --dry-run flag would be redundant there.
-_DRY_RUN_DOMAINS = {"award-attachment"}
+# Domain-specific extra CLI flags forwarded verbatim to the underlying
+# loader, beyond the universal --limit every domain already gets. Only
+# award-attachment needs any of this today - --limit alone already implies
+# "no database write" for every other domain (see each domain's --limit
+# help text). `default=None` on a non-store_true entry means "don't
+# forward it at all unless explicitly given" - the underlying loader's own
+# default then applies.
+_EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
+    "award-attachment": [
+        (
+            "--dry-run",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --dry-run.",
+            },
+        ),
+        (
+            "--upload",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --upload.",
+            },
+        ),
+        (
+            "--bucket",
+            {
+                "type": str,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --bucket.",
+            },
+        ),
+        (
+            "--prefix",
+            {
+                "type": str,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --prefix.",
+            },
+        ),
+        (
+            "--file-id",
+            {
+                "type": int,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --file-id.",
+            },
+        ),
+        (
+            "--retry-failed",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's --retry-failed."
+                ),
+            },
+        ),
+        (
+            "--multipart-threshold-bytes",
+            {
+                "type": int,
+                "default": None,
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--multipart-threshold-bytes."
+                ),
+            },
+        ),
+    ],
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,12 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Forwarded to the underlying loader's --limit.",
         )
-        if domain in _DRY_RUN_DOMAINS:
-            domain_parser.add_argument(
-                "--dry-run",
-                action="store_true",
-                help="Forwarded to the underlying loader's --dry-run.",
-            )
+        for flag, kwargs in _EXTRA_DOMAIN_ARGUMENTS.get(domain, []):
+            domain_parser.add_argument(flag, **kwargs)
 
     return parser
 
@@ -83,8 +143,15 @@ def _run_domain(domain: str, args: argparse.Namespace) -> int:
     forwarded: list[str] = []
     if args.limit is not None:
         forwarded.extend(["--limit", str(args.limit)])
-    if getattr(args, "dry_run", False):
-        forwarded.append("--dry-run")
+
+    for flag, kwargs in _EXTRA_DOMAIN_ARGUMENTS.get(domain, []):
+        dest = flag.lstrip("-").replace("-", "_")
+        value = getattr(args, dest, None)
+        if kwargs.get("action") == "store_true":
+            if value:
+                forwarded.append(flag)
+        elif value is not None:
+            forwarded.extend([flag, str(value)])
 
     # Rewrite sys.argv rather than changing each loader's main()/parse_args()
     # signature, so every domain script stays exactly as it is today (and

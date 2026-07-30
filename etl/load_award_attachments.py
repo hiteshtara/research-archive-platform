@@ -1,25 +1,41 @@
-"""Award attachment metadata loader (Sprint 1: foundation only).
+"""Award attachment loader - metadata (Sprint 1) and resumable S3 upload
+of distinct physical files (Sprint 2).
 
-Reads Award attachment references (KCOEUS.AWARD_ATTACHMENT) and
+Sprint 1 reads Award attachment references (KCOEUS.AWARD_ATTACHMENT) and
 deduplicated physical-file metadata (KCOEUS.ATTACHMENT_FILE, with a
-KCOEUS.FILE_DATA fallback) directly from Oracle - metadata only. This
-sprint deliberately does not implement blob streaming, S3 upload, SHA256
-hashing, multipart upload, an API, a UI, presigned URLs, or download
-endpoints - those are out of scope until a later sprint. See
-docs/DECISIONS.md and database/migrations/V035__create_award_attachment_archive.sql
-for the schema this loader populates.
+KCOEUS.FILE_DATA fallback) directly from Oracle - metadata only, no blob
+content. Sprint 2 (--upload) streams each distinct physical file's BLOB
+content from Oracle in chunks (never fully in memory), computing SHA-256
+incrementally, and uploads it to S3 - ordinary upload for small files,
+manual multipart (aborted on any failure) above --multipart-threshold-bytes.
+Uploads are resumable: already-UPLOADED rows with a matching bucket/key are
+skipped, upload_attempts is tracked, and status only advances to UPLOADED
+after S3 confirms the write. An API, a UI, presigned URLs, and download
+endpoints remain out of scope. See docs/DECISIONS.md,
+database/migrations/V035__create_award_attachment_archive.sql, and
+database/migrations/V036__extend_award_attachment_upload_status.sql for the
+schema this loader populates.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import boto3
+import oracledb
 import pandas as pd
+from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.attachments.models import sanitize_file_name
+from archive_etl.config.settings import require_oracle_environment
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -31,6 +47,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ORACLE_DIR = PROJECT_ROOT / "oracle" / "award"
 REFERENCES_ORACLE_SQL = _ORACLE_DIR / "export_award_attachments.sql"
 FILES_ORACLE_SQL = _ORACLE_DIR / "export_award_attachment_files.sql"
+
+# Sprint 2 (upload) defaults.
+DEFAULT_S3_KEY_PREFIX = "award-files/by-file-id"
+DEFAULT_MULTIPART_THRESHOLD_BYTES = 16 * 1024 * 1024
+DEFAULT_UPLOAD_CHUNK_SIZE = 1024 * 1024
+# S3 requires every part but the last to be at least 5 MiB.
+_S3_MIN_PART_SIZE = 5 * 1024 * 1024
 
 REFERENCE_REQUIRED_COLUMNS = {
     "award_attachment_id",
@@ -75,6 +98,254 @@ FILE_COLUMNS = [
     "oracle_update_user",
     "uploaded_at",
 ]
+
+
+class MissingSourceContentError(RuntimeError):
+    """Raised when the Oracle row/BLOB backing a resolved BlobLocation
+    turns out to be null at upload time, despite metadata saying
+    otherwise - a genuine data-race/inconsistency between the Sprint 1
+    metadata snapshot and Oracle's current state, not the ordinary
+    MISSING_SOURCE_CONTENT classification (which is decided purely from
+    the stored blob_source column, before ever touching Oracle for the
+    blob content itself). Treated as a normal upload failure (FAILED),
+    not silently downgraded to MISSING_SOURCE_CONTENT."""
+
+
+@dataclass(frozen=True)
+class BlobLocation:
+    table: str
+    id_column: str
+    blob_column: str
+    reference_id: int
+
+
+def resolve_blob_location(
+    *, file_id: int, file_data_id: Any, blob_source: str | None
+) -> BlobLocation | None:
+    """Decide where to stream a physical file's BLOB content from, per
+    the blob selection rule: ATTACHMENT_FILE.FILE_DATA (INLINE) is
+    primary; FILE_DATA.DATA (EXTERNAL), joined by
+    ATTACHMENT_FILE.FILE_DATA_ID = FILE_DATA.ID, is the fallback. Returns
+    None when there is nothing to upload at all (blob_source is neither -
+    a MISSING_SOURCE_CONTENT row)."""
+    if blob_source == "INLINE":
+        return BlobLocation("ATTACHMENT_FILE", "FILE_ID", "FILE_DATA", file_id)
+    if blob_source == "EXTERNAL":
+        if file_data_id is None or (
+            isinstance(file_data_id, float) and pd.isna(file_data_id)
+        ):
+            return None
+        return BlobLocation("FILE_DATA", "ID", "DATA", int(file_data_id))
+    return None
+
+
+def iter_blob_chunks(
+    connection: Any,
+    location: BlobLocation,
+    chunk_size: int,
+) -> Iterator[bytes]:
+    """Yield raw BLOB chunks for `location` without ever holding the full
+    BLOB in memory - streamed straight from Oracle into whatever the
+    caller does with each chunk (e.g. an S3 upload), one chunk_size
+    fetch at a time. Raises MissingSourceContentError if the row or its
+    BLOB column is null at read time."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT source.{location.blob_column}
+            FROM KCOEUS.{location.table} source
+            WHERE source.{location.id_column} = :reference_id
+            """,
+            reference_id=location.reference_id,
+        )
+        row = cursor.fetchone()
+        if row is None or row[0] is None:
+            raise MissingSourceContentError(
+                f"{location.table} row or BLOB missing for "
+                f"{location.reference_id}"
+            )
+
+        blob = row[0]
+        offset = 1
+        while True:
+            chunk = blob.read(offset, chunk_size)
+            if not chunk:
+                break
+            yield chunk
+            offset += len(chunk)
+
+
+def build_s3_key(prefix: str, file_id: int, file_name: str | None) -> str:
+    """Deterministic key: {prefix}/{file_id}/{sanitized_file_name} - the
+    same file_id always produces the same key, which is what makes the
+    UPLOADED-with-matching-bucket/key resume check meaningful."""
+    sanitized = sanitize_file_name(file_name, file_id)
+    return f"{prefix.strip('/')}/{file_id}/{sanitized}"
+
+
+def _connect_oracle() -> oracledb.Connection:
+    credentials = require_oracle_environment()
+    return oracledb.connect(
+        user=credentials["ORACLE_USER"],
+        password=credentials["ORACLE_PASSWORD"],
+        dsn=credentials["ORACLE_DSN"],
+    )
+
+
+def create_s3_client() -> Any:
+    return boto3.client("s3")
+
+
+def validate_aws_identity() -> dict[str, str]:
+    """Fail closed before any upload if AWS credentials are missing or
+    invalid - never attempt an upload against an unverified identity."""
+    try:
+        identity = boto3.client("sts").get_caller_identity()
+    except (BotoCoreError, ClientError) as error:
+        raise RuntimeError(
+            "AWS identity validation failed - refusing to upload: "
+            f"{redact_error_message(str(error))}"
+        ) from error
+    return {
+        "account": str(identity.get("Account", "")),
+        "arn": str(identity.get("Arn", "")),
+    }
+
+
+def validate_bucket_accessible(s3_client: Any, bucket: str) -> None:
+    """Fail closed if the bucket is missing or inaccessible. Never creates
+    a bucket - a missing bucket is always an error, not a fallback path."""
+    try:
+        s3_client.head_bucket(Bucket=bucket)
+    except (BotoCoreError, ClientError) as error:
+        raise RuntimeError(
+            f"S3 bucket '{bucket}' is not accessible - refusing to "
+            "upload (this loader never creates buckets): "
+            f"{redact_error_message(str(error))}"
+        ) from error
+
+
+def _multipart_upload(
+    chunks: Iterator[bytes],
+    digest: hashlib._Hash,
+    s3_client: Any,
+    *,
+    bucket: str,
+    key: str,
+    content_type: str | None,
+    part_size: int,
+) -> tuple[int, str]:
+    effective_part_size = max(part_size, _S3_MIN_PART_SIZE)
+
+    create_kwargs: dict[str, str] = {"Bucket": bucket, "Key": key}
+    if content_type:
+        create_kwargs["ContentType"] = content_type
+    upload = s3_client.create_multipart_upload(**create_kwargs)
+    upload_id = upload["UploadId"]
+
+    parts: list[dict[str, Any]] = []
+    total_bytes = 0
+    part_number = 1
+    buffer = bytearray()
+
+    try:
+        for chunk in chunks:
+            digest.update(chunk)
+            buffer.extend(chunk)
+            total_bytes += len(chunk)
+            # A single incoming chunk can itself be larger than
+            # effective_part_size (e.g. a large Oracle read chunk against
+            # a small configured part size) - keep slicing off full parts
+            # rather than uploading one oversized part per chunk.
+            while len(buffer) >= effective_part_size:
+                part_payload = bytes(buffer[:effective_part_size])
+                del buffer[:effective_part_size]
+                part = s3_client.upload_part(
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumber=part_number,
+                    Body=part_payload,
+                )
+                parts.append({"ETag": part["ETag"], "PartNumber": part_number})
+                part_number += 1
+
+        if buffer or not parts:
+            # The final part (or the only part, if the whole stream fit
+            # in fewer bytes than part_size) - S3 allows the last part to
+            # be smaller than the minimum part size.
+            part = s3_client.upload_part(
+                Bucket=bucket,
+                Key=key,
+                UploadId=upload_id,
+                PartNumber=part_number,
+                Body=bytes(buffer),
+            )
+            parts.append({"ETag": part["ETag"], "PartNumber": part_number})
+
+        s3_client.complete_multipart_upload(
+            Bucket=bucket,
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={"Parts": parts},
+        )
+    except Exception:
+        s3_client.abort_multipart_upload(
+            Bucket=bucket, Key=key, UploadId=upload_id
+        )
+        raise
+
+    return total_bytes, digest.hexdigest()
+
+
+def stream_upload(
+    connection: Any,
+    location: BlobLocation,
+    s3_client: Any,
+    *,
+    bucket: str,
+    key: str,
+    content_type: str | None,
+    file_size_bytes: int | None,
+    multipart_threshold: int,
+    chunk_size: int = DEFAULT_UPLOAD_CHUNK_SIZE,
+) -> tuple[int, str]:
+    """Stream a physical file's BLOB content from Oracle to S3 in chunks,
+    computing SHA-256 incrementally, never holding the full BLOB in
+    memory for anything at or above multipart_threshold. The upload
+    strategy (ordinary vs. multipart) is decided from the already-known
+    file_size_bytes metadata rather than by buffering to detect size at
+    runtime; an unknown size defaults to multipart (the safe assumption
+    when the size can't be trusted)."""
+    digest = hashlib.sha256()
+    chunks = iter_blob_chunks(connection, location, chunk_size)
+
+    use_multipart = (
+        file_size_bytes is None or file_size_bytes >= multipart_threshold
+    )
+
+    if not use_multipart:
+        buffer = bytearray()
+        for chunk in chunks:
+            digest.update(chunk)
+            buffer.extend(chunk)
+        extra_args: dict[str, str] = {}
+        if content_type:
+            extra_args["ContentType"] = content_type
+        s3_client.put_object(
+            Bucket=bucket, Key=key, Body=bytes(buffer), **extra_args
+        )
+        return len(buffer), digest.hexdigest()
+
+    return _multipart_upload(
+        chunks,
+        digest,
+        s3_client,
+        bucket=bucket,
+        key=key,
+        content_type=content_type,
+        part_size=multipart_threshold,
+    )
 
 
 def read_bounded_references(source: OracleDataSource, limit: int) -> pd.DataFrame:
@@ -259,9 +530,10 @@ def prepare_files(dataframe: pd.DataFrame) -> pd.DataFrame:
     # Sprint 1 is metadata-only: no blob is ever streamed, hashed, or
     # uploaded here. upload_status only reflects whether a *future* upload
     # sprint has anything to do for this row - a file with no blob at all
-    # can never be uploaded and is SKIPPED rather than PENDING.
+    # can never be uploaded and is MISSING_SOURCE_CONTENT rather than
+    # PENDING.
     dataframe["upload_status"] = dataframe["blob_source"].apply(
-        lambda value: "PENDING" if pd.notna(value) else "SKIPPED"
+        lambda value: "PENDING" if pd.notna(value) else "MISSING_SOURCE_CONTENT"
     )
     dataframe["upload_attempts"] = 0
     dataframe["last_error"] = None
@@ -438,12 +710,267 @@ def verify_loaded_data(
         )
 
 
+# --- Sprint 2: resumable S3 upload -----------------------------------------
+
+# PENDING/UPLOADING are always upload candidates - UPLOADING included so a
+# row left mid-upload by a crashed prior run gets picked up again rather
+# than looking untouched forever. FAILED is only a candidate with
+# --retry-failed. MISSING_SOURCE_CONTENT is never a candidate - there is
+# structurally nothing to upload for it.
+_DEFAULT_CANDIDATE_STATUSES = ["PENDING", "UPLOADING"]
+
+
+def select_upload_candidates(
+    connection: Connection,
+    *,
+    limit: int | None,
+    file_id: int | None,
+    retry_failed: bool,
+) -> pd.DataFrame:
+    statuses = list(_DEFAULT_CANDIDATE_STATUSES)
+    if retry_failed:
+        statuses.append("FAILED")
+
+    query = """
+        SELECT
+            file_id,
+            file_data_id,
+            file_name,
+            content_type,
+            blob_source,
+            file_size_bytes,
+            upload_status,
+            s3_bucket,
+            s3_key
+        FROM archive.attachment_object
+        WHERE upload_status = ANY(:statuses)
+    """
+    params: dict[str, Any] = {"statuses": statuses}
+    if file_id is not None:
+        query += " AND file_id = :file_id"
+        params["file_id"] = file_id
+    query += " ORDER BY file_id"
+    if limit is not None:
+        query += " LIMIT :limit"
+        params["limit"] = limit
+
+    result = connection.execute(text(query), params)
+    return pd.DataFrame(result.mappings().all())
+
+
+def mark_file_uploading(engine: Engine, file_id: int) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.attachment_object
+                   SET upload_status = 'UPLOADING',
+                       upload_attempts = upload_attempts + 1
+                 WHERE file_id = :file_id
+                """
+            ),
+            {"file_id": file_id},
+        )
+
+
+def mark_file_uploaded(
+    engine: Engine,
+    file_id: int,
+    *,
+    bucket: str,
+    key: str,
+    sha256: str,
+    byte_size: int,
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.attachment_object
+                   SET upload_status = 'UPLOADED',
+                       s3_bucket = :bucket,
+                       s3_key = :key,
+                       sha256 = :sha256,
+                       file_size_bytes = :byte_size,
+                       last_error = NULL,
+                       uploaded_at = CURRENT_TIMESTAMP
+                 WHERE file_id = :file_id
+                """
+            ),
+            {
+                "file_id": file_id,
+                "bucket": bucket,
+                "key": key,
+                "sha256": sha256,
+                "byte_size": byte_size,
+            },
+        )
+
+
+def mark_file_upload_failed(
+    engine: Engine, file_id: int, error_message: str
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.attachment_object
+                   SET upload_status = 'FAILED',
+                       last_error = :last_error
+                 WHERE file_id = :file_id
+                """
+            ),
+            {
+                "file_id": file_id,
+                "last_error": redact_error_message(error_message),
+            },
+        )
+
+
+def mark_file_missing_source_content(engine: Engine, file_id: int) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.attachment_object
+                   SET upload_status = 'MISSING_SOURCE_CONTENT'
+                 WHERE file_id = :file_id
+                """
+            ),
+            {"file_id": file_id},
+        )
+
+
+def _run_upload(arguments: argparse.Namespace) -> dict[str, int]:
+    """Upload every selected candidate physical file's BLOB content to
+    S3. Never called unless --upload was explicitly given (see main()).
+    Each row's status transition (UPLOADING -> UPLOADED/FAILED) is its
+    own immediately-committed transaction - deliberately NOT one big
+    transaction for the whole batch, unlike the metadata load, since the
+    whole point of --upload is that a crash partway through must leave
+    durable, resumable progress rather than rolling everything back."""
+    if not arguments.bucket:
+        raise RuntimeError(
+            "--bucket is required with --upload - refusing to guess an "
+            "upload destination"
+        )
+
+    identity = validate_aws_identity()
+    logger.info(
+        "AWS identity validated for upload: account={}",
+        identity["account"],
+    )
+
+    s3_client = create_s3_client()
+    validate_bucket_accessible(s3_client, arguments.bucket)
+
+    engine = create_postgres_engine()
+
+    with engine.begin() as connection:
+        candidates = select_upload_candidates(
+            connection,
+            limit=arguments.limit,
+            file_id=arguments.file_id,
+            retry_failed=arguments.retry_failed,
+        )
+
+    report = {
+        "physical_files_selected": len(candidates),
+        "uploaded": 0,
+        "skipped_already_uploaded": 0,
+        "failed": 0,
+        "missing_source_content": 0,
+        "bytes_uploaded": 0,
+        "inline_source_count": 0,
+        "file_data_source_count": 0,
+    }
+
+    prefix = arguments.prefix or DEFAULT_S3_KEY_PREFIX
+    multipart_threshold = (
+        arguments.multipart_threshold_bytes or DEFAULT_MULTIPART_THRESHOLD_BYTES
+    )
+
+    oracle_connection: oracledb.Connection | None = None
+    try:
+        for row in candidates.itertuples(index=False):
+            file_id = int(row.file_id)
+            target_key = build_s3_key(
+                prefix, file_id, getattr(row, "file_name", None)
+            )
+
+            if (
+                row.upload_status == "UPLOADED"
+                and row.s3_bucket == arguments.bucket
+                and row.s3_key == target_key
+            ):
+                logger.info(
+                    "SKIP file_id={} already uploaded to s3://{}/{}",
+                    file_id,
+                    arguments.bucket,
+                    target_key,
+                )
+                report["skipped_already_uploaded"] += 1
+                continue
+
+            location = resolve_blob_location(
+                file_id=file_id,
+                file_data_id=getattr(row, "file_data_id", None),
+                blob_source=getattr(row, "blob_source", None),
+            )
+            if location is None:
+                mark_file_missing_source_content(engine, file_id)
+                report["missing_source_content"] += 1
+                continue
+
+            if oracle_connection is None:
+                oracle_connection = _connect_oracle()
+
+            mark_file_uploading(engine, file_id)
+            try:
+                byte_size, sha256 = stream_upload(
+                    oracle_connection,
+                    location,
+                    s3_client,
+                    bucket=arguments.bucket,
+                    key=target_key,
+                    content_type=getattr(row, "content_type", None),
+                    file_size_bytes=getattr(row, "file_size_bytes", None),
+                    multipart_threshold=multipart_threshold,
+                )
+            except Exception as error:
+                logger.exception("Upload failed for file_id={}", file_id)
+                mark_file_upload_failed(engine, file_id, str(error))
+                report["failed"] += 1
+                continue
+
+            mark_file_uploaded(
+                engine,
+                file_id,
+                bucket=arguments.bucket,
+                key=target_key,
+                sha256=sha256,
+                byte_size=byte_size,
+            )
+            report["uploaded"] += 1
+            report["bytes_uploaded"] += byte_size
+            if location.table == "ATTACHMENT_FILE":
+                report["inline_source_count"] += 1
+            else:
+                report["file_data_source_count"] += 1
+    finally:
+        if oracle_connection is not None:
+            oracle_connection.close()
+
+    logger.info("Award attachment upload reconciliation: {}", report)
+    return report
+
+
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Load Award attachment metadata (not blob content) from "
-            "Oracle. Sprint 1 scope: no blob streaming, no S3 upload, no "
-            "SHA256 - see this module's docstring."
+            "Load Award attachment metadata from Oracle, and (--upload) "
+            "stream each distinct physical file's BLOB content to S3. See "
+            "this module's docstring."
         )
     )
     parser.add_argument(
@@ -451,9 +978,11 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "Truncate references and files to at most this many rows "
-            "after reading (independently per dataset, matching every "
-            "other domain loader's --limit)."
+            "Without --upload: truncate references and files to at most "
+            "this many rows after reading (independently per dataset, "
+            "matching every other domain loader's --limit). With "
+            "--upload: cap how many physical files are selected for "
+            "upload in this run."
         ),
     )
     parser.add_argument(
@@ -461,7 +990,64 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Read and validate metadata and report reconciliation counts, "
-            "but never connect to, write to, or migrate PostgreSQL."
+            "but never connect to, write to, or migrate PostgreSQL. Has "
+            "no effect with --upload (use a non-existent --bucket in a "
+            "throwaway account, or just don't pass --upload, to avoid a "
+            "real upload)."
+        ),
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help=(
+            "Upload physical files already loaded into "
+            "archive.attachment_object to S3, streaming BLOB content "
+            "from Oracle in chunks. Requires --bucket. Never runs unless "
+            "this flag is explicitly given - --limit/--file-id/"
+            "--retry-failed alone do nothing without it."
+        ),
+    )
+    parser.add_argument(
+        "--bucket",
+        type=str,
+        default=None,
+        help="S3 bucket to upload to. Required with --upload.",
+    )
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default=None,
+        help=(
+            "S3 key prefix (default: "
+            f"'{DEFAULT_S3_KEY_PREFIX}'). The full key is always "
+            "{prefix}/{file_id}/{sanitized_file_name}."
+        ),
+    )
+    parser.add_argument(
+        "--file-id",
+        type=int,
+        default=None,
+        help=(
+            "With --upload, upload only this specific file_id (for "
+            "targeted testing/debugging)."
+        ),
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help=(
+            "With --upload, also include FAILED rows as upload "
+            "candidates, in addition to PENDING/UPLOADING."
+        ),
+    )
+    parser.add_argument(
+        "--multipart-threshold-bytes",
+        type=int,
+        default=None,
+        help=(
+            "With --upload, files at or above this size use multipart "
+            "upload; smaller files use a single put_object (default: "
+            f"{DEFAULT_MULTIPART_THRESHOLD_BYTES:,} bytes = 16 MiB)."
         ),
     )
     return parser.parse_args(arguments)
@@ -520,6 +1106,10 @@ def _read_coherent_sample(
 
 def main() -> None:
     arguments = parse_args()
+
+    if arguments.upload:
+        _run_upload(arguments)
+        return
 
     if arguments.limit is not None:
         references, files, validation_report = _read_coherent_sample(
