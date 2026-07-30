@@ -48,8 +48,8 @@ a Controller built before its Service, is a sign the order was skipped.
   `information_schema`, migrations, or existing extraction SQL first.
 - **Business grain vs. historical grain**: never treat a raw archive row
   count as a business-object count without checking which one you actually
-  need. See `CLAUDE.md`'s grain rules for Award/Proposal/Protocol before
-  writing any dashboard, API, or reconciliation logic that counts rows.
+  need. See `CLAUDE.md`'s grain rules for Award/Proposal before writing any
+  dashboard, API, or reconciliation logic that counts rows.
 - **AI features** (`app.ai.*`): never give a provider direct database
   access, never let a provider's output reach the user without citation
   validation, and default every new AI feature flag to `false`. See

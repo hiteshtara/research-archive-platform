@@ -16,9 +16,14 @@ CURRENT STATUS
 
 Completed
 
-◐ Protocol Archive — canonical replacement in progress
+✗ Protocol Archive — a second, independent human-subjects archive that was
+  under development as a possible replacement for legacy IRB. Removed in
+  full (API, UI, ETL loaders/Oracle SQL, forward-only schema-removal
+  migration V032). See `docs/DECISIONS.md` for the reversal and rationale.
 
-⚠ Legacy IRB compatibility path — deprecated; no new features
+✓ Legacy IRB — preserved as the sole human-subjects/protocol domain; no
+  longer considered deprecated now that Protocol Archive was removed rather
+  than reaching feature parity.
 
 ✓ Award Archive
 
