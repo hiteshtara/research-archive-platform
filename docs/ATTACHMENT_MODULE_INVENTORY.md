@@ -2,16 +2,30 @@
 
 ## Scope and evidence levels
 
-This inventory covers only BU-supported archive modules:
+This inventory covers BU-supported archive modules with an attachment
+contract:
 
 - Subaward
 - Award
 - Proposal
 - Negotiation
-- Protocol
 
 It excludes IACUC, S2S, templates, lookup tables, and unused KC modules.
 Oracle extraction remains local to a BU-managed computer on the VPN.
+
+**Protocol (removed).** A "Protocol" attachment module previously existed
+here, covering `KCOEUS.PROTOCOL_ATTACHMENT_PROTOCOL`/
+`PROTOCOL_ATTACHMENT_PERSONNEL` via the `etl/archive_etl/attachments/plugins/irb.py`
+plugin (module codes `IRB_PROTOCOL`/`IRB_PERSONNEL` — named after Kuali's IRB
+functional module, not this repo's separate legacy IRB domain). It has been
+removed along with the rest of Protocol Archive; see `docs/DECISIONS.md`.
+**The already-archived `archive.archived_attachment` rows with module codes
+`IRB_PROTOCOL`/`IRB_PERSONNEL` are kept in place** for historical
+compatibility — they are not purged, and the shared `module_code` CHECK
+constraint from V020 is not narrowed to exclude them. No new ingestion into
+those module codes is possible since the plugin is gone; this is a closed,
+historical data set, not an active module. See the "Protocol (historical)"
+section below for the archived contract detail.
 
 Each module is evaluated independently for:
 
@@ -32,8 +46,9 @@ KCOEUS.ATTACHMENT_FILE.FILE_DATA
 KCOEUS.ATTACHMENT_FILE.FILE_DATA_ID
 ```
 
-Award, Negotiation, and Protocol read `ATTACHMENT_FILE.FILE_DATA` directly
-through `FILE_ID`; they do not look up `KCOEUS.FILE_DATA`.
+Award and Negotiation read `ATTACHMENT_FILE.FILE_DATA` directly through
+`FILE_ID`; they do not look up `KCOEUS.FILE_DATA`. The removed Protocol
+plugins did the same (see "Protocol (historical)" below).
 
 ## Summary
 
@@ -43,13 +58,15 @@ through `FILE_ID`; they do not look up `KCOEUS.FILE_DATA`.
 | Proposal | Verified | Direct `FILE_DATA_ID` verified | Generic V020 destination | Implemented |
 | Award | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
 | Negotiation | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
-| Protocol | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Generic V020 destination | Both implemented |
+| Protocol (historical) | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Generic V020 destination | Removed — rows retained, no new ingestion |
 
-V020 adds `archive.archived_attachment` for Award, Proposal, Negotiation,
-Protocol, and Protocol personnel. Its typed columns hold the common archive
-contract, while `source_metadata` preserves source-specific identifiers and
-attributes. The uniqueness key is `(module_code, source_attachment_id)`.
-Subaward continues to use its V019 destination and existing API/UI contract.
+V020 adds `archive.archived_attachment` for Award, Proposal, and Negotiation
+(plus historical Protocol/Protocol-personnel rows under module codes
+`IRB_PROTOCOL`/`IRB_PERSONNEL` — see above). Its typed columns hold the
+common archive contract, while `source_metadata` preserves source-specific
+identifiers and attributes. The uniqueness key is
+`(module_code, source_attachment_id)`. Subaward continues to use its V019
+destination and existing API/UI contract.
 
 ## Subaward
 
@@ -201,9 +218,18 @@ restriction identifiers remain in `source_metadata`.
 The inventory must not describe `NEGOTIATION_ATTACHMENT` as physically
 unverified.
 
-## Protocol
+## Protocol (historical)
 
-### Confirmed Oracle contract
+**This module is removed. The plugin code
+(`etl/archive_etl/attachments/plugins/irb.py`) and its two runner
+registrations (legacy plugin IDs `irb`, `irb-personnel`) no longer exist in
+this repository.** The contract below is preserved only to explain the
+`IRB_PROTOCOL`/`IRB_PERSONNEL` module codes still present on already-archived
+`archive.archived_attachment` rows, which are kept for historical
+compatibility and are not purged (see `docs/DECISIONS.md`). No new rows can
+be ingested under these module codes.
+
+### Confirmed Oracle contract (as it existed before removal)
 
 - Protocol attachment table:
   `KCOEUS.PROTOCOL_ATTACHMENT_PROTOCOL`
@@ -265,24 +291,26 @@ The verified `ATTACHMENT_FILE` enrichment and payload fields are:
   Protocol-specific migration destination and has no confirmed mapping here.
 - Protocol repositories, DTOs, and UI have no attachment contract.
 
-### Status and missing information
+### Status (before removal)
 
 Both Protocol source tables and their direct `ATTACHMENT_FILE.FILE_ID` joins
-are verified. The Protocol and personnel plugins read
-`ATTACHMENT_FILE.FILE_DATA`; filename and MIME type come from `FILE_NAME` and
+were verified. The Protocol and personnel plugins read
+`ATTACHMENT_FILE.FILE_DATA`; filename and MIME type came from `FILE_NAME` and
 `CONTENT_TYPE`.
 
-Both plugins synchronize into V020 with separate module codes:
+Both plugins synchronized into V020 with separate module codes:
 `IRB_PROTOCOL` and `IRB_PERSONNEL`. Protocol attachment version and status
-fields, and personnel `PERSON_ID` and `TYPE_CD`, remain in `source_metadata`.
+fields, and personnel `PERSON_ID` and `TYPE_CD`, remain in `source_metadata`
+on the rows that were already archived — those rows and fields are
+unaffected by the plugin's removal.
 
 ## CLI behavior
 
-Subaward, Award, Proposal, Negotiation, Protocol (legacy plugin ID `irb`), and
-Protocol personnel (legacy plugin ID `irb-personnel`) are registered. Each
-generic module supports
-`--sync-postgres`; this applies migrations and idempotently upserts its local
-manifest without contacting Oracle or S3.
+Subaward, Award, Proposal, and Negotiation are registered. Each generic
+module supports `--sync-postgres`; this applies migrations and idempotently
+upserts its local manifest without contacting Oracle or S3. The Protocol
+(`irb`) and Protocol personnel (`irb-personnel`) plugin IDs are no longer
+registered and will fail with an unknown-module error if invoked.
 
 Confirmed Subaward dry run:
 

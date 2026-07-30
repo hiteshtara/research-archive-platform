@@ -1,24 +1,20 @@
 # ETL Runbook
 
-Order
+Order (Oracle-direct, the default — see
+[`docs/runbooks/ORACLE.md`](ORACLE.md) for the full operator workflow)
 
 Migration
 
 ↓
 
-Oracle Export
-
-↓
-
-CSV Validation
-
-↓
-
-Bulk Copy
+Oracle Extract + Validate (direct, streamed into Postgres)
 
 ↓
 
 Verification
+
+CSV export/upload is an explicit, non-default fallback (`--csv` /
+`SOURCE_MODE=csv`), not a required step in the default workflow.
 
 -------------------------------------------------------------------------------
 

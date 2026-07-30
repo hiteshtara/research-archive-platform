@@ -16,11 +16,10 @@ Build the premier read-only enterprise archive for Boston University research ad
 | Negotiations | ✅ Complete |
 | Subawards | ✅ Complete |
 | Proposal Archive | ✅ Complete |
-| Protocol Archive | ✅ Complete |
+| Protocol Archive | ❌ Removed (see `docs/DECISIONS.md`) |
 | AI Foundation | ✅ Complete |
 | Award AI UI | ✅ Complete |
 | Live AI Provider | ⬜ Planned |
-| Protocol AI | ⬜ Planned |
 | Negotiation AI | ⬜ Planned |
 | Document RAG | ⬜ Planned |
 | Natural Language Search | ⬜ Planned |
@@ -90,7 +89,6 @@ Deliverables
 
 - ArchiveContextBuilder
 - AwardContextBuilder
-- ProtocolContextBuilder
 - NegotiationContextBuilder
 - ProposalContextBuilder
 - SubawardContextBuilder
@@ -101,14 +99,9 @@ Deliverables
 # Phase 4 — Protocol AI
 
 Status:
-⬜ Planned
-
-Deliverables
-
-- Protocol Summary endpoint
-- Protocol Summary UI
-- Citation validation
-- Tests
+❌ Cancelled — Protocol Archive (the domain this phase targeted) was removed
+in full; see `docs/DECISIONS.md`. Legacy IRB was kept instead and has no AI
+feature planned at this time.
 
 ---
 
@@ -198,7 +191,6 @@ Status:
 Tools
 
 - searchAwards
-- searchProtocols
 - searchNegotiations
 - searchDocuments
 - explainLoad
@@ -217,11 +209,11 @@ Agents
 Build an enterprise AI assistant capable of answering research-administration questions across:
 
 - Awards
-- Protocols
 - Negotiations
 - Proposals
 - Subawards
 - Documents
+- IRB
 
 while preserving:
 

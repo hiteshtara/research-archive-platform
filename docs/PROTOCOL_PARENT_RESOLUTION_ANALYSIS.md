@@ -1,5 +1,20 @@
 # Protocol Parent-Resolution Analysis
 
+> **DEPRECATED — historical reference only, not current architecture.**
+> Protocol Archive (the domain this analysis was performed for) has been
+> removed in full; see `docs/DECISIONS.md`. The scripts and SQL files this
+> document references —
+> `etl/analyze_protocol_parent_resolution.py`,
+> `oracle/protocol/parent_resolution/protocol_child_parent_summary.sql`, and
+> `oracle/protocol/parent_resolution/protocol_child_parent_examples.sql` —
+> **no longer exist in this repository** and cannot be rerun as written.
+> This document is retained only because its finding is a genuine Oracle
+> data-quality gotcha (`PROTOCOL_ID` does not reliably identify a row's
+> business version) that could resurface in any future extraction work
+> touching `KCOEUS.PROTOCOL`/`PROTOCOL_PERSONS` and related tables,
+> including legacy IRB's. Nothing below describes a runnable procedure or
+> current schema.
+
 ## Purpose and evidence boundary
 
 This analysis tests whether a Protocol child row's physical `PROTOCOL_ID`
