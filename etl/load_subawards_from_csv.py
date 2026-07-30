@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pandas as pd
 from loguru import logger
-from pandas.errors import EmptyDataError
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
@@ -17,7 +16,6 @@ from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DOWNLOAD_DIR = Path.home() / "Downloads"
 
 SOURCE_COLUMN_RENAMES = {
     "update_timestamp": "source_update_timestamp",
@@ -42,11 +40,7 @@ class DatasetSpec:
     oracle_sql_file: str
     numeric_columns: tuple[str, ...] = ()
     date_columns: tuple[str, ...] = ()
-    allow_empty: bool = False
     parent_column: str | None = "subaward_id"
-
-    def csv_path(self, csv_dir: Path) -> Path:
-        return csv_dir / self.file_name
 
     @property
     def oracle_path(self) -> Path:
@@ -238,7 +232,6 @@ DATASETS = (
             "date_requested", "date_followup", "date_received",
             "update_timestamp",
         ),
-        allow_empty=True,
     ),
     DatasetSpec(
         key="reports",
@@ -257,7 +250,6 @@ DATASETS = (
         oracle_sql_file="export_subaward_reports.sql",
         numeric_columns=("subaward_id", "sequence_number", "ver_nbr"),
         date_columns=("update_timestamp",),
-        allow_empty=True,
     ),
     DatasetSpec(
         key="notepad",
@@ -278,7 +270,6 @@ DATASETS = (
             "subaward_notepad_id", "subaward_id", "entry_number", "ver_nbr",
         ),
         date_columns=("create_timestamp", "update_timestamp"),
-        allow_empty=True,
     ),
     DatasetSpec(
         key="notifications",
@@ -298,7 +289,6 @@ DATASETS = (
             "notification_type_id", "ver_nbr",
         ),
         date_columns=("create_timestamp", "update_timestamp"),
-        allow_empty=True,
         parent_column="owning_document_id_fk",
     ),
     DatasetSpec(
@@ -348,94 +338,28 @@ DATASETS = (
 )
 
 
-def normalize_column_name(column: str) -> str:
-    return column.strip().lower().replace(" ", "_").replace("-", "_")
-
-
-def empty_dataframe(spec: DatasetSpec) -> pd.DataFrame:
-    return pd.DataFrame(columns=list(spec.columns))
-
-
 def parse_args(
     arguments: list[str] | None = None,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Load Subaward data from Oracle (default) or a CSV export set."
-        )
-    )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--oracle",
-        action="store_true",
-        help="Read all datasets directly from Oracle (the default).",
-    )
-    source.add_argument(
-        "--csv",
-        action="store_true",
-        help="Read all datasets from the existing CSV export set.",
+        description="Load Subaward data from Oracle."
     )
     parser.add_argument(
-        "--csv-dir",
-        type=Path,
-        default=DOWNLOAD_DIR,
-        help=f"Directory containing the CSV export set. Defaults to {DOWNLOAD_DIR}.",
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Truncate every dataset to at most this many rows after "
+            "reading, skip cross-dataset validation, and skip the "
+            "database write entirely (a bounded dry run for testing "
+            "connectivity/transform logic - not a partial load)."
+        ),
     )
     return parser.parse_args(arguments)
 
 
-def require_files(csv_dir: Path) -> None:
-    missing = [
-        str(spec.csv_path(csv_dir))
-        for spec in DATASETS
-        if not spec.allow_empty and not spec.csv_path(csv_dir).exists()
-    ]
-    if missing:
-        raise RuntimeError(
-            "Missing required Subaward CSV files:\n" + "\n".join(missing)
-        )
-
-
 def read_oracle(spec: DatasetSpec) -> pd.DataFrame:
     return OracleDataSource(spec.oracle_path).read()
-
-
-def read_csv(spec: DatasetSpec, csv_dir: Path) -> pd.DataFrame:
-    path = spec.csv_path(csv_dir)
-    logger.info("Reading {}", path)
-
-    if not path.exists():
-        if spec.allow_empty:
-            logger.info(
-                "{} is absent; treating it as a valid empty dataset",
-                spec.file_name,
-            )
-            return empty_dataframe(spec)
-        raise RuntimeError(f"Missing required CSV file: {path}")
-
-    try:
-        dataframe = pd.read_csv(
-            path,
-            dtype=str,
-            keep_default_na=True,
-            na_values=["", "NULL", "null"],
-            low_memory=False,
-        )
-    except EmptyDataError:
-        if not spec.allow_empty:
-            raise RuntimeError(f"{spec.file_name} is empty") from None
-        logger.info(
-            "{} contains no header or rows; treating it as a valid empty dataset",
-            spec.file_name,
-        )
-        return empty_dataframe(spec)
-
-    dataframe.columns = [normalize_column_name(c) for c in dataframe.columns]
-    dataframe = dataframe.replace(
-        {"": None, "NULL": None, "null": None, "NaN": None, "nan": None}
-    )
-    logger.info("{} rows read from {}", len(dataframe), spec.file_name)
-    return dataframe
 
 
 def prepare_dataset(spec: DatasetSpec, dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -508,7 +432,7 @@ def create_load_run(connection: Connection, total_rows: int) -> int:
             VALUES (
                 'SUBAWARD',
                 'KUALI',
-                'subaward CSV export set',
+                'Oracle KCOEUS export',
                 :rows_read,
                 'STARTED'
             )
@@ -662,21 +586,25 @@ def mark_load_complete(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = not arguments.csv
-    csv_dir = arguments.csv_dir
 
-    if use_oracle:
-        logger.info("Reading Subaward data from Oracle")
+    logger.info("Reading Subaward data from Oracle")
+    datasets = {
+        spec.key: prepare_dataset(spec, read_oracle(spec))
+        for spec in DATASETS
+    }
+
+    if arguments.limit is not None:
         datasets = {
-            spec.key: prepare_dataset(spec, read_oracle(spec))
-            for spec in DATASETS
+            key: dataframe.head(arguments.limit)
+            for key, dataframe in datasets.items()
         }
-    else:
-        require_files(csv_dir)
-        datasets = {
-            spec.key: prepare_dataset(spec, read_csv(spec, csv_dir))
-            for spec in DATASETS
-        }
+        logger.info(
+            "Dry run (--limit {}): read {} - skipping validation and "
+            "database write.",
+            arguments.limit,
+            " ".join(f"{key}={len(df):,}" for key, df in datasets.items()),
+        )
+        return
 
     subawards = datasets["subawards"]
     validate_parent_relationships(subawards, datasets)

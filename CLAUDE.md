@@ -56,10 +56,22 @@ auth in favor of permit-all (`app.security.enabled=false`).
 ## Architecture
 
 ### Data flow and the read-only boundary
-Oracle (legacy Kuali, BU VPN-only) → Python ETL extracts, validates, writes
-CSV/Parquet → upload to S3 → load into Postgres (`archive` schema) → Spring
-Boot API (JdbcClient, no writes back to Oracle) → React UI. The API and UI
-never talk to Oracle directly; only the ETL does, and only for reading.
+Oracle (legacy Kuali, BU VPN-only) → Python ETL, run from a BU VPN-connected
+machine, streams directly into Postgres (`archive` schema) → Spring Boot API
+(JdbcClient, no writes back to Oracle) → React UI. Oracle is the **only**
+supported source of structured data for the Award/Negotiation/Subaward/
+Proposal loaders — CSV ingestion for structured data has been retired
+entirely (no `SOURCE_MODE`, no `--csv`/`--csv-dir` flags on any loader; see
+`docs/DECISIONS.md`). Award's unit contacts and Proposal's people had no
+verified Oracle extraction query and have been removed entirely (API, UI,
+ETL, and schema — see `docs/DECISIONS.md`); don't reintroduce them without a
+verified extraction query. S3 is retained only for document/attachment
+binary storage and for the
+legacy IRB Excel/Parquet export pipeline, unaffected by this change. The API
+and UI never talk to Oracle directly; only the ETL does, and only for
+reading. See [`etl/README.md`](etl/README.md) for the unified CLI and the
+connectivity check, and `docs/runbooks/` for the day-to-day operator
+workflow.
 
 ### Migrations are not run by Spring Boot
 SQL files in `database/migrations/` use Flyway's `V###__description.sql`
@@ -76,11 +88,19 @@ The package layout (`adapter/in/web`, `adapter/out/*`, `application/*`,
 the IRB domain has a formal ports/use-case layer
 (`application/port/in/IrbQueryUseCase`, `application/port/out/IrbQueryPort`,
 `application/service/IrbQueryService`). Every other domain — Award,
-Negotiation, Proposal, Protocol, Subaward — has its controller call a concrete
+Negotiation, Proposal, Subaward — has its controller call a concrete
 `*ArchiveService` that calls a `*ArchiveRepository` directly, with no port
 interface in between. When adding a new domain, mirror the concrete-service
-pattern (the five non-IRB domains), not the IRB ports pattern, unless you're
+pattern (the four non-IRB domains), not the IRB ports pattern, unless you're
 deliberately extending that pattern everywhere.
+
+A separate "Protocol Archive" domain (a second, independent human-subjects
+archive alongside IRB, with its own `archive.protocol_*` tables) was removed
+in full — API, UI, ETL loaders/Oracle SQL, and a forward-only schema-removal
+migration (`V032__drop_protocol_archive.sql`). IRB was kept as the sole
+surviving domain for that data. See [`docs/DECISIONS.md`](docs/DECISIONS.md)
+for the history and rationale; don't resurrect the concrete-service pattern
+above as "add a Protocol domain back" without reading that first.
 
 Not-found handling is also split: IRB throws a custom
 `edu.bu.archive.exception.RecordNotFoundException`; every other domain throws
@@ -92,7 +112,8 @@ controller in the app, not just Award's).
 ### Research object model and business grain
 Proposal is the backbone of the archive — every major object should
 eventually connect to it. Conceptual chain: Proposal → Award → Funding →
-Protocol → Negotiation → Investigator (Subaward hangs off Award/Proposal).
+Negotiation → Investigator (Subaward hangs off Award/Proposal). IRB is a
+separate, self-contained domain, not part of this chain.
 
 **Never treat a raw archive row count as a business-object count.** Identify
 the business grain (the real-world entity count) and the historical grain
@@ -113,15 +134,19 @@ read Award's repository/service/controller first.
   `archive.award_funding_proposal` as the Proposal count; use the stable
   institutional Proposal business identifier instead. Don't assign meaning to
   ad-hoc profiling numbers unless the exact SQL and column order are known.
-- **Protocol**: resolve amendment/renewal parents by `protocol_number` +
-  `sequence_number` (the validated method — see `PROJECT_MEMORY.md` for the
-  investigation behind it), not by Oracle `PROTOCOL_ID` alone; keep
-  `PROTOCOL_ID` only as audit metadata where it disagrees with the resolved
-  parent.
 - Dashboard count labels must match their grain exactly: `Awards` = distinct
   `award_number`; `Historical Award Records` = version-row `COUNT(*)`;
-  `Funding Relationships` = relationship-row count; `Protocol Families` =
-  distinct protocol base; `Historical Versions` = version-row count.
+  `Funding Relationships`/`Submissions`/`Timeline Events` = IRB-sourced
+  relationship/event-row counts (`archive.irb_funding_source`,
+  `archive.irb_submission`, `archive.irb_timeline_event`).
+- If you ever extract Oracle `PROTOCOL_ID`-linked data again (including for
+  IRB), don't assume a child row's `PROTOCOL_ID` identifies its business
+  version: the now-removed Protocol Archive investigation found this
+  disagreed at material scale (~15% mismatch for Personnel) and required
+  resolving the parent from `PROTOCOL_NUMBER` + `SEQUENCE_NUMBER` instead,
+  retaining the original `PROTOCOL_ID` only as audit metadata. See
+  `docs/PROTOCOL_PARENT_RESOLUTION_ANALYSIS.md` (retained, deprecated) and
+  `docs/DECISIONS.md`.
 
 ### AI features (Award Summary / Award Questions)
 Everything AI-related lives behind `app.ai.*` feature flags that default OFF,
@@ -162,9 +187,9 @@ which is how local dev and most controller-level `@WebMvcTest`s run.
 ## Coding conventions specific to this repo
 
 - Development order for a new feature/domain: DB migration → Oracle
-  extraction SQL → CSV export → ETL → Repository → Service → Controller →
-  React UI. Don't skip ahead (e.g. don't write a Service against a table that
-  doesn't exist in a migration yet).
+  extraction SQL → ETL (reads directly from Oracle; no CSV export step) →
+  Repository → Service → Controller → React UI. Don't skip ahead (e.g. don't
+  write a Service against a table that doesn't exist in a migration yet).
 - Mirror the Award implementation when building out a new domain rather than
   inventing a new shape.
 - Never invent Oracle table/column names — verify against

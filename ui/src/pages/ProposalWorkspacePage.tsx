@@ -25,11 +25,10 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import {
   getProposalAwards,
   getProposalHistory,
-  getProposalPeople,
   getProposalWorkspace,
 } from "../api/client";
 
-const tabs = ["General", "People", "Awards", "History"];
+const tabs = ["General", "Awards", "History"];
 
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -69,21 +68,15 @@ function ProposalWorkspaceContent({
     queryFn: () => getProposalWorkspace(proposalNumber!),
   });
 
-  const peopleQuery = useQuery({
-    queryKey: ["proposal-people", proposalNumber],
-    enabled: !!proposalNumber && activeTab === 1,
-    queryFn: () => getProposalPeople(proposalNumber!),
-  });
-
   const awardsQuery = useQuery({
     queryKey: ["proposal-awards", proposalNumber],
-    enabled: !!proposalNumber && activeTab === 2,
+    enabled: !!proposalNumber && activeTab === 1,
     queryFn: () => getProposalAwards(proposalNumber!),
   });
 
   const historyQuery = useQuery({
     queryKey: ["proposal-history", proposalNumber, historyPage],
-    enabled: !!proposalNumber && activeTab === 3,
+    enabled: !!proposalNumber && activeTab === 2,
     queryFn: () =>
       getProposalHistory(proposalNumber!, {
         page: historyPage,
@@ -208,103 +201,6 @@ function ProposalWorkspaceContent({
 
           {activeTab === 1 && (
             <Stack spacing={2}>
-              {peopleQuery.isLoading && (
-                <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-                  <CircularProgress />
-                </Box>
-              )}
-
-              {peopleQuery.isError && (
-                <Alert severity="error">Unable to load Proposal people.</Alert>
-              )}
-
-              {peopleQuery.data && (
-                <>
-                  <Typography sx={{ fontWeight: 700 }}>
-                    {peopleQuery.data.length.toLocaleString()} people
-                  </Typography>
-
-                  {peopleQuery.data.length === 0 ? (
-                    <Alert severity="info">
-                      No people are associated with the current Proposal.
-                    </Alert>
-                  ) : (
-                    <Box sx={{ overflowX: "auto" }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Role</TableCell>
-                            <TableCell>Name</TableCell>
-                            <TableCell>Person ID</TableCell>
-                            <TableCell>Project Role</TableCell>
-                            <TableCell>Faculty</TableCell>
-                            <TableCell>Academic Year Effort</TableCell>
-                            <TableCell>Calendar Year Effort</TableCell>
-                            <TableCell>Summer Effort</TableCell>
-                            <TableCell>Total Effort</TableCell>
-                          </TableRow>
-                        </TableHead>
-
-                        <TableBody>
-                          {peopleQuery.data.map((person) => (
-                            <TableRow
-                              key={[
-                                person.proposalId,
-                                person.versionNumber,
-                                person.personId,
-                                person.fullName,
-                                person.role,
-                                person.projectRole,
-                                person.sourceUpdateTimestamp,
-                                person.sourceUpdateUser,
-                                person.verNbr,
-                              ].join("-")}
-                              hover
-                            >
-                              <TableCell>
-                                <Stack
-                                  sx={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: 1,
-                                  }}
-                                >
-                                  {person.role ?? "—"}
-
-                                  {person.principalInvestigator && (
-                                    <Chip
-                                      size="small"
-                                      color="success"
-                                      label="PI"
-                                    />
-                                  )}
-                                </Stack>
-                              </TableCell>
-                              <TableCell>{person.fullName ?? "—"}</TableCell>
-                              <TableCell>{person.personId ?? "—"}</TableCell>
-                              <TableCell>{person.projectRole ?? "—"}</TableCell>
-                              <TableCell>{person.facultyFlag ?? "—"}</TableCell>
-                              <TableCell>
-                                {person.academicYearEffort ?? "—"}
-                              </TableCell>
-                              <TableCell>
-                                {person.calendarYearEffort ?? "—"}
-                              </TableCell>
-                              <TableCell>{person.summerEffort ?? "—"}</TableCell>
-                              <TableCell>{person.totalEffort ?? "—"}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </Box>
-                  )}
-                </>
-              )}
-            </Stack>
-          )}
-
-          {activeTab === 2 && (
-            <Stack spacing={2}>
               {awardsQuery.isLoading && (
                 <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
                   <CircularProgress />
@@ -368,7 +264,7 @@ function ProposalWorkspaceContent({
             </Stack>
           )}
 
-          {activeTab === 3 && (
+          {activeTab === 2 && (
             <Stack spacing={3}>
               {historyQuery.isLoading && (
                 <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>

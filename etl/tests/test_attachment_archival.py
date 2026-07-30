@@ -227,8 +227,6 @@ class AttachmentArchivalTest(unittest.TestCase):
             "award",
             "proposal",
             "negotiation",
-            "irb",
-            "irb-personnel",
             "subaward",
         }
         for module in expected_modules:

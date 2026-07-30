@@ -3,9 +3,8 @@
 Read-only historical archive for Boston University research administration
 data, preserved after the retirement of the legacy Kuali Research
 Administration system. The platform never writes back to source data — it
-exists to make decades of Award, Proposal, Protocol, Negotiation, and
-Subaward history permanently searchable after the system of record goes
-away.
+exists to make decades of Award, Proposal, Negotiation, Subaward, and IRB
+history permanently searchable after the system of record goes away.
 
 ## Contents
 
@@ -21,25 +20,25 @@ away.
 
 ## About
 
-**Data domains**: Protocols, Awards, Institutional Proposals, Negotiations,
-Subawards, Documents.
+**Data domains**: Awards, Institutional Proposals, Negotiations, Subawards,
+IRB, Documents.
 
-**Core model**: Proposal is the backbone of the archive — Award, Protocol,
-Negotiation, and Subaward each connect back to it. An optional, read-only AI
-layer (Award summaries and Q&A, disabled by default) sits on top of the
-archived data; see [Documentation map](#documentation-map) for its design.
+**Core model**: Proposal is the backbone of the archive — Award, Negotiation,
+and Subaward each connect back to it. IRB is a separate, self-contained
+domain. A prior "Protocol Archive" module (a second, independent
+human-subjects archive alongside IRB) was removed after IRB was chosen as
+the sole surviving domain for that data — see
+[`docs/DECISIONS.md`](docs/DECISIONS.md) for the history. An optional,
+read-only AI layer (Award summaries and Q&A, disabled by default) sits on
+top of the archived data; see [Documentation map](#documentation-map) for
+its design.
 
 ## Architecture
 
 ```text
 Oracle (BU VPN-only, source of truth until retirement)
-    │  Python ETL: extract, validate
-    ▼
-CSV / Parquet
-    │  upload
-    ▼
-Amazon S3
-    │  load
+    │  Python ETL, run from a BU VPN-connected machine
+    │  streams directly into Postgres - the only supported path
     ▼
 PostgreSQL (archive schema, Amazon RDS)
     │  JdbcClient, no writes back to Oracle
@@ -49,6 +48,15 @@ Spring Boot API
     ▼
 React UI
 ```
+
+Oracle is the only supported source of structured data for the
+Award/Negotiation/Subaward/Proposal loaders — CSV ingestion has been
+retired entirely (no `SOURCE_MODE`, no `--csv`/`--csv-dir` flags; see
+[`docs/DECISIONS.md`](docs/DECISIONS.md)). Amazon S3 is retained only for
+document/attachment binary storage and for the legacy IRB Excel/Parquet
+export pipeline, which is unaffected by this change. See
+[`etl/README.md`](etl/README.md) and [`docs/runbooks/`](docs/runbooks/)
+for the supported Oracle-direct workflow.
 
 The API and UI never talk to Oracle directly — only the ETL does, and only
 to read. Database migrations use Flyway's file-naming convention
@@ -120,7 +128,7 @@ Run the relevant suite before every commit; see
 | [`docs/AI_TROUBLESHOOTING.md`](docs/AI_TROUBLESHOOTING.md), [`docs/runbooks/ecs-ai-deployment.md`](docs/runbooks/ecs-ai-deployment.md) | AI feature deployment and incident postmortems |
 | [`docs/runbooks/`](docs/runbooks/) | Local setup, ETL, Oracle, and troubleshooting quick references |
 | [`ops/AWS_OPERATIONS.md`](ops/AWS_OPERATIONS.md) | AWS account, Amplify, ECR, ECS operations manual |
-| `docs/*_CSV_CONTRACT.md`, `docs/*_RECONCILIATION.md` | Per-domain (Protocol/Negotiation/Subaward) ETL data contracts and validation |
+| `docs/*_CSV_CONTRACT.md`, `docs/*_RECONCILIATION.md` | Per-domain (Negotiation/Subaward) ETL data contracts and validation |
 
 ## Security
 
@@ -136,8 +144,11 @@ coding conventions, and commit expectations before making a change.
 
 ## Status
 
-Award, Proposal, Negotiation, and Subaward archives are complete; Protocol
-Archive is in progress and is the current canonical replacement for the
-deprecated legacy IRB compatibility path. See
+Award, Proposal, Negotiation, and Subaward archives are complete. Legacy IRB
+is preserved and is the sole human-subjects/protocol domain in this
+application; a separate "Protocol Archive" module that was under
+development as a possible replacement for IRB has been removed in full
+(API, UI, ETL, and a forward-only schema-removal migration — see
+[`docs/DECISIONS.md`](docs/DECISIONS.md)). See
 [`docs/development/MASTER_ROADMAP.md`](docs/development/MASTER_ROADMAP.md)
 and [`docs/CURRENT_SPRINT.md`](docs/CURRENT_SPRINT.md) for details.

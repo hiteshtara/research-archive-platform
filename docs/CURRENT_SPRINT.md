@@ -8,31 +8,22 @@
 - Negotiation Archive
 - Subaward Archive
 
-### Protocol Archive
+### Protocol Archive — removed
 
-In Progress
+Was in progress (Phase 1 Core complete, Phase 2 Personnel in progress) as a
+second, independent human-subjects archive alongside legacy IRB. Removed in
+full: API, UI, ETL loaders/Oracle SQL, and forward-only migration
+`V032__drop_protocol_archive.sql` (drops `archive.protocol_version` and its
+child tables, plus the `archive.v_protocol_latest`/`archive.v_protocol_family`
+views). See `docs/DECISIONS.md` for the reversal and rationale. There is no
+further Protocol Archive work planned.
 
-- Phase 1: Protocol Core implementation complete; production reconciliation
-  pending
-- Phase 2: Personnel implementation in progress
-- Canonical parent: `archive.protocol_version`
-- Derived views: `archive.v_protocol_latest`,
-  `archive.v_protocol_family`
-- Identity: `PROTOCOL_NUMBER`, `SEQUENCE_NUMBER`, `PROTOCOL_ID`
+### Legacy IRB
 
-Next
-
-- Phase 3: Funding and Research
-- Phase 4: Workflow
-- Phase 5: Reviews and Correspondence
-- Phase 6: Attachments
-
-### Legacy IRB Compatibility
-
-Deprecated. Do not add features. Preserve V004–V010 and the existing loader,
-API, views, routes, and UI until Protocol reaches feature parity. Retirement
-is a separate cleanup milestone and must not be mixed with Protocol feature
-development.
+Preserved as the sole human-subjects/protocol domain — no longer considered
+deprecated now that Protocol Archive was removed rather than reaching
+feature parity. V004–V010 and the existing loader, API, views, routes, and
+UI are unchanged.
 
 ### Future Modules
 

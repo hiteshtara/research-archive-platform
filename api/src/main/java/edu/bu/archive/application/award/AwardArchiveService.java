@@ -6,7 +6,6 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
@@ -226,28 +225,6 @@ public class AwardArchiveService {
         }
 
         return repository.findCurrentPeople(
-                normalizedAwardNumber
-        );
-    }
-
-
-    public List<AwardUnitContactResponse>
-            findCurrentUnitContacts(
-                    String awardNumber
-            ) {
-        String normalizedAwardNumber =
-                normalizeAwardNumber(awardNumber);
-
-        if (repository.findCurrent(
-                normalizedAwardNumber
-        ).isEmpty()) {
-            throw new NoSuchElementException(
-                    "Award not found: "
-                            + normalizedAwardNumber
-            );
-        }
-
-        return repository.findCurrentUnitContacts(
                 normalizedAwardNumber
         );
     }

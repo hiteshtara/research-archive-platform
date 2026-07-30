@@ -2,7 +2,6 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -189,52 +188,6 @@ public class ProposalArchiveRepository {
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(ProposalRowResponse.class)
-                .list();
-    }
-
-    public List<ProposalPersonResponse> findCurrentPeople(
-            String proposalNumber
-    ) {
-        return jdbc.sql("""
-                WITH current_proposal AS (
-                    SELECT
-                        proposal_id,
-                        version_number
-                    FROM archive.proposal_version
-                    WHERE proposal_number = :proposalNumber
-                    ORDER BY
-                        version_number DESC,
-                        source_update_timestamp DESC NULLS LAST,
-                        proposal_id DESC
-                    LIMIT 1
-                )
-                SELECT
-                    person.proposal_id,
-                    person.version_number,
-                    person.person_id,
-                    person.full_name,
-                    person.role,
-                    person.project_role,
-                    person.principal_investigator,
-                    person.faculty_flag,
-                    person.academic_year_effort,
-                    person.calendar_year_effort,
-                    person.summer_effort,
-                    person.total_effort,
-                    person.source_update_timestamp,
-                    person.source_update_user,
-                    person.ver_nbr
-                FROM archive.proposal_person person
-                INNER JOIN current_proposal current
-                    ON current.proposal_id = person.proposal_id
-                   AND current.version_number = person.version_number
-                ORDER BY
-                    person.principal_investigator DESC,
-                    person.full_name NULLS LAST,
-                    person.person_id NULLS LAST
-                """)
-                .param("proposalNumber", proposalNumber)
-                .query(ProposalPersonResponse.class)
                 .list();
     }
 

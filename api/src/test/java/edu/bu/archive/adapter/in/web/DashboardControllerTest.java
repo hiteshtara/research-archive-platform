@@ -21,7 +21,7 @@ class DashboardControllerTest {
         JdbcClient.MappedQuerySpec<DashboardDto> query =
                 mock(JdbcClient.MappedQuerySpec.class);
         DashboardDto expected = new DashboardDto(
-                1, 2, 3, 4, 5, 6,
+                1, 4, 5, 6,
                 43057, 281591,
                 7, 8,
                 9, 10, 0
@@ -48,14 +48,6 @@ class DashboardControllerTest {
         assertThat(sql)
                 .contains(
                         "COUNT(*) FROM archive.irb_protocol"
-                )
-                .contains(
-                        "COUNT(DISTINCT protocol_number) "
-                                + "AS protocol_families"
-                )
-                .contains(
-                        "COUNT(*) AS protocol_versions "
-                                + "FROM archive.protocol_version"
                 )
                 .contains(
                         "COUNT(*) FROM archive.irb_submission"
@@ -89,11 +81,10 @@ class DashboardControllerTest {
                 )
                 .doesNotContain(
                         "FROM archive.award_funding_proposal"
+                )
+                .doesNotContain(
+                        "archive.protocol_version"
                 );
-        assertThat(sql.split(
-                "FROM archive.protocol_version",
-                -1
-        )).hasSize(2);
         assertThat(sql.split(
                 "FROM archive.award_version",
                 -1

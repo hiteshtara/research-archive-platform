@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock
 
 import pandas as pd
@@ -10,34 +8,31 @@ import pandas as pd
 from archive_etl.pipeline.sources import OracleDataSource
 from load_awards_from_csv import (
     AMOUNTS_ORACLE_SQL,
-    DOWNLOAD_DIR,
     PEOPLE_ORACLE_SQL,
     PROPOSALS_ORACLE_SQL,
     VERSIONS_ORACLE_SQL,
-    parse_args,
     prepare_versions,
-    read_csv,
 )
 
 
 class AwardLoaderFrameworkTest(unittest.TestCase):
-    def test_shared_csv_source_preserves_award_preparation(self) -> None:
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "award_versions.csv"
-            pd.DataFrame(
-                [
-                    {
-                        "AWARD ID": "101",
-                        "AWARD-NUMBER": "000001",
-                        "SEQUENCE_NUMBER": "1",
-                        "TITLE": "Award",
-                        "AWARD_SEQUENCE_STATUS": "ACTIVE",
-                        "UPDATE_TIMESTAMP": "2025-01-02 03:04:05",
-                    }
-                ]
-            ).to_csv(path, index=False)
+    def test_prepare_versions_normalizes_columns_and_computes_primary_current(
+        self,
+    ) -> None:
+        dataframe = pd.DataFrame(
+            [
+                {
+                    "award_id": 101,
+                    "award_number": "000001",
+                    "sequence_number": 1,
+                    "title": "Award",
+                    "award_sequence_status": "ACTIVE",
+                    "update_timestamp": "2025-01-02 03:04:05",
+                }
+            ]
+        )
 
-            prepared = prepare_versions(read_csv(path))
+        prepared = prepare_versions(dataframe)
 
         self.assertEqual(prepared["award_id"].tolist(), [101])
         self.assertEqual(
@@ -48,24 +43,6 @@ class AwardLoaderFrameworkTest(unittest.TestCase):
             prepared["is_primary_current"].tolist(),
             [True],
         )
-
-    def test_oracle_is_default_and_csv_is_explicit(self) -> None:
-        defaults = parse_args([])
-        self.assertFalse(defaults.csv)
-        self.assertEqual(defaults.csv_dir, DOWNLOAD_DIR)
-
-        explicit_csv = parse_args(["--csv"])
-        self.assertTrue(explicit_csv.csv)
-
-        custom_dir = parse_args(["--csv-dir", "/tmp/award-exports"])
-        self.assertEqual(
-            custom_dir.csv_dir,
-            Path("/tmp/award-exports"),
-        )
-
-    def test_oracle_and_csv_are_mutually_exclusive(self) -> None:
-        with self.assertRaises(SystemExit):
-            parse_args(["--oracle", "--csv"])
 
     def test_oracle_extraction_sql_files_exist_and_are_readable(self) -> None:
         # These are checked in directly rather than downloaded at runtime,
