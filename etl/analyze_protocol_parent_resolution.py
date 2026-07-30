@@ -8,7 +8,6 @@ from typing import Any
 
 import oracledb
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SQL_DIRECTORY = (
     PROJECT_ROOT

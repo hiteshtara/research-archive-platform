@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
-
+from archive_etl.utils.redaction import redact_error_message
 
 STAGING_COLUMNS = [
     "load_id",
@@ -319,7 +319,7 @@ def mark_load_failed(
             ),
             {
                 "load_id": load_id,
-                "error_message": error_message[:4000],
+                "error_message": redact_error_message(error_message),
             },
         )
 
@@ -384,7 +384,7 @@ def main() -> None:
     try:
         source_extract_at = (
             latest_object["LastModified"]
-            .astimezone(timezone.utc)
+            .astimezone(UTC)
         )
 
         stage_dataframe = prepare_stage_dataframe(

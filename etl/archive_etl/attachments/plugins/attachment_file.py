@@ -15,7 +15,7 @@ from archive_etl.attachments.models import (
     sanitize_file_name,
     utc_now,
 )
-from archive_etl.attachments.oracle_blob import AttachmentFileBlobReader
+from archive_etl.attachments.oracle_blob import AttachmentFileBlobReader, OracleBlobReader
 from archive_etl.attachments.plugins.base import AttachmentPlugin
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
@@ -33,7 +33,7 @@ class AttachmentFilePlugin(AttachmentPlugin):
         self,
         attempts: int,
         chunk_size: int,
-    ) -> AttachmentFileBlobReader:
+    ) -> OracleBlobReader:
         return AttachmentFileBlobReader(attempts, chunk_size)
 
     def s3_key(
@@ -133,7 +133,7 @@ class AttachmentFilePlugin(AttachmentPlugin):
 
     def sync_postgres(
         self,
-        manifest: ManifestStore,
+        manifest: ManifestStore | FlexibleManifestStore,
         record_id: int | None,
     ) -> int:
         engine = create_postgres_engine()

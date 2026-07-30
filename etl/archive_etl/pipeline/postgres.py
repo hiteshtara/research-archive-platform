@@ -15,7 +15,7 @@ from archive_etl.pipeline.reconciliation import (
 from archive_etl.pipeline.reporting import LoadReport
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
-
+from archive_etl.utils.redaction import redact_error_message
 
 LoadOperation = Callable[["PostgreSQLLoadContext"], int]
 
@@ -83,16 +83,20 @@ class PostgreSQLLoader:
         operation: LoadOperation,
         reconciler: Reconciler = no_reconciliation,
     ) -> LoadReport:
-        load_id: int | None = None
+        # The STARTED load_run row is committed in its own transaction,
+        # separately from the load itself. If it were created inside the
+        # same transaction as the risky work below, a failure would roll
+        # back the STARTED row along with everything else - leaving the
+        # later mark-failed UPDATE with nothing to match, so a failed load
+        # would leave no trace at all in the audit table.
+        load_id = self._create_load_run(
+            domain=domain,
+            source_system=source_system,
+            source_name=source_name,
+            rows_read=rows_read,
+        )
         try:
             with self.engine.begin() as connection:
-                load_id = self._create_load_run(
-                    connection,
-                    domain=domain,
-                    source_system=source_system,
-                    source_name=source_name,
-                    rows_read=rows_read,
-                )
                 context = PostgreSQLLoadContext(
                     connection,
                     load_id,
@@ -113,48 +117,47 @@ class PostgreSQLLoader:
                 reconciliation=reconciliation,
             )
         except Exception as error:
-            if load_id is not None:
-                self._mark_failed(load_id, str(error))
+            self._mark_failed(load_id, redact_error_message(error))
             raise
 
     def _create_load_run(
         self,
-        connection: Connection,
         *,
         domain: str,
         source_system: str,
         source_name: str,
         rows_read: int,
     ) -> int:
-        return int(
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO archive.load_run (
-                        domain,
-                        source_system,
-                        source_file_name,
-                        rows_read,
-                        status
-                    )
-                    VALUES (
-                        :domain,
-                        :source_system,
-                        :source_name,
-                        :rows_read,
-                        'STARTED'
-                    )
-                    RETURNING load_id
-                    """
-                ),
-                {
-                    "domain": domain,
-                    "source_system": source_system,
-                    "source_name": source_name,
-                    "rows_read": rows_read,
-                },
-            ).scalar_one()
-        )
+        with self.engine.begin() as connection:
+            return int(
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO archive.load_run (
+                            domain,
+                            source_system,
+                            source_file_name,
+                            rows_read,
+                            status
+                        )
+                        VALUES (
+                            :domain,
+                            :source_system,
+                            :source_name,
+                            :rows_read,
+                            'STARTED'
+                        )
+                        RETURNING load_id
+                        """
+                    ),
+                    {
+                        "domain": domain,
+                        "source_system": source_system,
+                        "source_name": source_name,
+                        "rows_read": rows_read,
+                    },
+                ).scalar_one()
+            )
 
     def _mark_complete(
         self,

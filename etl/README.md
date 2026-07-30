@@ -1,31 +1,163 @@
 # Research Archive Platform — ETL
 
-Python pipeline that extracts approved data from BU's legacy Oracle/Kuali
-sources, validates it, and loads it into the archive's PostgreSQL database.
-See the [repository root README](../README.md) for the overall data flow.
+Python pipeline that extracts approved data from BU's Kuali Oracle database
+(and, for IRB, an Excel/S3 export pipeline), validates it, and loads it into
+the Research Archive's PostgreSQL database. See the
+[repository root README](../README.md) for the overall architecture.
+
+## Prerequisites
+
+- Python 3.12+
+- [uv](https://github.com/astral-sh/uv) for dependency management
+- Network access to BU's Kuali Oracle database (typically requires the BU
+  VPN) for anything that reads from Oracle
+- Network access to the target PostgreSQL instance (local Docker Postgres
+  for dev, BU's RDS instance for BU environments)
+- No Oracle Instant Client install is required — `python-oracledb` runs in
+  thin mode by default.
+
+## Setup
+
+```
+cd etl
+uv sync
+cp .env.example .env   # then fill in real values
+```
+
+Export the variables in `.env` into your shell before running anything
+(`set -a; source .env; set +a`, direnv, or your process manager's env
+handling). Nothing in this codebase reads `.env` directly — scripts read the
+process environment.
+
+### Environment variables
+
+| Variable | Required for | Notes |
+| --- | --- | --- |
+| `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN` | Any Oracle read (`--oracle` loaders, `load_protocol_*.py`, `archive_attachments.py`, `export_protocol_versions.py`) | `ORACLE_DSN` is an Easy Connect string, e.g. `kuali-oracle.bu.edu:1521/KCPROD` |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Every `load_*.py` script, both reconciliation scripts | — |
+| `POSTGRES_SSLMODE` | Optional | Defaults to `prefer`. Use `require` or `verify-full` against BU's RDS once TLS is configured |
+| `DATA_BUCKET_NAME` | `load_from_s3.py`, `load_composite_from_s3.py`, `run_export.py`, `run_composite_export.py` | S3 bucket holding IRB Parquet/validation exports |
+| `AWS_REGION` | Optional | Defaults to `us-east-1` |
+| `IRB_S3_PREFIX` | Optional | Defaults to `landing/irb/`; only read by `load_from_s3.py` |
+
+Every script fails fast with a clear message listing exactly which variables
+are missing — see `archive_etl/config/settings.py`.
+
+## Connectivity tests
+
+Run these before attempting a real extraction or load, especially the first
+time from a new machine or network:
+
+```
+uv run python scripts/test_oracle_connection.py
+uv run python scripts/test_postgres_connection.py
+```
+
+`test_postgres_connection.py` also reports how many migrations are on disk
+vs. applied, and flags a gap in the migration version sequence if one
+exists.
 
 ## Layout
 
-- `extract/`, `transform/`, `load/` (via `load_*_from_csv.py`, `load_from_s3.py`,
-  `load_composite_from_s3.py`) — per-domain extraction and loading scripts
-  (Protocols, Awards, Proposals, Negotiations, Subawards).
-- `archive_etl/`, `config/`, `validate/`, `upload/` — shared pipeline code.
-- `run_export.py`, `run_composite_export.py` — export entry points.
+- `load_awards_from_csv.py`, `load_negotiations_from_csv.py`,
+  `load_subawards_from_csv.py`, `load_proposals_from_csv.py` — Award,
+  Negotiation, Subaward, and Proposal loaders. Award, Negotiation, and
+  Subaward read directly from Oracle by default (`--csv` to fall back to a
+  CSV export set). Proposal reads versions/awards from Oracle by default but
+  always reads people from CSV — `proposal_persons` in Oracle is missing
+  several columns (`academic_year_effort`, `faculty_flag`, etc.) that the
+  CSV export currently includes, and no verified extraction query exists yet
+  for that shape.
+- `load_protocol_*.py`, `load_protocols_from_csv.py` — Protocol-domain
+  loaders (core, actions, amendments/renewals, locations, funding,
+  personnel, research areas, submissions), all Oracle-direct.
+- `load_from_s3.py`, `load_composite_from_s3.py` — IRB loaders that read a
+  Parquet export from S3 (produced by `run_export.py` /
+  `run_composite_export.py` from a manually exported Kuali Excel workbook).
+- `archive_etl/` — shared library code: `pipeline/` (Oracle/CSV data
+  sources, the shared load-and-reconcile framework), `upload/` (Postgres
+  engine creation, migrations, S3 upload), `config/settings.py` (all
+  environment-variable validation), `attachments/` (Oracle BLOB streaming
+  for document archival), `utils/redaction.py` (secret redaction for error
+  messages).
+- `scripts/` — operational scripts: connectivity tests, load reconciliation,
+  failed-load listing (see below).
 - `run_protocol_reconciliation.py`, `run_protocol_personnel_reconciliation.py`,
-  `analyze_protocol_parent_resolution.py` — data-quality/reconciliation checks.
-- `archive_attachments.py`, `archive_subaward_attachments.py` — document/attachment
-  archival.
-- `tests/` — pytest test suite.
+  `analyze_protocol_parent_resolution.py` — ad hoc data-quality checks
+  against `sql/verify/*.sql`.
+- `archive_attachments.py`, `archive_subaward_attachments.py` — document/
+  attachment archival from Oracle BLOB columns.
+- `tests/` — pytest test suite; none of it requires live Oracle/Postgres
+  credentials (Oracle/Postgres/S3 clients are mocked).
+
+## Running a loader
+
+Each loader is a standalone script:
+
+```
+uv run python load_awards_from_csv.py            # Oracle (default)
+uv run python load_awards_from_csv.py --csv       # CSV export set fallback
+uv run python load_protocol_actions.py
+uv run python load_from_s3.py
+```
+
+Every loader is idempotent: legacy CSV loaders `TRUNCATE`-then-reload their
+target tables inside a transaction; the shared pipeline framework (used by
+the Protocol loaders) does `INSERT ... ON CONFLICT DO UPDATE`. Rerunning a
+loader after a failure is safe — no manual cleanup is required first.
+
+Every loader writes a row to `archive.load_run` before it does any risky
+work, so a failure is always visible in the audit trail even if the load
+itself never completes (see `archive_etl/pipeline/postgres.py` and each
+loader's `create_load_run`/`mark_load_failed` functions).
+
+## Reconciliation and recovery
+
+```
+# See what failed and the exact command to rerun it
+uv run python scripts/resume_failed_load.py
+uv run python scripts/resume_failed_load.py --domain AWARD
+
+# Inspect row counts for a specific load, a domain's recent history, or the
+# most recent load overall
+uv run python scripts/reconcile_load.py --load-id 42
+uv run python scripts/reconcile_load.py --domain AWARD --limit 5
+uv run python scripts/reconcile_load.py --latest
+
+# Domain-specific data-quality reconciliation against Oracle
+uv run python run_protocol_reconciliation.py
+uv run python run_protocol_personnel_reconciliation.py
+```
+
+There is no destructive "rollback" command by design — a loader failure
+leaves the previous successful data in place (legacy loaders reload inside
+a single transaction; the shared framework's `INSERT ... ON CONFLICT`
+approach never deletes rows). Recovery is: fix the underlying problem
+(credentials, source data, network), then rerun the same loader command.
+
+## Troubleshooting
+
+- **"Missing required environment variable(s): ..."** — set the listed
+  variables; see the table above.
+- **Oracle connection hangs or times out** — confirm you're on the BU VPN
+  and that `ORACLE_DSN` is reachable (`test_oracle_connection.py` will fail
+  with a clear driver error rather than hanging indefinitely, since
+  `oracledb.connect` uses the driver's normal connect timeout).
+- **Postgres `sslmode` errors against BU's RDS** — set `POSTGRES_SSLMODE`
+  explicitly (`require` or `verify-full`); the default `prefer` is meant for
+  local dev.
+- **A load's row counts don't add up** — run
+  `scripts/reconcile_load.py --load-id <id>`; it flags any load where
+  `rows_read != rows_loaded + rows_rejected`.
+- **Migration gap warning on startup** — a migration file is missing from
+  `database/migrations/` relative to the version sequence on disk; check
+  version control history for a renamed/deleted file before proceeding.
 
 ## Development
-
-This project uses [uv](https://github.com/astral-sh/uv) (see `pyproject.toml` /
-`uv.lock`). Typical workflow:
 
 ```
 uv sync
 uv run pytest
+uv run ruff check .
+uv run mypy .
 ```
-
-Extraction requires the BU VPN; loading targets the archive's PostgreSQL
-database (see repository root `.envrc` / Terraform for connection details).

@@ -1,9 +1,9 @@
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from archive_etl.config.settings import load_settings
+from archive_etl.config.settings import get_aws_region, get_data_bucket_name
 from archive_etl.extract.excel import read_excel_file
 from archive_etl.transform.irb import transform_irb
 from archive_etl.upload.s3 import upload_file
@@ -11,9 +11,10 @@ from archive_etl.validate.irb import validate_irb
 
 
 def run_irb_export(input_file: str) -> None:
-    settings = load_settings()
+    bucket_name = get_data_bucket_name()
+    region = get_aws_region()
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     export_dir = Path("exports/irb")
     validation_dir = Path("exports/validation")
@@ -39,9 +40,6 @@ def run_irb_export(input_file: str) -> None:
 
     parquet_file = export_dir / f"irb_protocols_{timestamp}.parquet"
     transformed_df.to_parquet(parquet_file, index=False)
-
-    bucket_name = settings["aws"]["data_bucket"]
-    region = settings["aws"]["region"]
 
     parquet_key = f"landing/irb/{parquet_file.name}"
     validation_key = f"validation/irb/{validation_file.name}"

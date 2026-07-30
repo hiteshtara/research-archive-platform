@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 import os
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from loguru import logger
 
-from archive_etl.attachments.manifest import ManifestStore
+from archive_etl.attachments.manifest import FlexibleManifestStore, ManifestStore
 from archive_etl.attachments.models import (
     ArchiveCounts,
     AttachmentRecord,
@@ -17,8 +17,8 @@ from archive_etl.attachments.models import (
     utc_now,
 )
 from archive_etl.attachments.oracle_blob import OracleBlobReader
-from archive_etl.attachments.plugins.base import AttachmentPlugin
 from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
+from archive_etl.attachments.plugins.base import AttachmentPlugin
 from archive_etl.attachments.plugins.irb import (
     IrbPersonnelAttachmentPlugin,
     IrbProtocolAttachmentPlugin,
@@ -39,7 +39,6 @@ from archive_etl.attachments.s3_storage import (
     upload_object,
 )
 
-
 PLUGINS: dict[str, AttachmentPlugin] = {
     "award": AwardAttachmentPlugin(),
     "irb": IrbProtocolAttachmentPlugin(),
@@ -59,7 +58,7 @@ def process_attachment(
     *,
     plugin: AttachmentPlugin,
     reader: OracleBlobReader,
-    manifest: ManifestStore,
+    manifest: ManifestStore | FlexibleManifestStore,
     s3_client,
     bucket: str,
     prefix: str,
@@ -226,7 +225,7 @@ def process_attachment(
 
 def verify_manifest_orphans(
     metadata_path: Path,
-    manifest: ManifestStore,
+    manifest: ManifestStore | FlexibleManifestStore,
     plugin: AttachmentPlugin,
     record_id: int | None,
     limit: int | None,

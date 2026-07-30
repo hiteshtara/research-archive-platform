@@ -13,7 +13,7 @@ from sqlalchemy.engine import Engine
 
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
-
+from archive_etl.utils.redaction import redact_error_message
 
 DATASETS = {
     "protocols": "irb_protocols.parquet",
@@ -702,7 +702,7 @@ def mark_failed(
             ),
             {
                 "load_id": load_id,
-                "error_message": str(error)[:4000],
+                "error_message": redact_error_message(error),
             },
         )
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 from typing import Any
@@ -9,10 +10,30 @@ from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.pipeline.sources import OracleDataSource
+from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
+from archive_etl.utils.redaction import redact_error_message
 
-from archive_etl.upload.bulk_copy import bulk_copy_dataframe
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Oracle extraction queries exist for four of the five Award datasets.
+# award_unit_contacts.csv has no corresponding Oracle extraction query yet,
+# so it is always read from CSV regardless of --oracle/--csv - this is a
+# deliberate, documented limitation, not an oversight.
+VERSIONS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "01_award_versions.sql"
+)
+AMOUNTS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "02_award_amounts.sql"
+)
+PEOPLE_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "03_award_people.sql"
+)
+PROPOSALS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "04_award_proposals.sql"
+)
 
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
@@ -60,10 +81,10 @@ UNIT_CONTACT_REQUIRED_COLUMNS = {
 }
 
 
-def require_files() -> None:
+def require_files(paths: list[Path]) -> None:
     missing = [
         str(path)
-        for path in FILES.values()
+        for path in paths
         if not path.exists()
     ]
 
@@ -663,29 +684,90 @@ def mark_load_failed(
             ),
             {
                 "load_id": load_id,
-                "error_message": error_message[:4000],
+                "error_message": redact_error_message(error_message),
             },
         )
 
 
-def main() -> None:
-    require_files()
+def parse_args(
+    arguments: list[str] | None = None,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Load Award versions/amounts/people/proposals from Oracle "
+            "(default) or a CSV export set. Unit contacts have no Oracle "
+            "extraction query yet and are always read from CSV."
+        )
+    )
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--oracle",
+        action="store_true",
+        help="Read versions/amounts/people/proposals directly from Oracle (the default).",
+    )
+    source.add_argument(
+        "--csv",
+        action="store_true",
+        help="Read all five datasets from the existing CSV export set.",
+    )
+    parser.add_argument(
+        "--csv-dir",
+        type=Path,
+        default=DOWNLOAD_DIR,
+        help=(
+            "Directory containing the CSV export set. Used for --csv, "
+            "and always for award_unit_contacts.csv. "
+            f"Defaults to {DOWNLOAD_DIR}."
+        ),
+    )
+    return parser.parse_args(arguments)
 
-    versions = prepare_versions(
-        read_csv(FILES["versions"])
-    )
-    amounts = prepare_amounts(
-        read_csv(FILES["amounts"])
-    )
-    people = prepare_people(
-        read_csv(FILES["people"])
-    )
-    proposals = prepare_proposals(
-        read_csv(FILES["proposals"])
-    )
+
+def main() -> None:
+    arguments = parse_args()
+    use_oracle = not arguments.csv
+    csv_dir = arguments.csv_dir
+
+    require_files([csv_dir / "award_unit_contacts.csv"])
     unit_contacts = prepare_unit_contacts(
-        read_csv(FILES["unit_contacts"])
+        read_csv(csv_dir / "award_unit_contacts.csv")
     )
+
+    if use_oracle:
+        logger.info("Reading Award versions/amounts/people/proposals from Oracle")
+        versions = prepare_versions(
+            OracleDataSource(VERSIONS_ORACLE_SQL).read()
+        )
+        amounts = prepare_amounts(
+            OracleDataSource(AMOUNTS_ORACLE_SQL).read()
+        )
+        people = prepare_people(
+            OracleDataSource(PEOPLE_ORACLE_SQL).read()
+        )
+        proposals = prepare_proposals(
+            OracleDataSource(PROPOSALS_ORACLE_SQL).read()
+        )
+    else:
+        require_files(
+            [
+                csv_dir / "award_versions.csv",
+                csv_dir / "award_amounts.csv",
+                csv_dir / "award_people.csv",
+                csv_dir / "award_proposals.csv",
+            ]
+        )
+        versions = prepare_versions(
+            read_csv(csv_dir / "award_versions.csv")
+        )
+        amounts = prepare_amounts(
+            read_csv(csv_dir / "award_amounts.csv")
+        )
+        people = prepare_people(
+            read_csv(csv_dir / "award_people.csv")
+        )
+        proposals = prepare_proposals(
+            read_csv(csv_dir / "award_proposals.csv")
+        )
 
     validate_child_award_ids(
         versions,
@@ -728,15 +810,20 @@ def main() -> None:
         migration_path,
     )
 
-    load_id: int | None = None
+    # The STARTED load_run row is committed in its own transaction, before
+    # the risky work below begins. If it were created inside the same
+    # transaction as the load itself, a failure would roll back the
+    # STARTED row along with everything else, and the mark_load_failed
+    # UPDATE in the except block below would silently match zero rows -
+    # leaving no trace of the failure in archive.load_run at all.
+    with engine.begin() as connection:
+        load_id = create_load_run(
+            connection,
+            total_rows,
+        )
 
     try:
         with engine.begin() as connection:
-            load_id = create_load_run(
-                connection,
-                total_rows,
-            )
-
             clear_existing_award_data(connection)
 
             version_rows = load_dataframe(
@@ -902,12 +989,11 @@ def main() -> None:
         )
 
     except Exception as error:
-        if load_id is not None:
-            mark_load_failed(
-                engine,
-                load_id,
-                str(error),
-            )
+        mark_load_failed(
+            engine,
+            load_id,
+            str(error),
+        )
 
         logger.exception("Award load failed")
         raise

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ParentResolutionStrategy(str, Enum):
+class ParentResolutionStrategy(StrEnum):
     NUMBER_SEQUENCE = "NUMBER_SEQUENCE"
     DIRECT_PROTOCOL_ID = "DIRECT_PROTOCOL_ID"
     OWNER_CHAIN = "OWNER_CHAIN"
@@ -35,7 +35,7 @@ class NumberSequenceParentResolver:
 
     def __init__(
         self,
-        parent_rows: Iterable[Mapping[str, Any]],
+        parent_rows: Iterable[Mapping[Any, Any]],
     ) -> None:
         self._parents: dict[tuple[str, int], list[int]] = {}
         for row in parent_rows:

@@ -1,11 +1,14 @@
 import csv
-import os
 from pathlib import Path
 
 import oracledb
 
-SQL_FILE = Path("oracle/protocol/export_protocol_versions.sql")
-OUTPUT_FILE = Path("etl/data/protocol_versions.csv")
+from archive_etl.config.settings import require_oracle_environment
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ETL_ROOT = Path(__file__).resolve().parent
+SQL_FILE = PROJECT_ROOT / "oracle" / "protocol" / "export_protocol_versions.sql"
+OUTPUT_FILE = ETL_ROOT / "data" / "protocol_versions.csv"
 FETCH_SIZE = 5000
 
 
@@ -18,10 +21,12 @@ def main() -> None:
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+    credentials = require_oracle_environment()
+
     with oracledb.connect(
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        dsn=os.environ["ORACLE_DSN"],
+        user=credentials["ORACLE_USER"],
+        password=credentials["ORACLE_PASSWORD"],
+        dsn=credentials["ORACLE_DSN"],
     ) as connection:
         print("Connected to Oracle")
 

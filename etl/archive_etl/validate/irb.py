@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 REQUIRED_COLUMNS = {
     "protocol_base",
     "protocol_number",

@@ -1,17 +1,31 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
 from loguru import logger
 from pandas.errors import EmptyDataError
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
+from archive_etl.utils.redaction import redact_error_message
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# All five datasets have a verified, column-matching Oracle extraction query.
+_ORACLE_DIR = PROJECT_ROOT / "oracle" / "negotiation"
+ORACLE_SQL = {
+    "negotiations": _ORACLE_DIR / "export_negotiations.sql",
+    "activities": _ORACLE_DIR / "export_negotiation_activities.sql",
+    "custom_data": _ORACLE_DIR / "export_negotiation_custom_data.sql",
+    "notifications": _ORACLE_DIR / "export_negotiation_notifications.sql",
+    "unassociated": _ORACLE_DIR / "export_negotiation_unassociated.sql",
+}
 
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
@@ -132,25 +146,42 @@ SOURCE_COLUMN_RENAMES = {
 }
 
 
-def require_files() -> None:
-    required_keys = {
-        "negotiations",
-        "activities",
-        "custom_data",
-        "unassociated",
-    }
-
-    missing = [
-        str(FILES[key])
-        for key in sorted(required_keys)
-        if not FILES[key].exists()
-    ]
+def require_files(paths: list[Path]) -> None:
+    missing = [str(path) for path in paths if not path.exists()]
 
     if missing:
         raise RuntimeError(
             "Missing required Negotiation CSV files:\n"
             + "\n".join(missing)
         )
+
+
+def parse_args(
+    arguments: list[str] | None = None,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Load Negotiation data from Oracle (default) or a CSV export set."
+        )
+    )
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--oracle",
+        action="store_true",
+        help="Read all five datasets directly from Oracle (the default).",
+    )
+    source.add_argument(
+        "--csv",
+        action="store_true",
+        help="Read all five datasets from the existing CSV export set.",
+    )
+    parser.add_argument(
+        "--csv-dir",
+        type=Path,
+        default=DOWNLOAD_DIR,
+        help=f"Directory containing the CSV export set. Defaults to {DOWNLOAD_DIR}.",
+    )
+    return parser.parse_args(arguments)
 
 
 def normalize_column_name(column: str) -> str:
@@ -536,6 +567,29 @@ def create_load_run(
     return int(load_id)
 
 
+def mark_load_failed(
+    engine: Engine,
+    load_id: int,
+    error_message: str,
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE archive.load_run
+                   SET status = 'FAILED',
+                       completed_at = CURRENT_TIMESTAMP,
+                       error_message = :error_message
+                 WHERE load_id = :load_id
+                """
+            ),
+            {
+                "load_id": load_id,
+                "error_message": redact_error_message(error_message),
+            },
+        )
+
+
 def clear_existing_negotiation_data(connection: Connection) -> None:
     logger.info("Clearing existing Negotiation archive data")
 
@@ -669,27 +723,55 @@ def mark_load_complete(
 
 
 def main() -> None:
-    require_files()
+    arguments = parse_args()
+    use_oracle = not arguments.csv
+    csv_dir = arguments.csv_dir
 
-    negotiations = prepare_negotiations(
-        read_csv(FILES["negotiations"], NEGOTIATION_COLUMNS)
-    )
-    activities = prepare_activities(
-        read_csv(FILES["activities"], ACTIVITY_COLUMNS)
-    )
-    custom_data = prepare_custom_data(
-        read_csv(FILES["custom_data"], CUSTOM_DATA_COLUMNS)
-    )
-    notifications = prepare_notifications(
-        read_csv(
-            FILES["notifications"],
-            NOTIFICATION_COLUMNS,
-            allow_empty=True,
+    if use_oracle:
+        logger.info("Reading Negotiation data from Oracle")
+        negotiations = prepare_negotiations(
+            OracleDataSource(ORACLE_SQL["negotiations"]).read()
         )
-    )
-    unassociated = prepare_unassociated(
-        read_csv(FILES["unassociated"], UNASSOCIATED_COLUMNS)
-    )
+        activities = prepare_activities(
+            OracleDataSource(ORACLE_SQL["activities"]).read()
+        )
+        custom_data = prepare_custom_data(
+            OracleDataSource(ORACLE_SQL["custom_data"]).read()
+        )
+        notifications = prepare_notifications(
+            OracleDataSource(ORACLE_SQL["notifications"]).read()
+        )
+        unassociated = prepare_unassociated(
+            OracleDataSource(ORACLE_SQL["unassociated"]).read()
+        )
+    else:
+        require_files(
+            [
+                csv_dir / "negotiations.csv",
+                csv_dir / "negotiation_activities.csv",
+                csv_dir / "negotiation_custom_data.csv",
+                csv_dir / "negotiation_unassociated.csv",
+            ]
+        )
+        negotiations = prepare_negotiations(
+            read_csv(csv_dir / "negotiations.csv", NEGOTIATION_COLUMNS)
+        )
+        activities = prepare_activities(
+            read_csv(csv_dir / "negotiation_activities.csv", ACTIVITY_COLUMNS)
+        )
+        custom_data = prepare_custom_data(
+            read_csv(csv_dir / "negotiation_custom_data.csv", CUSTOM_DATA_COLUMNS)
+        )
+        notifications = prepare_notifications(
+            read_csv(
+                csv_dir / "negotiation_notifications.csv",
+                NOTIFICATION_COLUMNS,
+                allow_empty=True,
+            )
+        )
+        unassociated = prepare_unassociated(
+            read_csv(csv_dir / "negotiation_unassociated.csv", UNASSOCIATED_COLUMNS)
+        )
 
     validate_parent_ids(
         negotiations,
@@ -744,67 +826,78 @@ def main() -> None:
         / "migrations",
     )
 
+    # The STARTED load_run row is committed in its own transaction, before
+    # the risky work below begins - otherwise a failure would roll back
+    # the STARTED row along with everything else, and mark_load_failed
+    # would silently update zero rows, leaving no trace of the failure.
     with engine.begin() as connection:
         load_id = create_load_run(connection, total_rows)
-        clear_existing_negotiation_data(connection)
 
-        loaded_counts = {
-            "negotiation": load_dataframe(
-                connection,
-                negotiations,
-                "negotiation",
-                NEGOTIATION_COLUMNS,
-                load_id,
-            ),
-            "negotiation_activity": load_dataframe(
-                connection,
-                activities,
-                "negotiation_activity",
-                ACTIVITY_COLUMNS,
-                load_id,
-            ),
-            "negotiation_custom_data": load_dataframe(
-                connection,
-                custom_data,
-                "negotiation_custom_data",
-                CUSTOM_DATA_COLUMNS,
-                load_id,
-            ),
-            "negotiation_notification": load_dataframe(
-                connection,
-                notifications,
-                "negotiation_notification",
-                NOTIFICATION_COLUMNS,
-                load_id,
-            ),
-            "negotiation_unassociated_detail": load_dataframe(
-                connection,
-                unassociated,
-                "negotiation_unassociated_detail",
-                UNASSOCIATED_COLUMNS,
-                load_id,
-            ),
-        }
+    try:
+        with engine.begin() as connection:
+            clear_existing_negotiation_data(connection)
 
-        if loaded_counts != expected_counts:
-            raise RuntimeError(
-                "Negotiation COPY row counts do not match prepared row counts"
-            )
+            loaded_counts = {
+                "negotiation": load_dataframe(
+                    connection,
+                    negotiations,
+                    "negotiation",
+                    NEGOTIATION_COLUMNS,
+                    load_id,
+                ),
+                "negotiation_activity": load_dataframe(
+                    connection,
+                    activities,
+                    "negotiation_activity",
+                    ACTIVITY_COLUMNS,
+                    load_id,
+                ),
+                "negotiation_custom_data": load_dataframe(
+                    connection,
+                    custom_data,
+                    "negotiation_custom_data",
+                    CUSTOM_DATA_COLUMNS,
+                    load_id,
+                ),
+                "negotiation_notification": load_dataframe(
+                    connection,
+                    notifications,
+                    "negotiation_notification",
+                    NOTIFICATION_COLUMNS,
+                    load_id,
+                ),
+                "negotiation_unassociated_detail": load_dataframe(
+                    connection,
+                    unassociated,
+                    "negotiation_unassociated_detail",
+                    UNASSOCIATED_COLUMNS,
+                    load_id,
+                ),
+            }
 
-        verify_loaded_data(connection, expected_counts)
-        mark_load_complete(connection, load_id, total_rows)
+            if loaded_counts != expected_counts:
+                raise RuntimeError(
+                    "Negotiation COPY row counts do not match prepared row counts"
+                )
 
-    logger.success(
-        "Negotiation load completed and verified. "
-        "negotiations={} activities={} custom_data={} "
-        "notifications={} unassociated={} total={}",
-        loaded_counts["negotiation"],
-        loaded_counts["negotiation_activity"],
-        loaded_counts["negotiation_custom_data"],
-        loaded_counts["negotiation_notification"],
-        loaded_counts["negotiation_unassociated_detail"],
-        sum(loaded_counts.values()),
-    )
+            verify_loaded_data(connection, expected_counts)
+            mark_load_complete(connection, load_id, total_rows)
+
+        logger.success(
+            "Negotiation load completed and verified. "
+            "negotiations={} activities={} custom_data={} "
+            "notifications={} unassociated={} total={}",
+            loaded_counts["negotiation"],
+            loaded_counts["negotiation_activity"],
+            loaded_counts["negotiation_custom_data"],
+            loaded_counts["negotiation_notification"],
+            loaded_counts["negotiation_unassociated_detail"],
+            sum(loaded_counts.values()),
+        )
+    except Exception as error:
+        mark_load_failed(engine, load_id, str(error))
+        logger.exception("Negotiation load failed")
+        raise
 
 
 if __name__ == "__main__":

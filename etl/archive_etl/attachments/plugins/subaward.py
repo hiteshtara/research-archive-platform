@@ -4,15 +4,16 @@ import argparse
 import csv
 import re
 import unicodedata
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from dateutil.parser import parse as parse_datetime
 from loguru import logger
 from sqlalchemy import text
 
-from archive_etl.attachments.manifest import ManifestStore
+from archive_etl.attachments.manifest import FlexibleManifestStore, ManifestStore
 from archive_etl.attachments.models import (
     ArchiveCounts,
     AttachmentRecord,
@@ -249,7 +250,7 @@ class SubawardAttachmentPlugin(AttachmentPlugin):
 
     def sync_postgres(
         self,
-        manifest: ManifestStore,
+        manifest: ManifestStore | FlexibleManifestStore,
         record_id: int | None,
     ) -> int:
         engine = create_postgres_engine()
