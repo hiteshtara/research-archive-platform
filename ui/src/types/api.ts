@@ -253,31 +253,6 @@ export interface AwardPerson {
   sourceUpdateUser: string | null;
 }
 
-export interface AwardUnitContact {
-  awardUnitContactId: number;
-  awardId: number;
-  awardNumber: string;
-  sequenceNumber: number;
-  personId: string | null;
-  fullName: string | null;
-  unitNumber: string | null;
-  unitName: string | null;
-  parentUnitNumber: string | null;
-  parentUnitName: string | null;
-  unitAdministratorTypeCode: string | null;
-  projectRole: string | null;
-  unitContactType: string | null;
-  defaultUnitContact: string | null;
-  primaryTitle: string | null;
-  directoryTitle: string | null;
-  officeLocation: string | null;
-  emailAddress: string | null;
-  officePhone: string | null;
-  phoneExtension: string | null;
-  sourceUpdateTimestamp: string | null;
-  sourceUpdateUser: string | null;
-}
-
 export interface AwardAmount {
   awardAmountInfoId: number;
   awardId: number;
@@ -423,24 +398,6 @@ export interface ProposalWorkspaceResponse {
 
 export interface ProposalVersionPageResponse
   extends PageResponse<ProposalRow> {}
-
-export interface ProposalPerson {
-  proposalId: number;
-  versionNumber: number;
-  personId: string | null;
-  fullName: string | null;
-  role: string | null;
-  projectRole: string | null;
-  principalInvestigator: boolean;
-  facultyFlag: string | null;
-  academicYearEffort: number | null;
-  calendarYearEffort: number | null;
-  summerEffort: number | null;
-  totalEffort: number | null;
-  sourceUpdateTimestamp: string | null;
-  sourceUpdateUser: string | null;
-  verNbr: number | null;
-}
 
 export interface ProposalAward {
   proposalId: number;

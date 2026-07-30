@@ -305,14 +305,6 @@ export function getAwardPeople(
   return request(`/api/awards/${encodeURIComponent(awardNumber)}/people`);
 }
 
-export function getAwardUnitContacts(
-  awardNumber: string,
-): Promise<import("../types/api").AwardUnitContact[]> {
-  return request(
-    `/api/awards/${encodeURIComponent(awardNumber)}/unit-contacts`,
-  );
-}
-
 export function getAwardAmounts(
   awardNumber: string,
 ): Promise<import("../types/api").AwardAmount[]> {
@@ -399,12 +391,6 @@ export function getProposalHistory(
       proposalNumber,
     )}/history?${searchParameters.toString()}`,
   );
-}
-
-export function getProposalPeople(
-  proposalNumber: string,
-): Promise<import("../types/api").ProposalPerson[]> {
-  return request(`/api/proposals/${encodeURIComponent(proposalNumber)}/people`);
 }
 
 export function getProposalAwards(

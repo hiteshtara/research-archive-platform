@@ -29,7 +29,6 @@ import {
   getAwardAmounts,
   getAwardFunding,
   getAwardProposals,
-  getAwardUnitContacts,
   getAwardSequenceDetail,
   getAwardSequencePage,
   getAwardWorkspace,
@@ -44,7 +43,6 @@ const AI_QUESTIONS_ENABLED =
 const tabs = [
   "General",
   "People",
-  "Unit Contacts",
   "Funding",
   "Amounts",
   "Proposals",
@@ -74,18 +72,10 @@ export function AwardHistoryPage() {
     queryFn: () => getAwardPeople(awardNumber!),
   });
 
-  const unitContactsQuery = useQuery({
-    queryKey: ["award-unit-contacts", awardNumber],
-
-    enabled: !!awardNumber && activeTab === 2,
-
-    queryFn: () => getAwardUnitContacts(awardNumber!),
-  });
-
   const fundingQuery = useQuery({
     queryKey: ["award-funding", awardNumber],
 
-    enabled: !!awardNumber && activeTab === 3,
+    enabled: !!awardNumber && activeTab === 2,
 
     queryFn: () => getAwardFunding(awardNumber!),
   });
@@ -93,7 +83,7 @@ export function AwardHistoryPage() {
   const amountsQuery = useQuery({
     queryKey: ["award-amounts", awardNumber],
 
-    enabled: !!awardNumber && activeTab === 4,
+    enabled: !!awardNumber && activeTab === 3,
 
     queryFn: () => getAwardAmounts(awardNumber!),
   });
@@ -101,7 +91,7 @@ export function AwardHistoryPage() {
   const proposalsQuery = useQuery({
     queryKey: ["award-proposals", awardNumber],
 
-    enabled: !!awardNumber && activeTab === 5,
+    enabled: !!awardNumber && activeTab === 4,
 
     queryFn: () => getAwardProposals(awardNumber!),
   });
@@ -109,7 +99,7 @@ export function AwardHistoryPage() {
   const historyQuery = useQuery({
     queryKey: ["award-sequence-page", awardNumber, historyPage],
 
-    enabled: !!awardNumber && activeTab === 6,
+    enabled: !!awardNumber && activeTab === 5,
 
     queryFn: () =>
       getAwardSequencePage(awardNumber!, {
@@ -380,154 +370,6 @@ export function AwardHistoryPage() {
 
           {activeTab === 2 && (
             <Stack spacing={2}>
-              {unitContactsQuery.isLoading && (
-                <Box
-                  sx={{
-                    display: "grid",
-                    placeItems: "center",
-                    py: 8,
-                  }}
-                >
-                  <CircularProgress />
-                </Box>
-              )}
-
-              {unitContactsQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Award unit contacts.
-                </Alert>
-              )}
-
-              {unitContactsQuery.data && (
-                <>
-                  <Typography sx={{ fontWeight: 700 }}>
-                    {unitContactsQuery.data.length.toLocaleString()} unit
-                    contacts
-                  </Typography>
-
-                  {unitContactsQuery.data.length === 0 ? (
-                    <Alert severity="info">
-                      No unit contacts are associated with the current Award.
-                    </Alert>
-                  ) : (
-                    <Box sx={{ overflowX: "auto" }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Project Role</TableCell>
-                            <TableCell>Name</TableCell>
-                            <TableCell>Email</TableCell>
-                            <TableCell>Phone</TableCell>
-                            <TableCell>Title</TableCell>
-                            <TableCell>Unit</TableCell>
-                            <TableCell>Parent Unit</TableCell>
-                            <TableCell>Default</TableCell>
-                          </TableRow>
-                        </TableHead>
-
-                        <TableBody>
-                          {unitContactsQuery.data.map((contact) => (
-                            <TableRow key={contact.awardUnitContactId} hover>
-                              <TableCell>
-                                {contact.projectRole ?? "—"}
-                              </TableCell>
-
-                              <TableCell>
-                                <Typography sx={{ fontWeight: 700 }}>
-                                  {contact.fullName ?? "Unnamed contact"}
-                                </Typography>
-
-                                {contact.personId && (
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                  >
-                                    {contact.personId}
-                                  </Typography>
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                {contact.emailAddress ? (
-                                  <a href={`mailto:${contact.emailAddress}`}>
-                                    {contact.emailAddress}
-                                  </a>
-                                ) : (
-                                  "—"
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                {contact.officePhone ?? "—"}
-
-                                {contact.phoneExtension && (
-                                  <>
-                                    {" ext. "}
-                                    {contact.phoneExtension}
-                                  </>
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                {contact.directoryTitle ??
-                                  contact.primaryTitle ??
-                                  "—"}
-                              </TableCell>
-
-                              <TableCell>
-                                <Typography>
-                                  {contact.unitName ?? "—"}
-                                </Typography>
-
-                                {contact.unitNumber && (
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                  >
-                                    {contact.unitNumber}
-                                  </Typography>
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                <Typography>
-                                  {contact.parentUnitName ?? "—"}
-                                </Typography>
-
-                                {contact.parentUnitNumber && (
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                  >
-                                    {contact.parentUnitNumber}
-                                  </Typography>
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                {contact.defaultUnitContact === "Y" ? (
-                                  <Chip
-                                    size="small"
-                                    color="primary"
-                                    label="Yes"
-                                  />
-                                ) : (
-                                  "No"
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </Box>
-                  )}
-                </>
-              )}
-            </Stack>
-          )}
-
-          {activeTab === 3 && (
-            <Stack spacing={2}>
               {fundingQuery.isLoading && (
                 <Box
                   sx={{
@@ -609,7 +451,7 @@ export function AwardHistoryPage() {
             </Stack>
           )}
 
-          {activeTab === 4 && (
+          {activeTab === 3 && (
             <Stack spacing={2}>
               {amountsQuery.isLoading && (
                 <Box
@@ -721,7 +563,7 @@ export function AwardHistoryPage() {
             </Stack>
           )}
 
-          {activeTab === 5 && (
+          {activeTab === 4 && (
             <Stack spacing={2}>
               {proposalsQuery.isLoading && (
                 <Box
@@ -812,7 +654,7 @@ export function AwardHistoryPage() {
             </Stack>
           )}
 
-          {activeTab === 6 && (
+          {activeTab === 5 && (
             <Stack spacing={3}>
               {historyQuery.isLoading && (
                 <Box

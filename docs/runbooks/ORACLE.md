@@ -70,14 +70,6 @@ See [`etl/README.md`](../../etl/README.md) for the full command reference
 troubleshooting), and [`docs/DECISIONS.md`](../DECISIONS.md) /
 [`CLAUDE.md`](../../CLAUDE.md) for the architectural rationale.
 
-## Two datasets are not loaded at all
-
-Award's unit contacts and Proposal's people have no verified Oracle
-extraction query and are not loaded by any means (not CSV, not Oracle) —
-see the module docstring comments in `load_awards_from_csv.py`/
-`load_proposals_from_csv.py` in `etl/`. This is a known, accepted gap, not
-an oversight.
-
 ## Never guess Oracle columns
 
 Always verify against `information_schema`, the KC OJB descriptor, or a

@@ -1,7 +1,6 @@
 package edu.bu.archive.application.proposal;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
@@ -93,17 +92,6 @@ public class ProposalArchiveService {
                 pageMetadata.totalPages(),
                 pageMetadata.first(),
                 pageMetadata.last()
-        );
-    }
-
-    public List<ProposalPersonResponse> findCurrentPeople(
-            String proposalNumber
-    ) {
-        String normalizedProposalNumber =
-                requireExistingProposal(proposalNumber);
-
-        return repository.findCurrentPeople(
-                normalizedProposalNumber
         );
     }
 

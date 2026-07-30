@@ -62,11 +62,11 @@ machine, streams directly into Postgres (`archive` schema) → Spring Boot API
 supported source of structured data for the Award/Negotiation/Subaward/
 Proposal loaders — CSV ingestion for structured data has been retired
 entirely (no `SOURCE_MODE`, no `--csv`/`--csv-dir` flags on any loader; see
-`docs/DECISIONS.md`). Two datasets have no verified Oracle extraction query
-and are consequently no longer loaded at all rather than kept on a CSV
-fallback: Award's unit contacts and Proposal's people — see the module
-docstring comments in `load_awards_from_csv.py`/`load_proposals_from_csv.py`.
-S3 is retained only for document/attachment binary storage and for the
+`docs/DECISIONS.md`). Award's unit contacts and Proposal's people had no
+verified Oracle extraction query and have been removed entirely (API, UI,
+ETL, and schema — see `docs/DECISIONS.md`); don't reintroduce them without a
+verified extraction query. S3 is retained only for document/attachment
+binary storage and for the
 legacy IRB Excel/Parquet export pipeline, unaffected by this change. The API
 and UI never talk to Oracle directly; only the ETL does, and only for
 reading. See [`etl/README.md`](etl/README.md) for the unified CLI and the
