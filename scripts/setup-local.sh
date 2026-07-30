@@ -48,11 +48,22 @@ if [[ "$ACTUAL_COUNT" -ne "$EXPECTED_COUNT" ]]; then
     exit 1
 fi
 
-echo "OK: $ACTUAL_COUNT synthetic attachment rows present for subaward_id=1."
+echo "OK: $ACTUAL_COUNT synthetic attachment rows present for subaward_id=94204."
 echo
-echo "Done. app.attachments.storage=local is already the default in"
-echo "application-local.yml, so running the API with"
-echo "SPRING_PROFILES_ACTIVE=local (scripts/run-local.sh or"
-echo "api/scripts/dev.sh) will serve these fixtures at:"
-echo "  GET /api/subawards/1/attachments"
-echo "  GET /api/subawards/1/attachments/{attachmentId}/download"
+echo "========================================"
+echo "Local attachment demo ready"
+echo
+echo "Open:"
+echo
+echo "http://localhost:5173/subawards/94204"
+echo
+echo "or select Subaward 4330 from the first page."
+echo
+echo "Sample files:"
+echo
+echo "✓ sample-agreement.pdf"
+echo "✓ sample-budget.xlsx"
+echo "✓ sample-note.txt (not archived)"
+echo "✓ sample-missing.pdf (404 demo)"
+echo
+echo "========================================"

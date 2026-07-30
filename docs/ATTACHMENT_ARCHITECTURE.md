@@ -84,11 +84,14 @@ Swapping implementations is a Spring property, not a code change.
 - The **database schema** — `archive.subaward_attachment` and
   `archive.subaward_attachment_archive`, unmodified, same tables production
   uses.
-- The **business record** the fixtures attach to — `subaward_id = 1` is a
-  genuine subaward already loaded into the local Postgres instance by the
-  ETL (it existed before this feature was built and simply happened to have
-  zero real attachments, making it a safe place to attach synthetic rows
-  without risk of colliding with or obscuring real data).
+- The **business record** the fixtures attach to — `subaward_id = 94204` is
+  a genuine subaward already loaded into the local Postgres instance by the
+  ETL, chosen for two reasons: it has zero real attachments (safe to attach
+  synthetic rows without colliding with or obscuring real data), and it is
+  one of the highest `subaward_id` values in the table, which puts it near
+  the top of the Subaward list page's default (no-search) first page — see
+  [§6](#6-local-development) for why this specific choice matters for
+  discoverability.
 - The **API/service/repository code path** — controller, service,
   ownership/IDOR check, filename sanitization, and HTTP status/error
   semantics are all the same code that runs in production.
@@ -624,6 +627,33 @@ Under the hood it runs, in order:
 1. `python3 tools/generate-local-attachment-fixtures.py`
 2. `psql ... -f scripts/seed-local-subaward-attachments.sql`
 3. A `SELECT COUNT(*)` check against the seeded ID range.
+
+### Finding the seeded attachments in the UI
+
+The synthetic attachments are seeded onto **`subaward_id = 94204`**, a real,
+existing local subaward with zero real attachments. This ID was chosen
+deliberately for discoverability: the Subaward list page's default view
+(no search term) orders results by `subaward_id DESC`, and `94204` is one
+of the highest IDs in the local database — so it appears **5th from the
+top of the very first page**, with no searching, scrolling, or URL-editing
+required.
+
+After `./scripts/setup-local.sh` and starting the local API + UI
+(`scripts/run-local.sh`):
+
+1. Open the Subawards list (`http://localhost:5173/subawards`).
+2. The row for subaward `4330` (subaward_id 94204) is near the top of the
+   first page.
+3. Click it, then open the **Attachments** tab.
+
+Or jump straight there: `http://localhost:5173/subawards/94204`.
+
+An earlier version of this seed used `subaward_id = 1` instead, which also
+has zero real attachments but sits on the *last* page of roughly 3,700 (the
+default sort puts the lowest ID dead last) — not reachable within a search
+in any reasonable time. `scripts/seed-local-subaward-attachments.sql`
+automatically cleans up any leftover rows from that earlier choice if
+you're re-running it after an update.
 
 ### Where they live
 
