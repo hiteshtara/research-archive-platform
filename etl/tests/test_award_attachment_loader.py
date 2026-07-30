@@ -222,6 +222,21 @@ def _oracle_source_stub(dataframe: pd.DataFrame) -> MagicMock:
     return MagicMock(read=MagicMock(return_value=dataframe))
 
 
+def _oracle_batches_stub(batches: list[pd.DataFrame]) -> MagicMock:
+    """An OracleDataSource-shaped mock whose read_batches() yields the
+    given DataFrames lazily via a real generator (not iter(list)), so it
+    has a .close() method matching OracleDataSource.read_batches()'s
+    actual return type, and so tests can assert on how many were
+    consumed."""
+
+    def _generator():
+        yield from batches
+
+    stub = MagicMock()
+    stub.read_batches.side_effect = _generator
+    return stub
+
+
 class DryRunIsReadOnlyTest(unittest.TestCase):
     def _references(self) -> pd.DataFrame:
         return pd.DataFrame(
@@ -286,8 +301,8 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 attachment_loader,
                 "OracleDataSource",
                 side_effect=[
-                    _oracle_source_stub(self._references()),
-                    _oracle_source_stub(self._files()),
+                    _oracle_batches_stub([self._references()]),
+                    _oracle_batches_stub([self._files()]),
                 ],
             ),
             patch.object(attachment_loader, "parse_args") as parse_args,
@@ -299,6 +314,17 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             attachment_loader.main()
 
         create_engine.assert_not_called()
+
+    def test_dry_run_with_limit_never_imports_or_uses_an_s3_client(self) -> None:
+        # There is no S3 client anywhere in this module this sprint - the
+        # module itself has no boto3/S3 dependency to mock, so the
+        # strongest proof available is that this name is entirely absent.
+        self.assertNotIn("boto3", dir(attachment_loader))
+        self.assertFalse(
+            hasattr(attachment_loader, "create_s3_client"),
+            "Sprint 1 must not introduce any S3 client - blob upload is a "
+            "later sprint",
+        )
 
     def test_non_dry_run_without_limit_does_write(self) -> None:
         # Sanity check on the flip side: a real (non-dry-run) invocation
@@ -336,6 +362,194 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
 
         create_engine.assert_called_once()
         mark_complete.assert_called_once()
+
+
+class ReadBoundedReferencesTest(unittest.TestCase):
+    def test_stops_reading_once_the_limit_is_reached(self) -> None:
+        produced = {"batches": 0}
+
+        def fake_batches():
+            for i in range(1000):
+                produced["batches"] += 1
+                yield pd.DataFrame(
+                    [
+                        {
+                            "award_attachment_id": i,
+                            "award_id": 100 + i,
+                            "award_number": f"{i:06d}",
+                            "sequence_number": 0,
+                            "file_id": i,
+                        }
+                    ]
+                )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = attachment_loader.read_bounded_references(source, 5)
+
+        self.assertEqual(len(result), 5)
+        # The whole point of this helper: it must never exhaust a
+        # 1,000-batch generator (i.e. the full 1.8M-row Oracle table) just
+        # to satisfy a --limit of 5.
+        self.assertLess(produced["batches"], 1000)
+
+
+class ReadFilesMatchingIdsTest(unittest.TestCase):
+    def test_stops_once_every_target_id_is_found(self) -> None:
+        produced = {"batches": 0}
+
+        def fake_batches():
+            for file_id in range(1000):
+                produced["batches"] += 1
+                yield pd.DataFrame(
+                    [{"file_id": file_id, "blob_source": "INLINE"}]
+                )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = attachment_loader.read_files_matching_ids(source, {3, 7})
+
+        self.assertEqual(sorted(result["file_id"].tolist()), [3, 7])
+        # Both targets appear well before batch 1000 - the scan must not
+        # exhaust the full (138,538-row) physical-file source looking for
+        # them.
+        self.assertLess(produced["batches"], 1000)
+
+    def test_reports_unresolved_ids_when_source_is_exhausted(self) -> None:
+        def fake_batches():
+            for file_id in range(5):
+                yield pd.DataFrame(
+                    [{"file_id": file_id, "blob_source": "INLINE"}]
+                )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        # 999 is never present in the source at all.
+        result = attachment_loader.read_files_matching_ids(source, {2, 999})
+
+        self.assertEqual(result["file_id"].tolist(), [2])
+
+    def test_duplicate_reference_file_ids_collapse_to_one_target(self) -> None:
+        # Sampled references pointing at the same physical file must not
+        # cause that file to be searched for (or returned) more than once.
+        target_ids = {9001}
+
+        def fake_batches():
+            yield pd.DataFrame(
+                [{"file_id": 9001, "blob_source": "INLINE"}]
+            )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = attachment_loader.read_files_matching_ids(source, target_ids)
+
+        self.assertEqual(len(result), 1)
+
+    def test_returns_empty_dataframe_for_no_targets(self) -> None:
+        source = MagicMock()
+
+        result = attachment_loader.read_files_matching_ids(source, set())
+
+        self.assertTrue(result.empty)
+        source.read_batches.assert_not_called()
+
+
+class CoherentSampleTest(unittest.TestCase):
+    def test_duplicate_reference_file_ids_produce_one_physical_file_row(
+        self,
+    ) -> None:
+        # Two references share file_id=9001 - the coherent sample must
+        # still only produce one attachment_object-bound row for it.
+        references = pd.DataFrame(
+            [
+                {
+                    "award_attachment_id": 1,
+                    "award_id": 101,
+                    "award_number": "000001",
+                    "sequence_number": 0,
+                    "file_id": 9001,
+                },
+                {
+                    "award_attachment_id": 2,
+                    "award_id": 102,
+                    "award_number": "000002",
+                    "sequence_number": 0,
+                    "file_id": 9001,
+                },
+            ]
+        )
+        files = pd.DataFrame(
+            [
+                {
+                    "file_id": 9001,
+                    "file_data_id": None,
+                    "blob_source": "INLINE",
+                }
+            ]
+        )
+
+        with patch.object(
+            attachment_loader,
+            "OracleDataSource",
+            side_effect=[
+                _oracle_batches_stub([references]),
+                _oracle_batches_stub([files]),
+            ],
+        ):
+            sampled_references, sampled_files, report = (
+                attachment_loader._read_coherent_sample(10)
+            )
+
+        self.assertEqual(len(sampled_references), 2)
+        self.assertEqual(len(sampled_files), 1)
+        self.assertEqual(report["sampled_reference_count"], 2)
+        self.assertEqual(report["distinct_sampled_file_id_count"], 1)
+        self.assertEqual(report["matched_physical_file_count"], 1)
+        self.assertEqual(report["unresolved_file_id_count"], 0)
+
+    def test_unresolved_file_ids_are_reported_not_silently_dropped(self) -> None:
+        references = pd.DataFrame(
+            [
+                {
+                    "award_attachment_id": 1,
+                    "award_id": 101,
+                    "award_number": "000001",
+                    "sequence_number": 0,
+                    "file_id": 9001,
+                },
+                {
+                    "award_attachment_id": 2,
+                    "award_id": 102,
+                    "award_number": "000002",
+                    "sequence_number": 0,
+                    "file_id": 9002,
+                },
+            ]
+        )
+        # Only 9001 is ever found in the (mocked) physical-file source -
+        # 9002 does not exist there.
+        files = pd.DataFrame(
+            [{"file_id": 9001, "file_data_id": None, "blob_source": "INLINE"}]
+        )
+
+        with patch.object(
+            attachment_loader,
+            "OracleDataSource",
+            side_effect=[
+                _oracle_batches_stub([references]),
+                _oracle_batches_stub([files]),
+            ],
+        ):
+            _, sampled_files, report = attachment_loader._read_coherent_sample(10)
+
+        self.assertEqual(report["distinct_sampled_file_id_count"], 2)
+        self.assertEqual(report["matched_physical_file_count"], 1)
+        self.assertEqual(report["unresolved_file_id_count"], 1)
+        self.assertEqual(sampled_files["file_id"].tolist(), [9001])
 
 
 class OracleExtractionSqlFilesExistTest(unittest.TestCase):

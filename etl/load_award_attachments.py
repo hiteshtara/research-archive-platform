@@ -77,6 +77,89 @@ FILE_COLUMNS = [
 ]
 
 
+def read_bounded_references(source: OracleDataSource, limit: int) -> pd.DataFrame:
+    """Read at most `limit` rows from the Award attachment references
+    Oracle source, stopping the fetch as soon as enough rows have been
+    collected instead of reading the full result set. Used only for
+    --limit sampling - the full load reads every reference unconditionally
+    via read()."""
+    collected: list[pd.DataFrame] = []
+    total = 0
+    batches = source.read_batches()
+    try:
+        for batch in batches:
+            collected.append(batch)
+            total += len(batch)
+            if total >= limit:
+                break
+    finally:
+        batches.close()
+
+    if not collected:
+        return pd.DataFrame()
+    return pd.concat(collected, ignore_index=True).head(limit)
+
+
+def read_files_matching_ids(
+    source: OracleDataSource, target_file_ids: set[int]
+) -> pd.DataFrame:
+    """Scan the Award attachment physical-file Oracle source batch by
+    batch, keeping only rows whose file_id is an exact match in
+    target_file_ids, and stopping as soon as every target ID has been
+    found - or the source is exhausted, in which case some targets remain
+    unresolved (reported, not silently dropped). Used only for --limit
+    sampling; the full load reads every physical file unconditionally via
+    read(). No blob column is ever selected by the underlying query
+    regardless - this only ever narrows *which rows* are kept client-side.
+    """
+    if not target_file_ids:
+        return pd.DataFrame()
+
+    remaining = set(target_file_ids)
+    collected: list[pd.DataFrame] = []
+    batches = source.read_batches()
+    try:
+        for batch in batches:
+            batch_ids = pd.to_numeric(batch["file_id"], errors="coerce")
+            mask = batch_ids.isin(remaining)
+            if mask.any():
+                collected.append(batch[mask])
+                remaining -= set(batch_ids[mask].astype("int64").tolist())
+            if not remaining:
+                break
+    finally:
+        batches.close()
+
+    if not collected:
+        return pd.DataFrame()
+    return pd.concat(collected, ignore_index=True)
+
+
+def build_sample_validation_report(
+    references: pd.DataFrame,
+    files: pd.DataFrame,
+    sampled_file_ids: set[int],
+) -> dict[str, int]:
+    matched_physical_file_count = len(files)
+    return {
+        "sampled_reference_count": len(references),
+        "distinct_sampled_file_id_count": len(sampled_file_ids),
+        "matched_physical_file_count": matched_physical_file_count,
+        "unresolved_file_id_count": (
+            len(sampled_file_ids) - matched_physical_file_count
+        ),
+        "inline_count": int((files["blob_source"] == "INLINE").sum())
+        if not files.empty
+        else 0,
+        "external_count": int((files["blob_source"] == "EXTERNAL").sum())
+        if not files.empty
+        else 0,
+        "missing_count": int(files["blob_source"].isna().sum())
+        if not files.empty
+        else 0,
+    }
+
+
 def require_columns(
     dataframe: pd.DataFrame,
     required_columns: set[str],
@@ -384,35 +467,87 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(arguments)
 
 
+def _read_coherent_sample(
+    limit: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
+    """Sample up to `limit` Award attachment references (stopping the
+    Oracle fetch early), then scan the physical-file source only for the
+    distinct file_id values that sample actually references - never an
+    independent head(limit) of files, which could pull in physical files
+    unrelated to the sampled references or miss ones that are related."""
+    logger.info(
+        "Sampling up to {} Award attachment references from Oracle "
+        "(bounded read, no PostgreSQL connection will be made)",
+        limit,
+    )
+
+    references = prepare_references(
+        read_bounded_references(OracleDataSource(REFERENCES_ORACLE_SQL), limit)
+    )
+
+    sampled_file_ids = {
+        int(value) for value in references["file_id"].dropna().unique()
+    }
+
+    files_raw = read_files_matching_ids(
+        OracleDataSource(FILES_ORACLE_SQL), sampled_file_ids
+    )
+    files = prepare_files(files_raw) if not files_raw.empty else files_raw
+
+    report = build_sample_validation_report(references, files, sampled_file_ids)
+
+    logger.info(
+        "Dry run (--limit {}) - bounded, coherent sample:\n"
+        "  sampled references:         {}\n"
+        "  distinct sampled file_ids:  {}\n"
+        "  matched physical files:     {}\n"
+        "  unresolved file_ids:        {}\n"
+        "  inline:                     {}\n"
+        "  external:                   {}\n"
+        "  missing:                    {}",
+        limit,
+        report["sampled_reference_count"],
+        report["distinct_sampled_file_id_count"],
+        report["matched_physical_file_count"],
+        report["unresolved_file_id_count"],
+        report["inline_count"],
+        report["external_count"],
+        report["missing_count"],
+    )
+
+    return references, files, report
+
+
 def main() -> None:
     arguments = parse_args()
 
-    logger.info("Reading Award attachment references/files from Oracle")
-    references = prepare_references(
-        OracleDataSource(REFERENCES_ORACLE_SQL).read()
-    )
-    files = prepare_files(OracleDataSource(FILES_ORACLE_SQL).read())
-
     if arguments.limit is not None:
-        references = references.head(arguments.limit)
-        files = files.head(arguments.limit)
+        references, files, validation_report = _read_coherent_sample(
+            arguments.limit
+        )
+    else:
+        logger.info("Reading Award attachment references/files from Oracle")
+        references = prepare_references(
+            OracleDataSource(REFERENCES_ORACLE_SQL).read()
+        )
+        files = prepare_files(OracleDataSource(FILES_ORACLE_SQL).read())
 
-    validation_report = build_validation_report(references, files)
+        validation_report = build_validation_report(references, files)
 
-    logger.info(
-        "Award attachment reconciliation: references={:,} files={:,} "
-        "inline={:,} external={:,} missing={:,}",
-        validation_report["award_references_read"],
-        validation_report["physical_files_read"],
-        validation_report["inline_blob_count"],
-        validation_report["external_blob_count"],
-        validation_report["missing_blob_count"],
-    )
+        logger.info(
+            "Award attachment reconciliation: references={:,} files={:,} "
+            "inline={:,} external={:,} missing={:,}",
+            validation_report["award_references_read"],
+            validation_report["physical_files_read"],
+            validation_report["inline_blob_count"],
+            validation_report["external_blob_count"],
+            validation_report["missing_blob_count"],
+        )
 
     if arguments.dry_run:
         logger.info(
             "Dry run: metadata read and validated - no PostgreSQL "
-            "connection, write, or migration performed."
+            "connection, write, migration, or BLOB payload read performed."
         )
         return
 

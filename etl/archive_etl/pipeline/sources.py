@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -134,3 +134,55 @@ class OracleDataSource:
             self.name,
         )
         return dataframe
+
+    def read_batches(self) -> Generator[pd.DataFrame, None, None]:
+        """Yield one normalized DataFrame per fetchmany() batch, without
+        accumulating the full result set in memory.
+
+        This is an addition alongside read(), not a replacement - read()
+        is unchanged and still used by every existing loader. This exists
+        so a caller can stop fetching further batches early (e.g. a
+        bounded --limit sample) without ever reading the rest of the
+        result set. Callers that break out of iterating this generator
+        early should call its .close() method (e.g. in a try/finally) so
+        the Oracle cursor/connection are released promptly rather than
+        waiting on garbage collection.
+
+        Unlike read(), this yields nothing at all for a query that returns
+        zero rows - there is no batch to yield. Callers that need "zero
+        rows with the right columns" behavior should use read() instead.
+        """
+        credentials = require_oracle_environment(self.environ)
+
+        sql_text = _strip_sqlplus_directives(
+            self.sql_path.read_text(encoding="utf-8")
+        ).strip()
+        if sql_text.endswith(";"):
+            sql_text = sql_text[:-1].rstrip()
+
+        logger.info("Reading Oracle data using {} (batched)", self.sql_path)
+
+        with self.connect(
+            user=credentials["ORACLE_USER"],
+            password=credentials["ORACLE_PASSWORD"],
+            dsn=credentials["ORACLE_DSN"],
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.arraysize = self.fetch_size
+                cursor.execute(sql_text)
+                columns = [
+                    str(column[0])
+                    for column in cursor.description
+                ]
+
+                while batch := cursor.fetchmany(self.fetch_size):
+                    rows = [
+                        tuple(
+                            _materialize_oracle_value(value)
+                            for value in row
+                        )
+                        for row in batch
+                    ]
+                    frame = pd.DataFrame(rows, columns=columns)
+                    normalize_columns(frame)
+                    yield frame
