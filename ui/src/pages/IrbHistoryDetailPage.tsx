@@ -265,7 +265,7 @@ export function IrbHistoryDetailPage() {
 
           if (protocolBase) {
             navigate(
-              `/protocols/${encodeURIComponent(protocolBase)}`,
+              `/irb?query=${encodeURIComponent(protocolBase)}`,
             );
           }
         }}

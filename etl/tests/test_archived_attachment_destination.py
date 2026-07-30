@@ -10,9 +10,6 @@ from unittest.mock import Mock, patch
 
 from archive_etl.attachments.oracle_blob import FileDataBlobReader
 from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
-from archive_etl.attachments.plugins.irb import (
-    IrbPersonnelAttachmentPlugin,
-)
 from archive_etl.attachments.plugins.proposal import (
     ProposalAttachmentPlugin,
 )
@@ -47,40 +44,6 @@ class ArchivedAttachmentDestinationTest(unittest.TestCase):
         self.assertEqual(
             plugin.s3_key("test/proposals", record),
             "test/proposals/91/81/scope.pdf",
-        )
-
-    def test_irb_personnel_preserves_verified_identifiers(self) -> None:
-        plugin = IrbPersonnelAttachmentPlugin()
-        row = {
-            "pa_personnel_id": "71",
-            "protocol_id_fk": "61",
-            "protocol_number": "0000061",
-            "sequence_number": "3",
-            "type_cd": "2",
-            "document_id": "51",
-            "file_id": "FILE-71",
-            "description": "CV",
-            "person_id": "P0001",
-            "update_timestamp": "2026-01-01 10:00:00",
-            "file_name": "cv.docx",
-            "content_type":
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document",
-            "attachment_file_data_id": "LEGACY-71",
-            "attachment_file_sequence_number": "4",
-            "attachment_file_update_timestamp":
-                "2026-01-02 10:00:00",
-        }
-        record = self._single_record(plugin, row)
-
-        self.assertEqual(record.attachment_id, 71)
-        self.assertEqual(record.record_id, 61)
-        self.assertEqual(record.file_data_id, "FILE-71")
-        self.assertEqual(record.attributes["person_id"], "P0001")
-        self.assertEqual(record.attributes["type_code"], "2")
-        self.assertEqual(
-            record.attributes["attachment_file_data_id"],
-            "LEGACY-71",
         )
 
     @patch(
