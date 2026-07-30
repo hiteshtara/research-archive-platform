@@ -14,13 +14,26 @@ def test_build_parser_requires_a_command() -> None:
 
 
 @pytest.mark.parametrize(
-    "domain", ["award", "negotiation", "subaward", "proposal"]
+    "domain",
+    ["award", "negotiation", "subaward", "proposal", "award-attachment"],
 )
 def test_build_parser_accepts_each_domain_with_defaults(domain: str) -> None:
     args = build_parser().parse_args([domain])
 
     assert args.command == domain
     assert args.limit is None
+
+
+def test_build_parser_accepts_award_attachment_dry_run() -> None:
+    args = build_parser().parse_args(["award-attachment", "--dry-run"])
+
+    assert args.command == "award-attachment"
+    assert args.dry_run is True
+
+
+def test_build_parser_rejects_dry_run_for_other_domains() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["award", "--dry-run"])
 
 
 def test_build_parser_accepts_check_with_no_extra_arguments() -> None:
@@ -67,6 +80,46 @@ def test_run_domain_forwards_limit() -> None:
         "load_subawards_from_csv.py",
         "--limit",
         "10",
+    ]
+
+
+def test_run_domain_forwards_dry_run() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award-attachment", "--dry-run"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == ["load_award_attachments.py", "--dry-run"]
+
+
+def test_run_domain_forwards_limit_and_dry_run_together() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--limit", "10", "--dry-run"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ):
+        _run_domain("award-attachment", args)
+
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--limit",
+        "10",
+        "--dry-run",
     ]
 
 

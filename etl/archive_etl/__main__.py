@@ -24,7 +24,14 @@ DOMAIN_MODULES: dict[str, str] = {
     "negotiation": "load_negotiations_from_csv",
     "subaward": "load_subawards_from_csv",
     "proposal": "load_proposals_from_csv",
+    "award-attachment": "load_award_attachments",
 }
+
+# Domains whose loader supports --dry-run in addition to --limit. Only
+# award-attachment needs this today - --limit alone already implies "no
+# database write" for every other domain (see each domain's --limit help
+# text), so a separate --dry-run flag would be redundant there.
+_DRY_RUN_DOMAINS = {"award-attachment"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     for domain in DOMAIN_MODULES:
         domain_parser = subparsers.add_parser(
             domain,
-            help=f"Load {domain.capitalize()} data from Oracle.",
+            help=f"Load {domain.replace('-', ' ').capitalize()} data from Oracle.",
         )
         domain_parser.add_argument(
             "--limit",
@@ -60,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Forwarded to the underlying loader's --limit.",
         )
+        if domain in _DRY_RUN_DOMAINS:
+            domain_parser.add_argument(
+                "--dry-run",
+                action="store_true",
+                help="Forwarded to the underlying loader's --dry-run.",
+            )
 
     return parser
 
@@ -70,6 +83,8 @@ def _run_domain(domain: str, args: argparse.Namespace) -> int:
     forwarded: list[str] = []
     if args.limit is not None:
         forwarded.extend(["--limit", str(args.limit)])
+    if getattr(args, "dry_run", False):
+        forwarded.append("--dry-run")
 
     # Rewrite sys.argv rather than changing each loader's main()/parse_args()
     # signature, so every domain script stays exactly as it is today (and
