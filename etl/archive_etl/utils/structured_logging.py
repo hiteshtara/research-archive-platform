@@ -8,14 +8,19 @@ Logs verbatim; nothing else needs to change for these lines to become
 queryable there.
 
 Fields: timestamp, run_id (bound once for the whole run), level, message,
-and whichever of stage/file_id/status/elapsed_ms a call site bound via
-logger.bind(...). Never includes SQL text or BLOB content - this module
-cannot inspect message content to enforce that automatically, so it is a
+and whichever of stage/file_id/status/elapsed_ms/secret_id a call site
+bound via logger.bind(...). secret_id is a Secrets Manager ARN/name - an
+identifier, never a credential - and is the only secret-adjacent field
+this schema has room for at all; there is no field for arbitrary secret
+content, a DSN, a connection URL, or a resolved username/password value.
+Never includes SQL text or BLOB content either - this module cannot
+inspect message content to enforce that automatically, so it is a
 calling-convention responsibility (see load_award_attachments.py's
 per-file logging, which only ever binds/logs identifiers, status labels,
-and timings, never query text or bytes) same as secret redaction remains
-each caller's job via redact_error_message() before anything reaches
-last_error/an exception log.
+and timings, never query text or bytes, and archive_etl/config/ecs.py,
+which only ever binds secret_id, never a resolved credential value) same
+as secret redaction remains each caller's job via redact_error_message()
+before anything reaches last_error/an exception log.
 """
 
 from __future__ import annotations
@@ -26,7 +31,14 @@ from typing import Any
 
 from loguru import logger
 
-_BOUND_FIELDS = ("run_id", "stage", "file_id", "status", "elapsed_ms")
+_BOUND_FIELDS = (
+    "run_id",
+    "stage",
+    "file_id",
+    "status",
+    "elapsed_ms",
+    "secret_id",
+)
 
 
 def _json_sink(message: Any) -> None:

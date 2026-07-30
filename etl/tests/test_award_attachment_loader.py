@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 import load_award_attachments as attachment_loader
+from archive_etl.config.settings import ConfigurationError
+from archive_etl.config.startup_validation import StartupValidationError
 
 
 class FakeBlob:
@@ -1409,6 +1411,357 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
 
         run_lookup.assert_called_once_with(9001)
         read_sample.assert_not_called()
+
+
+class RunEcsSetupTest(unittest.TestCase):
+    """Orchestration tests for _run_ecs_setup - every collaborator
+    (Secrets Manager resolution, startup-validation checks, migrations)
+    has its own focused unit tests elsewhere; these prove _run_ecs_setup
+    wires them together in the exact required order and short-circuits
+    correctly for --migrate-only."""
+
+    def _run(self, *, migrate_only: bool) -> dict:
+        arguments = MagicMock(migrate_only=migrate_only, bucket=None)
+        calls: list[str] = []
+
+        def _track(name, retval=None):
+            def _fn(*args, **kwargs):
+                calls.append(name)
+                return retval
+
+            return _fn
+
+        def _boto3_client_side_effect(service_name, *args, **kwargs):
+            calls.append(f"boto3.client({service_name})")
+            return MagicMock()
+
+        with (
+            patch.object(attachment_loader, "configure_structured_logging"),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                side_effect=_track(
+                    "validate_aws_identity", {"account": "123", "arn": "arn:x"}
+                ),
+            ) as validate_identity,
+            patch.object(
+                attachment_loader.boto3,
+                "client",
+                side_effect=_boto3_client_side_effect,
+            ) as boto3_client,
+            patch.object(
+                attachment_loader,
+                "configure_ecs_environment",
+                side_effect=_track("configure_ecs_environment"),
+            ) as configure_env,
+            patch.object(
+                attachment_loader,
+                "create_postgres_engine",
+                side_effect=_track("create_postgres_engine", MagicMock()),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_postgres_reachable",
+                side_effect=_track("validate_postgres_reachable"),
+            ),
+            patch.object(
+                attachment_loader,
+                "apply_migrations",
+                side_effect=_track("apply_migrations"),
+            ) as apply_migrations,
+            patch.object(
+                attachment_loader,
+                "validate_table_exists",
+                side_effect=_track("validate_table_exists"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_upload_status_schema",
+                side_effect=_track("validate_upload_status_schema"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_oracle_reachable",
+                side_effect=_track("validate_oracle_reachable"),
+            ) as validate_oracle,
+            patch.object(
+                attachment_loader,
+                "create_s3_client",
+                side_effect=_track("create_s3_client", MagicMock()),
+            ) as create_s3,
+            patch.object(
+                attachment_loader,
+                "validate_bucket_exists",
+                side_effect=_track("validate_bucket_exists"),
+            ) as validate_bucket,
+            patch.object(
+                attachment_loader,
+                "get_data_bucket_name",
+                side_effect=ConfigurationError("no bucket configured"),
+            ),
+        ):
+            result = attachment_loader._run_ecs_setup(arguments, "run-1")
+
+        return {
+            "result": result,
+            "calls": calls,
+            "validate_identity": validate_identity,
+            "boto3_client": boto3_client,
+            "configure_env": configure_env,
+            "apply_migrations": apply_migrations,
+            "validate_oracle": validate_oracle,
+            "create_s3": create_s3,
+            "validate_bucket": validate_bucket,
+        }
+
+    def test_migrate_only_reaches_apply_migrations(self) -> None:
+        result = self._run(migrate_only=True)
+
+        self.assertIn("apply_migrations", result["calls"])
+        self.assertTrue(result["result"])
+
+    def test_migrate_only_validates_schema_after_migrating_not_before(self) -> None:
+        calls = self._run(migrate_only=True)["calls"]
+
+        self.assertLess(
+            calls.index("apply_migrations"), calls.index("validate_table_exists")
+        )
+        self.assertLess(
+            calls.index("apply_migrations"),
+            calls.index("validate_upload_status_schema"),
+        )
+
+    def test_migrate_only_never_contacts_oracle(self) -> None:
+        result = self._run(migrate_only=True)
+
+        self.assertNotIn("validate_oracle_reachable", result["calls"])
+        result["validate_oracle"].assert_not_called()
+        result["configure_env"].assert_called_once()
+        self.assertFalse(result["configure_env"].call_args.kwargs["include_oracle"])
+
+    def test_migrate_only_never_contacts_s3(self) -> None:
+        result = self._run(migrate_only=True)
+
+        result["create_s3"].assert_not_called()
+        result["validate_bucket"].assert_not_called()
+
+    def test_identity_resolved_before_secrets_manager_client_created(self) -> None:
+        calls = self._run(migrate_only=True)["calls"]
+
+        self.assertLess(
+            calls.index("validate_aws_identity"),
+            calls.index("boto3.client(secretsmanager)"),
+        )
+
+    def test_creates_exactly_one_secrets_manager_client(self) -> None:
+        result = self._run(migrate_only=True)
+
+        result["boto3_client"].assert_called_once_with("secretsmanager")
+
+    def test_secrets_loaded_before_postgres_connectivity_check(self) -> None:
+        calls = self._run(migrate_only=True)["calls"]
+
+        self.assertLess(
+            calls.index("configure_ecs_environment"),
+            calls.index("validate_postgres_reachable"),
+        )
+
+    def test_normal_flow_reaches_oracle_then_tables_then_schema_in_order(
+        self,
+    ) -> None:
+        result = self._run(migrate_only=False)
+        calls = result["calls"]
+
+        self.assertNotIn("apply_migrations", calls)
+        self.assertFalse(result["result"])
+        self.assertLess(
+            calls.index("validate_postgres_reachable"),
+            calls.index("validate_oracle_reachable"),
+        )
+        self.assertLess(
+            calls.index("validate_oracle_reachable"),
+            calls.index("validate_table_exists"),
+        )
+        self.assertLess(
+            calls.index("validate_table_exists"),
+            calls.index("validate_upload_status_schema"),
+        )
+
+    def test_normal_flow_validates_bucket_between_oracle_and_tables_when_configured(
+        self,
+    ) -> None:
+        arguments = MagicMock(migrate_only=False, bucket="my-bucket")
+        calls: list[str] = []
+
+        def _track(name, retval=None):
+            def _fn(*args, **kwargs):
+                calls.append(name)
+                return retval
+
+            return _fn
+
+        with (
+            patch.object(attachment_loader, "configure_structured_logging"),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                return_value={"account": "123", "arn": "arn:x"},
+            ),
+            patch.object(attachment_loader.boto3, "client", return_value=MagicMock()),
+            patch.object(attachment_loader, "configure_ecs_environment"),
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "validate_postgres_reachable"),
+            patch.object(
+                attachment_loader,
+                "validate_oracle_reachable",
+                side_effect=_track("validate_oracle_reachable"),
+            ),
+            patch.object(
+                attachment_loader, "create_s3_client", return_value=MagicMock()
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_bucket_exists",
+                side_effect=_track("validate_bucket_exists"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_table_exists",
+                side_effect=_track("validate_table_exists"),
+            ),
+            patch.object(attachment_loader, "validate_upload_status_schema"),
+        ):
+            attachment_loader._run_ecs_setup(arguments, "run-1")
+
+        self.assertLess(
+            calls.index("validate_oracle_reachable"),
+            calls.index("validate_bucket_exists"),
+        )
+        self.assertLess(
+            calls.index("validate_bucket_exists"), calls.index("validate_table_exists")
+        )
+
+    def test_fails_fast_on_postgres_before_touching_oracle(self) -> None:
+        arguments = MagicMock(migrate_only=False, bucket=None)
+
+        with (
+            patch.object(attachment_loader, "configure_structured_logging"),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                return_value={"account": "123", "arn": "arn:x"},
+            ),
+            patch.object(attachment_loader.boto3, "client", return_value=MagicMock()),
+            patch.object(attachment_loader, "configure_ecs_environment"),
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_postgres_reachable",
+                side_effect=StartupValidationError("PostgreSQL is not reachable"),
+            ),
+            patch.object(
+                attachment_loader, "validate_oracle_reachable"
+            ) as validate_oracle,
+        ):
+            with self.assertRaises(StartupValidationError):
+                attachment_loader._run_ecs_setup(arguments, "run-1")
+
+        validate_oracle.assert_not_called()
+
+
+class ParseArgsMigrateOnlyTest(unittest.TestCase):
+    def test_migrate_only_requires_ecs(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(["--migrate-only"])
+
+    def test_migrate_only_with_ecs_is_accepted(self) -> None:
+        args = attachment_loader.parse_args(["--ecs", "--migrate-only"])
+
+        self.assertTrue(args.migrate_only)
+        self.assertTrue(args.ecs)
+
+    def test_ecs_without_migrate_only_defaults_to_false(self) -> None:
+        args = attachment_loader.parse_args(["--ecs"])
+
+        self.assertFalse(args.migrate_only)
+
+
+class MigrateOnlyMainIntegrationTest(unittest.TestCase):
+    def test_main_returns_immediately_after_migrate_only_completes(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "_run_ecs_setup", return_value=True
+            ) as run_ecs_setup,
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_file_id_lookup,
+        ):
+            # upload/file_id are deliberately also set, to prove
+            # migrate_only short-circuits main() before either runs.
+            parse_args.return_value = MagicMock(
+                ecs=True,
+                migrate_only=True,
+                upload=True,
+                file_id=9001,
+                limit=None,
+            )
+            attachment_loader.main()
+
+        run_ecs_setup.assert_called_once()
+        run_upload.assert_not_called()
+        run_file_id_lookup.assert_not_called()
+
+    def test_ecs_upload_fails_when_migrations_are_absent_and_never_uploads(
+        self,
+    ) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(attachment_loader, "configure_structured_logging"),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                return_value={"account": "123", "arn": "arn:x"},
+            ),
+            patch.object(attachment_loader.boto3, "client", return_value=MagicMock()),
+            patch.object(attachment_loader, "configure_ecs_environment"),
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "validate_postgres_reachable"),
+            patch.object(attachment_loader, "validate_oracle_reachable"),
+            patch.object(
+                attachment_loader,
+                "get_data_bucket_name",
+                side_effect=ConfigurationError("no bucket"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_table_exists",
+                side_effect=StartupValidationError(
+                    "archive.attachment_object does not exist"
+                ),
+            ),
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=True,
+                migrate_only=False,
+                upload=True,
+                bucket=None,
+                file_id=None,
+                limit=None,
+                dry_run=False,
+            )
+            with self.assertRaises(StartupValidationError):
+                attachment_loader.main()
+
+        run_upload.assert_not_called()
 
 
 class OracleExtractionSqlFilesExistTest(unittest.TestCase):

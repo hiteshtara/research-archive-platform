@@ -67,37 +67,44 @@ uv run mypy .
 
 `--ecs` changes three things, and only three:
 
-1. **Credential resolution** (`archive_etl/config/ecs.py`) — never
-   requires a local export. PostgreSQL: plain `POSTGRES_*` environment
-   variables first (already true in the current, unmodified ECS task
-   definition — its `secrets` block resolves the RDS-managed Secrets
-   Manager secret into plain env vars before the container's process ever
-   starts), falling back to a direct Secrets Manager lookup via
-   `POSTGRES_SECRET_ARN` if the plain vars aren't populated. Oracle:
-   Secrets Manager via `ORACLE_SECRET_ARN` if set, otherwise plain
-   `ORACLE_USER`/`ORACLE_PASSWORD`/`ORACLE_DSN` environment variables.
-   Fails with a clear `ConfigurationError` if neither path resolves —
-   never silently falls through to "nothing configured."
+1. **Credential resolution** (`archive_etl/config/ecs.py`) — **never**
+   requires a local export, and **never** accepts a plaintext
+   `POSTGRES_USER`/`POSTGRES_PASSWORD`/`ORACLE_USER`/`ORACLE_PASSWORD`/
+   `ORACLE_DSN` environment variable as the source of a credential.
+   PostgreSQL username/password always come from the `POSTGRES_SECRET_ID`
+   secret; Oracle username/password/dsn always come from the
+   `ORACLE_SECRET_ID` secret (skipped entirely for `--migrate-only` — see
+   below). PostgreSQL host/port/dbname come from the secret when present,
+   otherwise from the plain (non-secret) `POSTGRES_HOST`/`POSTGRES_PORT`/
+   `POSTGRES_DB` environment variables — those are connection routing
+   info, not credentials, so a plain variable is an acceptable source for
+   them specifically. A resolved host/port that points at loopback
+   (`localhost`/`127.0.0.1`/`::1`, or port `15432`) is always rejected —
+   `--ecs` mode connecting to a local tunnel would silently defeat the
+   entire reason this mode exists. Fails with a clear `ConfigurationError`
+   (or a more specific subclass — see "Secrets Manager requirements"
+   below) on any failure — never silently falls through to "nothing
+   configured."
 2. **Structured logging** (`archive_etl/utils/structured_logging.py`) —
    replaces the default human-readable stderr handler with one JSON
    object per line on stdout, which ECS's `awslogs` log driver (already
    configured for the loader task) forwards to CloudWatch Logs verbatim.
-3. **Startup validation** (`archive_etl/config/startup_validation.py`) —
-   read-only checks, run once, before touching any file (see "Startup
-   validation" below). Aborts immediately with a clear
-   `StartupValidationError` on the first failure.
+3. **Startup validation** — read-only checks, run once, in a specific
+   order, before touching any file or Oracle BLOB (see "Startup
+   validation" below). Aborts immediately with a clear error on the first
+   failure.
 
 It also applies one **production default**: `--bucket` defaults to the
-`DATA_BUCKET_NAME` environment variable (already injected as a plain
-variable by the existing task definition) when not explicitly given.
+`DATA_BUCKET_NAME` environment variable when not explicitly given.
 
 AWS credentials themselves need no special handling — running inside a
 real ECS task, `boto3`'s default credential chain already picks up the
-task role's temporary credentials automatically via the ECS container
-credentials endpoint. `--ecs` mode's startup validation and
-`validate_aws_identity()` (an `sts:GetCallerIdentity` call) simply confirm
-this resolved correctly; there is no bespoke credential-fetching code for
-this, and there should not be.
+**task role's** temporary credentials automatically via the ECS container
+credentials endpoint. `--ecs` mode explicitly resolves this identity via
+`validate_aws_identity()` (an `sts:GetCallerIdentity` call) as the very
+first startup step, before any secret is touched; there is no bespoke
+credential-fetching code, and `AWS_PROFILE`/local `~/.aws` credentials are
+never required or read.
 
 ```bash
 # Inside the ECS loader task (or an environment providing equivalent
@@ -105,18 +112,69 @@ this, and there should not be.
 uv run python load_award_attachments.py --ecs --upload --limit 500
 ```
 
+### Bootstrapping a fresh database: `--migrate-only`
+
+Ordinary `--ecs` execution **requires** `archive.attachment_object`/
+`archive.award_attachment` and the V036 `upload_status` schema to already
+exist — it never applies a migration itself, so it never silently
+mutates schema during what's supposed to be an upload run. On a
+brand-new RDS database (migrations V035/V036 never applied), use
+`--migrate-only` once first:
+
+```bash
+uv run python load_award_attachments.py --ecs --migrate-only
+```
+
+This resolves AWS identity and the PostgreSQL secret (skipping the
+Oracle secret entirely), verifies PostgreSQL connectivity, applies
+pending migrations, validates the resulting schema (the same table-
+existence and `upload_status` constraint checks ordinary `--ecs` runs
+use), then **exits successfully without ever touching Oracle, S3, or any
+attachment data**. `--migrate-only` is rejected at the argument-parsing
+level if `--ecs` isn't also given.
+
 ### Secrets Manager requirements
 
-| Credential | Source | Shape (verified against `terraform/modules/rds/main.tf`) |
-| --- | --- | --- |
-| PostgreSQL | `<project>/<environment>/postgres` secret (already provisioned; ARN available as `POSTGRES_SECRET_ARN` if you want the loader to fetch it directly instead of relying on the task definition's `secrets` block) | `{"engine", "host", "port", "dbname", "username", "password"}` |
-| Oracle | `ORACLE_SECRET_ARN`, if you choose to provision one | **Proposed, not verified** — no Oracle secret currently exists in this repo's Terraform. Assumed shape: `{"username", "password", "dsn"}`. Verify (or provision) before relying on this path; plain `ORACLE_USER`/`ORACLE_PASSWORD`/`ORACLE_DSN` environment variables remain fully supported and require no secret at all. |
+| Credential | Environment variable | Shape | Precedence |
+| --- | --- | --- | --- |
+| PostgreSQL | `POSTGRES_SECRET_ID` — required for every `--ecs` invocation, including `--migrate-only` | Verified against `terraform/modules/rds/main.tf`'s `aws_secretsmanager_secret_version.database`: `{"engine", "host", "port", "dbname", "username", "password"}`. `database` is also accepted as a synonym for `dbname`. | `username`/`password` **always** come from the secret — no environment-variable fallback, ever. `host`/`port`/`dbname` come from the secret when present; if the secret omits one, it falls back to the plain `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` environment variable; if neither source has it, resolution fails clearly. |
+| Oracle | `ORACLE_SECRET_ID` — required for every `--ecs` invocation **except** `--migrate-only` | **Proposed, not yet provisioned** — no Oracle secret currently exists in this repo's Terraform. Contract: `{"username": "...", "password": "...", "dsn": "..."}`, all three required. | All three fields always come from the secret — no environment-variable fallback in `--ecs` mode at all (unlike PostgreSQL's host/port/dbname, there is no non-sensitive subset of Oracle's contract). |
 
-The execution role's IAM policy (`terraform/modules/ecs/main.tf`'s
-`execution_secrets` policy) already grants `secretsmanager:GetSecretValue`
-on the Postgres secret. If you provision an Oracle secret, its ARN needs
-the same grant added to that policy — a Terraform change, out of scope
-for this branch.
+Distinct, catchable exception types (`archive_etl/config/ecs.py`, all
+subclasses of `ConfigurationError`) distinguish *why* a secret failed to
+resolve, without ever including the secret's content in the message:
+`SecretNotFoundError`, `SecretAccessDeniedError`, `SecretInvalidJsonError`,
+`SecretMissingKeyError`, `SecretEmptyValueError`.
+
+**Creating the Oracle secret** (not done by this branch — for an
+authorized operator to run later, once IAM permissions are in place; see
+"IAM permissions" below). This avoids the password ever appearing as a
+literal command-line argument, so it is not captured in shell history or
+visible via `ps`:
+
+```bash
+# read -s disables terminal echo; the value only ever lives in the
+# ORACLE_PASSWORD shell variable, never as a literal argument.
+read -r -s -p "Oracle (KCOEUS) password: " ORACLE_PASSWORD
+echo
+
+aws secretsmanager create-secret \
+  --name research-archive-platform/dev/oracle \
+  --description "Oracle KCOEUS credentials for the Award Attachment loader" \
+  --secret-string "$(jq -n \
+      --arg username "<kcoeus-username>" \
+      --arg password "$ORACLE_PASSWORD" \
+      --arg dsn "<host>:1521/<service-name>" \
+      '{username: $username, password: $password, dsn: $dsn}')" \
+  --region us-east-1
+
+unset ORACLE_PASSWORD
+```
+
+`jq -n` builds the JSON body without ever writing a plaintext file to
+disk; `unset` clears the variable from the current shell afterward. This
+command is **documentation only** — it has not been run as part of this
+work, and doing so is explicitly out of scope for this commit.
 
 ### CloudWatch logs
 
@@ -148,23 +206,39 @@ fields @timestamp, file_id, status, elapsed_ms
 
 ## Startup validation
 
-Runs once, at the start of any `--ecs` invocation, entirely read-only (no
-writes — always safe under `--dry-run` too):
+Runs once, at the start of every `--ecs` invocation, entirely read-only
+(no writes anywhere — always safe under `--dry-run` too), in this exact
+order (`load_award_attachments.py`'s `_run_ecs_setup()`):
 
-1. PostgreSQL reachable (`SELECT 1`)
-2. Oracle reachable (`SELECT 1 FROM DUAL`)
-3. S3 bucket exists (`HEAD` — skipped, not failed, if no bucket is
+1. Configure structured logging
+2. Resolve ECS task-role identity via STS (`validate_aws_identity()`)
+3. Create **one** Secrets Manager client for the whole startup
+4. Load the PostgreSQL secret (always)
+5. Load the Oracle secret (**skipped** for `--migrate-only`)
+6. Verify PostgreSQL connectivity (`SELECT 1`)
+7. **If `--migrate-only`:** apply migrations, validate the resulting
+   schema (steps 10–11, below, run here instead), then exit successfully
+   — steps 8–9 and any file/upload processing never run
+8. Verify Oracle connectivity (`SELECT 1 FROM DUAL`)
+9. Verify S3 bucket access (`HEAD` — skipped, not failed, if no bucket is
    configured at all, e.g. a metadata-only `--ecs` run with no
    `--bucket`/`DATA_BUCKET_NAME`)
-4. `archive.attachment_object` and `archive.award_attachment` tables exist
-5. `archive.attachment_object.upload_status`'s CHECK constraint
-   (`ck_attachment_object_upload_status`) matches the migration V036
-   contract (`PENDING`, `UPLOADING`, `UPLOADED`, `FAILED`,
-   `MISSING_SOURCE_CONTENT`)
+10. Verify `archive.attachment_object` and `archive.award_attachment`
+    tables exist
+11. Verify `archive.attachment_object.upload_status`'s CHECK constraint
+    (`ck_attachment_object_upload_status`) matches the migration V036
+    contract (`PENDING`, `UPLOADING`, `UPLOADED`, `FAILED`,
+    `MISSING_SOURCE_CONTENT`)
+12. Only then does `main()` proceed to metadata reading, BLOB reading, or
+    upload
 
-Each check raises a clear `StartupValidationError` identifying exactly
-what failed; the loader aborts immediately rather than proceeding with a
-partially-verified environment.
+Each check raises a clear `StartupValidationError` (or `ConfigurationError`
+for credential-resolution failures) identifying exactly what failed; the
+loader aborts immediately — no upload or BLOB read can begin before every
+required check for the requested mode passes. Ordinary `--ecs` execution
+(without `--migrate-only`) still requires migrations to already be
+applied; it never applies them itself, so an upload run never silently
+mutates schema.
 
 ## One-file validation
 
@@ -247,21 +321,138 @@ it to ECR, registers a new task-definition revision from the existing
 a one-off Fargate task, waits for completion, streams its CloudWatch
 logs, and exits with the task container's own exit code. It supports
 `--file-id`, `--limit`, `--retry-failed`, `--dry-run`, `--upload`,
-`--bucket`, and `--prefix` — the same flags the loader itself accepts —
-translating them into the ECS `run-task --overrides` JSON via
-`etl/scripts/build_award_attachment_ecs_overrides.py` (a small, pure,
-independently-tested function — see `etl/tests/test_build_award_attachment_ecs_overrides.py`).
+`--migrate-only`, `--bucket`, and `--prefix` — the same flags the loader
+itself accepts — translating them into the ECS `run-task --overrides`
+JSON via `etl/scripts/build_award_attachment_ecs_overrides.py` (a small,
+pure, independently-tested function — see
+`etl/tests/test_build_award_attachment_ecs_overrides.py`).
+
+The script also passes `POSTGRES_SECRET_ID`/`ORACLE_SECRET_ID` (and,
+optionally, `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/
+`DATA_BUCKET_NAME`/`AWS_REGION`) through as **non-secret** container
+environment overrides — identifiers and connection routing info only.
+There is no flag, environment variable, or code path anywhere in the
+script or the override builder that accepts a password, a DSN, or a
+secret's JSON content; the loader resolves those itself, at runtime, from
+Secrets Manager.
 
 Required environment (no safe defaults — the script refuses to guess
-them): `ECR_REPOSITORY_URI`, `SUBNET_IDS`, `SECURITY_GROUP_ID`. See the
-script's own header comment for the full list of optional overrides
-(`AWS_REGION`, `PROJECT_NAME`, `ENVIRONMENT`, `CLUSTER_NAME`,
-`TASK_FAMILY`).
+them): `ECR_REPOSITORY_URI`, `SUBNET_IDS`, `SECURITY_GROUP_ID`,
+`POSTGRES_SECRET_ID`. `ORACLE_SECRET_ID` is required unless
+`--migrate-only` is passed. See the script's own header comment for the
+full list of optional overrides (`AWS_REGION`, `PROJECT_NAME`,
+`ENVIRONMENT`, `CLUSTER_NAME`, `TASK_FAMILY`, `POSTGRES_HOST`/`PORT`/`DB`,
+`DATA_BUCKET_NAME`).
+
+Example — bootstrap a fresh database:
+```bash
+POSTGRES_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-4k6Ngz \
+  scripts/run-award-attachment-loader.sh --migrate-only
+```
+which generates the container command
+`load_award_attachments.py --ecs --migrate-only`.
 
 **This script performs real AWS actions the moment it is invoked** (image
 build/push, task-definition registration, and — with `--upload` and
 without `--dry-run` — a real upload run). It was authored and reviewed on
 this branch but has not been executed.
+
+## IAM permissions (documentation only — Terraform not modified)
+
+The application code inside the loader container runs as the **task
+role** (`aws_iam_role.task` in `terraform/modules/ecs/main.tf`), not the
+execution role — every `boto3` call this loader makes (Secrets Manager,
+S3, STS) is authorized by the task role's policy. The **execution role**
+(`aws_iam_role.execution`) is used only by the ECS agent itself: pulling
+the container image and (for the *existing* IRB loader path only)
+resolving its own `secrets` block before the container starts. No
+application-level Secrets Manager or S3 call should ever depend on the
+execution role's permissions.
+
+**Confirmed gap (from the implementation audit):** the task role
+currently has **no** `secretsmanager:GetSecretValue` permission at all,
+and lacks the S3 multipart-upload actions Sprint 2's large-file path
+needs. Both are required before a real `--ecs` run can succeed.
+
+Task role — minimum additions needed:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRequiredSecrets",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": [
+        "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-4k6Ngz",
+        "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/oracle-??????"
+      ]
+    },
+    {
+      "Sid": "ListBucketForHeadBucketAndMultipartUploads",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::research-archive-platform-dev-documents-770203350335"
+    },
+    {
+      "Sid": "UploadObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::research-archive-platform-dev-documents-770203350335/award-files/by-file-id/*"
+    }
+  ]
+}
+```
+
+Notes:
+- Exactly two named secret ARNs — never `secretsmanager:*` or a wildcard
+  resource. The Oracle secret's exact suffix (`-??????`) isn't known
+  until it's created (Secrets Manager appends a random 6-character
+  suffix); update this policy with the real ARN once provisioned.
+- `s3:HeadBucket` (this loader's bucket-exists check) is, per AWS's own
+  API reference, authorized via the `s3:ListBucket` action — there is no
+  separate `s3:HeadBucket` IAM action to grant.
+- `s3:GetObject`/`s3:HeadObject` are **not** currently needed — this
+  loader never reads back an uploaded object. Add them only if a future
+  verification step requires it.
+- `s3:ListBucketMultipartUploads` is inherently bucket-level (no
+  object-level equivalent) — the one genuinely unavoidable wildcard-like
+  scope, and it's still restricted to the specific bucket, never `*`.
+- The upload key prefix (`award-files/by-file-id/*`) matches
+  `DEFAULT_S3_KEY_PREFIX` in `load_award_attachments.py`; if `--prefix` is
+  ever overridden to something outside that path, this policy's resource
+  scope needs widening accordingly.
+
+Execution role — **no change needed**: retains its existing
+`AmazonECSTaskExecutionRolePolicy` (ECR pull + CloudWatch Logs
+`CreateLogStream`/`PutLogEvents`/`CreateLogGroup`) and its existing
+`secretsmanager:GetSecretValue` grant on the Postgres secret (used only
+for the *existing* IRB loader path's `secrets`-block resolution, not by
+this loader's own direct Secrets Manager calls).
+
+`sts:GetCallerIdentity` (used by `validate_aws_identity()`) requires
+**no IAM policy grant at all** — it's usable by any valid AWS identity
+with zero prior permissions, by design.
+
+Task-definition environment additions needed (non-secret; the actual
+`secrets` block stays as today's `POSTGRES_HOST/PORT/DB/USER/PASSWORD`
+for the *existing* IRB path — this is additive, not a replacement):
+
+| Variable | Purpose |
+| --- | --- |
+| `POSTGRES_SECRET_ID` | ARN/name of the PostgreSQL secret, for this loader's own direct Secrets Manager call |
+| `ORACLE_SECRET_ID` | ARN/name of the Oracle secret (once provisioned) |
+| `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` | Fallback only for whichever of host/port/dbname the secret doesn't include itself — likely redundant given the secret already has all three, but harmless to include |
+| `DATA_BUCKET_NAME` | Already present today for the IRB path; reused as this loader's `--bucket` default |
+| `AWS_REGION` | Already present today; the SDK's own region resolution applies regardless |
 
 ## Scope confirmation
 
@@ -269,9 +460,12 @@ this branch but has not been executed.
   Sprint 1/2.
 - Terraform is unmodified. `terraform/modules/ecs/main.tf` and
   `terraform/modules/rds/main.tf` are read as the source of truth for
-  cluster/task-family/secret naming, not changed.
+  cluster/task-family/secret naming, not changed. The "IAM permissions"
+  section above documents the exact changes Terraform will need later.
 - `etl/Dockerfile.loader` **was** updated (not Terraform) — it previously
   only copied `load_from_s3.py`/`load_composite_from_s3.py` into the
   image, not `load_award_attachments.py` or the `oracle/` SQL directory
   it needs. Without this fix, `--ecs` execution would fail immediately
   inside the container regardless of any other Sprint 3 work.
+- No secret was created, no live migration was applied, and no ECS task
+  was launched as part of this work.

@@ -21,21 +21,48 @@ set -euo pipefail
 #                            Fargate task (same VPC as the loader task's
 #                            security group)
 #   SECURITY_GROUP_ID      - the loader task's security group ID
+#   POSTGRES_SECRET_ID      - Secrets Manager ARN/name for the PostgreSQL
+#                              secret (an identifier, not a credential -
+#                              see docs/AWARD_ATTACHMENT_ECS_EXECUTION.md).
+#                              Not required for --migrate-only's own
+#                              validation, but the loader needs it for
+#                              every --ecs invocation including that one.
+#
+# Required for every --ecs invocation EXCEPT --migrate-only (which never
+# touches Oracle):
+#   ORACLE_SECRET_ID   - Secrets Manager ARN/name for the Oracle secret
 #
 # Optional environment (sensible defaults matching the current
-# Terraform naming convention):
-#   AWS_REGION       (default: us-east-1)
-#   PROJECT_NAME      (default: research-archive-platform)
-#   ENVIRONMENT       (default: dev)
-#   CLUSTER_NAME      (default: ${PROJECT_NAME}-${ENVIRONMENT}-etl)
-#   TASK_FAMILY       (default: ${PROJECT_NAME}-${ENVIRONMENT}-loader)
+# Terraform naming convention, or simply omitted if not set - the loader
+# falls back to its own POSTGRES_HOST/PORT/DB env vars or DATA_BUCKET_NAME
+# defaults when these aren't passed through):
+#   AWS_REGION         (default: us-east-1)
+#   PROJECT_NAME        (default: research-archive-platform)
+#   ENVIRONMENT         (default: dev)
+#   CLUSTER_NAME        (default: ${PROJECT_NAME}-${ENVIRONMENT}-etl)
+#   TASK_FAMILY         (default: ${PROJECT_NAME}-${ENVIRONMENT}-loader)
+#   POSTGRES_HOST/POSTGRES_PORT/POSTGRES_DB  - only needed as a fallback
+#     for whichever of host/port/dbname the PostgreSQL secret doesn't
+#     include itself
+#   DATA_BUCKET_NAME   - documents bucket name, passed through as a
+#                          plain (non-secret) container environment
+#                          override
+#
+# None of POSTGRES_USER, POSTGRES_PASSWORD, ORACLE_USER, ORACLE_PASSWORD,
+# or ORACLE_DSN are ever read or passed through by this script - in --ecs
+# mode those always come from Secrets Manager, resolved by the loader
+# process itself at runtime, never from an environment override.
 #
 # Usage:
 #   scripts/run-award-attachment-loader.sh [--dry-run] [--upload] \
-#       [--limit N] [--file-id N] [--retry-failed] \
+#       [--migrate-only] [--limit N] [--file-id N] [--retry-failed] \
 #       [--bucket NAME] [--prefix PREFIX]
 #
 # Examples:
+#   # Bootstrap a fresh database (apply migrations, validate schema, exit):
+#   POSTGRES_SECRET_ID=arn:...:postgres \
+#     scripts/run-award-attachment-loader.sh --migrate-only
+#
 #   # One-file validation, read-only, no PostgreSQL/S3 writes:
 #   scripts/run-award-attachment-loader.sh --file-id 9001 --dry-run
 #
@@ -58,12 +85,14 @@ CONTAINER_NAME="loader"
 : "${ECR_REPOSITORY_URI:?ECR_REPOSITORY_URI is not set - set it to the loader image's ECR repository URI}"
 : "${SUBNET_IDS:?SUBNET_IDS is not set - comma-separated private subnet IDs for the Fargate task}"
 : "${SECURITY_GROUP_ID:?SECURITY_GROUP_ID is not set - the loader task's security group ID}"
+: "${POSTGRES_SECRET_ID:?POSTGRES_SECRET_ID is not set - Secrets Manager ARN/name for the PostgreSQL secret (an identifier, never a credential)}"
 
 FILE_ID=""
 LIMIT=""
 RETRY_FAILED=false
 DRY_RUN=false
 UPLOAD=false
+MIGRATE_ONLY=false
 BUCKET=""
 PREFIX=""
 
@@ -74,11 +103,16 @@ while [[ $# -gt 0 ]]; do
     --retry-failed) RETRY_FAILED=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --upload) UPLOAD=true; shift ;;
+    --migrate-only) MIGRATE_ONLY=true; shift ;;
     --bucket) BUCKET="$2"; shift 2 ;;
     --prefix) PREFIX="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+if [[ "$MIGRATE_ONLY" == false ]]; then
+  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only)}"
+fi
 
 if [[ "$UPLOAD" == true && "$DRY_RUN" == false ]]; then
   echo "=== WARNING: this will perform a REAL S3 upload run ==="
@@ -140,15 +174,30 @@ NEW_REVISION_ARN="$(aws ecs register-task-definition \
 
 echo "Registered: $NEW_REVISION_ARN"
 
-echo "=== Building command override ==="
+echo "=== Building command + environment override ==="
 OVERRIDE_ARGS=()
 [[ -n "$FILE_ID" ]] && OVERRIDE_ARGS+=(--file-id "$FILE_ID")
 [[ -n "$LIMIT" ]] && OVERRIDE_ARGS+=(--limit "$LIMIT")
 [[ "$RETRY_FAILED" == true ]] && OVERRIDE_ARGS+=(--retry-failed)
 [[ "$DRY_RUN" == true ]] && OVERRIDE_ARGS+=(--dry-run)
 [[ "$UPLOAD" == true ]] && OVERRIDE_ARGS+=(--upload)
+[[ "$MIGRATE_ONLY" == true ]] && OVERRIDE_ARGS+=(--migrate-only)
 [[ -n "$BUCKET" ]] && OVERRIDE_ARGS+=(--bucket "$BUCKET")
 [[ -n "$PREFIX" ]] && OVERRIDE_ARGS+=(--prefix "$PREFIX")
+
+# Non-secret configuration only - identifiers and connection routing
+# info, never a password/DSN/secret value. POSTGRES_SECRET_ID is always
+# required (checked above); ORACLE_SECRET_ID is required unless
+# --migrate-only. POSTGRES_HOST/PORT/DB and DATA_BUCKET_NAME/AWS_REGION
+# are passed through only if set - the loader has its own fallbacks/
+# defaults for all of them.
+OVERRIDE_ARGS+=(--postgres-secret-id "$POSTGRES_SECRET_ID")
+[[ -n "${ORACLE_SECRET_ID:-}" ]] && OVERRIDE_ARGS+=(--oracle-secret-id "$ORACLE_SECRET_ID")
+[[ -n "${POSTGRES_HOST:-}" ]] && OVERRIDE_ARGS+=(--postgres-host "$POSTGRES_HOST")
+[[ -n "${POSTGRES_PORT:-}" ]] && OVERRIDE_ARGS+=(--postgres-port "$POSTGRES_PORT")
+[[ -n "${POSTGRES_DB:-}" ]] && OVERRIDE_ARGS+=(--postgres-db "$POSTGRES_DB")
+[[ -n "${DATA_BUCKET_NAME:-}" ]] && OVERRIDE_ARGS+=(--data-bucket-name "$DATA_BUCKET_NAME")
+[[ -n "$AWS_REGION" ]] && OVERRIDE_ARGS+=(--aws-region "$AWS_REGION")
 
 OVERRIDES_JSON="$(
   cd "$ROOT_DIR/etl" \

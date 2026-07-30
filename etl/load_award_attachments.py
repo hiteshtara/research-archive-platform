@@ -53,7 +53,13 @@ from archive_etl.config.settings import (
     get_data_bucket_name,
     require_oracle_environment,
 )
-from archive_etl.config.startup_validation import run_startup_validation
+from archive_etl.config.startup_validation import (
+    validate_bucket_exists,
+    validate_oracle_reachable,
+    validate_postgres_reachable,
+    validate_table_exists,
+    validate_upload_status_schema,
+)
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -1136,18 +1142,37 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Production execution mode for the ECS loader task: resolve "
-            "PostgreSQL/Oracle credentials via Secrets Manager or ECS "
-            "environment variables (never requires a local .env export), "
-            "switch to structured JSON logging for CloudWatch, apply "
-            "production defaults (--bucket defaults to DATA_BUCKET_NAME "
-            "if not given), and run read-only startup validation "
-            "(PostgreSQL/Oracle reachable, S3 bucket exists, Award "
+            "PostgreSQL/Oracle credentials from AWS Secrets Manager only "
+            "(POSTGRES_SECRET_ID/ORACLE_SECRET_ID - never a plaintext "
+            "environment variable, never a local .env export), switch to "
+            "structured JSON logging for CloudWatch, apply production "
+            "defaults (--bucket defaults to DATA_BUCKET_NAME if not "
+            "given), and run startup validation (AWS identity, secrets, "
+            "PostgreSQL/Oracle reachable, S3 bucket exists, Award "
             "attachment tables present, upload_status schema matches "
             "V036) before processing anything - aborts immediately on "
-            "any failure."
+            "any failure. Requires the tables/schema to already exist - "
+            "see --migrate-only to bootstrap a fresh database."
         ),
     )
-    return parser.parse_args(arguments)
+    parser.add_argument(
+        "--migrate-only",
+        action="store_true",
+        help=(
+            "Valid only with --ecs. Resolve AWS identity and the "
+            "PostgreSQL secret, verify PostgreSQL connectivity, apply "
+            "pending database migrations, validate the resulting schema "
+            "(Award attachment tables + upload_status constraint), then "
+            "exit successfully - without ever touching Oracle, S3, or "
+            "any attachment data. Use this once to bootstrap a fresh "
+            "database; every other --ecs invocation requires migrations "
+            "to already be applied and never applies them itself."
+        ),
+    )
+    parsed = parser.parse_args(arguments)
+    if parsed.migrate_only and not parsed.ecs:
+        parser.error("--migrate-only is only valid together with --ecs")
+    return parsed
 
 
 def _run_file_id_lookup(file_id: int) -> dict[str, Any]:
@@ -1259,18 +1284,65 @@ def _read_coherent_sample(
     return references, files, report
 
 
-def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> None:
-    """--ecs mode setup: structured logging, credential resolution
-    (never requires a local export), production defaults, and read-only
-    startup validation. Aborts immediately (lets the raised exception
-    propagate) if any of it fails."""
+def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
+    """--ecs mode setup, in exactly this order:
+
+    1. structured logging
+    2. AWS task-role identity via STS
+    3. one Secrets Manager client for the whole startup
+    4. load the PostgreSQL secret (always required)
+    5. load the Oracle secret (skipped entirely for --migrate-only -
+       migration never touches Oracle)
+    6. verify PostgreSQL connectivity
+    7. if --migrate-only: apply migrations, validate the resulting
+       schema, and return True so main() exits without ever reaching
+       Oracle, S3, metadata, or upload code
+    8. verify Oracle connectivity
+    9. verify S3 bucket access (skipped, not failed, if no bucket is
+       configured at all)
+    10. verify the Award attachment tables exist
+    11. verify the upload_status constraint matches migration V036
+
+    Aborts immediately (lets the raised exception propagate) if any step
+    fails - no upload or BLOB read may begin before every required check
+    for the requested mode passes. Returns True when --migrate-only
+    completed successfully (the caller must not proceed further), False
+    otherwise."""
     configure_structured_logging(run_id)
     logger.bind(stage="startup").info(
         "Starting in --ecs mode: run_id={}", run_id
     )
 
+    identity = validate_aws_identity()
+    logger.bind(stage="startup").info(
+        "AWS identity resolved via ECS task role: account={}",
+        identity["account"],
+    )
+
     secrets_client = boto3.client("secretsmanager")
-    configure_ecs_environment(secrets_client)
+
+    configure_ecs_environment(
+        secrets_client, include_oracle=not arguments.migrate_only
+    )
+
+    engine = create_postgres_engine()
+    validate_postgres_reachable(engine)
+    logger.bind(stage="startup").info("PostgreSQL reachable")
+
+    if arguments.migrate_only:
+        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        logger.bind(stage="startup").info("Migrations applied")
+
+        validate_table_exists(engine, "attachment_object")
+        validate_table_exists(engine, "award_attachment")
+        validate_upload_status_schema(engine)
+        logger.bind(stage="startup", status="migrate_only_complete").info(
+            "Migration and schema validation complete"
+        )
+        return True
+
+    validate_oracle_reachable(_connect_oracle)
+    logger.bind(stage="startup").info("Oracle reachable")
 
     if not arguments.bucket:
         try:
@@ -1278,14 +1350,28 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> None:
         except ConfigurationError:
             pass
 
-    engine = create_postgres_engine()
-    s3_client = create_s3_client() if arguments.bucket else None
-    run_startup_validation(
-        engine=engine,
-        connect_oracle=_connect_oracle,
-        s3_client=s3_client,
-        bucket=arguments.bucket,
+    if arguments.bucket:
+        s3_client = create_s3_client()
+        validate_bucket_exists(s3_client, arguments.bucket)
+        logger.bind(stage="startup").info(
+            "S3 bucket exists: {}", arguments.bucket
+        )
+    else:
+        logger.bind(stage="startup").info(
+            "No bucket configured - skipping S3 bucket existence check"
+        )
+
+    validate_table_exists(engine, "attachment_object")
+    validate_table_exists(engine, "award_attachment")
+    logger.bind(stage="startup").info("Award attachment tables present")
+
+    validate_upload_status_schema(engine)
+    logger.bind(stage="startup").info(
+        "upload_status schema matches expected migration"
     )
+
+    logger.bind(stage="startup").info("Startup validation passed")
+    return False
 
 
 def main() -> None:
@@ -1293,7 +1379,9 @@ def main() -> None:
     run_id = str(uuid.uuid4())
 
     if arguments.ecs:
-        _run_ecs_setup(arguments, run_id)
+        migrate_only_complete = _run_ecs_setup(arguments, run_id)
+        if migrate_only_complete:
+            return
 
     if arguments.upload:
         _run_upload(arguments, run_id=run_id)

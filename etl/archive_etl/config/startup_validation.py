@@ -1,11 +1,19 @@
-"""Read-only startup validation for --ecs mode.
+"""Read-only startup-validation checks for --ecs mode.
 
-Fails fast, before processing any file, if PostgreSQL or Oracle aren't
-reachable, the S3 bucket doesn't exist, the Award Attachment tables are
-missing, or the upload_status CHECK constraint doesn't match the expected
-migration (V036__extend_award_attachment_upload_status.sql). Every check
-here is read-only (SELECT / HEAD only) - no writes anywhere, so this is
-always safe to run under --dry-run too.
+Each function here checks one thing - PostgreSQL reachable, Oracle
+reachable, an S3 bucket exists, an archive table exists, or the
+upload_status CHECK constraint matches the expected migration
+(V036__extend_award_attachment_upload_status.sql) - and raises
+StartupValidationError with a clear message if it fails. Every check is
+read-only (SELECT / HEAD only); no writes happen anywhere in this module.
+
+load_award_attachments.py's _run_ecs_setup() orchestrates these in the
+specific order --ecs mode requires (identity -> secrets -> PostgreSQL
+connectivity -> [--migrate-only: migrate + validate + exit] -> Oracle
+connectivity -> bucket -> tables -> schema) rather than calling a single
+combined function here, since --migrate-only needs to run a subset of
+these checks in the middle of that sequence, not the same order every
+time.
 """
 
 from __future__ import annotations
@@ -13,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -120,44 +127,3 @@ def validate_upload_status_schema(engine: Engine) -> None:
             "archive.attachment_object's upload_status CHECK constraint "
             "is missing expected value(s): " + ", ".join(missing)
         )
-
-
-def run_startup_validation(
-    *,
-    engine: Engine,
-    connect_oracle: Callable[[], Any],
-    s3_client: Any = None,
-    bucket: str | None = None,
-) -> None:
-    """Run every check in order, raising StartupValidationError with a
-    clear message on the first failure (fail fast). The bucket check is
-    skipped (not failed) when no bucket is configured at all - metadata-
-    only ECS runs don't need one."""
-    logger.info("Running ECS startup validation")
-
-    validate_postgres_reachable(engine)
-    logger.info("Startup validation: PostgreSQL reachable")
-
-    validate_oracle_reachable(connect_oracle)
-    logger.info("Startup validation: Oracle reachable")
-
-    if bucket:
-        validate_bucket_exists(s3_client, bucket)
-        logger.info("Startup validation: S3 bucket exists ({})", bucket)
-    else:
-        logger.info(
-            "Startup validation: no bucket configured - skipping S3 "
-            "bucket existence check"
-        )
-
-    validate_table_exists(engine, "attachment_object")
-    validate_table_exists(engine, "award_attachment")
-    logger.info("Startup validation: Award attachment tables present")
-
-    validate_upload_status_schema(engine)
-    logger.info(
-        "Startup validation: upload_status schema matches expected "
-        "migration"
-    )
-
-    logger.info("Startup validation passed")
