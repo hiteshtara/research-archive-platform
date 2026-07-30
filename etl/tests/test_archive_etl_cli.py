@@ -20,8 +20,6 @@ def test_build_parser_accepts_each_domain_with_defaults(domain: str) -> None:
     args = build_parser().parse_args([domain])
 
     assert args.command == domain
-    assert args.source is None
-    assert args.csv_dir is None
     assert args.limit is None
 
 
@@ -31,17 +29,12 @@ def test_build_parser_accepts_check_with_no_extra_arguments() -> None:
     assert args.command == "check"
 
 
-def test_build_parser_rejects_an_unknown_source_value() -> None:
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["award", "--source", "parquet"])
-
-
-def test_run_domain_forwards_source_oracle_as_the_oracle_flag() -> None:
+def test_run_domain_forwards_nothing_when_limit_is_not_given() -> None:
     fake_module = MagicMock()
     captured_argv: list[str] = []
     fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
 
-    args = build_parser().parse_args(["award", "--source", "oracle"])
+    args = build_parser().parse_args(["award"])
 
     original_argv = list(sys.argv)
     with patch(
@@ -52,27 +45,17 @@ def test_run_domain_forwards_source_oracle_as_the_oracle_flag() -> None:
 
     import_module.assert_called_once_with("load_awards_from_csv")
     fake_module.main.assert_called_once_with()
-    assert captured_argv == ["load_awards_from_csv.py", "--oracle"]
+    assert captured_argv == ["load_awards_from_csv.py"]
     assert sys.argv == original_argv
     assert result == 0
 
 
-def test_run_domain_forwards_source_csv_dir_and_limit() -> None:
+def test_run_domain_forwards_limit() -> None:
     fake_module = MagicMock()
     captured_argv: list[str] = []
     fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
 
-    args = build_parser().parse_args(
-        [
-            "subaward",
-            "--source",
-            "csv",
-            "--csv-dir",
-            "/tmp/exports",
-            "--limit",
-            "10",
-        ]
-    )
+    args = build_parser().parse_args(["subaward", "--limit", "10"])
 
     with patch(
         "archive_etl.__main__.importlib.import_module",
@@ -82,9 +65,6 @@ def test_run_domain_forwards_source_csv_dir_and_limit() -> None:
 
     assert captured_argv == [
         "load_subawards_from_csv.py",
-        "--csv",
-        "--csv-dir",
-        "/tmp/exports",
         "--limit",
         "10",
     ]

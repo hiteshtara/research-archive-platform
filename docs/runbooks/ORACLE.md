@@ -5,7 +5,7 @@
 `KCOEUS` (BU's legacy Kuali Research Administration Oracle schema), reachable
 only from a BU VPN-connected machine.
 
-## Workflow (current: Oracle-direct, `SOURCE_MODE=oracle` default)
+## Workflow
 
 ```text
 Oracle (KCOEUS, BU VPN-only)
@@ -14,8 +14,11 @@ Oracle (KCOEUS, BU VPN-only)
 PostgreSQL (archive schema, direct streaming load)
 ```
 
-CSV/S3 upload (the previous default) is now an explicit, non-default
-fallback — see "CSV fallback" below. It is not part of the normal workflow.
+Oracle is the only supported source of structured data for the
+Award/Negotiation/Subaward/Proposal loaders — there is no CSV fallback (see
+[`docs/DECISIONS.md`](../DECISIONS.md)). Legacy IRB continues to use its own,
+separate Excel/Parquet-via-S3 export pipeline (`load_from_s3.py`,
+`load_composite_from_s3.py`), unaffected by this.
 
 ## Supported operator workflow
 
@@ -37,29 +40,24 @@ fallback — see "CSV fallback" below. It is not part of the normal workflow.
    export ORACLE_PASSWORD=...
    export ORACLE_DSN=...      # e.g. host:1521/SERVICE_NAME
    ```
-5. **Confirm Oracle is the source** (it's the default — this step is only
-   needed if `SOURCE_MODE` was previously set to `csv` in your shell):
-   ```bash
-   export SOURCE_MODE=oracle
-   ```
-6. **Check connectivity before a real run** (validates both Oracle and
+5. **Check connectivity before a real run** (validates both Oracle and
    Postgres, prints no secrets):
    ```bash
    uv run python -m archive_etl check
    ```
-7. **Run a domain load:**
+6. **Run a domain load:**
    ```bash
-   uv run python -m archive_etl <domain> --source oracle
+   uv run python -m archive_etl <domain>
    # domain is one of: award, negotiation, subaward, proposal
    ```
-8. **Use `--limit` only for read-only validation**, never as a partial
+7. **Use `--limit` only for read-only validation**, never as a partial
    load. It truncates every dataset to at most `N` rows after reading,
    skips cross-dataset validation, and returns before any database write —
    it never touches PostgreSQL:
    ```bash
-   uv run python -m archive_etl <domain> --source oracle --limit 10
+   uv run python -m archive_etl <domain> --limit 10
    ```
-9. **Review reconciliation results** after a real run:
+8. **Review reconciliation results** after a real run:
    ```bash
    uv run python scripts/reconcile_load.py --latest
    uv run python scripts/reconcile_load.py --domain AWARD --limit 5
@@ -72,21 +70,13 @@ See [`etl/README.md`](../../etl/README.md) for the full command reference
 troubleshooting), and [`docs/DECISIONS.md`](../DECISIONS.md) /
 [`CLAUDE.md`](../../CLAUDE.md) for the architectural rationale.
 
-## CSV fallback (explicit, non-default)
+## Two datasets are not loaded at all
 
-CSV/S3 upload remains available only where a clean existing CSV path
-already works (Award/Negotiation/Subaward/Proposal), and only when
-explicitly requested — it is never the default and is not the supported
-day-to-day workflow:
-
-```bash
-uv run python -m archive_etl <domain> --source csv --csv-dir ~/Downloads
-```
-
-Legacy IRB continues to use its own, separate Excel/Parquet-via-S3 export
-pipeline (`load_from_s3.py`, `load_composite_from_s3.py`) regardless of
-`SOURCE_MODE` — that pipeline was not part of the Oracle-direct change and
-is unaffected by it.
+Award's unit contacts and Proposal's people have no verified Oracle
+extraction query and are not loaded by any means (not CSV, not Oracle) —
+see the module docstring comments in `load_awards_from_csv.py`/
+`load_proposals_from_csv.py` in `etl/`. This is a known, accepted gap, not
+an oversight.
 
 ## Never guess Oracle columns
 

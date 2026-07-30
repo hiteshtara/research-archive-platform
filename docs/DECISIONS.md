@@ -16,6 +16,26 @@ Never duplicate Award logic.
 
 Mirror existing patterns.
 
+Oracle is the only supported source of structured data. CSV ingestion for
+Award/Negotiation/Subaward/Proposal has been retired entirely: no
+`SOURCE_MODE`, no `--csv`/`--csv-dir` flags on any loader, no CSV export
+step in the development order, no CSV contract docs. Two datasets have no
+verified Oracle extraction query and were dropped rather than kept on a CSV
+fallback: Award's unit contacts (`archive.award_unit_contact` is truncated
+on every load, since it has a FK to `award_version`, but never repopulated
+— it goes and stays empty) and Proposal's people (`archive.proposal_person`
+has no FK to `proposal_version` and is simply never touched again — existing
+rows are frozen at their last-loaded state). Writing unverified Oracle
+extraction SQL to fill either gap was explicitly rejected in favor of
+leaving the gap visible; see the module docstring comments in
+`load_awards_from_csv.py`/`load_proposals_from_csv.py`. S3 is retained only
+for document/attachment binary storage and legacy IRB's separate Excel/
+Parquet export pipeline — neither is affected by this decision. The S3
+"data" bucket's `processed/`/`rejected/` prefixes and the `processed/`
+lifecycle rule were removed from Terraform as dead infrastructure (zero
+code references anywhere); `landing/`/`validation/` were kept because IRB's
+export pipeline actively uses those prefix namespaces.
+
 ## Superseded: Protocol Archive (removed)
 
 The decisions below were made while building a "Protocol Archive" module — a

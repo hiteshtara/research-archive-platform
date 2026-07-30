@@ -1,6 +1,6 @@
 # ETL Runbook
 
-Order (Oracle-direct, the default — see
+Order (Oracle is the only supported source — see
 [`docs/runbooks/ORACLE.md`](ORACLE.md) for the full operator workflow)
 
 Migration
@@ -13,24 +13,24 @@ Oracle Extract + Validate (direct, streamed into Postgres)
 
 Verification
 
-CSV export/upload is an explicit, non-default fallback (`--csv` /
-`SOURCE_MODE=csv`), not a required step in the default workflow.
+There is no CSV export/upload step — CSV ingestion for structured data has
+been retired entirely (see [`docs/DECISIONS.md`](../DECISIONS.md)).
 
 -------------------------------------------------------------------------------
 
 Proposal ETL
 
-proposal_versions.csv
+proposal_versions (Oracle)
 
-proposal_people.csv
-
-award_proposals.csv
+award_proposals (Oracle)
 
 ↓
 
 proposal_version
 
-proposal_person
-
 proposal_award
+
+proposal_person is not loaded - no verified Oracle extraction query exists,
+and this dataset was dropped rather than kept on a CSV fallback. Existing
+proposal_person rows are left untouched, not truncated.
 

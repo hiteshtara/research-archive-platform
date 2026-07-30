@@ -38,7 +38,7 @@ its design.
 ```text
 Oracle (BU VPN-only, source of truth until retirement)
     │  Python ETL, run from a BU VPN-connected machine
-    │  streams directly into Postgres (SOURCE_MODE=oracle, the default)
+    │  streams directly into Postgres - the only supported path
     ▼
 PostgreSQL (archive schema, Amazon RDS)
     │  JdbcClient, no writes back to Oracle
@@ -49,13 +49,14 @@ Spring Boot API
 React UI
 ```
 
-CSV/S3 upload remains available as an explicit, non-default fallback
-(`SOURCE_MODE=csv` or `--csv`) for the Award/Negotiation/Subaward/Proposal
-loaders; see [`etl/README.md`](etl/README.md) and
-[`docs/runbooks/`](docs/runbooks/) for the supported Oracle-direct workflow.
-Amazon S3 is still used for document/attachment binary storage and for the
-legacy IRB Excel/Parquet export pipeline, independent of the Award/
-Negotiation/Subaward/Proposal source mode.
+Oracle is the only supported source of structured data for the
+Award/Negotiation/Subaward/Proposal loaders — CSV ingestion has been
+retired entirely (no `SOURCE_MODE`, no `--csv`/`--csv-dir` flags; see
+[`docs/DECISIONS.md`](docs/DECISIONS.md)). Amazon S3 is retained only for
+document/attachment binary storage and for the legacy IRB Excel/Parquet
+export pipeline, which is unaffected by this change. See
+[`etl/README.md`](etl/README.md) and [`docs/runbooks/`](docs/runbooks/)
+for the supported Oracle-direct workflow.
 
 The API and UI never talk to Oracle directly — only the ETL does, and only
 to read. Database migrations use Flyway's file-naming convention

@@ -5,11 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 from loguru import logger
-from pandas.errors import EmptyDataError
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
-from archive_etl.config.settings import use_oracle_source
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -26,16 +24,6 @@ ORACLE_SQL = {
     "custom_data": _ORACLE_DIR / "export_negotiation_custom_data.sql",
     "notifications": _ORACLE_DIR / "export_negotiation_notifications.sql",
     "unassociated": _ORACLE_DIR / "export_negotiation_unassociated.sql",
-}
-
-DOWNLOAD_DIR = Path.home() / "Downloads"
-
-FILES = {
-    "negotiations": DOWNLOAD_DIR / "negotiations.csv",
-    "activities": DOWNLOAD_DIR / "negotiation_activities.csv",
-    "custom_data": DOWNLOAD_DIR / "negotiation_custom_data.csv",
-    "notifications": DOWNLOAD_DIR / "negotiation_notifications.csv",
-    "unassociated": DOWNLOAD_DIR / "negotiation_unassociated.csv",
 }
 
 NEGOTIATION_COLUMNS = [
@@ -147,40 +135,11 @@ SOURCE_COLUMN_RENAMES = {
 }
 
 
-def require_files(paths: list[Path]) -> None:
-    missing = [str(path) for path in paths if not path.exists()]
-
-    if missing:
-        raise RuntimeError(
-            "Missing required Negotiation CSV files:\n"
-            + "\n".join(missing)
-        )
-
-
 def parse_args(
     arguments: list[str] | None = None,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Load Negotiation data from Oracle (default) or a CSV export set."
-        )
-    )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--oracle",
-        action="store_true",
-        help="Read all five datasets directly from Oracle (the default).",
-    )
-    source.add_argument(
-        "--csv",
-        action="store_true",
-        help="Read all five datasets from the existing CSV export set.",
-    )
-    parser.add_argument(
-        "--csv-dir",
-        type=Path,
-        default=DOWNLOAD_DIR,
-        help=f"Directory containing the CSV export set. Defaults to {DOWNLOAD_DIR}.",
+        description="Load Negotiation data from Oracle."
     )
     parser.add_argument(
         "--limit",
@@ -194,78 +153,6 @@ def parse_args(
         ),
     )
     return parser.parse_args(arguments)
-
-
-def normalize_column_name(column: str) -> str:
-    return (
-        column.strip()
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_")
-    )
-
-
-def empty_dataframe(columns: list[str]) -> pd.DataFrame:
-    return pd.DataFrame(columns=columns)
-
-
-def read_csv(
-    path: Path,
-    expected_columns: list[str],
-    allow_empty: bool = False,
-) -> pd.DataFrame:
-    logger.info("Reading {}", path)
-
-    if not path.exists():
-        if allow_empty:
-            logger.info(
-                "{} is absent; treating it as a valid empty dataset",
-                path.name,
-            )
-            return empty_dataframe(expected_columns)
-
-        raise RuntimeError(f"Missing required CSV file: {path}")
-
-    try:
-        dataframe = pd.read_csv(
-            path,
-            dtype=str,
-            keep_default_na=True,
-            na_values=["", "NULL", "null"],
-            low_memory=False,
-        )
-    except EmptyDataError:
-        if not allow_empty:
-            raise RuntimeError(f"{path.name} is empty") from None
-
-        logger.info(
-            "{} contains no header or rows; treating it as a valid empty dataset",
-            path.name,
-        )
-        return empty_dataframe(expected_columns)
-
-    dataframe.columns = [
-        normalize_column_name(column)
-        for column in dataframe.columns
-    ]
-
-    dataframe = dataframe.replace(
-        {
-            "": None,
-            "NULL": None,
-            "null": None,
-            "NaN": None,
-            "nan": None,
-        }
-    )
-
-    logger.info(
-        "{} rows read from {}",
-        len(dataframe),
-        path.name,
-    )
-
-    return dataframe
 
 
 def require_columns(
@@ -566,7 +453,7 @@ def create_load_run(
             VALUES (
                 'NEGOTIATION',
                 'KUALI',
-                'negotiation CSV export set',
+                'Oracle KCOEUS export',
                 :rows_read,
                 'STARTED'
             )
@@ -736,57 +623,23 @@ def mark_load_complete(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = use_oracle_source(
-        oracle_flag=arguments.oracle,
-        csv_flag=arguments.csv,
-    )
-    csv_dir = arguments.csv_dir
 
-    if use_oracle:
-        logger.info("Reading Negotiation data from Oracle")
-        negotiations = prepare_negotiations(
-            OracleDataSource(ORACLE_SQL["negotiations"]).read()
-        )
-        activities = prepare_activities(
-            OracleDataSource(ORACLE_SQL["activities"]).read()
-        )
-        custom_data = prepare_custom_data(
-            OracleDataSource(ORACLE_SQL["custom_data"]).read()
-        )
-        notifications = prepare_notifications(
-            OracleDataSource(ORACLE_SQL["notifications"]).read()
-        )
-        unassociated = prepare_unassociated(
-            OracleDataSource(ORACLE_SQL["unassociated"]).read()
-        )
-    else:
-        require_files(
-            [
-                csv_dir / "negotiations.csv",
-                csv_dir / "negotiation_activities.csv",
-                csv_dir / "negotiation_custom_data.csv",
-                csv_dir / "negotiation_unassociated.csv",
-            ]
-        )
-        negotiations = prepare_negotiations(
-            read_csv(csv_dir / "negotiations.csv", NEGOTIATION_COLUMNS)
-        )
-        activities = prepare_activities(
-            read_csv(csv_dir / "negotiation_activities.csv", ACTIVITY_COLUMNS)
-        )
-        custom_data = prepare_custom_data(
-            read_csv(csv_dir / "negotiation_custom_data.csv", CUSTOM_DATA_COLUMNS)
-        )
-        notifications = prepare_notifications(
-            read_csv(
-                csv_dir / "negotiation_notifications.csv",
-                NOTIFICATION_COLUMNS,
-                allow_empty=True,
-            )
-        )
-        unassociated = prepare_unassociated(
-            read_csv(csv_dir / "negotiation_unassociated.csv", UNASSOCIATED_COLUMNS)
-        )
+    logger.info("Reading Negotiation data from Oracle")
+    negotiations = prepare_negotiations(
+        OracleDataSource(ORACLE_SQL["negotiations"]).read()
+    )
+    activities = prepare_activities(
+        OracleDataSource(ORACLE_SQL["activities"]).read()
+    )
+    custom_data = prepare_custom_data(
+        OracleDataSource(ORACLE_SQL["custom_data"]).read()
+    )
+    notifications = prepare_notifications(
+        OracleDataSource(ORACLE_SQL["notifications"]).read()
+    )
+    unassociated = prepare_unassociated(
+        OracleDataSource(ORACLE_SQL["unassociated"]).read()
+    )
 
     if arguments.limit is not None:
         negotiations = negotiations.head(arguments.limit)

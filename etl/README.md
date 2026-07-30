@@ -33,10 +33,9 @@ process environment.
 
 | Variable | Required for | Notes |
 | --- | --- | --- |
-| `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN` | Any Oracle read (`--oracle`/`SOURCE_MODE=oracle` loaders, `archive_attachments.py`) | `ORACLE_DSN` is an Easy Connect string, e.g. `kuali-oracle.bu.edu:1521/KCPROD` |
-| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Every `load_*.py` script, both reconciliation scripts | — |
+| `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN` | Every `load_*.py` script, `archive_attachments.py` | `ORACLE_DSN` is an Easy Connect string, e.g. `kuali-oracle.bu.edu:1521/KCPROD` |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Every `load_*.py` script | — |
 | `POSTGRES_SSLMODE` | Optional | Defaults to `prefer`. Use `require` or `verify-full` against BU's RDS once TLS is configured |
-| `SOURCE_MODE` | Optional | `oracle` (default) or `csv`. Sets the default source for Award/Negotiation/Subaward/Proposal when neither `--oracle` nor `--csv` is passed explicitly on the command line — an explicit flag always wins. See `archive_etl/config/settings.py`'s `use_oracle_source()`. |
 | `DATA_BUCKET_NAME` | `load_from_s3.py`, `load_composite_from_s3.py`, `run_export.py`, `run_composite_export.py` | S3 bucket holding IRB Parquet/validation exports |
 | `AWS_REGION` | Optional | Defaults to `us-east-1` |
 | `IRB_S3_PREFIX` | Optional | Defaults to `landing/irb/`; only read by `load_from_s3.py` |
@@ -64,19 +63,23 @@ exists.
 
 - `load_awards_from_csv.py`, `load_negotiations_from_csv.py`,
   `load_subawards_from_csv.py`, `load_proposals_from_csv.py` — Award,
-  Negotiation, Subaward, and Proposal loaders. Award, Negotiation, and
-  Subaward read directly from Oracle by default (`--csv` to fall back to a
-  CSV export set). Proposal reads versions/awards from Oracle by default but
-  always reads people from CSV — `proposal_persons` in Oracle is missing
-  several columns (`academic_year_effort`, `faculty_flag`, etc.) that the
-  CSV export currently includes, and no verified extraction query exists yet
-  for that shape.
+  Negotiation, Subaward, and Proposal loaders. All read directly from
+  Oracle; there is no CSV path (the `_from_csv` filename suffix is a
+  historical holdover from before CSV ingestion was retired — see
+  `docs/DECISIONS.md`). Two datasets have no verified Oracle extraction
+  query and are consequently not loaded at all rather than kept on a CSV
+  fallback: Award's unit contacts (`archive.award_unit_contact` goes and
+  stays empty) and Proposal's people (`archive.proposal_person` is left
+  untouched at its last-loaded state, not truncated) — see the module
+  docstring comments in each file.
 - `load_from_s3.py`, `load_composite_from_s3.py` — IRB loaders that read a
   Parquet export from S3 (produced by `run_export.py` /
   `run_composite_export.py` from a manually exported Kuali Excel workbook).
-- `archive_etl/` — shared library code: `pipeline/` (Oracle/CSV data
-  sources, the shared load-and-reconcile framework), `upload/` (Postgres
-  engine creation, migrations, S3 upload), `config/settings.py` (all
+  This is IRB's own separate export/load pipeline and is unaffected by the
+  CSV retirement above.
+- `archive_etl/` — shared library code: `pipeline/` (Oracle data sources,
+  the shared load-and-reconcile framework), `upload/` (Postgres engine
+  creation, migrations, S3 upload), `config/settings.py` (all
   environment-variable validation), `attachments/` (Oracle BLOB streaming
   for document archival), `utils/redaction.py` (secret redaction for error
   messages).
@@ -94,27 +97,26 @@ scripts described below — it exists for a single consistent command shape,
 not a replacement for running a script directly (both work identically):
 
 ```
-uv run python -m archive_etl check                          # Oracle + Postgres connectivity, no secrets printed
-uv run python -m archive_etl award --source oracle           # same as: load_awards_from_csv.py --oracle
-uv run python -m archive_etl award --source csv --csv-dir ~/Downloads
-uv run python -m archive_etl subaward --limit 10              # bounded dry run - reads + validates 10 rows per dataset, skips the database write
+uv run python -m archive_etl check                # Oracle + Postgres connectivity, no secrets printed
+uv run python -m archive_etl award                 # same as: load_awards_from_csv.py
+uv run python -m archive_etl subaward --limit 10    # bounded dry run - reads + validates 10 rows per dataset, skips the database write
 ```
 
-Covers `award`, `negotiation`, `subaward`, and `proposal` (the four domains
-with a `--source oracle`/`--source csv` choice). `--limit N` truncates every
-dataset to at most `N` rows after reading, skips cross-dataset referential
-validation (which would otherwise spuriously fail against independently
-truncated datasets), and returns before any database write — use it to
-exercise Oracle/CSV connectivity and the transform/prepare logic without
-touching PostgreSQL. It is not a partial-load mechanism.
+Covers `award`, `negotiation`, `subaward`, and `proposal`. There is no
+source selection — Oracle is the only supported source. `--limit N`
+truncates every dataset to at most `N` rows after reading, skips
+cross-dataset referential validation (which would otherwise spuriously fail
+against independently truncated datasets), and returns before any database
+write — use it to exercise Oracle connectivity and the transform/prepare
+logic without touching PostgreSQL. It is not a partial-load mechanism.
 
 ## Running a loader
 
 Each loader is also a standalone script, exactly as before:
 
 ```
-uv run python load_awards_from_csv.py            # Oracle (default; or SOURCE_MODE=csv)
-uv run python load_awards_from_csv.py --csv       # CSV export set fallback (explicit, always overrides SOURCE_MODE)
+uv run python load_awards_from_csv.py
+uv run python load_awards_from_csv.py --limit 10
 uv run python load_from_s3.py
 ```
 
@@ -170,13 +172,16 @@ inside a single transaction). Recovery is: fix the underlying problem
 ## Known issues
 
 - `archive_etl/pipeline/postgres.py`'s `PostgreSQLLoader`/
-  `PostgreSQLLoadContext` (`INSERT ... ON CONFLICT DO UPDATE` framework) was
-  used only by the Protocol Archive loaders, which have been removed. It is
-  currently referenced only by its own module and `tests/test_pipeline_framework.py`
-  — no active loader uses it. It was intentionally left in place rather than
-  deleted during Protocol Archive removal, since removing shared-looking
-  framework code was out of scope for that change; a future change may want
-  to either adopt it for a real use case or remove it as dead code.
+  `PostgreSQLLoadContext` (`INSERT ... ON CONFLICT DO UPDATE` framework) and
+  `archive_etl/pipeline/sources.py`'s `CsvDataSource` were used only by the
+  Protocol Archive loaders (framework) and, historically, by the CSV path of
+  the domain loaders (`CsvDataSource`) — both are now retired. Each is
+  referenced only by its own module and its own test
+  (`tests/test_pipeline_framework.py`) — no active loader uses either. Both
+  were intentionally left in place rather than deleted, since removing
+  shared-looking framework code was out of scope for the changes that
+  orphaned them; a future change may want to either adopt them for a real
+  use case or remove them as dead code.
 
 ## Development
 

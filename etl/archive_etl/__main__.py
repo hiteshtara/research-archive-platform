@@ -1,14 +1,16 @@
 """Unified CLI entrypoint for the Research Archive ETL.
 
-    uv run python -m archive_etl <domain> [--source oracle|csv] [--limit N] [--csv-dir PATH]
+    uv run python -m archive_etl <domain> [--limit N]
     uv run python -m archive_etl check
 
-This is a thin dispatcher over the existing per-domain loader scripts and
-the existing connectivity-check scripts under scripts/ - it does not
-reimplement any loading, validation, or connectivity-check logic, only
-translates one consistent command shape into the arguments/functions those
-scripts already provide. Each domain script remains independently runnable
-exactly as before (e.g. `uv run python load_awards_from_csv.py --oracle`).
+Oracle is the only supported source of structured data - there is no
+--source/--csv selection. This is a thin dispatcher over the existing
+per-domain loader scripts and the existing connectivity-check scripts under
+scripts/ - it does not reimplement any loading, validation, or
+connectivity-check logic, only translates one consistent command shape into
+the arguments/functions those scripts already provide. Each domain script
+remains independently runnable exactly as before (e.g. `uv run python
+load_awards_from_csv.py --limit 10`).
 """
 
 from __future__ import annotations
@@ -30,9 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m archive_etl",
         description=(
             "Unified entrypoint for the Research Archive ETL loaders. "
-            "Each domain is also independently runnable as its own script "
-            "(e.g. `uv run python load_awards_from_csv.py --oracle`); this "
-            "wraps the same scripts under one consistent command shape."
+            "Oracle is the only supported source - there is no source "
+            "selection. Each domain is also independently runnable as its "
+            "own script (e.g. `uv run python load_awards_from_csv.py "
+            "--limit 10`); this wraps the same scripts under one consistent "
+            "command shape."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -48,23 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     for domain in DOMAIN_MODULES:
         domain_parser = subparsers.add_parser(
             domain,
-            help=f"Load {domain.capitalize()} data.",
-        )
-        domain_parser.add_argument(
-            "--source",
-            choices=["oracle", "csv"],
-            default=None,
-            help=(
-                "Override SOURCE_MODE for this run. Defaults to the "
-                "SOURCE_MODE environment variable (itself defaulting to "
-                "'oracle') - see the underlying script's own --oracle/--csv "
-                "flags, which this forwards to."
-            ),
-        )
-        domain_parser.add_argument(
-            "--csv-dir",
-            default=None,
-            help="Forwarded to the underlying loader's --csv-dir.",
+            help=f"Load {domain.capitalize()} data from Oracle.",
         )
         domain_parser.add_argument(
             "--limit",
@@ -80,12 +68,6 @@ def _run_domain(domain: str, args: argparse.Namespace) -> int:
     module = importlib.import_module(DOMAIN_MODULES[domain])
 
     forwarded: list[str] = []
-    if args.source == "oracle":
-        forwarded.append("--oracle")
-    elif args.source == "csv":
-        forwarded.append("--csv")
-    if args.csv_dir is not None:
-        forwarded.extend(["--csv-dir", args.csv_dir])
     if args.limit is not None:
         forwarded.extend(["--limit", str(args.limit)])
 

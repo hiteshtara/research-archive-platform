@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
-from archive_etl.config.settings import use_oracle_source
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -19,14 +17,18 @@ from archive_etl.utils.redaction import redact_error_message
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Oracle extraction queries exist and match the loader's expected columns
-# for versions and awards. proposal_people.csv has no equivalent Oracle
-# query yet: oracle/proposal's only people-shaped query
+# for versions and awards. proposal_people has no equivalent Oracle query:
+# oracle/proposal's only people-shaped query
 # (sql/extract/proposal/04_proposal_3892_people.sql) is a one-off diagnostic
 # hardcoded to a single proposal_id, and doesn't produce
 # academic_year_effort/calendar_year_effort/summer_effort/total_effort/
-# ver_nbr/source_update_user - columns the CSV path currently loads. Rather
-# than guess at Oracle columns that may not exist on PROPOSAL_PERSONS,
-# people is always read from CSV until a verified extraction query exists.
+# ver_nbr/source_update_user - columns the retired CSV path used to load.
+# Rather than guess at Oracle columns that may not exist on
+# PROPOSAL_PERSONS, this dataset is no longer loaded at all as of the CSV
+# retirement - see docs/DECISIONS.md. Unlike award_unit_contact,
+# archive.proposal_person has no FK to proposal_version, so it is not
+# included in clear_existing_proposal_data()'s TRUNCATE - existing rows are
+# left completely untouched, not emptied.
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "01_proposal_versions.sql"
 )
@@ -34,25 +36,10 @@ AWARDS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "04_award_proposals.sql"
 )
 
-DOWNLOAD_DIR = Path.home() / "Downloads"
-
-FILES = {
-    "versions": DOWNLOAD_DIR / "proposal_versions.csv",
-    "people": DOWNLOAD_DIR / "proposal_people.csv",
-    "awards": DOWNLOAD_DIR / "award_proposals.csv",
-}
-
 VERSION_REQUIRED_COLUMNS = {
     "proposal_id",
     "proposal_number",
     "version_number",
-}
-
-PERSON_REQUIRED_COLUMNS = {
-    "proposal_id",
-    "version_number",
-    "role_code",
-    "principal_investigator",
 }
 
 AWARD_REQUIRED_COLUMNS = {
@@ -89,69 +76,14 @@ VERSION_COLUMNS = [
     "source_update_timestamp",
 ]
 
-PERSON_COLUMNS = [
-    "proposal_id",
-    "version_number",
-    "person_id",
-    "full_name",
-    "role",
-    "project_role",
-    "principal_investigator",
-    "faculty_flag",
-    "academic_year_effort",
-    "calendar_year_effort",
-    "summer_effort",
-    "total_effort",
-    "source_update_timestamp",
-    "source_update_user",
-    "ver_nbr",
-]
-
-
-def require_files(paths: list[Path]) -> None:
-    missing = [
-        str(path)
-        for path in paths
-        if not path.exists()
-    ]
-
-    if missing:
-        raise RuntimeError(
-            "Missing required Proposal CSV files:\n"
-            + "\n".join(missing)
-        )
-
-
 def parse_args(
     arguments: list[str] | None = None,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Load Proposal versions/awards from Oracle (default) or a CSV "
-            "export set. People has no Oracle extraction query yet and is "
-            "always read from CSV."
+            "Load Proposal versions/awards from Oracle. People is not "
+            "loaded - see docs/DECISIONS.md."
         )
-    )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--oracle",
-        action="store_true",
-        help="Read versions/awards directly from Oracle (the default).",
-    )
-    source.add_argument(
-        "--csv",
-        action="store_true",
-        help="Read all three datasets from the existing CSV export set.",
-    )
-    parser.add_argument(
-        "--csv-dir",
-        type=Path,
-        default=DOWNLOAD_DIR,
-        help=(
-            "Directory containing the CSV export set. Used for --csv, "
-            "and always for proposal_people.csv. "
-            f"Defaults to {DOWNLOAD_DIR}."
-        ),
     )
     parser.add_argument(
         "--limit",
@@ -165,50 +97,6 @@ def parse_args(
         ),
     )
     return parser.parse_args(arguments)
-
-
-def normalize_column_name(column: str) -> str:
-    return (
-        column.strip()
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_")
-    )
-
-
-def read_csv(path: Path) -> pd.DataFrame:
-    logger.info("Reading {}", path)
-
-    dataframe = pd.read_csv(
-        path,
-        dtype=str,
-        keep_default_na=True,
-        na_values=["", "NULL", "null"],
-        low_memory=False,
-    )
-
-    dataframe.columns = [
-        normalize_column_name(column)
-        for column in dataframe.columns
-    ]
-
-    dataframe = dataframe.replace(
-        {
-            "": None,
-            "NULL": None,
-            "null": None,
-            "NaN": None,
-            "nan": None,
-        }
-    )
-
-    logger.info(
-        "{} rows read from {}",
-        len(dataframe),
-        path.name,
-    )
-
-    return dataframe
 
 
 def require_columns(
@@ -249,18 +137,6 @@ def convert_dates(
                 dataframe[column],
                 errors="coerce",
             )
-
-
-def convert_boolean(value: Any) -> bool:
-    if value is None or pd.isna(value):
-        return False
-
-    return str(value).strip().upper() in {
-        "Y",
-        "YES",
-        "TRUE",
-        "1",
-    }
 
 
 def require_values(
@@ -352,51 +228,6 @@ def prepare_versions(
     return dataframe
 
 
-def prepare_people(
-    dataframe: pd.DataFrame,
-) -> pd.DataFrame:
-    require_columns(
-        dataframe,
-        PERSON_REQUIRED_COLUMNS,
-        "proposal_people.csv",
-    )
-
-    convert_numeric(
-        dataframe,
-        [
-            "proposal_id",
-            "version_number",
-            "academic_year_effort",
-            "calendar_year_effort",
-            "summer_effort",
-            "total_effort",
-            "ver_nbr",
-        ],
-    )
-
-    convert_dates(
-        dataframe,
-        ["source_update_timestamp"],
-    )
-
-    dataframe["principal_investigator"] = (
-        dataframe["principal_investigator"]
-        .map(convert_boolean)
-    )
-
-    dataframe = dataframe.rename(
-        columns={"role_code": "role"}
-    )
-
-    require_values(
-        dataframe,
-        ["proposal_id", "version_number"],
-        "proposal_people.csv",
-    )
-
-    return dataframe
-
-
 def prepare_awards(
     dataframe: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -479,7 +310,7 @@ def create_load_run(connection: Connection, total_rows: int) -> int:
             VALUES (
                 'PROPOSAL',
                 'KUALI',
-                'proposal CSV export set',
+                'Oracle KCOEUS export',
                 :rows_read,
                 'STARTED'
             )
@@ -543,12 +374,16 @@ def clear_existing_proposal_data(
 ) -> None:
     logger.info("Clearing existing Proposal archive data")
 
+    # archive.proposal_person is intentionally not truncated here: this
+    # dataset is no longer loaded (see the module docstring comment near
+    # the top of this file), and unlike award_unit_contact it has no FK to
+    # proposal_version, so existing rows are simply left untouched rather
+    # than truncated with nothing to replace them.
     connection.execute(
         text(
             """
             TRUNCATE TABLE
                 archive.proposal_award,
-                archive.proposal_person,
                 archive.proposal_version;
             """
         )
@@ -638,43 +473,26 @@ def load_proposal_awards(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = use_oracle_source(
-        oracle_flag=arguments.oracle,
-        csv_flag=arguments.csv,
-    )
-    people_path = arguments.csv_dir / "proposal_people.csv"
 
-    if use_oracle:
-        require_files([people_path])
-        versions = prepare_versions(OracleDataSource(VERSIONS_ORACLE_SQL).read())
-        awards = prepare_awards(OracleDataSource(AWARDS_ORACLE_SQL).read())
-    else:
-        versions_path = arguments.csv_dir / "proposal_versions.csv"
-        awards_path = arguments.csv_dir / "award_proposals.csv"
-        require_files([versions_path, people_path, awards_path])
-        versions = prepare_versions(read_csv(versions_path))
-        awards = prepare_awards(read_csv(awards_path))
-
-    people = prepare_people(read_csv(people_path))
+    logger.info("Reading Proposal versions/awards from Oracle")
+    versions = prepare_versions(OracleDataSource(VERSIONS_ORACLE_SQL).read())
+    awards = prepare_awards(OracleDataSource(AWARDS_ORACLE_SQL).read())
 
     if arguments.limit is not None:
         versions = versions.head(arguments.limit)
-        people = people.head(arguments.limit)
         awards = awards.head(arguments.limit)
         logger.info(
-            "Dry run (--limit {}): read versions={} people={} awards={} - "
+            "Dry run (--limit {}): read versions={} awards={} - "
             "skipping database write.",
             arguments.limit,
             len(versions),
-            len(people),
             len(awards),
         )
         return
 
     logger.info(
-        "Prepared Proposal rows: versions={:,} people={:,} awards={:,}",
+        "Prepared Proposal rows: versions={:,} awards={:,}",
         len(versions),
-        len(people),
         len(awards),
     )
 
@@ -687,7 +505,7 @@ def main() -> None:
         / "migrations",
     )
 
-    total_rows = len(versions) + len(people) + len(awards)
+    total_rows = len(versions) + len(awards)
 
     # The STARTED load_run row is committed in its own transaction, before
     # the risky work below begins - otherwise a failure would roll back
@@ -707,13 +525,6 @@ def main() -> None:
                 VERSION_COLUMNS,
             )
 
-            person_rows = load_dataframe(
-                connection,
-                people,
-                "proposal_person",
-                PERSON_COLUMNS,
-            )
-
             award_rows = load_proposal_awards(
                 connection,
                 awards,
@@ -722,17 +533,16 @@ def main() -> None:
             mark_load_complete(
                 connection,
                 load_id,
-                version_rows + person_rows + award_rows,
+                version_rows + award_rows,
             )
 
         logger.success(
             "Proposal load completed. "
-            "load_id={} versions={} people={} awards={} total={}",
+            "load_id={} versions={} awards={} total={}",
             load_id,
             version_rows,
-            person_rows,
             award_rows,
-            version_rows + person_rows + award_rows,
+            version_rows + award_rows,
         )
     except Exception as error:
         mark_load_failed(engine, load_id, str(error))
