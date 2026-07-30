@@ -58,15 +58,20 @@ auth in favor of permit-all (`app.security.enabled=false`).
 ### Data flow and the read-only boundary
 Oracle (legacy Kuali, BU VPN-only) → Python ETL, run from a BU VPN-connected
 machine, streams directly into Postgres (`archive` schema) → Spring Boot API
-(JdbcClient, no writes back to Oracle) → React UI. `SOURCE_MODE=oracle` is
-the default for the Award/Negotiation/Subaward/Proposal loaders; CSV/S3
-upload is an explicit, non-default fallback (`SOURCE_MODE=csv` or `--csv`)
-kept only where a clean existing CSV path already works. S3 is still used
-for document/attachment binary storage and for the legacy IRB Excel/Parquet
-export pipeline, independent of Oracle-vs-CSV source mode. The API and UI
-never talk to Oracle directly; only the ETL does, and only for reading. See
-[`etl/README.md`](etl/README.md) for the unified CLI and the connectivity
-check, and `docs/runbooks/` for the day-to-day operator workflow.
+(JdbcClient, no writes back to Oracle) → React UI. Oracle is the **only**
+supported source of structured data for the Award/Negotiation/Subaward/
+Proposal loaders — CSV ingestion for structured data has been retired
+entirely (no `SOURCE_MODE`, no `--csv`/`--csv-dir` flags on any loader; see
+`docs/DECISIONS.md`). Two datasets have no verified Oracle extraction query
+and are consequently no longer loaded at all rather than kept on a CSV
+fallback: Award's unit contacts and Proposal's people — see the module
+docstring comments in `load_awards_from_csv.py`/`load_proposals_from_csv.py`.
+S3 is retained only for document/attachment binary storage and for the
+legacy IRB Excel/Parquet export pipeline, unaffected by this change. The API
+and UI never talk to Oracle directly; only the ETL does, and only for
+reading. See [`etl/README.md`](etl/README.md) for the unified CLI and the
+connectivity check, and `docs/runbooks/` for the day-to-day operator
+workflow.
 
 ### Migrations are not run by Spring Boot
 SQL files in `database/migrations/` use Flyway's `V###__description.sql`
@@ -182,9 +187,9 @@ which is how local dev and most controller-level `@WebMvcTest`s run.
 ## Coding conventions specific to this repo
 
 - Development order for a new feature/domain: DB migration → Oracle
-  extraction SQL → CSV export → ETL → Repository → Service → Controller →
-  React UI. Don't skip ahead (e.g. don't write a Service against a table that
-  doesn't exist in a migration yet).
+  extraction SQL → ETL (reads directly from Oracle; no CSV export step) →
+  Repository → Service → Controller → React UI. Don't skip ahead (e.g. don't
+  write a Service against a table that doesn't exist in a migration yet).
 - Mirror the Award implementation when building out a new domain rather than
   inventing a new shape.
 - Never invent Oracle table/column names — verify against

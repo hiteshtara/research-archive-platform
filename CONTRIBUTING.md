@@ -20,19 +20,19 @@ architecture and commands — this file covers *how* to work in this repo, not
 
 ## Development order
 
-Features in this codebase span five layers, and they must be built **in
-this order**, not skipped or built out of sequence:
+Features in this codebase span layers, and they must be built **in this
+order**, not skipped or built out of sequence:
 
 1. **Database migration** (`database/migrations/V###__description.sql`)
 2. **Oracle extraction SQL** (verify columns exist before writing it — never
-   guess)
-3. **CSV export**
-4. **ETL** (`etl/`) — loads into PostgreSQL and applies pending migrations
-   via `public.schema_migration`
-5. **Repository** (`api/.../adapter/out/persistence`)
-6. **Service** (`api/.../application/<domain>`)
-7. **Controller** (`api/.../adapter/in/web`)
-8. **React UI** (`ui/`)
+   guess). Oracle is the only supported source of structured data — there
+   is no CSV export step; see `docs/DECISIONS.md`.
+3. **ETL** (`etl/`) — reads directly from Oracle, loads into PostgreSQL,
+   and applies pending migrations via `public.schema_migration`
+4. **Repository** (`api/.../adapter/out/persistence`)
+5. **Service** (`api/.../application/<domain>`)
+6. **Controller** (`api/.../adapter/in/web`)
+7. **React UI** (`ui/`)
 
 A Service written against a table that doesn't exist yet in a migration, or
 a Controller built before its Service, is a sign the order was skipped.
