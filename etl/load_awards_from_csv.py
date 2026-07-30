@@ -18,10 +18,10 @@ from archive_etl.utils.redaction import redact_error_message
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Oracle extraction queries exist for four of the five Award datasets.
-# award_unit_contacts.csv has no corresponding Oracle extraction query yet,
-# so it is always read from CSV regardless of --oracle/--csv - this is a
-# deliberate, documented limitation, not an oversight.
+# Oracle extraction queries exist for versions/amounts/people/proposals.
+# Award unit contacts had no verified Oracle extraction query and has been
+# removed entirely (API, UI, ETL, and the archive.award_unit_contact table)
+# - see docs/DECISIONS.md.
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "01_award_versions.sql"
 )
@@ -34,17 +34,6 @@ PEOPLE_ORACLE_SQL = (
 PROPOSALS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "04_award_proposals.sql"
 )
-
-DOWNLOAD_DIR = Path.home() / "Downloads"
-
-FILES = {
-    "versions": DOWNLOAD_DIR / "award_versions.csv",
-    "amounts": DOWNLOAD_DIR / "award_amounts.csv",
-    "people": DOWNLOAD_DIR / "award_people.csv",
-    "proposals": DOWNLOAD_DIR / "award_proposals.csv",
-    "unit_contacts": DOWNLOAD_DIR / "award_unit_contacts.csv",
-}
-
 
 VERSION_REQUIRED_COLUMNS = {
     "award_id",
@@ -72,71 +61,6 @@ PROPOSAL_REQUIRED_COLUMNS = {
     "award_id",
     "proposal_id",
 }
-
-UNIT_CONTACT_REQUIRED_COLUMNS = {
-    "award_unit_contact_id",
-    "award_id",
-    "award_number",
-    "sequence_number",
-}
-
-
-def require_files(paths: list[Path]) -> None:
-    missing = [
-        str(path)
-        for path in paths
-        if not path.exists()
-    ]
-
-    if missing:
-        raise RuntimeError(
-            "Missing required Award CSV files:\n"
-            + "\n".join(missing)
-        )
-
-
-def normalize_column_name(column: str) -> str:
-    return (
-        column.strip()
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_")
-    )
-
-
-def read_csv(path: Path) -> pd.DataFrame:
-    logger.info("Reading {}", path)
-
-    dataframe = pd.read_csv(
-        path,
-        dtype=str,
-        keep_default_na=True,
-        na_values=["", "NULL", "null"],
-        low_memory=False,
-    )
-
-    dataframe.columns = [
-        normalize_column_name(column)
-        for column in dataframe.columns
-    ]
-
-    dataframe = dataframe.replace(
-        {
-            "": None,
-            "NULL": None,
-            "null": None,
-            "NaN": None,
-            "nan": None,
-        }
-    )
-
-    logger.info(
-        "{} rows read from {}",
-        len(dataframe),
-        path.name,
-    )
-
-    return dataframe
 
 
 def require_columns(
@@ -425,48 +349,6 @@ def prepare_people(
     return dataframe
 
 
-def prepare_unit_contacts(
-    dataframe: pd.DataFrame,
-) -> pd.DataFrame:
-    require_columns(
-        dataframe,
-        UNIT_CONTACT_REQUIRED_COLUMNS,
-        "award_unit_contacts.csv",
-    )
-
-    convert_numeric(
-        dataframe,
-        [
-            "award_unit_contact_id",
-            "award_id",
-            "sequence_number",
-            "ver_nbr",
-        ],
-    )
-
-    convert_dates(
-        dataframe,
-        ["update_timestamp"],
-    )
-
-    duplicate_rows = dataframe.duplicated(
-        subset=["award_unit_contact_id"],
-        keep="first",
-    )
-
-    if duplicate_rows.any():
-        logger.warning(
-            "Removed {} duplicate Award Unit Contact rows",
-            int(duplicate_rows.sum()),
-        )
-
-        dataframe = dataframe.loc[
-            ~duplicate_rows
-        ].copy()
-
-    return dataframe
-
-
 def prepare_proposals(
     dataframe: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -526,7 +408,7 @@ def create_load_run(
             VALUES (
                 'AWARD',
                 'KUALI',
-                'award CSV export set',
+                'Oracle KCOEUS export',
                 :rows_read,
                 'STARTED'
             )
@@ -599,7 +481,6 @@ def clear_existing_award_data(
             """
             TRUNCATE TABLE
                 archive.award_funding_proposal,
-                archive.award_unit_contact,
                 archive.award_person,
                 archive.award_amount_info,
                 archive.award_version
@@ -694,30 +575,19 @@ def parse_args(
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Load Award versions/amounts/people/proposals from Oracle "
-            "(default) or a CSV export set. Unit contacts have no Oracle "
-            "extraction query yet and are always read from CSV."
+            "Load Award versions/amounts/people/proposals from Oracle. "
+            "Unit contacts are not loaded - see docs/DECISIONS.md."
         )
     )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--oracle",
-        action="store_true",
-        help="Read versions/amounts/people/proposals directly from Oracle (the default).",
-    )
-    source.add_argument(
-        "--csv",
-        action="store_true",
-        help="Read all five datasets from the existing CSV export set.",
-    )
     parser.add_argument(
-        "--csv-dir",
-        type=Path,
-        default=DOWNLOAD_DIR,
+        "--limit",
+        type=int,
+        default=None,
         help=(
-            "Directory containing the CSV export set. Used for --csv, "
-            "and always for award_unit_contacts.csv. "
-            f"Defaults to {DOWNLOAD_DIR}."
+            "Truncate every dataset to at most this many rows after "
+            "reading, skip cross-dataset validation, and skip the "
+            "database write entirely (a bounded dry run for testing "
+            "connectivity/transform logic - not a partial load)."
         ),
     )
     return parser.parse_args(arguments)
@@ -725,49 +595,36 @@ def parse_args(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = not arguments.csv
-    csv_dir = arguments.csv_dir
 
-    require_files([csv_dir / "award_unit_contacts.csv"])
-    unit_contacts = prepare_unit_contacts(
-        read_csv(csv_dir / "award_unit_contacts.csv")
+    logger.info("Reading Award versions/amounts/people/proposals from Oracle")
+    versions = prepare_versions(
+        OracleDataSource(VERSIONS_ORACLE_SQL).read()
+    )
+    amounts = prepare_amounts(
+        OracleDataSource(AMOUNTS_ORACLE_SQL).read()
+    )
+    people = prepare_people(
+        OracleDataSource(PEOPLE_ORACLE_SQL).read()
+    )
+    proposals = prepare_proposals(
+        OracleDataSource(PROPOSALS_ORACLE_SQL).read()
     )
 
-    if use_oracle:
-        logger.info("Reading Award versions/amounts/people/proposals from Oracle")
-        versions = prepare_versions(
-            OracleDataSource(VERSIONS_ORACLE_SQL).read()
+    if arguments.limit is not None:
+        versions = versions.head(arguments.limit)
+        amounts = amounts.head(arguments.limit)
+        people = people.head(arguments.limit)
+        proposals = proposals.head(arguments.limit)
+        logger.info(
+            "Dry run (--limit {}): read versions={} amounts={} people={} "
+            "proposals={} - skipping validation and database write.",
+            arguments.limit,
+            len(versions),
+            len(amounts),
+            len(people),
+            len(proposals),
         )
-        amounts = prepare_amounts(
-            OracleDataSource(AMOUNTS_ORACLE_SQL).read()
-        )
-        people = prepare_people(
-            OracleDataSource(PEOPLE_ORACLE_SQL).read()
-        )
-        proposals = prepare_proposals(
-            OracleDataSource(PROPOSALS_ORACLE_SQL).read()
-        )
-    else:
-        require_files(
-            [
-                csv_dir / "award_versions.csv",
-                csv_dir / "award_amounts.csv",
-                csv_dir / "award_people.csv",
-                csv_dir / "award_proposals.csv",
-            ]
-        )
-        versions = prepare_versions(
-            read_csv(csv_dir / "award_versions.csv")
-        )
-        amounts = prepare_amounts(
-            read_csv(csv_dir / "award_amounts.csv")
-        )
-        people = prepare_people(
-            read_csv(csv_dir / "award_people.csv")
-        )
-        proposals = prepare_proposals(
-            read_csv(csv_dir / "award_proposals.csv")
-        )
+        return
 
     validate_child_award_ids(
         versions,
@@ -784,18 +641,12 @@ def main() -> None:
         proposals,
         "award_proposals.csv",
     )
-    validate_child_award_ids(
-        versions,
-        unit_contacts,
-        "award_unit_contacts.csv",
-    )
 
     total_rows = (
         len(versions)
         + len(amounts)
         + len(people)
         + len(proposals)
-        + len(unit_contacts)
     )
 
     engine = create_postgres_engine()
@@ -910,43 +761,6 @@ def main() -> None:
                 load_id,
             )
 
-            unit_contacts = unit_contacts.rename(
-                columns={"obj_id": "source_object_id"}
-            )
-
-            unit_contact_rows = load_dataframe(
-                connection,
-                unit_contacts,
-                "award_unit_contact",
-                [
-                    "award_unit_contact_id",
-                    "award_id",
-                    "award_number",
-                    "sequence_number",
-                    "person_id",
-                    "full_name",
-                    "unit_number",
-                    "unit_name",
-                    "parent_unit_number",
-                    "parent_unit_name",
-                    "unit_administrator_type_code",
-                    "project_role",
-                    "unit_contact_type",
-                    "default_unit_contact",
-                    "primary_title",
-                    "directory_title",
-                    "office_location",
-                    "email_address",
-                    "office_phone",
-                    "phone_extension",
-                    "update_timestamp",
-                    "update_user",
-                    "ver_nbr",
-                    "source_object_id",
-                ],
-                load_id,
-            )
-
             proposal_rows = load_dataframe(
                 connection,
                 proposals,
@@ -968,7 +782,6 @@ def main() -> None:
                 + amount_rows
                 + person_rows
                 + proposal_rows
-                + unit_contact_rows
             )
 
             mark_load_complete(
@@ -979,13 +792,12 @@ def main() -> None:
 
         logger.success(
             "Award load completed. "
-            "load_id={} versions={} amounts={} people={} proposals={} unit_contacts={}",
+            "load_id={} versions={} amounts={} people={} proposals={}",
             load_id,
             len(versions),
             len(amounts),
             len(people),
             len(proposals),
-            len(unit_contacts),
         )
 
     except Exception as error:

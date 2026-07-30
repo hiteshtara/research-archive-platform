@@ -20,9 +20,10 @@ write path to anything.
   an explicit property with no default that enables it.
 - **Known limitation**: authorization today is "is this a valid
   authenticated user," not per-record ownership — any authenticated user in
-  the Cognito pool can query any Award/Protocol/Proposal/etc. This matches
-  the archive's intended access model (authorized BU staff can look up any
-  historical record) but is worth knowing if that assumption ever changes.
+  the Cognito pool can query any Award/Proposal/IRB/etc. record. This
+  matches the archive's intended access model (authorized BU staff can look
+  up any historical record) but is worth knowing if that assumption ever
+  changes.
 
 ## AI features (Award Summary / Award Questions)
 

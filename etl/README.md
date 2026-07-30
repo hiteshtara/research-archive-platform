@@ -33,8 +33,8 @@ process environment.
 
 | Variable | Required for | Notes |
 | --- | --- | --- |
-| `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN` | Any Oracle read (`--oracle` loaders, `load_protocol_*.py`, `archive_attachments.py`, `export_protocol_versions.py`) | `ORACLE_DSN` is an Easy Connect string, e.g. `kuali-oracle.bu.edu:1521/KCPROD` |
-| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Every `load_*.py` script, both reconciliation scripts | — |
+| `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_DSN` | Every `load_*.py` script, `archive_attachments.py` | `ORACLE_DSN` is an Easy Connect string, e.g. `kuali-oracle.bu.edu:1521/KCPROD` |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Every `load_*.py` script | — |
 | `POSTGRES_SSLMODE` | Optional | Defaults to `prefer`. Use `require` or `verify-full` against BU's RDS once TLS is configured |
 | `DATA_BUCKET_NAME` | `load_from_s3.py`, `load_composite_from_s3.py`, `run_export.py`, `run_composite_export.py` | S3 bucket holding IRB Parquet/validation exports |
 | `AWS_REGION` | Optional | Defaults to `us-east-1` |
@@ -51,6 +51,8 @@ time from a new machine or network:
 ```
 uv run python scripts/test_oracle_connection.py
 uv run python scripts/test_postgres_connection.py
+# or both together:
+uv run python -m archive_etl check
 ```
 
 `test_postgres_connection.py` also reports how many migrations are on disk
@@ -61,50 +63,66 @@ exists.
 
 - `load_awards_from_csv.py`, `load_negotiations_from_csv.py`,
   `load_subawards_from_csv.py`, `load_proposals_from_csv.py` — Award,
-  Negotiation, Subaward, and Proposal loaders. Award, Negotiation, and
-  Subaward read directly from Oracle by default (`--csv` to fall back to a
-  CSV export set). Proposal reads versions/awards from Oracle by default but
-  always reads people from CSV — `proposal_persons` in Oracle is missing
-  several columns (`academic_year_effort`, `faculty_flag`, etc.) that the
-  CSV export currently includes, and no verified extraction query exists yet
-  for that shape.
-- `load_protocol_*.py`, `load_protocols_from_csv.py` — Protocol-domain
-  loaders (core, actions, amendments/renewals, locations, funding,
-  personnel, research areas, submissions), all Oracle-direct.
+  Negotiation, Subaward, and Proposal loaders. All read directly from
+  Oracle; there is no CSV path (the `_from_csv` filename suffix is a
+  historical holdover from before CSV ingestion was retired — see
+  `docs/DECISIONS.md`). Award unit contacts and Proposal people had no
+  verified Oracle extraction query and have been removed entirely (API,
+  UI, ETL, and schema — see `docs/DECISIONS.md`).
 - `load_from_s3.py`, `load_composite_from_s3.py` — IRB loaders that read a
   Parquet export from S3 (produced by `run_export.py` /
   `run_composite_export.py` from a manually exported Kuali Excel workbook).
-- `archive_etl/` — shared library code: `pipeline/` (Oracle/CSV data
-  sources, the shared load-and-reconcile framework), `upload/` (Postgres
-  engine creation, migrations, S3 upload), `config/settings.py` (all
+  This is IRB's own separate export/load pipeline and is unaffected by the
+  CSV retirement above.
+- `archive_etl/` — shared library code: `pipeline/` (Oracle data sources,
+  the shared load-and-reconcile framework), `upload/` (Postgres engine
+  creation, migrations, S3 upload), `config/settings.py` (all
   environment-variable validation), `attachments/` (Oracle BLOB streaming
   for document archival), `utils/redaction.py` (secret redaction for error
   messages).
 - `scripts/` — operational scripts: connectivity tests, load reconciliation,
   failed-load listing (see below).
-- `run_protocol_reconciliation.py`, `run_protocol_personnel_reconciliation.py`,
-  `analyze_protocol_parent_resolution.py` — ad hoc data-quality checks
-  against `sql/verify/*.sql`.
 - `archive_attachments.py`, `archive_subaward_attachments.py` — document/
   attachment archival from Oracle BLOB columns.
 - `tests/` — pytest test suite; none of it requires live Oracle/Postgres
   credentials (Oracle/Postgres/S3 clients are mocked).
 
-## Running a loader
+## Unified CLI
 
-Each loader is a standalone script:
+`archive_etl/__main__.py` is a thin dispatcher over the same per-domain
+scripts described below — it exists for a single consistent command shape,
+not a replacement for running a script directly (both work identically):
 
 ```
-uv run python load_awards_from_csv.py            # Oracle (default)
-uv run python load_awards_from_csv.py --csv       # CSV export set fallback
-uv run python load_protocol_actions.py
+uv run python -m archive_etl check                # Oracle + Postgres connectivity, no secrets printed
+uv run python -m archive_etl award                 # same as: load_awards_from_csv.py
+uv run python -m archive_etl subaward --limit 10    # bounded dry run - reads + validates 10 rows per dataset, skips the database write
+```
+
+Covers `award`, `negotiation`, `subaward`, and `proposal`. There is no
+source selection — Oracle is the only supported source. `--limit N`
+truncates every dataset to at most `N` rows after reading, skips
+cross-dataset referential validation (which would otherwise spuriously fail
+against independently truncated datasets), and returns before any database
+write — use it to exercise Oracle connectivity and the transform/prepare
+logic without touching PostgreSQL. It is not a partial-load mechanism.
+
+## Running a loader
+
+Each loader is also a standalone script, exactly as before:
+
+```
+uv run python load_awards_from_csv.py
+uv run python load_awards_from_csv.py --limit 10
 uv run python load_from_s3.py
 ```
 
-Every loader is idempotent: legacy CSV loaders `TRUNCATE`-then-reload their
-target tables inside a transaction; the shared pipeline framework (used by
-the Protocol loaders) does `INSERT ... ON CONFLICT DO UPDATE`. Rerunning a
-loader after a failure is safe — no manual cleanup is required first.
+Every active loader is idempotent via `TRUNCATE`-then-reload inside a
+transaction. Rerunning a loader after a failure is safe — no manual cleanup
+is required first. (`archive_etl/pipeline/postgres.py` also defines a
+generic `INSERT ... ON CONFLICT DO UPDATE` loading framework, but as of the
+Protocol Archive removal no active loader uses it — see "Known issues"
+below.)
 
 Every loader writes a row to `archive.load_run` before it does any risky
 work, so a failure is always visible in the audit trail even if the load
@@ -123,16 +141,11 @@ uv run python scripts/resume_failed_load.py --domain AWARD
 uv run python scripts/reconcile_load.py --load-id 42
 uv run python scripts/reconcile_load.py --domain AWARD --limit 5
 uv run python scripts/reconcile_load.py --latest
-
-# Domain-specific data-quality reconciliation against Oracle
-uv run python run_protocol_reconciliation.py
-uv run python run_protocol_personnel_reconciliation.py
 ```
 
 There is no destructive "rollback" command by design — a loader failure
-leaves the previous successful data in place (legacy loaders reload inside
-a single transaction; the shared framework's `INSERT ... ON CONFLICT`
-approach never deletes rows). Recovery is: fix the underlying problem
+leaves the previous successful data in place (every active loader reloads
+inside a single transaction). Recovery is: fix the underlying problem
 (credentials, source data, network), then rerun the same loader command.
 
 ## Troubleshooting
@@ -152,6 +165,20 @@ approach never deletes rows). Recovery is: fix the underlying problem
 - **Migration gap warning on startup** — a migration file is missing from
   `database/migrations/` relative to the version sequence on disk; check
   version control history for a renamed/deleted file before proceeding.
+
+## Known issues
+
+- `archive_etl/pipeline/postgres.py`'s `PostgreSQLLoader`/
+  `PostgreSQLLoadContext` (`INSERT ... ON CONFLICT DO UPDATE` framework) and
+  `archive_etl/pipeline/sources.py`'s `CsvDataSource` were used only by the
+  Protocol Archive loaders (framework) and, historically, by the CSV path of
+  the domain loaders (`CsvDataSource`) — both are now retired. Each is
+  referenced only by its own module and its own test
+  (`tests/test_pipeline_framework.py`) — no active loader uses either. Both
+  were intentionally left in place rather than deleted, since removing
+  shared-looking framework code was out of scope for the changes that
+  orphaned them; a future change may want to either adopt them for a real
+  use case or remove them as dead code.
 
 ## Development
 

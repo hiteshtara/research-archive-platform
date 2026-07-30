@@ -6,7 +6,6 @@ import {
   GavelOutlined,
   HandshakeOutlined,
   LogoutOutlined,
-  MenuBookOutlined,
   SearchOutlined,
 } from "@mui/icons-material";
 import {
@@ -36,11 +35,6 @@ const navigation = [
     label: "Dashboard",
     icon: <DashboardOutlined />,
     path: "/",
-  },
-  {
-    label: "Protocols",
-    icon: <MenuBookOutlined />,
-    path: "/protocols",
   },
   {
     label: "Awards",

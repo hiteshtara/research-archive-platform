@@ -1,7 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 
 import org.junit.jupiter.api.Test;
@@ -53,59 +52,6 @@ class ProposalArchiveRepositoryTest {
                 "proposalNumber",
                 "P-100"
         );
-    }
-
-    @Test
-    void findCurrentPeopleExcludesPeopleFromOlderVersions() {
-        JdbcClient jdbc = mock(JdbcClient.class);
-        JdbcClient.StatementSpec statement =
-                mock(JdbcClient.StatementSpec.class);
-        @SuppressWarnings("unchecked")
-        JdbcClient.MappedQuerySpec<ProposalPersonResponse> query =
-                mock(JdbcClient.MappedQuerySpec.class);
-
-        when(jdbc.sql(anyString())).thenReturn(statement);
-        when(statement.param(
-                "proposalNumber",
-                "P-100"
-        )).thenReturn(statement);
-        when(statement.query(
-                ProposalPersonResponse.class
-        )).thenReturn(query);
-        when(query.list()).thenReturn(List.of());
-
-        ProposalArchiveRepository repository =
-                new ProposalArchiveRepository(jdbc);
-
-        repository.findCurrentPeople("P-100");
-
-        String sql = org.mockito.Mockito
-                .mockingDetails(jdbc)
-                .getInvocations()
-                .stream()
-                .filter(invocation ->
-                        invocation.getMethod()
-                                .getName()
-                                .equals("sql")
-                )
-                .map(invocation ->
-                        (String) invocation.getArgument(0)
-                )
-                .findFirst()
-                .orElseThrow()
-                .replaceAll("\\s+", " ");
-
-        assertThat(sql)
-                .contains(
-                        "ORDER BY version_number DESC, "
-                                + "source_update_timestamp DESC NULLS LAST, "
-                                + "proposal_id DESC"
-                )
-                .contains(
-                        "current.proposal_id = person.proposal_id "
-                                + "AND current.version_number "
-                                + "= person.version_number"
-                );
     }
 
     @Test

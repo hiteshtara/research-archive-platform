@@ -11,7 +11,6 @@ from archive_etl.attachments.oracle_blob import (
     FileDataBlobReader,
 )
 from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
-from archive_etl.attachments.plugins.irb import IrbProtocolAttachmentPlugin
 from archive_etl.attachments.plugins.negotiation import (
     NegotiationAttachmentPlugin,
 )
@@ -67,7 +66,6 @@ class OracleBlobReaderTest(unittest.TestCase):
         for plugin in (
             AwardAttachmentPlugin(),
             NegotiationAttachmentPlugin(),
-            IrbProtocolAttachmentPlugin(),
         ):
             with self.subTest(module=plugin.module_name):
                 self.assertIsInstance(

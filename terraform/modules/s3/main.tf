@@ -5,7 +5,10 @@ locals {
 
 #
 # DATA BUCKET
-# Stores CSV, Parquet, JSON, validation reports, and ETL files.
+# Used by legacy IRB's Excel/Parquet-via-S3 export/load pipeline only
+# (landing/irb/, landing/irb-composite/, validation/irb/,
+# validation/irb-composite/). Award/Negotiation/Subaward/Proposal read
+# directly from Oracle and never touch this bucket.
 #
 
 resource "aws_s3_bucket" "data" {
@@ -64,48 +67,9 @@ resource "aws_s3_bucket_ownership_controls" "data" {
   }
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "data" {
-  bucket = aws_s3_bucket.data.id
-
-  rule {
-    id     = "archive-old-processed-files"
-    status = "Enabled"
-
-    filter {
-      prefix = "processed/"
-    }
-
-    transition {
-      days          = 90
-      storage_class = "STANDARD_IA"
-    }
-
-    transition {
-      days          = 365
-      storage_class = "GLACIER_IR"
-    }
-  }
-
-  depends_on = [
-    aws_s3_bucket_versioning.data
-  ]
-}
-
 resource "aws_s3_object" "data_landing_prefix" {
   bucket  = aws_s3_bucket.data.id
   key     = "landing/"
-  content = ""
-}
-
-resource "aws_s3_object" "data_processed_prefix" {
-  bucket  = aws_s3_bucket.data.id
-  key     = "processed/"
-  content = ""
-}
-
-resource "aws_s3_object" "data_rejected_prefix" {
-  bucket  = aws_s3_bucket.data.id
-  key     = "rejected/"
   content = ""
 }
 
