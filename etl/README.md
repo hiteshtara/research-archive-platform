@@ -66,12 +66,9 @@ exists.
   Negotiation, Subaward, and Proposal loaders. All read directly from
   Oracle; there is no CSV path (the `_from_csv` filename suffix is a
   historical holdover from before CSV ingestion was retired — see
-  `docs/DECISIONS.md`). Two datasets have no verified Oracle extraction
-  query and are consequently not loaded at all rather than kept on a CSV
-  fallback: Award's unit contacts (`archive.award_unit_contact` goes and
-  stays empty) and Proposal's people (`archive.proposal_person` is left
-  untouched at its last-loaded state, not truncated) — see the module
-  docstring comments in each file.
+  `docs/DECISIONS.md`). Award unit contacts and Proposal people had no
+  verified Oracle extraction query and have been removed entirely (API,
+  UI, ETL, and schema — see `docs/DECISIONS.md`).
 - `load_from_s3.py`, `load_composite_from_s3.py` — IRB loaders that read a
   Parquet export from S3 (produced by `run_export.py` /
   `run_composite_export.py` from a manually exported Kuali Excel workbook).

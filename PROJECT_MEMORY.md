@@ -39,8 +39,6 @@ Completed
 
 ✓ Award People
 
-✓ Award Unit Contacts
-
 Proposal
 
 Completed
@@ -50,8 +48,6 @@ Completed
 ✓ Proposal migration V015
 
 ✓ proposal_version table
-
-✓ proposal_person table
 
 ✓ proposal_award table
 

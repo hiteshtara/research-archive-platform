@@ -2,7 +2,6 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
-import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
@@ -79,16 +78,6 @@ public class ProposalArchiveController {
                         page,
                         size
                 )
-        );
-    }
-
-    @GetMapping("/{proposalNumber}/people")
-    public ResponseEntity<List<ProposalPersonResponse>> people(
-            @PathVariable
-            String proposalNumber
-    ) {
-        return ResponseEntity.ok(
-                service.findCurrentPeople(proposalNumber)
         );
     }
 

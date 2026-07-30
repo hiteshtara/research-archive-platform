@@ -17,18 +17,9 @@ from archive_etl.utils.redaction import redact_error_message
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Oracle extraction queries exist and match the loader's expected columns
-# for versions and awards. proposal_people has no equivalent Oracle query:
-# oracle/proposal's only people-shaped query
-# (sql/extract/proposal/04_proposal_3892_people.sql) is a one-off diagnostic
-# hardcoded to a single proposal_id, and doesn't produce
-# academic_year_effort/calendar_year_effort/summer_effort/total_effort/
-# ver_nbr/source_update_user - columns the retired CSV path used to load.
-# Rather than guess at Oracle columns that may not exist on
-# PROPOSAL_PERSONS, this dataset is no longer loaded at all as of the CSV
-# retirement - see docs/DECISIONS.md. Unlike award_unit_contact,
-# archive.proposal_person has no FK to proposal_version, so it is not
-# included in clear_existing_proposal_data()'s TRUNCATE - existing rows are
-# left completely untouched, not emptied.
+# for versions and awards. Proposal people had no verified Oracle extraction
+# query and has been removed entirely (API, UI, ETL, and the
+# archive.proposal_person table) - see docs/DECISIONS.md.
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "01_proposal_versions.sql"
 )
@@ -374,11 +365,6 @@ def clear_existing_proposal_data(
 ) -> None:
     logger.info("Clearing existing Proposal archive data")
 
-    # archive.proposal_person is intentionally not truncated here: this
-    # dataset is no longer loaded (see the module docstring comment near
-    # the top of this file), and unlike award_unit_contact it has no FK to
-    # proposal_version, so existing rows are simply left untouched rather
-    # than truncated with nothing to replace them.
     connection.execute(
         text(
             """

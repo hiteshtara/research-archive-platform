@@ -30,7 +30,7 @@ proposal_version
 
 proposal_award
 
-proposal_person is not loaded - no verified Oracle extraction query exists,
-and this dataset was dropped rather than kept on a CSV fallback. Existing
-proposal_person rows are left untouched, not truncated.
+Proposal people (`archive.proposal_person`) had no verified Oracle
+extraction query and has been removed entirely (API, UI, ETL, and schema —
+see [`docs/DECISIONS.md`](../DECISIONS.md)).
 

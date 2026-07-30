@@ -19,12 +19,9 @@ from archive_etl.utils.redaction import redact_error_message
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Oracle extraction queries exist for versions/amounts/people/proposals.
-# award_unit_contacts has no corresponding Oracle extraction query
-# (award_unit_contacts.csv is missing columns not yet verified against
-# Oracle), so this dataset is no longer loaded at all as of the CSV
-# retirement - see docs/DECISIONS.md. archive.award_unit_contact is still
-# truncated below (it has a FK to award_version, which must be truncated on
-# every load) but is never repopulated, so it goes and stays empty.
+# Award unit contacts had no verified Oracle extraction query and has been
+# removed entirely (API, UI, ETL, and the archive.award_unit_contact table)
+# - see docs/DECISIONS.md.
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "01_award_versions.sql"
 )
@@ -484,7 +481,6 @@ def clear_existing_award_data(
             """
             TRUNCATE TABLE
                 archive.award_funding_proposal,
-                archive.award_unit_contact,
                 archive.award_person,
                 archive.award_amount_info,
                 archive.award_version
@@ -764,12 +760,6 @@ def main() -> None:
                 ],
                 load_id,
             )
-
-            # archive.award_unit_contact is truncated by
-            # clear_existing_award_data() above (required, since it has a
-            # FK to award_version) but is never reloaded - this dataset has
-            # no verified Oracle extraction query (see the module docstring
-            # comment near the top of this file). It goes and stays empty.
 
             proposal_rows = load_dataframe(
                 connection,
