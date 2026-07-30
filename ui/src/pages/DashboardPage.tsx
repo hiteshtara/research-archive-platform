@@ -45,13 +45,6 @@ const primaryBusinessCards: Array<{
     path: "/irb",
   },
   {
-    key: "protocolFamilies",
-    title: "Protocol Families",
-    description: "Distinct institutional protocol numbers",
-    icon: <ArchiveOutlined />,
-    path: "/protocols",
-  },
-  {
     key: "awards",
     title: "Awards",
     description: "Distinct institutional award numbers",
@@ -75,13 +68,6 @@ const historicalActivityCards: Array<{
   path: string;
 }> = [
   {
-    key: "protocolVersions",
-    title: "Historical Protocol Versions",
-    description: "All historical protocol versions loaded from Kuali",
-    icon: <HistoryOutlined />,
-    path: "/protocols",
-  },
-  {
     key: "awardHistoryRecords",
     title: "Historical Award Records",
     description: "All preserved Kuali Award source rows",
@@ -100,21 +86,21 @@ const historicalActivityCards: Array<{
     title: "Submissions",
     description: "Initial applications, amendments, renewals and other submissions",
     icon: <DescriptionOutlined />,
-    path: "/protocols",
+    path: "/irb",
   },
   {
     key: "fundingRecords",
     title: "Funding Relationships",
-    description: "Archived protocol funding source relationships",
+    description: "Archived IRB funding source relationships",
     icon: <GavelOutlined />,
-    path: "/protocols",
+    path: "/irb",
   },
   {
     key: "timelineEvents",
     title: "Timeline Events",
     description: "Historical workflow and review events",
     icon: <TimelineOutlined />,
-    path: "/protocols",
+    path: "/irb",
   },
 ];
 
@@ -473,24 +459,6 @@ export function DashboardPage() {
               </Typography>
               <Typography sx={{ fontWeight: 700 }}>
                 {dashboard.irb.toLocaleString()}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                Protocol families
-              </Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                {dashboard.protocolFamilies.toLocaleString()}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                Historical versions
-              </Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                {dashboard.protocolVersions.toLocaleString()}
               </Typography>
             </Grid>
 
