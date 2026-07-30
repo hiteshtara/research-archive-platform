@@ -10,6 +10,7 @@ from pandas.errors import EmptyDataError
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.config.settings import use_oracle_source
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
@@ -381,6 +382,17 @@ def parse_args(
         default=DOWNLOAD_DIR,
         help=f"Directory containing the CSV export set. Defaults to {DOWNLOAD_DIR}.",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Truncate every dataset to at most this many rows after "
+            "reading, skip cross-dataset validation, and skip the "
+            "database write entirely (a bounded dry run for testing "
+            "connectivity/transform logic - not a partial load)."
+        ),
+    )
     return parser.parse_args(arguments)
 
 
@@ -662,7 +674,10 @@ def mark_load_complete(
 
 def main() -> None:
     arguments = parse_args()
-    use_oracle = not arguments.csv
+    use_oracle = use_oracle_source(
+        oracle_flag=arguments.oracle,
+        csv_flag=arguments.csv,
+    )
     csv_dir = arguments.csv_dir
 
     if use_oracle:
@@ -677,6 +692,19 @@ def main() -> None:
             spec.key: prepare_dataset(spec, read_csv(spec, csv_dir))
             for spec in DATASETS
         }
+
+    if arguments.limit is not None:
+        datasets = {
+            key: dataframe.head(arguments.limit)
+            for key, dataframe in datasets.items()
+        }
+        logger.info(
+            "Dry run (--limit {}): read {} - skipping validation and "
+            "database write.",
+            arguments.limit,
+            " ".join(f"{key}={len(df):,}" for key, df in datasets.items()),
+        )
+        return
 
     subawards = datasets["subawards"]
     validate_parent_relationships(subawards, datasets)

@@ -57,6 +57,39 @@ def require_postgres_environment(
     return values
 
 
+DEFAULT_SOURCE_MODE = "oracle"
+VALID_SOURCE_MODES = ("oracle", "csv")
+
+
+def get_source_mode(environ: Mapping[str, str] = os.environ) -> str:
+    """Read SOURCE_MODE (default "oracle"). Loaders that support both an
+    Oracle-direct and a CSV-fallback path use this as the default when no
+    explicit --oracle/--csv CLI flag is given - see use_oracle_source()."""
+    mode = environ.get("SOURCE_MODE", DEFAULT_SOURCE_MODE)
+    if mode not in VALID_SOURCE_MODES:
+        raise ConfigurationError(
+            f"SOURCE_MODE must be one of {VALID_SOURCE_MODES}, got: {mode!r}"
+        )
+    return mode
+
+
+def use_oracle_source(
+    *,
+    oracle_flag: bool,
+    csv_flag: bool,
+    environ: Mapping[str, str] = os.environ,
+) -> bool:
+    """Resolve whether a loader supporting --oracle/--csv should read from
+    Oracle. An explicit CLI flag always wins (oracle_flag and csv_flag are
+    expected to come from an argparse mutually-exclusive group, so both can
+    never be true); otherwise falls back to SOURCE_MODE (default "oracle")."""
+    if csv_flag:
+        return False
+    if oracle_flag:
+        return True
+    return get_source_mode(environ) == "oracle"
+
+
 def get_aws_region(environ: Mapping[str, str] = os.environ) -> str:
     return environ.get("AWS_REGION", DEFAULT_AWS_REGION)
 
