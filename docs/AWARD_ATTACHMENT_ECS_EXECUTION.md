@@ -6,7 +6,7 @@ Documents the Award Attachment loader's production execution model
 execution, one-file validation, batch execution (both plain `--limit` and
 the deterministic `--create-batch`/`--load-batch`/`--show-batch`/
 `--upload --batch-id` workflow built on the generic ETL batch framework —
-see [`docs/ETL_BATCH_FRAMEWORK.md`](ETL_BATCH_FRAMEWORK.md)), recovery
+see [`docs/architecture/ETL_BATCH_FRAMEWORK.md`](architecture/ETL_BATCH_FRAMEWORK.md)), recovery
 after interruption, rollback, Secrets Manager requirements, and
 CloudWatch logs.
 
@@ -399,7 +399,7 @@ invocations even select the same N files as each other, if any row's
 validating exactly 10 files end to end) you need a **batch**: a durable,
 immutable manifest of exactly which physical files are in scope, built on
 the generic ETL batch framework (`archive.etl_batch`/`etl_batch_item` —
-see [`docs/ETL_BATCH_FRAMEWORK.md`](ETL_BATCH_FRAMEWORK.md)).
+see [`docs/architecture/ETL_BATCH_FRAMEWORK.md`](architecture/ETL_BATCH_FRAMEWORK.md)).
 
 ### Deterministic batch workflow
 
@@ -461,7 +461,7 @@ scripts/run-award-attachment-loader.sh --show-batch <N>
 
 # 7. Verify the S3 objects directly (out of scope for the loader itself,
 #    which never reads back what it wrote):
-aws s3 ls s3://research-archive-platform-dev-documents-770203350335/attachments/awards/ --recursive | grep -F "<file_id>"
+aws s3 ls s3://research-archive-platform-dev-documents-770203350335/award-files/by-file-id/ --recursive | grep -F "<file_id>"
 
 # 8. Rerun the exact same upload command to prove idempotency - every
 #    file is already UPLOADED with a matching bucket/key, so all 10 are
