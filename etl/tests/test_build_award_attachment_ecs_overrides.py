@@ -86,7 +86,7 @@ class BuildEnvironmentOverridesTest(unittest.TestCase):
             postgres_host="db.internal",
             postgres_port="5432",
             postgres_db="research_archive",
-            data_bucket_name="research-archive-platform-dev-documents-770203350335",
+            award_attachment_bucket_name="research-archive-platform-dev-documents-770203350335",
             aws_region="us-east-1",
         )
 
@@ -99,7 +99,7 @@ class BuildEnvironmentOverridesTest(unittest.TestCase):
                 "POSTGRES_HOST",
                 "POSTGRES_PORT",
                 "POSTGRES_DB",
-                "DATA_BUCKET_NAME",
+                "AWARD_ATTACHMENT_BUCKET_NAME",
                 "AWS_REGION",
             },
         )
@@ -124,7 +124,7 @@ class BuildEnvironmentOverridesTest(unittest.TestCase):
                 "postgres_host",
                 "postgres_port",
                 "postgres_db",
-                "data_bucket_name",
+                "award_attachment_bucket_name",
                 "aws_region",
             },
         )
@@ -201,7 +201,7 @@ class ParseArgsTest(unittest.TestCase):
                 "5432",
                 "--postgres-db",
                 "research_archive",
-                "--data-bucket-name",
+                "--award-attachment-bucket-name",
                 "my-bucket",
                 "--aws-region",
                 "us-east-1",
@@ -220,7 +220,7 @@ class ParseArgsTest(unittest.TestCase):
         self.assertEqual(args.postgres_host, "db.internal")
         self.assertEqual(args.postgres_port, "5432")
         self.assertEqual(args.postgres_db, "research_archive")
-        self.assertEqual(args.data_bucket_name, "my-bucket")
+        self.assertEqual(args.award_attachment_bucket_name, "my-bucket")
         self.assertEqual(args.aws_region, "us-east-1")
 
     def test_parses_migrate_only(self) -> None:

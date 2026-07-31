@@ -122,6 +122,81 @@ resource "aws_iam_role_policy" "task_s3" {
   policy = data.aws_iam_policy_document.task_s3.json
 }
 
+# Award Attachment loader (etl/load_award_attachments.py --ecs): the
+# application code runs as this task role, not the execution role - every
+# Secrets Manager/S3/STS call it makes is authorized here. Granted on
+# exactly the two named secrets, never secretsmanager:*.
+data "aws_iam_policy_document" "task_secrets" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue"
+    ]
+
+    resources = [
+      var.database_secret_arn,
+      var.oracle_secret_arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_secrets" {
+  name   = "${var.project_name}-${var.environment}-loader-task-secrets"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_secrets.json
+}
+
+# Award Attachment loader's documents-bucket access, scoped to its own
+# key prefix (see DEFAULT_S3_KEY_PREFIX in load_award_attachments.py) -
+# entirely separate from task_s3 above, which covers the unrelated,
+# IRB-only data bucket. s3:GetObject/HeadObject are deliberately not
+# granted - this loader never reads back an uploaded object today; add
+# them, scoped the same way, only if a future verification step needs
+# them.
+data "aws_iam_policy_document" "task_documents_s3" {
+  statement {
+    sid    = "ListDocumentsBucketForAwardAttachments"
+    effect = "Allow"
+
+    actions = [
+      "s3:ListBucket",
+      "s3:ListBucketMultipartUploads"
+    ]
+
+    resources = [
+      var.documents_bucket_arn
+    ]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["award-files/by-file-id/*"]
+    }
+  }
+
+  statement {
+    sid    = "UploadAwardAttachmentObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:PutObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts"
+    ]
+
+    resources = [
+      "${var.documents_bucket_arn}/award-files/by-file-id/*"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_documents_s3" {
+  name   = "${var.project_name}-${var.environment}-loader-documents-s3"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_documents_s3.json
+}
+
 resource "aws_ecs_task_definition" "loader" {
   family                   = "${var.project_name}-${var.environment}-loader"
   requires_compatibilities = ["FARGATE"]
@@ -154,6 +229,30 @@ resource "aws_ecs_task_definition" "loader" {
         {
           name  = "IRB_S3_PREFIX"
           value = "landing/irb/"
+        },
+        # Award Attachment loader (--ecs). Deliberately a distinct
+        # variable from DATA_BUCKET_NAME above - that one is the
+        # unrelated, IRB-only data bucket; this one is the documents
+        # bucket load_award_attachments.py uploads to. Secret
+        # identifiers only (ARNs, not credentials) - the loader fetches
+        # username/password/dsn itself, at runtime, from Secrets
+        # Manager. POSTGRES_HOST/PORT/DB are intentionally not added
+        # here as plain values - they are already provided as plain
+        # environment variables via the `secrets` block below (ECS
+        # resolves those from the same PostgreSQL secret before the
+        # container starts), and duplicating the same variable name in
+        # both `environment` and `secrets` is invalid/undefined.
+        {
+          name  = "AWARD_ATTACHMENT_BUCKET_NAME"
+          value = var.documents_bucket_name
+        },
+        {
+          name  = "POSTGRES_SECRET_ID"
+          value = var.database_secret_arn
+        },
+        {
+          name  = "ORACLE_SECRET_ID"
+          value = var.oracle_secret_arn
         }
       ]
 

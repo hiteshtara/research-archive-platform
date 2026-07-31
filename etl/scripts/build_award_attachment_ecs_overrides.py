@@ -6,8 +6,8 @@ Translates CLI pass-through flags (--file-id, --limit, --retry-failed,
 for the "loader" container in the research-archive-platform-dev-loader
 task family (see terraform/modules/ecs/main.tf - not modified here), and
 translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
-POSTGRES_HOST/PORT/DB, DATA_BUCKET_NAME, AWS_REGION) into the container's
-environment override.
+POSTGRES_HOST/PORT/DB, AWARD_ATTACHMENT_BUCKET_NAME, AWS_REGION) into the
+container's environment override.
 
 Only secret *identifiers* (an ARN or name) ever appear here - never a
 password, a DSN, or any secret JSON. There is deliberately no
@@ -77,7 +77,7 @@ def build_environment_overrides(
     postgres_host: str | None = None,
     postgres_port: str | None = None,
     postgres_db: str | None = None,
-    data_bucket_name: str | None = None,
+    award_attachment_bucket_name: str | None = None,
     aws_region: str | None = None,
 ) -> list[dict[str, str]]:
     """Non-secret configuration only. POSTGRES_SECRET_ID/ORACLE_SECRET_ID
@@ -91,7 +91,7 @@ def build_environment_overrides(
         "POSTGRES_HOST": postgres_host,
         "POSTGRES_PORT": postgres_port,
         "POSTGRES_DB": postgres_db,
-        "DATA_BUCKET_NAME": data_bucket_name,
+        "AWARD_ATTACHMENT_BUCKET_NAME": award_attachment_bucket_name,
         "AWS_REGION": aws_region,
     }
     return [
@@ -116,7 +116,7 @@ def build_run_task_overrides(
     postgres_host: str | None = None,
     postgres_port: str | None = None,
     postgres_db: str | None = None,
-    data_bucket_name: str | None = None,
+    award_attachment_bucket_name: str | None = None,
     aws_region: str | None = None,
 ) -> dict:
     container_override: dict[str, object] = {
@@ -139,7 +139,7 @@ def build_run_task_overrides(
         postgres_host=postgres_host,
         postgres_port=postgres_port,
         postgres_db=postgres_db,
-        data_bucket_name=data_bucket_name,
+        award_attachment_bucket_name=award_attachment_bucket_name,
         aws_region=aws_region,
     )
     if environment:
@@ -163,7 +163,7 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--postgres-host", type=str, default=None)
     parser.add_argument("--postgres-port", type=str, default=None)
     parser.add_argument("--postgres-db", type=str, default=None)
-    parser.add_argument("--data-bucket-name", type=str, default=None)
+    parser.add_argument("--award-attachment-bucket-name", type=str, default=None)
     parser.add_argument("--aws-region", type=str, default=None)
     return parser.parse_args(arguments)
 
@@ -184,7 +184,7 @@ def main() -> None:
         postgres_host=args.postgres_host,
         postgres_port=args.postgres_port,
         postgres_db=args.postgres_db,
-        data_bucket_name=args.data_bucket_name,
+        award_attachment_bucket_name=args.award_attachment_bucket_name,
         aws_region=args.aws_region,
     )
     print(json.dumps(overrides))

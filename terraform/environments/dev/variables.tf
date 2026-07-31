@@ -412,6 +412,12 @@ variable "openai_secret_recovery_window_days" {
   default     = 7
 }
 
+variable "oracle_secret_recovery_window_days" {
+  description = "Secrets Manager recovery window for the Oracle (KCOEUS) credentials secret used by the Award Attachment loader. Use 0 only in non-production environments."
+  type        = number
+  default     = 7
+}
+
 variable "additional_api_environment_variables" {
   description = "Extra plaintext environment variables for the API container, e.g. { APP_AI_ENABLED = \"true\", APP_AI_PROVIDER = \"openai\", APP_AI_OPENAI_ENABLED = \"true\" }. See docs/runbooks/ecs-ai-deployment.md for the full set of APP_AI_* flags."
   type        = map(string)

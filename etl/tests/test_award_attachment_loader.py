@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 import load_award_attachments as attachment_loader
-from archive_etl.config.settings import ConfigurationError
 from archive_etl.config.startup_validation import StartupValidationError
 
 
@@ -1494,10 +1493,9 @@ class RunEcsSetupTest(unittest.TestCase):
                 "validate_bucket_exists",
                 side_effect=_track("validate_bucket_exists"),
             ) as validate_bucket,
-            patch.object(
-                attachment_loader,
-                "get_data_bucket_name",
-                side_effect=ConfigurationError("no bucket configured"),
+            patch.dict(
+                attachment_loader.os.environ,
+                {"AWARD_ATTACHMENT_BUCKET_NAME": ""},
             ),
         ):
             result = attachment_loader._run_ecs_setup(arguments, "run-1")
@@ -1735,10 +1733,9 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
             ),
             patch.object(attachment_loader, "validate_postgres_reachable"),
             patch.object(attachment_loader, "validate_oracle_reachable"),
-            patch.object(
-                attachment_loader,
-                "get_data_bucket_name",
-                side_effect=ConfigurationError("no bucket"),
+            patch.dict(
+                attachment_loader.os.environ,
+                {"AWARD_ATTACHMENT_BUCKET_NAME": ""},
             ),
             patch.object(
                 attachment_loader,

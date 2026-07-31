@@ -63,6 +63,11 @@ output "openai_secret_name" {
   value       = var.enable_openai_secret ? module.openai_secret[0].openai_secret_name : null
 }
 
+output "oracle_secret_arn" {
+  description = "ARN of the Oracle (KCOEUS) credentials secret for the Award Attachment loader. Terraform creates only the empty container - populate the value out-of-band (see docs/AWARD_ATTACHMENT_ECS_EXECUTION.md)."
+  value       = aws_secretsmanager_secret.oracle.arn
+}
+
 output "loader_ecr_repository_url" {
   value = module.loader_ecr.repository_url
 }
@@ -73,6 +78,11 @@ output "loader_ecs_cluster_name" {
 
 output "loader_task_definition_arn" {
   value = module.loader_ecs.task_definition_arn
+}
+
+output "loader_task_role_arn" {
+  description = "ARN of the task role application code inside the loader container runs as (Secrets Manager/S3/STS calls are authorized here, not via the execution role)."
+  value       = module.loader_ecs.loader_task_role_arn
 }
 
 output "loader_security_group_id" {

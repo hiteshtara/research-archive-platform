@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import time
 import uuid
 from collections.abc import Iterator
@@ -48,11 +49,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from archive_etl.attachments.models import sanitize_file_name
 from archive_etl.config.ecs import configure_ecs_environment
-from archive_etl.config.settings import (
-    ConfigurationError,
-    get_data_bucket_name,
-    require_oracle_environment,
-)
+from archive_etl.config.settings import require_oracle_environment
 from archive_etl.config.startup_validation import (
     validate_bucket_exists,
     validate_oracle_reachable,
@@ -88,6 +85,13 @@ PROJECT_ROOT = _resolve_project_root()
 _ORACLE_DIR = PROJECT_ROOT / "oracle" / "award"
 REFERENCES_ORACLE_SQL = _ORACLE_DIR / "export_award_attachments.sql"
 FILES_ORACLE_SQL = _ORACLE_DIR / "export_award_attachment_files.sql"
+
+# --ecs mode's production default for --bucket. Deliberately NOT
+# DATA_BUCKET_NAME - that variable is wired to a different, IRB-only S3
+# bucket (see terraform/modules/s3/main.tf's "DATA BUCKET" comment and
+# docs/AWARD_ATTACHMENT_ECS_EXECUTION.md) and using it here would silently
+# upload Award attachments to the wrong destination.
+AWARD_ATTACHMENT_BUCKET_NAME_VARIABLE = "AWARD_ATTACHMENT_BUCKET_NAME"
 
 # Sprint 2 (upload) defaults.
 DEFAULT_S3_KEY_PREFIX = "award-files/by-file-id"
@@ -1146,8 +1150,10 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "(POSTGRES_SECRET_ID/ORACLE_SECRET_ID - never a plaintext "
             "environment variable, never a local .env export), switch to "
             "structured JSON logging for CloudWatch, apply production "
-            "defaults (--bucket defaults to DATA_BUCKET_NAME if not "
-            "given), and run startup validation (AWS identity, secrets, "
+            "defaults (--bucket defaults to AWARD_ATTACHMENT_BUCKET_NAME "
+            "if not given - deliberately not DATA_BUCKET_NAME, a "
+            "different, IRB-only bucket), and run startup validation "
+            "(AWS identity, secrets, "
             "PostgreSQL/Oracle reachable, S3 bucket exists, Award "
             "attachment tables present, upload_status schema matches "
             "V036) before processing anything - aborts immediately on "
@@ -1345,10 +1351,9 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     logger.bind(stage="startup").info("Oracle reachable")
 
     if not arguments.bucket:
-        try:
-            arguments.bucket = get_data_bucket_name()
-        except ConfigurationError:
-            pass
+        arguments.bucket = (
+            os.environ.get(AWARD_ATTACHMENT_BUCKET_NAME_VARIABLE) or None
+        )
 
     if arguments.bucket:
         s3_client = create_s3_client()

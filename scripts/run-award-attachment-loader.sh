@@ -34,8 +34,8 @@ set -euo pipefail
 #
 # Optional environment (sensible defaults matching the current
 # Terraform naming convention, or simply omitted if not set - the loader
-# falls back to its own POSTGRES_HOST/PORT/DB env vars or DATA_BUCKET_NAME
-# defaults when these aren't passed through):
+# falls back to its own POSTGRES_HOST/PORT/DB env vars or
+# AWARD_ATTACHMENT_BUCKET_NAME defaults when these aren't passed through):
 #   AWS_REGION         (default: us-east-1)
 #   PROJECT_NAME        (default: research-archive-platform)
 #   ENVIRONMENT         (default: dev)
@@ -44,9 +44,12 @@ set -euo pipefail
 #   POSTGRES_HOST/POSTGRES_PORT/POSTGRES_DB  - only needed as a fallback
 #     for whichever of host/port/dbname the PostgreSQL secret doesn't
 #     include itself
-#   DATA_BUCKET_NAME   - documents bucket name, passed through as a
-#                          plain (non-secret) container environment
-#                          override
+#   AWARD_ATTACHMENT_BUCKET_NAME   - documents bucket name, passed
+#                          through as a plain (non-secret) container
+#                          environment override. Deliberately NOT
+#                          DATA_BUCKET_NAME - that is a different,
+#                          IRB-only bucket (see
+#                          docs/AWARD_ATTACHMENT_ECS_EXECUTION.md).
 #
 # None of POSTGRES_USER, POSTGRES_PASSWORD, ORACLE_USER, ORACLE_PASSWORD,
 # or ORACLE_DSN are ever read or passed through by this script - in --ecs
@@ -188,15 +191,15 @@ OVERRIDE_ARGS=()
 # Non-secret configuration only - identifiers and connection routing
 # info, never a password/DSN/secret value. POSTGRES_SECRET_ID is always
 # required (checked above); ORACLE_SECRET_ID is required unless
-# --migrate-only. POSTGRES_HOST/PORT/DB and DATA_BUCKET_NAME/AWS_REGION
-# are passed through only if set - the loader has its own fallbacks/
-# defaults for all of them.
+# --migrate-only. POSTGRES_HOST/PORT/DB and
+# AWARD_ATTACHMENT_BUCKET_NAME/AWS_REGION are passed through only if set
+# - the loader has its own fallbacks/defaults for all of them.
 OVERRIDE_ARGS+=(--postgres-secret-id "$POSTGRES_SECRET_ID")
 [[ -n "${ORACLE_SECRET_ID:-}" ]] && OVERRIDE_ARGS+=(--oracle-secret-id "$ORACLE_SECRET_ID")
 [[ -n "${POSTGRES_HOST:-}" ]] && OVERRIDE_ARGS+=(--postgres-host "$POSTGRES_HOST")
 [[ -n "${POSTGRES_PORT:-}" ]] && OVERRIDE_ARGS+=(--postgres-port "$POSTGRES_PORT")
 [[ -n "${POSTGRES_DB:-}" ]] && OVERRIDE_ARGS+=(--postgres-db "$POSTGRES_DB")
-[[ -n "${DATA_BUCKET_NAME:-}" ]] && OVERRIDE_ARGS+=(--data-bucket-name "$DATA_BUCKET_NAME")
+[[ -n "${AWARD_ATTACHMENT_BUCKET_NAME:-}" ]] && OVERRIDE_ARGS+=(--award-attachment-bucket-name "$AWARD_ATTACHMENT_BUCKET_NAME")
 [[ -n "$AWS_REGION" ]] && OVERRIDE_ARGS+=(--aws-region "$AWS_REGION")
 
 OVERRIDES_JSON="$(

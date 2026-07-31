@@ -95,7 +95,16 @@ uv run mypy .
    failure.
 
 It also applies one **production default**: `--bucket` defaults to the
-`DATA_BUCKET_NAME` environment variable when not explicitly given.
+`AWARD_ATTACHMENT_BUCKET_NAME` environment variable when not explicitly
+given. This is deliberately **not** `DATA_BUCKET_NAME` - that variable
+points at a different, IRB-only bucket
+(`research-archive-platform-dev-data-<account-id>`, used only by
+`load_from_s3.py`/`load_composite_from_s3.py`'s Excel/Parquet export
+pipeline - see `terraform/modules/s3/main.tf`'s "DATA BUCKET" comment).
+Reusing `DATA_BUCKET_NAME` for the Award Attachment loader would have
+silently repointed IRB's existing, working bucket resolution at the
+wrong bucket, since both loaders share the same ECS task family/
+container environment.
 
 AWS credentials themselves need no special handling — running inside a
 real ECS task, `boto3`'s default credential chain already picks up the
@@ -222,7 +231,7 @@ order (`load_award_attachments.py`'s `_run_ecs_setup()`):
 8. Verify Oracle connectivity (`SELECT 1 FROM DUAL`)
 9. Verify S3 bucket access (`HEAD` — skipped, not failed, if no bucket is
    configured at all, e.g. a metadata-only `--ecs` run with no
-   `--bucket`/`DATA_BUCKET_NAME`)
+   `--bucket`/`AWARD_ATTACHMENT_BUCKET_NAME`)
 10. Verify `archive.attachment_object` and `archive.award_attachment`
     tables exist
 11. Verify `archive.attachment_object.upload_status`'s CHECK constraint
@@ -329,10 +338,10 @@ pure, independently-tested function — see
 
 The script also passes `POSTGRES_SECRET_ID`/`ORACLE_SECRET_ID` (and,
 optionally, `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/
-`DATA_BUCKET_NAME`/`AWS_REGION`) through as **non-secret** container
-environment overrides — identifiers and connection routing info only.
-There is no flag, environment variable, or code path anywhere in the
-script or the override builder that accepts a password, a DSN, or a
+`AWARD_ATTACHMENT_BUCKET_NAME`/`AWS_REGION`) through as **non-secret**
+container environment overrides — identifiers and connection routing info
+only. There is no flag, environment variable, or code path anywhere in
+the script or the override builder that accepts a password, a DSN, or a
 secret's JSON content; the loader resolves those itself, at runtime, from
 Secrets Manager.
 
@@ -342,7 +351,7 @@ them): `ECR_REPOSITORY_URI`, `SUBNET_IDS`, `SECURITY_GROUP_ID`,
 `--migrate-only` is passed. See the script's own header comment for the
 full list of optional overrides (`AWS_REGION`, `PROJECT_NAME`,
 `ENVIRONMENT`, `CLUSTER_NAME`, `TASK_FAMILY`, `POSTGRES_HOST`/`PORT`/`DB`,
-`DATA_BUCKET_NAME`).
+`AWARD_ATTACHMENT_BUCKET_NAME`).
 
 Example — bootstrap a fresh database:
 ```bash
@@ -357,7 +366,7 @@ build/push, task-definition registration, and — with `--upload` and
 without `--dry-run` — a real upload run). It was authored and reviewed on
 this branch but has not been executed.
 
-## IAM permissions (documentation only — Terraform not modified)
+## IAM permissions (implemented in Terraform - not yet applied)
 
 The application code inside the loader container runs as the **task
 role** (`aws_iam_role.task` in `terraform/modules/ecs/main.tf`), not the
@@ -366,15 +375,17 @@ S3, STS) is authorized by the task role's policy. The **execution role**
 (`aws_iam_role.execution`) is used only by the ECS agent itself: pulling
 the container image and (for the *existing* IRB loader path only)
 resolving its own `secrets` block before the container starts. No
-application-level Secrets Manager or S3 call should ever depend on the
-execution role's permissions.
+application-level Secrets Manager or S3 call depends on the execution
+role's permissions.
 
-**Confirmed gap (from the implementation audit):** the task role
-currently has **no** `secretsmanager:GetSecretValue` permission at all,
-and lacks the S3 multipart-upload actions Sprint 2's large-file path
-needs. Both are required before a real `--ecs` run can succeed.
-
-Task role — minimum additions needed:
+The task role previously had **no** `secretsmanager:GetSecretValue`
+permission at all, and lacked the S3 multipart-upload actions Sprint 2's
+large-file path needs (confirmed by the implementation audit). Both are
+now defined in `terraform/modules/ecs/main.tf` — `aws_iam_role_policy.
+task_secrets` and `aws_iam_role_policy.task_documents_s3` — as two new,
+separate policies (kept apart from the pre-existing `task_s3` policy,
+which is untouched and still covers the unrelated, IRB-only data
+bucket):
 
 ```json
 {
@@ -386,20 +397,23 @@ Task role — minimum additions needed:
       "Action": "secretsmanager:GetSecretValue",
       "Resource": [
         "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-4k6Ngz",
-        "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/oracle-??????"
+        "<research-archive-platform/dev/oracle secret ARN - known only after Terraform creates it>"
       ]
     },
     {
-      "Sid": "ListBucketForHeadBucketAndMultipartUploads",
+      "Sid": "ListDocumentsBucketForAwardAttachments",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
         "s3:ListBucketMultipartUploads"
       ],
-      "Resource": "arn:aws:s3:::research-archive-platform-dev-documents-770203350335"
+      "Resource": "arn:aws:s3:::research-archive-platform-dev-documents-770203350335",
+      "Condition": {
+        "StringLike": { "s3:prefix": "award-files/by-file-id/*" }
+      }
     },
     {
-      "Sid": "UploadObjects",
+      "Sid": "UploadAwardAttachmentObjects",
       "Effect": "Allow",
       "Action": [
         "s3:PutObject",
@@ -414,24 +428,29 @@ Task role — minimum additions needed:
 
 Notes:
 - Exactly two named secret ARNs — never `secretsmanager:*` or a wildcard
-  resource. The Oracle secret's exact suffix (`-??????`) isn't known
-  until it's created (Secrets Manager appends a random 6-character
-  suffix); update this policy with the real ARN once provisioned.
+  resource. Both policies are scoped to the task role only.
 - `s3:HeadBucket` (this loader's bucket-exists check) is, per AWS's own
   API reference, authorized via the `s3:ListBucket` action — there is no
-  separate `s3:HeadBucket` IAM action to grant.
-- `s3:GetObject`/`s3:HeadObject` are **not** currently needed — this
-  loader never reads back an uploaded object. Add them only if a future
-  verification step requires it.
+  separate `s3:HeadBucket` IAM action to grant. The `s3:prefix` condition
+  constrains what a `ListBucket`/`ListBucketMultipartUploads` call is
+  allowed to *return*, not the bucket-level resource ARN itself (S3's
+  bucket-level actions are inherently whole-bucket in `Resource`; the
+  condition is the mechanism for narrowing what they can see).
+- `s3:GetObject`/`s3:HeadObject` are **not** granted — this loader never
+  reads back an uploaded object today. Add them, scoped the same way,
+  only if a future verification step requires it.
 - `s3:ListBucketMultipartUploads` is inherently bucket-level (no
-  object-level equivalent) — the one genuinely unavoidable wildcard-like
-  scope, and it's still restricted to the specific bucket, never `*`.
+  object-level equivalent) — the one genuinely unavoidable
+  whole-bucket-ARN scope, still restricted to this one bucket, never `*`,
+  and still narrowed by the same prefix condition.
 - The upload key prefix (`award-files/by-file-id/*`) matches
   `DEFAULT_S3_KEY_PREFIX` in `load_award_attachments.py`; if `--prefix` is
   ever overridden to something outside that path, this policy's resource
   scope needs widening accordingly.
+- The pre-existing `task_s3` policy (IRB's data bucket:
+  `s3:ListBucket`/`s3:GetObject`/`s3:PutObject`) is completely unchanged.
 
-Execution role — **no change needed**: retains its existing
+Execution role — **no change made or needed**: retains its existing
 `AmazonECSTaskExecutionRolePolicy` (ECR pull + CloudWatch Logs
 `CreateLogStream`/`PutLogEvents`/`CreateLogGroup`) and its existing
 `secretsmanager:GetSecretValue` grant on the Postgres secret (used only
@@ -442,30 +461,44 @@ this loader's own direct Secrets Manager calls).
 **no IAM policy grant at all** — it's usable by any valid AWS identity
 with zero prior permissions, by design.
 
-Task-definition environment additions needed (non-secret; the actual
-`secrets` block stays as today's `POSTGRES_HOST/PORT/DB/USER/PASSWORD`
-for the *existing* IRB path — this is additive, not a replacement):
+Task-definition environment additions (`terraform/modules/ecs/main.tf`'s
+`environment` block; the pre-existing `secrets` block, which already
+resolves `POSTGRES_HOST/PORT/DB/USER/PASSWORD` as plain environment
+variables from the Postgres secret before the container starts, is
+completely unchanged — adding the same variable names again via
+`environment` would be an invalid/undefined duplicate):
 
-| Variable | Purpose |
-| --- | --- |
-| `POSTGRES_SECRET_ID` | ARN/name of the PostgreSQL secret, for this loader's own direct Secrets Manager call |
-| `ORACLE_SECRET_ID` | ARN/name of the Oracle secret (once provisioned) |
-| `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` | Fallback only for whichever of host/port/dbname the secret doesn't include itself — likely redundant given the secret already has all three, but harmless to include |
-| `DATA_BUCKET_NAME` | Already present today for the IRB path; reused as this loader's `--bucket` default |
-| `AWS_REGION` | Already present today; the SDK's own region resolution applies regardless |
+| Variable | Source | Purpose |
+| --- | --- | --- |
+| `POSTGRES_SECRET_ID` | `var.database_secret_arn` (existing) | ARN of the PostgreSQL secret, for this loader's own direct Secrets Manager call |
+| `ORACLE_SECRET_ID` | `var.oracle_secret_arn` (new — `aws_secretsmanager_secret.oracle.arn`) | ARN of the Oracle secret |
+| `AWARD_ATTACHMENT_BUCKET_NAME` | `var.documents_bucket_name` (new) | Documents bucket name — deliberately not `DATA_BUCKET_NAME` (see "ECS execution" above) |
+| `DATA_BUCKET_NAME` | Unchanged | Still the IRB-only data bucket, for `load_from_s3.py` |
+| `AWS_REGION` | Unchanged | The SDK's own region resolution applies regardless |
+
+`POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` were **not** added as new
+plain `environment` entries — they're already provided as plain
+environment variables via the existing `secrets` block above, and the
+loader's `resolve_postgres_credentials()` already falls back to them
+(under those exact names) if the secret itself ever lacked host/port/
+dbname, which it doesn't today.
 
 ## Scope confirmation
 
 - No API, UI, presigned URLs, or download endpoints — unchanged from
   Sprint 1/2.
-- Terraform is unmodified. `terraform/modules/ecs/main.tf` and
-  `terraform/modules/rds/main.tf` are read as the source of truth for
-  cluster/task-family/secret naming, not changed. The "IAM permissions"
-  section above documents the exact changes Terraform will need later.
-- `etl/Dockerfile.loader` **was** updated (not Terraform) — it previously
-  only copied `load_from_s3.py`/`load_composite_from_s3.py` into the
-  image, not `load_award_attachments.py` or the `oracle/` SQL directory
-  it needs. Without this fix, `--ecs` execution would fail immediately
-  inside the container regardless of any other Sprint 3 work.
-- No secret was created, no live migration was applied, and no ECS task
-  was launched as part of this work.
+- Terraform **has now been modified** (`terraform/modules/ecs/`,
+  `terraform/environments/dev/main.tf`/`variables.tf`/`outputs.tf`) to
+  create the Oracle secret container, grant the task role the IAM
+  permissions above, and add the new task-definition environment
+  variables — but `terraform apply` has not been run. `terraform plan`
+  was run and reviewed (see the branch's commit history for the exact
+  plan summary); the Oracle secret's value is never in Terraform state
+  or source code, only its container/ARN.
+- `etl/Dockerfile.loader` was also updated (separately, earlier) — it
+  previously only copied `load_from_s3.py`/`load_composite_from_s3.py`
+  into the image, not `load_award_attachments.py` or the `oracle/` SQL
+  directory it needs. Without that fix, `--ecs` execution would fail
+  immediately inside the container regardless of any other work here.
+- No secret value was created, no live migration was applied, and no ECS
+  task was built, pushed, registered, or launched as part of this work.
