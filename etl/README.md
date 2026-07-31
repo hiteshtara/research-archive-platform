@@ -69,6 +69,12 @@ exists.
   `docs/DECISIONS.md`). Award unit contacts and Proposal people had no
   verified Oracle extraction query and have been removed entirely (API,
   UI, ETL, and schema — see `docs/DECISIONS.md`).
+- `load_protocols.py` — Protocol loader (`archive.protocol_version` /
+  `protocol_person` / `protocol_unit`), Oracle-direct only, entirely
+  independent of and additive to legacy IRB. See
+  `docs/PROTOCOL_ORACLE_LOADER.md` for the full architecture — it has its
+  own parent-resolution model and reconciliation shape distinct from the
+  other four domains above.
 - `load_from_s3.py`, `load_composite_from_s3.py` — IRB loaders that read a
   Parquet export from S3 (produced by `run_export.py` /
   `run_composite_export.py` from a manually exported Kuali Excel workbook).
@@ -97,15 +103,25 @@ not a replacement for running a script directly (both work identically):
 uv run python -m archive_etl check                # Oracle + Postgres connectivity, no secrets printed
 uv run python -m archive_etl award                 # same as: load_awards_from_csv.py
 uv run python -m archive_etl subaward --limit 10    # bounded dry run - reads + validates 10 rows per dataset, skips the database write
+uv run python -m archive_etl protocol --limit 10    # Protocol: bounded, coherent sample - see docs/PROTOCOL_ORACLE_LOADER.md
 ```
 
-Covers `award`, `negotiation`, `subaward`, and `proposal`. There is no
-source selection — Oracle is the only supported source. `--limit N`
+Covers `award`, `negotiation`, `subaward`, `proposal`, and `protocol`. There
+is no source selection — Oracle is the only supported source. `--limit N`
 truncates every dataset to at most `N` rows after reading, skips
 cross-dataset referential validation (which would otherwise spuriously fail
 against independently truncated datasets), and returns before any database
 write — use it to exercise Oracle connectivity and the transform/prepare
 logic without touching PostgreSQL. It is not a partial-load mechanism.
+
+`protocol --limit N` is the one exception to "truncates independently per
+dataset": it samples up to `N` protocol versions first, then keeps only the
+personnel/units that genuinely belong to those versions (a coherent sample,
+not an independent `head(N)` per dataset), and stops the Oracle fetch early
+rather than reading the full table. See
+[`docs/PROTOCOL_ORACLE_LOADER.md`](../docs/PROTOCOL_ORACLE_LOADER.md) for
+the full Protocol-specific architecture, reconciliation metrics, and
+deployment procedure.
 
 ## Running a loader
 
