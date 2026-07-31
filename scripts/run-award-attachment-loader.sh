@@ -61,7 +61,10 @@ set -euo pipefail
 #   scripts/run-award-attachment-loader.sh [--dry-run] [--upload] \
 #       [--migrate-only] [--show-upload-status] [--load-file-id N] \
 #       [--limit N] [--file-id N] [--retry-failed] [--bucket NAME] \
-#       [--prefix PREFIX] [--image-uri URI]
+#       [--prefix PREFIX] [--image-uri URI] \
+#       [--create-batch N] [--include-already-uploaded] \
+#       [--load-batch BATCH_ID] [--show-batch BATCH_ID] \
+#       [--batch-id BATCH_ID]
 #
 # --image-uri <full-ecr-image-uri>: reuse an already-built-and-pushed
 #   image instead of building/pushing a new one. When given, this script
@@ -89,6 +92,27 @@ set -euo pipefail
 #   Combine with --dry-run to see inserted/updated/unchanged/missing
 #   counts without persisting anything.
 #
+# --create-batch N (optionally with --include-already-uploaded): select
+#   exactly N distinct physical file_ids from Oracle, in stable ascending
+#   file_id order, and persist that exact membership as a new batch
+#   (archive.etl_batch/etl_batch_item - the generic ETL batch framework,
+#   see docs/ETL_BATCH_FRAMEWORK.md). Requires ORACLE_SECRET_ID. Never
+#   reads a BLOB, never touches S3.
+#
+# --load-batch BATCH_ID: idempotent metadata load for exactly this
+#   batch's recorded membership - the batch equivalent of --load-file-id.
+#   Requires ORACLE_SECRET_ID. Never reads a BLOB, never touches S3.
+#
+# --show-batch BATCH_ID: read-only status report for one batch (requested
+#   size, status, and file counts by metadata-load/upload state). Unlike
+#   every other --ecs mode except --migrate-only/--show-upload-status,
+#   this does NOT require ORACLE_SECRET_ID - it's PostgreSQL-only.
+#
+# --batch-id BATCH_ID (only valid with --upload): restrict the upload run
+#   to exactly this batch's membership, instead of every PENDING/
+#   UPLOADING (+FAILED with --retry-failed) row. Mutually exclusive with
+#   --file-id and with --create-batch/--load-batch/--show-batch.
+#
 # Examples:
 #   # Bootstrap a fresh database (apply migrations, validate schema, exit):
 #   POSTGRES_SECRET_ID=arn:...:postgres \
@@ -115,6 +139,15 @@ set -euo pipefail
 #   # Reuse an already-pushed image instead of building a new one:
 #   scripts/run-award-attachment-loader.sh --migrate-only \
 #       --image-uri 770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader:20260731T005343Z-b0d475d
+#
+#   # Deterministic 10-file batch workflow - see
+#   # docs/AWARD_ATTACHMENT_ECS_EXECUTION.md for the full sequence:
+#   scripts/run-award-attachment-loader.sh --create-batch 10
+#   scripts/run-award-attachment-loader.sh --show-batch 1
+#   scripts/run-award-attachment-loader.sh --load-batch 1
+#   scripts/run-award-attachment-loader.sh --show-batch 1
+#   scripts/run-award-attachment-loader.sh --upload --batch-id 1 --bucket my-bucket
+#   scripts/run-award-attachment-loader.sh --show-batch 1
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -141,6 +174,11 @@ SHOW_UPLOAD_STATUS=false
 BUCKET=""
 PREFIX=""
 IMAGE_URI_OVERRIDE=""
+CREATE_BATCH=""
+INCLUDE_ALREADY_UPLOADED=false
+LOAD_BATCH=""
+SHOW_BATCH=""
+BATCH_ID=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -155,6 +193,11 @@ while [[ $# -gt 0 ]]; do
     --bucket) BUCKET="$2"; shift 2 ;;
     --prefix) PREFIX="$2"; shift 2 ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
+    --create-batch) CREATE_BATCH="$2"; shift 2 ;;
+    --include-already-uploaded) INCLUDE_ALREADY_UPLOADED=true; shift ;;
+    --load-batch) LOAD_BATCH="$2"; shift 2 ;;
+    --show-batch) SHOW_BATCH="$2"; shift 2 ;;
+    --batch-id) BATCH_ID="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -164,8 +207,69 @@ if [[ "$SHOW_UPLOAD_STATUS" == true && -z "$FILE_ID" ]]; then
   exit 1
 fi
 
-if [[ "$MIGRATE_ONLY" == false && "$SHOW_UPLOAD_STATUS" == false ]]; then
-  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only/--show-upload-status)}"
+# Batch-verb validation, mirroring load_award_attachments.py's own
+# parse_args - fail fast here rather than only inside the ECS task, after
+# an image build/push and a task-definition registration have already run.
+ACTIVE_BATCH_VERBS=()
+[[ -n "$CREATE_BATCH" ]] && ACTIVE_BATCH_VERBS+=(--create-batch)
+[[ -n "$LOAD_BATCH" ]] && ACTIVE_BATCH_VERBS+=(--load-batch)
+[[ -n "$SHOW_BATCH" ]] && ACTIVE_BATCH_VERBS+=(--show-batch)
+
+if [[ "${#ACTIVE_BATCH_VERBS[@]}" -gt 1 ]]; then
+  echo "ERROR: ${ACTIVE_BATCH_VERBS[*]} cannot be combined - choose one batch operation at a time" >&2
+  exit 1
+fi
+
+if [[ -n "$CREATE_BATCH" ]] && ! [[ "$CREATE_BATCH" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: --create-batch must be a positive integer, got '$CREATE_BATCH'" >&2
+  exit 1
+fi
+
+if [[ "$INCLUDE_ALREADY_UPLOADED" == true && -z "$CREATE_BATCH" ]]; then
+  echo "ERROR: --include-already-uploaded requires --create-batch" >&2
+  exit 1
+fi
+
+if [[ "${#ACTIVE_BATCH_VERBS[@]}" -gt 0 ]]; then
+  if [[ "$UPLOAD" == true ]]; then
+    echo "ERROR: ${ACTIVE_BATCH_VERBS[0]} cannot be combined with --upload - use --upload --batch-id BATCH_ID to upload a batch" >&2
+    exit 1
+  fi
+  if [[ -n "$LOAD_FILE_ID" ]]; then
+    echo "ERROR: ${ACTIVE_BATCH_VERBS[0]} cannot be combined with --load-file-id" >&2
+    exit 1
+  fi
+  if [[ -n "$FILE_ID" ]]; then
+    echo "ERROR: ${ACTIVE_BATCH_VERBS[0]} cannot be combined with --file-id" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$BATCH_ID" ]]; then
+  if [[ "$UPLOAD" == false ]]; then
+    echo "ERROR: --batch-id is only valid together with --upload" >&2
+    exit 1
+  fi
+  if [[ "${#ACTIVE_BATCH_VERBS[@]}" -gt 0 ]]; then
+    echo "ERROR: --batch-id cannot be combined with ${ACTIVE_BATCH_VERBS[0]}" >&2
+    exit 1
+  fi
+  if [[ -n "$LOAD_FILE_ID" ]]; then
+    echo "ERROR: --batch-id cannot be combined with --load-file-id" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$FILE_ID" && -n "$BATCH_ID" ]]; then
+  echo "ERROR: --file-id and --batch-id cannot be combined" >&2
+  exit 1
+fi
+
+# --show-batch is PostgreSQL-only (like --migrate-only/--show-upload-status),
+# so it's exempt from the Oracle secret requirement below; --create-batch
+# and --load-batch both read Oracle and so are NOT exempt.
+if [[ "$MIGRATE_ONLY" == false && "$SHOW_UPLOAD_STATUS" == false && -z "$SHOW_BATCH" ]]; then
+  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only/--show-upload-status/--show-batch)}"
 fi
 
 if [[ -z "$IMAGE_URI_OVERRIDE" ]]; then
@@ -272,6 +376,11 @@ OVERRIDE_ARGS=()
 [[ "$UPLOAD" == true ]] && OVERRIDE_ARGS+=(--upload)
 [[ "$MIGRATE_ONLY" == true ]] && OVERRIDE_ARGS+=(--migrate-only)
 [[ "$SHOW_UPLOAD_STATUS" == true ]] && OVERRIDE_ARGS+=(--show-upload-status)
+[[ -n "$CREATE_BATCH" ]] && OVERRIDE_ARGS+=(--create-batch "$CREATE_BATCH")
+[[ "$INCLUDE_ALREADY_UPLOADED" == true ]] && OVERRIDE_ARGS+=(--include-already-uploaded)
+[[ -n "$LOAD_BATCH" ]] && OVERRIDE_ARGS+=(--load-batch "$LOAD_BATCH")
+[[ -n "$SHOW_BATCH" ]] && OVERRIDE_ARGS+=(--show-batch "$SHOW_BATCH")
+[[ -n "$BATCH_ID" ]] && OVERRIDE_ARGS+=(--batch-id "$BATCH_ID")
 [[ -n "$BUCKET" ]] && OVERRIDE_ARGS+=(--bucket "$BUCKET")
 [[ -n "$PREFIX" ]] && OVERRIDE_ARGS+=(--prefix "$PREFIX")
 

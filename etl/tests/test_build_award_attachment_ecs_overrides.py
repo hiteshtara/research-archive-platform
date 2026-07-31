@@ -130,6 +130,52 @@ class BuildContainerCommandTest(unittest.TestCase):
         self.assertNotIn("--file-id", command)
         self.assertNotIn("--retry-failed", command)
         self.assertNotIn("--migrate-only", command)
+        self.assertNotIn("--create-batch", command)
+        self.assertNotIn("--load-batch", command)
+        self.assertNotIn("--show-batch", command)
+        self.assertNotIn("--batch-id", command)
+
+    def test_create_batch_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(create_batch=10)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--create-batch", "10"])
+
+    def test_create_batch_with_include_already_uploaded(self) -> None:
+        command = build_container_command(
+            create_batch=10, include_already_uploaded=True
+        )
+
+        self.assertEqual(
+            command,
+            [
+                *MODULE_CLI_PREFIX,
+                "--create-batch",
+                "10",
+                "--include-already-uploaded",
+            ],
+        )
+
+    def test_include_already_uploaded_omitted_when_not_requested(self) -> None:
+        command = build_container_command(create_batch=10)
+
+        self.assertNotIn("--include-already-uploaded", command)
+
+    def test_show_batch_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(show_batch=42)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--show-batch", "42"])
+
+    def test_load_batch_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(load_batch=42)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--load-batch", "42"])
+
+    def test_upload_batch_id_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(upload=True, batch_id=42)
+
+        self.assertEqual(
+            command, [*MODULE_CLI_PREFIX, "--upload", "--batch-id", "42"]
+        )
 
 
 class BuildEnvironmentOverridesTest(unittest.TestCase):
@@ -313,10 +359,39 @@ class ParseArgsTest(unittest.TestCase):
         self.assertFalse(args.upload)
         self.assertFalse(args.migrate_only)
         self.assertFalse(args.show_upload_status)
+        self.assertIsNone(args.create_batch)
+        self.assertFalse(args.include_already_uploaded)
+        self.assertIsNone(args.load_batch)
+        self.assertIsNone(args.show_batch)
+        self.assertIsNone(args.batch_id)
         self.assertIsNone(args.bucket)
         self.assertIsNone(args.prefix)
         self.assertIsNone(args.postgres_secret_id)
         self.assertIsNone(args.oracle_secret_id)
+
+    def test_parses_batch_flags(self) -> None:
+        args = parse_args(
+            [
+                "--create-batch",
+                "10",
+                "--include-already-uploaded",
+            ]
+        )
+
+        self.assertEqual(args.create_batch, 10)
+        self.assertTrue(args.include_already_uploaded)
+
+    def test_parses_show_batch_and_load_batch(self) -> None:
+        args = parse_args(["--show-batch", "5"])
+        self.assertEqual(args.show_batch, 5)
+
+        args = parse_args(["--load-batch", "5"])
+        self.assertEqual(args.load_batch, 5)
+
+    def test_parses_batch_id(self) -> None:
+        args = parse_args(["--upload", "--batch-id", "5"])
+
+        self.assertEqual(args.batch_id, 5)
 
 
 if __name__ == "__main__":

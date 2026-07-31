@@ -3,7 +3,8 @@ Attachment loader task run.
 
 Translates CLI pass-through flags (--file-id, --load-file-id, --limit,
 --retry-failed, --dry-run, --upload, --migrate-only,
---show-upload-status) into the container command override
+--show-upload-status, --create-batch, --include-already-uploaded,
+--load-batch, --show-batch, --batch-id) into the container command override
 for the "loader" container in the research-archive-platform-dev-loader
 task family (see terraform/modules/ecs/main.tf - not modified here), and
 translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
@@ -52,6 +53,11 @@ def build_container_command(
     upload: bool = False,
     migrate_only: bool = False,
     show_upload_status: bool = False,
+    create_batch: int | None = None,
+    include_already_uploaded: bool = False,
+    load_batch: int | None = None,
+    show_batch: int | None = None,
+    batch_id: int | None = None,
     bucket: str | None = None,
     prefix: str | None = None,
 ) -> list[str]:
@@ -73,6 +79,14 @@ def build_container_command(
         command.append("--migrate-only")
     if show_upload_status:
         command.append("--show-upload-status")
+    if create_batch is not None:
+        command.extend(["--create-batch", str(create_batch)])
+    if include_already_uploaded:
+        command.append("--include-already-uploaded")
+    if load_batch is not None:
+        command.extend(["--load-batch", str(load_batch)])
+    if show_batch is not None:
+        command.extend(["--show-batch", str(show_batch)])
     if upload:
         command.append("--upload")
     if dry_run:
@@ -83,6 +97,8 @@ def build_container_command(
         command.extend(["--file-id", str(file_id)])
     if load_file_id is not None:
         command.extend(["--load-file-id", str(load_file_id)])
+    if batch_id is not None:
+        command.extend(["--batch-id", str(batch_id)])
     if retry_failed:
         command.append("--retry-failed")
     if bucket:
@@ -134,6 +150,11 @@ def build_run_task_overrides(
     upload: bool = False,
     migrate_only: bool = False,
     show_upload_status: bool = False,
+    create_batch: int | None = None,
+    include_already_uploaded: bool = False,
+    load_batch: int | None = None,
+    show_batch: int | None = None,
+    batch_id: int | None = None,
     bucket: str | None = None,
     prefix: str | None = None,
     postgres_secret_id: str | None = None,
@@ -155,6 +176,11 @@ def build_run_task_overrides(
             upload=upload,
             migrate_only=migrate_only,
             show_upload_status=show_upload_status,
+            create_batch=create_batch,
+            include_already_uploaded=include_already_uploaded,
+            load_batch=load_batch,
+            show_batch=show_batch,
+            batch_id=batch_id,
             bucket=bucket,
             prefix=prefix,
         ),
@@ -185,6 +211,11 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--migrate-only", action="store_true")
     parser.add_argument("--show-upload-status", action="store_true")
+    parser.add_argument("--create-batch", type=int, default=None)
+    parser.add_argument("--include-already-uploaded", action="store_true")
+    parser.add_argument("--load-batch", type=int, default=None)
+    parser.add_argument("--show-batch", type=int, default=None)
+    parser.add_argument("--batch-id", type=int, default=None)
     parser.add_argument("--bucket", type=str, default=None)
     parser.add_argument("--prefix", type=str, default=None)
     parser.add_argument("--postgres-secret-id", type=str, default=None)
@@ -208,6 +239,11 @@ def main() -> None:
         upload=args.upload,
         migrate_only=args.migrate_only,
         show_upload_status=args.show_upload_status,
+        create_batch=args.create_batch,
+        include_already_uploaded=args.include_already_uploaded,
+        load_batch=args.load_batch,
+        show_batch=args.show_batch,
+        batch_id=args.batch_id,
         bucket=args.bucket,
         prefix=args.prefix,
         postgres_secret_id=args.postgres_secret_id,

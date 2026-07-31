@@ -343,6 +343,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 upload=False,
                 file_id=None,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -371,6 +374,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 upload=False,
                 file_id=None,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -402,6 +408,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 upload=False,
                 file_id=None,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -444,6 +453,9 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 upload=False,
                 file_id=None,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 ecs=False,
             )
             create_engine.return_value = MagicMock()
@@ -1162,6 +1174,7 @@ class RunUploadTest(unittest.TestCase):
             prefix=None,
             limit=None,
             file_id=None,
+            batch_id=None,
             retry_failed=False,
             multipart_threshold_bytes=None,
         )
@@ -1349,6 +1362,9 @@ class UploadGatingTest(unittest.TestCase):
                 upload=False,
                 file_id=None,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -1361,7 +1377,12 @@ class UploadGatingTest(unittest.TestCase):
             patch.object(attachment_loader, "_run_upload") as run_upload,
         ):
             parse_args.return_value = MagicMock(
-                upload=True, load_file_id=None, ecs=False
+                upload=True,
+                load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -1496,6 +1517,9 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
                 upload=False,
                 file_id=9001,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 limit=None,
                 dry_run=True,
                 ecs=False,
@@ -1520,6 +1544,9 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
                 upload=False,
                 file_id=9001,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 limit=10,
                 dry_run=True,
                 ecs=False,
@@ -1649,6 +1676,7 @@ class RunEcsSetupTest(unittest.TestCase):
         arguments = MagicMock(
             migrate_only=migrate_only,
             show_upload_status=show_upload_status,
+            show_batch=None,
             bucket=None,
             file_id=9001,
         )
@@ -1853,7 +1881,10 @@ class RunEcsSetupTest(unittest.TestCase):
         self,
     ) -> None:
         arguments = MagicMock(
-            migrate_only=False, show_upload_status=False, bucket="my-bucket"
+            migrate_only=False,
+            show_upload_status=False,
+            show_batch=None,
+            bucket="my-bucket",
         )
         calls: list[str] = []
 
@@ -1916,7 +1947,10 @@ class RunEcsSetupTest(unittest.TestCase):
         this proves the two can never be confused, even when both env
         vars are set to different values simultaneously."""
         arguments = MagicMock(
-            migrate_only=False, show_upload_status=False, bucket=None
+            migrate_only=False,
+            show_upload_status=False,
+            show_batch=None,
+            bucket=None,
         )
 
         with (
@@ -1957,7 +1991,10 @@ class RunEcsSetupTest(unittest.TestCase):
 
     def test_fails_fast_on_postgres_before_touching_oracle(self) -> None:
         arguments = MagicMock(
-            migrate_only=False, show_upload_status=False, bucket=None
+            migrate_only=False,
+            show_upload_status=False,
+            show_batch=None,
+            bucket=None,
         )
 
         with (
@@ -2121,6 +2158,9 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 bucket=None,
                 file_id=None,
                 load_file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
                 limit=None,
                 dry_run=False,
             )
@@ -2185,6 +2225,9 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 dry_run=False,
                 upload=False,
                 file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
             )
             attachment_loader.main()
 
@@ -2214,6 +2257,9 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 dry_run=True,
                 upload=False,
                 file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
             )
             attachment_loader.main()
 
@@ -2241,6 +2287,9 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 dry_run=False,
                 upload=True,
                 file_id=9001,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
             )
             attachment_loader.main()
 
@@ -2271,6 +2320,9 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 dry_run=False,
                 upload=False,
                 file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
             )
             attachment_loader.main()
 

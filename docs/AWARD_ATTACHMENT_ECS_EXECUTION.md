@@ -3,8 +3,12 @@
 Documents the Award Attachment loader's production execution model
 (`etl/load_award_attachments.py --ecs`), built on branch
 `feature/award-attachment-s3-loader`. Covers local development, ECS
-execution, one-file validation, batch execution, recovery after
-interruption, rollback, Secrets Manager requirements, and CloudWatch logs.
+execution, one-file validation, batch execution (both plain `--limit` and
+the deterministic `--create-batch`/`--load-batch`/`--show-batch`/
+`--upload --batch-id` workflow built on the generic ETL batch framework —
+see [`docs/ETL_BATCH_FRAMEWORK.md`](ETL_BATCH_FRAMEWORK.md)), recovery
+after interruption, rollback, Secrets Manager requirements, and
+CloudWatch logs.
 
 ## Why `--ecs` exists
 
@@ -377,6 +381,149 @@ backlog; already-`UPLOADED` rows with a matching bucket/key are always
 skipped (see "Recovery after interruption" below), so repeated batch runs
 never re-upload the same physical file.
 
+### Why plain `--limit` is not sufficient for a controlled run
+
+`--limit` is **not a persisted selection** on either side of this loader:
+
+- On the metadata-load side, `--limit` bounds an Oracle scan re-evaluated
+  fresh on every invocation.
+- On the upload side, `--limit`/`select_upload_candidates` is a live,
+  unpersisted `WHERE upload_status = ANY(...) ORDER BY file_id LIMIT`
+  query, also re-evaluated fresh on every invocation.
+
+These are two different data sources with no relationship to each other,
+so there is no guarantee the same N files are used for metadata loading
+and upload — and no guarantee two separate `--upload --limit N`
+invocations even select the same N files as each other, if any row's
+`upload_status` changed in between. For a controlled, auditable run (e.g.
+validating exactly 10 files end to end) you need a **batch**: a durable,
+immutable manifest of exactly which physical files are in scope, built on
+the generic ETL batch framework (`archive.etl_batch`/`etl_batch_item` —
+see [`docs/ETL_BATCH_FRAMEWORK.md`](ETL_BATCH_FRAMEWORK.md)).
+
+### Deterministic batch workflow
+
+Four new `--ecs` subcommands, all under the same
+`load_award_attachments.py` / `python -m archive_etl award-attachment`
+entrypoint used by everything else in this document:
+
+| Command | Requires Oracle? | Requires S3? | Writes? |
+|---|---|---|---|
+| `--create-batch N [--include-already-uploaded]` | yes | no | PostgreSQL only |
+| `--load-batch BATCH_ID` | yes | no | PostgreSQL only |
+| `--show-batch BATCH_ID` | **no** (PostgreSQL-only, like `--migrate-only`/`--show-upload-status`) | no | none (read-only) |
+| `--upload --batch-id BATCH_ID` | yes | yes | PostgreSQL + S3 |
+
+`--create-batch`/`--load-batch`/`--show-batch` are mutually exclusive
+with each other and with `--upload`/`--file-id`/`--load-file-id`;
+`--batch-id` is only valid together with `--upload`, and is itself
+mutually exclusive with `--file-id`/`--load-file-id`/any of the three
+batch verbs. Get any of these combinations wrong and both the loader's
+own `parse_args` and `scripts/run-award-attachment-loader.sh` reject it
+immediately, before touching Oracle, PostgreSQL, S3, or (via the
+deployment helper) Docker/ECS at all.
+
+**The exact controlled 10-file sequence:**
+
+```bash
+# 1. Create a deterministic batch of exactly 10 distinct physical files.
+#    Selects in stable ascending file_id order, excludes already-UPLOADED
+#    files by default, and persists membership immediately - this is the
+#    only step where "which 10 files" is decided; every later step
+#    operates on exactly this membership, never a fresh sample.
+scripts/run-award-attachment-loader.sh --create-batch 10
+#    -> logs "Created batch_id=<N> requested_size=10 selected=10 file_ids=[...]"
+#    Record <N> - every later command needs it.
+
+# 2. Show the freshly created batch - confirms membership was persisted
+#    and nothing has happened to it yet (status=CREATED, all counts zero).
+scripts/run-award-attachment-loader.sh --show-batch <N>
+
+# 3. Load metadata for exactly this batch's 10 file_ids (and their
+#    award_attachment reference rows) - never touches the other ~138k
+#    rows, never reads a BLOB, never touches S3.
+scripts/run-award-attachment-loader.sh --load-batch <N>
+#    -> logs inserted/updated/unchanged/missing_in_oracle counts.
+
+# 4. Show the batch again - status is now READY, metadata_loaded=10 (or
+#    fewer, if any file_id wasn't found in Oracle - reported as
+#    missing_metadata, not silently dropped).
+scripts/run-award-attachment-loader.sh --show-batch <N>
+
+# 5. Upload exactly this batch's 10 files to S3.
+scripts/run-award-attachment-loader.sh --upload --batch-id <N> \
+  --bucket research-archive-platform-dev-documents-770203350335
+
+# 6. Show the batch again - status is now COMPLETED, with an
+#    uploaded/failed/missing_source_content breakdown for exactly these
+#    10 files.
+scripts/run-award-attachment-loader.sh --show-batch <N>
+
+# 7. Verify the S3 objects directly (out of scope for the loader itself,
+#    which never reads back what it wrote):
+aws s3 ls s3://research-archive-platform-dev-documents-770203350335/attachments/awards/ --recursive | grep -F "<file_id>"
+
+# 8. Rerun the exact same upload command to prove idempotency - every
+#    file is already UPLOADED with a matching bucket/key, so all 10 are
+#    reported as skipped_already_uploaded, none are re-uploaded, no
+#    duplicate S3 objects are created.
+scripts/run-award-attachment-loader.sh --upload --batch-id <N> \
+  --bucket research-archive-platform-dev-documents-770203350335
+
+# 9. Show the final batch status one more time to confirm it is stable
+#    across the rerun (same status, same counts as step 6).
+scripts/run-award-attachment-loader.sh --show-batch <N>
+```
+
+**How resume works:** if step 5 is interrupted partway through (task
+killed, crash, timeout), each file's status transition
+(`UPLOADING → UPLOADED`/`FAILED`) is its own immediately-committed
+transaction — re-running the exact same `--upload --batch-id <N>`
+command picks up only the files still `PENDING`/`UPLOADING` in that
+batch; already-`UPLOADED` files are skipped automatically.
+
+**How failed rows are retried:** add `--retry-failed` to the same
+`--upload --batch-id <N>` command — only that batch's `FAILED` rows
+(plus any still-`PENDING`) are retried; files outside the batch are never
+touched.
+
+**How already-uploaded rows behave:** a batch member whose
+`upload_status` is already `UPLOADED` with a matching bucket/key is
+reported as `skipped_already_uploaded` and never re-streamed from
+Oracle — this is what makes step 8 idempotent.
+
+**How missing Oracle files are reported:** `--show-batch` reports
+`missing_metadata` (batch members with no `attachment_object` row at
+all — Oracle didn't return them at `--load-batch` time) separately from
+`missing_source_content` (members that *were* loaded, but have no BLOB
+in either `ATTACHMENT_FILE` or `FILE_DATA` to upload). Neither is
+silently dropped from the count.
+
+**How to inspect a batch safely:** `--show-batch BATCH_ID` is read-only
+(a single `SELECT`, no transaction) and — uniquely among the four batch
+commands — needs no `ORACLE_SECRET_ID` at all, so it's safe to run
+repeatedly at any point in the workflow, including while an upload is
+still in progress from another invocation.
+
+**How to abandon or clean up a test batch:** there is no CLI flag for
+this, deliberately — batch membership is meant to be immutable once
+created. If a test batch needs to be discarded, do it directly in
+PostgreSQL:
+
+```sql
+DELETE FROM archive.etl_batch_item WHERE batch_id = <N>;
+DELETE FROM archive.etl_batch WHERE batch_id = <N>;
+```
+
+**What not to delete manually:** never delete rows from
+`archive.attachment_object`/`archive.award_attachment` to "undo" a
+batch's metadata load — those tables are shared with every other loading
+path (`--load-file-id`, the full metadata load, other batches), and a
+row there may be relied on by data outside the batch you're cleaning up.
+If a batch's *uploaded* files need to be un-uploaded, follow the
+"Rollback procedure" below instead — it applies identically whether the
+rows were uploaded via `--batch-id` or any other path.
+
 ## Recovery after interruption
 
 Every file's status transition (`UPLOADING` → `UPLOADED`/`FAILED`) is its
@@ -427,9 +574,12 @@ it to ECR, registers a new task-definition revision from the existing
 a one-off Fargate task, waits for completion, streams its CloudWatch
 logs, and exits with the task container's own exit code. It supports
 `--file-id`, `--load-file-id`, `--limit`, `--retry-failed`, `--dry-run`,
-`--upload`, `--migrate-only`, `--show-upload-status`, `--bucket`, and
-`--prefix` — the same flags the loader itself accepts — translating
-them into the ECS `run-task --overrides`
+`--upload`, `--migrate-only`, `--show-upload-status`, `--bucket`,
+`--prefix`, `--create-batch`, `--include-already-uploaded`,
+`--load-batch`, `--show-batch`, and `--batch-id` — the same flags the
+loader itself accepts, including the same early validation for
+conflicting combinations (see "Deterministic batch workflow" above) —
+translating them into the ECS `run-task --overrides`
 JSON via `etl/scripts/build_award_attachment_ecs_overrides.py` (a small,
 pure, independently-tested function — see
 `etl/tests/test_build_award_attachment_ecs_overrides.py`).
@@ -446,11 +596,12 @@ Secrets Manager.
 Required environment (no safe defaults — the script refuses to guess
 them): `ECR_REPOSITORY_URI`, `SUBNET_IDS`, `SECURITY_GROUP_ID`,
 `POSTGRES_SECRET_ID`. `ORACLE_SECRET_ID` is required unless
-`--migrate-only` or `--show-upload-status` is passed (`--show-upload-status`
-also requires `--file-id`). See the script's own header comment for the
-full list of optional overrides (`AWS_REGION`, `PROJECT_NAME`,
-`ENVIRONMENT`, `CLUSTER_NAME`, `TASK_FAMILY`, `POSTGRES_HOST`/`PORT`/`DB`,
-`AWARD_ATTACHMENT_BUCKET_NAME`).
+`--migrate-only`, `--show-upload-status`, or `--show-batch` is passed
+(`--show-upload-status` also requires `--file-id`) — `--create-batch` and
+`--load-batch` both read Oracle and so are **not** exempt. See the
+script's own header comment for the full list of optional overrides
+(`AWS_REGION`, `PROJECT_NAME`, `ENVIRONMENT`, `CLUSTER_NAME`,
+`TASK_FAMILY`, `POSTGRES_HOST`/`PORT`/`DB`, `AWARD_ATTACHMENT_BUCKET_NAME`).
 
 Example — bootstrap a fresh database:
 ```bash

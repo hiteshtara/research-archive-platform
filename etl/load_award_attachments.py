@@ -48,6 +48,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from archive_etl.attachments.models import sanitize_file_name
+from archive_etl.batch import framework as batch_framework
 from archive_etl.config.ecs import configure_ecs_environment
 from archive_etl.config.settings import require_oracle_environment
 from archive_etl.config.startup_validation import (
@@ -1072,6 +1073,290 @@ def _run_load_file_id(
     return report
 
 
+# --- Sprint 3: deterministic batch workflow --------------------------------
+#
+# Neither --limit (metadata load, bounded Oracle sampling) nor --limit
+# (upload candidate selection, a live PostgreSQL query) is a persisted
+# selection - see V037's migration header for the full explanation. A
+# batch is a durable manifest (archive.etl_batch/archive.etl_batch_item,
+# the generic batch framework in archive_etl.batch.framework): once
+# created, membership never changes, so --load-batch and --upload
+# --batch-id always operate on the exact same file_id set, and the whole
+# workflow can be paused and resumed at any point.
+#
+# Award attachment physical files are one domain/entity_type pair on that
+# shared, generic framework (domain=AWARD_ATTACHMENT_BATCH_DOMAIN,
+# entity_type=AWARD_ATTACHMENT_BATCH_ENTITY_TYPE) - everything below is
+# domain-specific glue: deciding which file_ids are candidates (Oracle
+# scan), doing the actual metadata load/upload for a file_id, and joining
+# the generic etl_batch_item table to this domain's own
+# attachment_object.upload_status. See docs/ETL_BATCH_FRAMEWORK.md.
+
+AWARD_ATTACHMENT_BATCH_DOMAIN = "AWARD_ATTACHMENT"
+AWARD_ATTACHMENT_BATCH_ENTITY_TYPE = "PHYSICAL_FILE"
+
+
+def _run_create_batch(
+    engine: Engine,
+    requested_size: int,
+    *,
+    include_already_uploaded: bool = False,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """--create-batch: select exactly `requested_size` distinct physical
+    file_id values from Oracle, in stable ascending file_id order (the
+    physical-file Oracle export is itself ORDER BY FILE_ID - see
+    oracle/award/export_award_attachment_files.sql), and persist that
+    exact membership as a new batch via the generic batch framework.
+    Never reads a BLOB (the Oracle query never selects blob content) and
+    never touches S3. By default, excludes file_ids already fully
+    UPLOADED in PostgreSQL - pass include_already_uploaded=True to select
+    from the full candidate pool regardless. Raises ValueError for a
+    non-positive requested_size, before touching Oracle or PostgreSQL."""
+    if requested_size <= 0:
+        raise ValueError(
+            f"requested_size must be positive, got {requested_size}"
+        )
+
+    excluded_file_ids: set[int] = set()
+    if not include_already_uploaded:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT file_id FROM archive.attachment_object "
+                    "WHERE upload_status = 'UPLOADED'"
+                )
+            ).scalars()
+            excluded_file_ids = {int(value) for value in rows}
+
+    selected_file_ids = batch_framework.select_distinct_ascending_from_oracle_batches(
+        OracleDataSource(FILES_ORACLE_SQL).read_batches(),
+        id_column="file_id",
+        requested_size=requested_size,
+        excluded=excluded_file_ids,
+    )
+
+    result = batch_framework.create_batch(
+        engine,
+        domain=AWARD_ATTACHMENT_BATCH_DOMAIN,
+        entity_type=AWARD_ATTACHMENT_BATCH_ENTITY_TYPE,
+        requested_size=requested_size,
+        selection_strategy="ORACLE_SCAN_ASCENDING_FILE_ID",
+        selected_keys=selected_file_ids,
+        selection_parameters={
+            "exclude_already_uploaded": not include_already_uploaded
+        },
+        run_id=run_id,
+    )
+
+    return {
+        "batch_id": result["batch_id"],
+        "requested_size": result["requested_size"],
+        "selected_count": result["selected_count"],
+        "selected_file_ids": result["selected_keys"],
+    }
+
+
+def _run_load_batch(
+    engine: Engine, batch_id: int, *, dry_run: bool = False, run_id: str | None = None
+) -> dict[str, Any]:
+    """--load-batch: idempotent metadata load for exactly the file_ids
+    already recorded as this batch's membership - never truncates or
+    replaces the full tables, never reads a BLOB, never touches S3.
+    Batch membership itself is never modified here, only
+    etl_batch(_item)'s status columns and the two attachment archive
+    tables. With dry_run=True, every UPSERT still runs (so the reported
+    counts are accurate) but everything is rolled back instead of
+    committed."""
+    load_logger = logger.bind(stage="load_batch", batch_id=batch_id, run_id=run_id)
+
+    with engine.connect() as connection:
+        file_ids = batch_framework.load_batch_membership(
+            connection,
+            batch_id,
+            domain=AWARD_ATTACHMENT_BATCH_DOMAIN,
+            entity_type=AWARD_ATTACHMENT_BATCH_ENTITY_TYPE,
+        )
+
+    target_ids = set(file_ids)
+    files_raw = read_files_matching_ids(OracleDataSource(FILES_ORACLE_SQL), target_ids)
+    files = prepare_files(files_raw) if not files_raw.empty else files_raw
+    found_file_ids = (
+        set(files["file_id"].astype("int64").tolist()) if not files.empty else set()
+    )
+    missing_file_ids = target_ids - found_file_ids
+
+    references_raw = read_references_matching_file_ids(
+        OracleDataSource(REFERENCES_ORACLE_SQL), found_file_ids
+    )
+    references = (
+        prepare_references(references_raw)
+        if not references_raw.empty
+        else references_raw
+    )
+
+    report = {
+        "batch_id": batch_id,
+        "physical_files_requested": len(target_ids),
+        "physical_files_found": len(found_file_ids),
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "missing_in_oracle": len(missing_file_ids),
+        "reference_rows_inserted": 0,
+        "reference_rows_updated": 0,
+        "reference_rows_unchanged": 0,
+    }
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = create_load_run(connection, len(files) + len(references))
+
+            for _, file_row in files.iterrows():
+                file_result = upsert_attachment_object(connection, file_row, load_id)
+                report[file_result] += 1
+                batch_framework.set_item_status(
+                    connection,
+                    batch_id,
+                    int(file_row["file_id"]),
+                    status=batch_framework.ITEM_STATUS_COMPLETED,
+                )
+
+            for missing_file_id in missing_file_ids:
+                batch_framework.set_item_status(
+                    connection,
+                    batch_id,
+                    missing_file_id,
+                    status=batch_framework.ITEM_STATUS_MISSING_SOURCE,
+                )
+
+            for _, reference_row in references.iterrows():
+                reference_result = upsert_award_attachment(
+                    connection, reference_row, load_id
+                )
+                report[f"reference_rows_{reference_result}"] += 1
+
+            mark_load_complete(
+                connection,
+                load_id,
+                len(files) + len(references),
+                {
+                    "inserted": report["inserted"],
+                    "updated": report["updated"],
+                    "unchanged": report["unchanged"],
+                },
+            )
+
+            batch_framework.set_batch_status(
+                connection, batch_id, status=batch_framework.BATCH_STATUS_READY
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    load_logger.info(
+        "Batch metadata load for batch_id={}{}: requested={} found={} "
+        "inserted={} updated={} unchanged={} missing_in_oracle={} "
+        "reference_rows(inserted={} updated={} unchanged={})",
+        batch_id,
+        " [DRY RUN - not persisted]" if dry_run else "",
+        report["physical_files_requested"],
+        report["physical_files_found"],
+        report["inserted"],
+        report["updated"],
+        report["unchanged"],
+        report["missing_in_oracle"],
+        report["reference_rows_inserted"],
+        report["reference_rows_updated"],
+        report["reference_rows_unchanged"],
+    )
+
+    return report
+
+
+def _run_show_batch(engine: Engine, batch_id: int) -> dict[str, Any]:
+    """--show-batch: read-only status report for one batch. Never writes
+    anything. Uses the generic batch_framework.show_batch for the
+    batch-shape fields (found/requested_size/created_at/status/
+    total_files/metadata_loaded/missing_metadata), then augments with the
+    attachment-specific upload_status breakdown (pending/uploading/
+    uploaded/failed/missing_source_content), which is business logic the
+    generic framework has no knowledge of."""
+    generic_report = batch_framework.show_batch(
+        engine,
+        batch_id,
+        domain=AWARD_ATTACHMENT_BATCH_DOMAIN,
+        entity_type=AWARD_ATTACHMENT_BATCH_ENTITY_TYPE,
+    )
+
+    if not generic_report["found"]:
+        logger.info("batch_id={} does not exist", batch_id)
+        return {"batch_id": batch_id, "found": False}
+
+    with engine.connect() as connection:
+        upload_status_rows = connection.execute(
+            text(
+                """
+                SELECT ao.upload_status, COUNT(*)
+                FROM archive.etl_batch_item ebi
+                JOIN archive.attachment_object ao ON ao.file_id = ebi.entity_key
+                WHERE ebi.batch_id = :batch_id
+                  AND ebi.status = :completed_status
+                GROUP BY ao.upload_status
+                """
+            ),
+            {
+                "batch_id": batch_id,
+                "completed_status": batch_framework.ITEM_STATUS_COMPLETED,
+            },
+        ).all()
+        upload_status_counts: dict[str, int] = {
+            row[0]: row[1] for row in upload_status_rows
+        }
+
+    report = {
+        "batch_id": generic_report["batch_id"],
+        "found": True,
+        "requested_size": generic_report["requested_size"],
+        "created_at": generic_report["created_at"],
+        "status": generic_report["status"],
+        "total_files": generic_report["total_items"],
+        "metadata_loaded": generic_report["completed"],
+        "pending": upload_status_counts.get("PENDING", 0),
+        "uploading": upload_status_counts.get("UPLOADING", 0),
+        "uploaded": upload_status_counts.get("UPLOADED", 0),
+        "failed": upload_status_counts.get("FAILED", 0),
+        "missing_source_content": upload_status_counts.get(
+            "MISSING_SOURCE_CONTENT", 0
+        ),
+        "missing_metadata": generic_report["total_items"] - generic_report["completed"],
+    }
+
+    logger.bind(stage="show_batch", batch_id=batch_id).info(
+        "batch_id={} status={} total_files={} metadata_loaded={} "
+        "pending={} uploading={} uploaded={} failed={} "
+        "missing_source_content={} missing_metadata={}",
+        report["batch_id"],
+        report["status"],
+        report["total_files"],
+        report["metadata_loaded"],
+        report["pending"],
+        report["uploading"],
+        report["uploaded"],
+        report["failed"],
+        report["missing_source_content"],
+        report["missing_metadata"],
+    )
+
+    return report
+
+
 # --- Sprint 2: resumable S3 upload -----------------------------------------
 
 # PENDING/UPLOADING are always upload candidates - UPLOADING included so a
@@ -1088,30 +1373,61 @@ def select_upload_candidates(
     limit: int | None,
     file_id: int | None,
     retry_failed: bool,
+    batch_id: int | None = None,
 ) -> pd.DataFrame:
+    """batch_id, when given, scopes selection to exactly that batch's
+    membership (archive.etl_batch_item, the generic batch framework) -
+    never any other PENDING/UPLOADING/FAILED row, no matter how many
+    exist. A batch member whose metadata load hasn't happened (or found
+    nothing in Oracle) yet has no matching attachment_object row, so the
+    inner join naturally excludes it - no separate etl_batch_item.status
+    filter is needed here. Mutually exclusive with file_id at the CLI
+    level (see parse_args)."""
     statuses = list(_DEFAULT_CANDIDATE_STATUSES)
     if retry_failed:
         statuses.append("FAILED")
 
-    query = """
-        SELECT
-            file_id,
-            file_data_id,
-            file_name,
-            content_type,
-            blob_source,
-            file_size_bytes,
-            upload_status,
-            s3_bucket,
-            s3_key
-        FROM archive.attachment_object
-        WHERE upload_status = ANY(:statuses)
-    """
-    params: dict[str, Any] = {"statuses": statuses}
-    if file_id is not None:
-        query += " AND file_id = :file_id"
-        params["file_id"] = file_id
-    query += " ORDER BY file_id"
+    if batch_id is not None:
+        query = """
+            SELECT
+                ao.file_id,
+                ao.file_data_id,
+                ao.file_name,
+                ao.content_type,
+                ao.blob_source,
+                ao.file_size_bytes,
+                ao.upload_status,
+                ao.s3_bucket,
+                ao.s3_key
+            FROM archive.attachment_object ao
+            JOIN archive.etl_batch_item ebi
+                ON ebi.entity_key = ao.file_id
+            WHERE ebi.batch_id = :batch_id
+              AND ao.upload_status = ANY(:statuses)
+        """
+        params: dict[str, Any] = {"batch_id": batch_id, "statuses": statuses}
+        query += " ORDER BY ao.file_id"
+    else:
+        query = """
+            SELECT
+                file_id,
+                file_data_id,
+                file_name,
+                content_type,
+                blob_source,
+                file_size_bytes,
+                upload_status,
+                s3_bucket,
+                s3_key
+            FROM archive.attachment_object
+            WHERE upload_status = ANY(:statuses)
+        """
+        params = {"statuses": statuses}
+        if file_id is not None:
+            query += " AND file_id = :file_id"
+            params["file_id"] = file_id
+        query += " ORDER BY file_id"
+
     if limit is not None:
         query += " LIMIT :limit"
         params["limit"] = limit
@@ -1233,12 +1549,28 @@ def _run_upload(
 
     engine = create_postgres_engine()
 
+    batch_id = getattr(arguments, "batch_id", None)
+    if batch_id is not None:
+        # started_at is set only the first time (see
+        # batch_framework.begin_batch_processing) - a resumed upload
+        # (after a partial completion) must not overwrite the original
+        # start time.
+        batch_framework.begin_batch_processing(
+            engine,
+            batch_id,
+            domain=AWARD_ATTACHMENT_BATCH_DOMAIN,
+            entity_type=AWARD_ATTACHMENT_BATCH_ENTITY_TYPE,
+            status=batch_framework.BATCH_STATUS_PROCESSING,
+        )
+        run_logger = run_logger.bind(batch_id=batch_id)
+
     with engine.begin() as connection:
         candidates = select_upload_candidates(
             connection,
             limit=arguments.limit,
             file_id=arguments.file_id,
             retry_failed=arguments.retry_failed,
+            batch_id=batch_id,
         )
 
     start_time = datetime.now(UTC)
@@ -1246,6 +1578,7 @@ def _run_upload(
 
     report: dict[str, Any] = {
         "run_id": run_id,
+        "batch_id": batch_id,
         "physical_files_selected": len(candidates),
         "uploaded": 0,
         "skipped_already_uploaded": 0,
@@ -1346,6 +1679,11 @@ def _run_upload(
     finally:
         if oracle_connection is not None:
             oracle_connection.close()
+
+    if batch_id is not None:
+        batch_framework.finish_batch_processing(
+            engine, batch_id, status=batch_framework.BATCH_STATUS_COMPLETED
+        )
 
     finish_time = datetime.now(UTC)
     duration_seconds = time.monotonic() - start_monotonic
@@ -1527,6 +1865,67 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "inspected without a direct connection to private RDS."
         ),
     )
+    parser.add_argument(
+        "--create-batch",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Select exactly N distinct physical file_ids from Oracle, in "
+            "stable ascending file_id order, and persist that exact "
+            "membership as a new batch (archive.etl_batch/"
+            "etl_batch_item, the generic batch framework) - a durable "
+            "manifest --load-batch and --upload --batch-id always operate "
+            "on, unlike --limit "
+            "(a live, unpersisted query re-evaluated on every "
+            "invocation - see docs/AWARD_ATTACHMENT_ECS_EXECUTION.md). "
+            "Excludes file_ids already fully UPLOADED unless "
+            "--include-already-uploaded is given. Never reads a BLOB, "
+            "never touches S3. N must be positive."
+        ),
+    )
+    parser.add_argument(
+        "--include-already-uploaded",
+        action="store_true",
+        help=(
+            "With --create-batch, include file_ids already fully "
+            "UPLOADED in the candidate pool instead of excluding them."
+        ),
+    )
+    parser.add_argument(
+        "--load-batch",
+        type=int,
+        default=None,
+        metavar="BATCH_ID",
+        help=(
+            "Idempotent metadata load for exactly this batch's recorded "
+            "membership (never truncates or replaces the full tables, "
+            "never reads a BLOB, never touches S3, preserves existing "
+            "upload state) - the batch equivalent of --load-file-id."
+        ),
+    )
+    parser.add_argument(
+        "--show-batch",
+        type=int,
+        default=None,
+        metavar="BATCH_ID",
+        help=(
+            "Read-only status report for one batch: requested_size, "
+            "status, and file counts by metadata-load/upload state. "
+            "Never writes anything."
+        ),
+    )
+    parser.add_argument(
+        "--batch-id",
+        type=int,
+        default=None,
+        metavar="BATCH_ID",
+        help=(
+            "With --upload, restrict candidate selection to exactly this "
+            "batch's membership - never any other PENDING/UPLOADING/"
+            "FAILED row. Only valid together with --upload."
+        ),
+    )
     parsed = parser.parse_args(arguments)
     if parsed.migrate_only and not parsed.ecs:
         parser.error("--migrate-only is only valid together with --ecs")
@@ -1534,6 +1933,56 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         parser.error("--show-upload-status is only valid together with --ecs")
     if parsed.show_upload_status and parsed.file_id is None:
         parser.error("--show-upload-status requires --file-id")
+
+    batch_verbs = [
+        ("--create-batch", parsed.create_batch),
+        ("--load-batch", parsed.load_batch),
+        ("--show-batch", parsed.show_batch),
+    ]
+    active_batch_verbs = [name for name, value in batch_verbs if value is not None]
+    if len(active_batch_verbs) > 1:
+        parser.error(
+            f"{' and '.join(active_batch_verbs)} cannot be combined - "
+            "choose one batch operation at a time"
+        )
+    if parsed.create_batch is not None and parsed.create_batch <= 0:
+        parser.error("--create-batch must be a positive integer")
+    if parsed.include_already_uploaded and parsed.create_batch is None:
+        parser.error("--include-already-uploaded requires --create-batch")
+
+    # Each batch verb (--create-batch/--load-batch/--show-batch) dispatches
+    # to its own, complete code path in main() and returns immediately -
+    # combining one with --upload, --load-file-id, or --file-id would
+    # silently ignore whichever flag lost dispatch priority, so all three
+    # are rejected explicitly here instead.
+    if active_batch_verbs:
+        if parsed.upload:
+            parser.error(
+                f"{active_batch_verbs[0]} cannot be combined with --upload "
+                "- use --upload --batch-id <BATCH_ID> to upload a batch"
+            )
+        if parsed.load_file_id is not None:
+            parser.error(
+                f"{active_batch_verbs[0]} cannot be combined with "
+                "--load-file-id"
+            )
+        if parsed.file_id is not None:
+            parser.error(
+                f"{active_batch_verbs[0]} cannot be combined with --file-id"
+            )
+
+    if parsed.batch_id is not None:
+        if not parsed.upload:
+            parser.error("--batch-id is only valid together with --upload")
+        if active_batch_verbs:
+            parser.error(
+                f"--batch-id cannot be combined with {active_batch_verbs[0]}"
+            )
+        if parsed.load_file_id is not None:
+            parser.error("--batch-id cannot be combined with --load-file-id")
+    if parsed.file_id is not None and parsed.batch_id is not None:
+        parser.error("--file-id and --batch-id cannot be combined")
+
     return parsed
 
 
@@ -1727,8 +2176,9 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     2. AWS task-role identity via STS
     3. one Secrets Manager client for the whole startup
     4. load the PostgreSQL secret (always required)
-    5. load the Oracle secret (skipped entirely for --migrate-only and
-       --show-upload-status - neither touches Oracle)
+    5. load the Oracle secret (skipped entirely for --migrate-only,
+       --show-upload-status, and --show-batch - none of them touch
+       Oracle)
     6. verify PostgreSQL connectivity
     7. if --migrate-only: apply migrations, validate the resulting
        schema, and return True so main() exits without ever reaching
@@ -1736,6 +2186,8 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     7a. if --show-upload-status: run the read-only diagnostic query for
         the given --file-id and return True, same as --migrate-only -
         never reaches Oracle, S3, or upload code either
+    7b. if --show-batch: run the read-only batch status report and
+        return True, same as --migrate-only - PostgreSQL only
     8. verify Oracle connectivity
     9. verify S3 bucket access (skipped, not failed, if no bucket is
        configured at all)
@@ -1744,9 +2196,9 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
 
     Aborts immediately (lets the raised exception propagate) if any step
     fails - no upload or BLOB read may begin before every required check
-    for the requested mode passes. Returns True when --migrate-only or
-    --show-upload-status completed successfully (the caller must not
-    proceed further), False otherwise."""
+    for the requested mode passes. Returns True when --migrate-only,
+    --show-upload-status, or --show-batch completed successfully (the
+    caller must not proceed further), False otherwise."""
     configure_structured_logging(run_id)
     logger.bind(stage="startup").info(
         "Starting in --ecs mode: run_id={}", run_id
@@ -1762,7 +2214,11 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
 
     configure_ecs_environment(
         secrets_client,
-        include_oracle=not (arguments.migrate_only or arguments.show_upload_status),
+        include_oracle=not (
+            arguments.migrate_only
+            or arguments.show_upload_status
+            or arguments.show_batch is not None
+        ),
     )
 
     engine = create_postgres_engine()
@@ -1786,6 +2242,13 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
         logger.bind(
             stage="startup", status="show_upload_status_complete"
         ).info("Upload-status lookup complete")
+        return True
+
+    if arguments.show_batch is not None:
+        _run_show_batch(engine, arguments.show_batch)
+        logger.bind(stage="startup", status="show_batch_complete").info(
+            "Batch status report complete"
+        )
         return True
 
     validate_oracle_reachable(_connect_oracle)
@@ -1828,6 +2291,35 @@ def main() -> None:
         ecs_setup_short_circuited = _run_ecs_setup(arguments, run_id)
         if ecs_setup_short_circuited:
             return
+
+    if arguments.create_batch is not None:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        _run_create_batch(
+            engine,
+            arguments.create_batch,
+            include_already_uploaded=arguments.include_already_uploaded,
+            run_id=run_id,
+        )
+        return
+
+    if arguments.load_batch is not None:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        _run_load_batch(
+            engine,
+            arguments.load_batch,
+            dry_run=arguments.dry_run,
+            run_id=run_id,
+        )
+        return
+
+    if arguments.show_batch is not None:
+        engine = create_postgres_engine()
+        _run_show_batch(engine, arguments.show_batch)
+        return
 
     if arguments.load_file_id is not None:
         engine = create_postgres_engine()

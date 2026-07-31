@@ -132,6 +132,52 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 ),
             },
         ),
+        (
+            "--create-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "N",
+                "help": "Forwarded to the underlying loader's --create-batch.",
+            },
+        ),
+        (
+            "--include-already-uploaded",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--include-already-uploaded."
+                ),
+            },
+        ),
+        (
+            "--load-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --load-batch.",
+            },
+        ),
+        (
+            "--show-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --show-batch.",
+            },
+        ),
+        (
+            "--batch-id",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --batch-id.",
+            },
+        ),
     ],
 }
 
