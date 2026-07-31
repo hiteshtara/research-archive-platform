@@ -1641,6 +1641,52 @@ class RunEcsSetupTest(unittest.TestCase):
             calls.index("validate_bucket_exists"), calls.index("validate_table_exists")
         )
 
+    def test_upload_without_bucket_flag_uses_bucket_env_never_data_bucket_name(
+        self,
+    ) -> None:
+        """--ecs --upload with no --bucket must resolve its destination
+        from AWARD_ATTACHMENT_BUCKET_NAME only. DATA_BUCKET_NAME is a
+        different, IRB-only bucket wired into the same ECS task family -
+        this proves the two can never be confused, even when both env
+        vars are set to different values simultaneously."""
+        arguments = MagicMock(migrate_only=False, bucket=None)
+
+        with (
+            patch.object(attachment_loader, "configure_structured_logging"),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                return_value={"account": "123", "arn": "arn:x"},
+            ),
+            patch.object(attachment_loader.boto3, "client", return_value=MagicMock()),
+            patch.object(attachment_loader, "configure_ecs_environment"),
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "validate_postgres_reachable"),
+            patch.object(attachment_loader, "validate_oracle_reachable"),
+            patch.object(
+                attachment_loader, "create_s3_client", return_value=MagicMock()
+            ),
+            patch.object(
+                attachment_loader, "validate_bucket_exists"
+            ) as validate_bucket,
+            patch.object(attachment_loader, "validate_table_exists"),
+            patch.object(attachment_loader, "validate_upload_status_schema"),
+            patch.dict(
+                attachment_loader.os.environ,
+                {
+                    "AWARD_ATTACHMENT_BUCKET_NAME": "correct-documents-bucket",
+                    "DATA_BUCKET_NAME": "wrong-irb-only-bucket",
+                },
+            ),
+        ):
+            attachment_loader._run_ecs_setup(arguments, "run-1")
+
+        self.assertEqual(arguments.bucket, "correct-documents-bucket")
+        validate_bucket.assert_called_once()
+        self.assertEqual(validate_bucket.call_args.args[1], "correct-documents-bucket")
+
     def test_fails_fast_on_postgres_before_touching_oracle(self) -> None:
         arguments = MagicMock(migrate_only=False, bucket=None)
 
