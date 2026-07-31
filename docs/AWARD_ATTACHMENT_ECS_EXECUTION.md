@@ -360,7 +360,15 @@ POSTGRES_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research
   scripts/run-award-attachment-loader.sh --migrate-only
 ```
 which generates the container command
-`load_award_attachments.py --ecs --migrate-only`.
+`["python", "-m", "archive_etl", "award-attachment", "--ecs", "--migrate-only"]`
+- the unified module CLI, never a bare `load_award_attachments.py`
+filename. An ECS containerOverrides `command` replaces the container's
+CMD entirely (no shell, no `uv run` wrapper to fall back on), so element
+0 must already be a real executable on the image's PATH; a bare script
+filename is neither executable nor found via PATH lookup, which is
+exactly how an earlier version of this command failed in production
+(`exec: "load_award_attachments.py": executable file not found in
+$PATH`).
 
 **This script performs real AWS actions the moment it is invoked** (image
 build/push, task-definition registration, and — with `--upload` and

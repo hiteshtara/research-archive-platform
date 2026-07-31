@@ -100,6 +100,20 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 ),
             },
         ),
+        (
+            "--ecs",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --ecs.",
+            },
+        ),
+        (
+            "--migrate-only",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --migrate-only.",
+            },
+        ),
     ],
 }
 

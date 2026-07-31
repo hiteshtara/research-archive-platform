@@ -9,6 +9,12 @@ translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
 POSTGRES_HOST/PORT/DB, AWARD_ATTACHMENT_BUCKET_NAME, AWS_REGION) into the
 container's environment override.
 
+The generated command always starts with ["python", "-m", "archive_etl",
+"award-attachment", "--ecs", ...] - never a bare "load_award_attachments.py"
+filename. An ECS containerOverrides `command` replaces the container's
+CMD entirely (no shell, no `uv run` wrapper), so element 0 must be a real
+executable already on PATH inside the image.
+
 Only secret *identifiers* (an ARN or name) ever appear here - never a
 password, a DSN, or any secret JSON. There is deliberately no
 --postgres-password/--oracle-password/--postgres-secret-value flag or
@@ -47,8 +53,18 @@ def build_container_command(
     prefix: str | None = None,
 ) -> list[str]:
     """--ecs is always included: this command is only ever used for the
-    ECS loader task, never local development."""
-    command = ["load_award_attachments.py", "--ecs"]
+    ECS loader task, never local development.
+
+    Invoked via the unified module CLI (`python -m archive_etl
+    award-attachment`), never a bare script filename - an ECS
+    containerOverrides `command` replaces the container's CMD entirely,
+    with no shell and no `uv run` wrapper to fall back on, so element 0
+    must be a real executable already on the container's PATH
+    (`python` - see etl/Dockerfile.loader). A bare `load_award_attachments.py`
+    is neither executable nor resolvable via PATH, which is exactly how a
+    prior version of this command failed in production (`exec:
+    "load_award_attachments.py": executable file not found in $PATH`)."""
+    command = ["python", "-m", "archive_etl", "award-attachment", "--ecs"]
 
     if migrate_only:
         command.append("--migrate-only")

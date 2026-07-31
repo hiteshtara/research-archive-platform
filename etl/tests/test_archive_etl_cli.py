@@ -43,6 +43,21 @@ def test_build_parser_rejects_dry_run_for_other_domains() -> None:
         build_parser().parse_args(["award", "--dry-run"])
 
 
+def test_build_parser_accepts_award_attachment_ecs_migrate_only() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--migrate-only"]
+    )
+
+    assert args.command == "award-attachment"
+    assert args.ecs is True
+    assert args.migrate_only is True
+
+
+def test_build_parser_rejects_ecs_for_other_domains() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["award", "--ecs"])
+
+
 def test_build_parser_accepts_check_with_no_extra_arguments() -> None:
     args = build_parser().parse_args(["check"])
 
@@ -135,6 +150,29 @@ def test_run_domain_forwards_limit_and_dry_run_together() -> None:
         "--limit",
         "10",
         "--dry-run",
+    ]
+
+
+def test_run_domain_forwards_ecs_and_migrate_only() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--migrate-only"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--ecs",
+        "--migrate-only",
     ]
 
 

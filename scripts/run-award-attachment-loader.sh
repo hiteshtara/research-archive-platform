@@ -284,15 +284,33 @@ aws logs tail "$LOG_GROUP" \
   --since 1h || echo "WARNING: could not tail logs - check the CloudWatch console directly."
 
 echo "=== Checking task exit code ==="
-EXIT_CODE="$(aws ecs describe-tasks \
+TASK_DESCRIBE_FILE="$TMP_DIR/task-describe.json"
+aws ecs describe-tasks \
   --cluster "$CLUSTER_NAME" \
   --tasks "$TASK_ARN" \
   --region "$AWS_REGION" \
-  --query "tasks[0].containers[?name=='${CONTAINER_NAME}'].exitCode | [0]" \
-  --output text)"
+  --output json \
+  > "$TASK_DESCRIBE_FILE"
 
-if [[ -z "$EXIT_CODE" || "$EXIT_CODE" == "None" ]]; then
-  echo "ERROR: could not determine the task's exit code - check CloudWatch logs and the ECS console."
+EXIT_CODE="$(jq -r --arg name "$CONTAINER_NAME" \
+  '.tasks[0].containers[] | select(.name == $name) | .exitCode // empty' \
+  "$TASK_DESCRIBE_FILE")"
+
+if [[ -z "$EXIT_CODE" ]]; then
+  # A container that fails before its process ever starts (a bad exec,
+  # a missing image, a resource limit) never gets an exitCode at all -
+  # ECS instead records why on the task and the container themselves.
+  # Report both explicitly rather than just saying it couldn't be
+  # determined - this is exactly the shape of failure a broken
+  # containerOverrides command produces (see the "executable file not
+  # found in $PATH" incident this script was fixed after).
+  STOPPED_REASON="$(jq -r '.tasks[0].stoppedReason // "(none reported)"' "$TASK_DESCRIBE_FILE")"
+  CONTAINER_REASON="$(jq -r --arg name "$CONTAINER_NAME" \
+    '.tasks[0].containers[] | select(.name == $name) | .reason // "(none reported)"' \
+    "$TASK_DESCRIBE_FILE")"
+  echo "ERROR: the task container never reported an exit code - it most likely failed during initialization, before load_award_attachments.py ever ran." >&2
+  echo "  Task stoppedReason: $STOPPED_REASON" >&2
+  echo "  Container reason:   $CONTAINER_REASON" >&2
   exit 1
 fi
 

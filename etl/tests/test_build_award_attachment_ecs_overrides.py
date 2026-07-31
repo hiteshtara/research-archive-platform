@@ -9,19 +9,71 @@ from scripts.build_award_attachment_ecs_overrides import (
     parse_args,
 )
 
+# Every generated command must start with this exact prefix: a real
+# executable (`python`) already on the container's PATH, never a bare
+# script filename - see build_container_command's docstring for why.
+MODULE_CLI_PREFIX = ["python", "-m", "archive_etl", "award-attachment", "--ecs"]
+
 
 class BuildContainerCommandTest(unittest.TestCase):
-    def test_always_includes_ecs_flag(self) -> None:
+    def test_always_uses_the_module_cli_prefix(self) -> None:
         command = build_container_command()
 
-        self.assertEqual(command, ["load_award_attachments.py", "--ecs"])
+        self.assertEqual(command, MODULE_CLI_PREFIX)
 
-    def test_dry_run_file_id_lookup(self) -> None:
+    def test_never_uses_the_bare_script_filename(self) -> None:
+        command = build_container_command(
+            migrate_only=True, upload=True, file_id=1, dry_run=True
+        )
+
+        self.assertNotIn("load_award_attachments.py", command)
+        self.assertEqual(command[0], "python")
+
+    def test_migrate_only_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(migrate_only=True)
+
+        self.assertEqual(
+            command,
+            [
+                "python",
+                "-m",
+                "archive_etl",
+                "award-attachment",
+                "--ecs",
+                "--migrate-only",
+            ],
+        )
+
+    def test_file_id_dry_run_produces_the_exact_required_command(self) -> None:
         command = build_container_command(file_id=9001, dry_run=True)
 
         self.assertEqual(
             command,
-            ["load_award_attachments.py", "--ecs", "--dry-run", "--file-id", "9001"],
+            [*MODULE_CLI_PREFIX, "--dry-run", "--file-id", "9001"],
+        )
+
+    def test_limit_dry_run_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(limit=10, dry_run=True)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--dry-run", "--limit", "10"],
+        )
+
+    def test_upload_file_id_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(upload=True, file_id=9001)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--upload", "--file-id", "9001"],
+        )
+
+    def test_retry_failed_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(upload=True, retry_failed=True)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--upload", "--retry-failed"],
         )
 
     def test_upload_with_limit_and_retry_failed(self) -> None:
@@ -32,8 +84,7 @@ class BuildContainerCommandTest(unittest.TestCase):
         self.assertEqual(
             command,
             [
-                "load_award_attachments.py",
-                "--ecs",
+                *MODULE_CLI_PREFIX,
                 "--upload",
                 "--limit",
                 "100",
@@ -59,14 +110,6 @@ class BuildContainerCommandTest(unittest.TestCase):
         self.assertNotIn("--file-id", command)
         self.assertNotIn("--retry-failed", command)
         self.assertNotIn("--migrate-only", command)
-
-    def test_migrate_only_produces_the_documented_example_command(self) -> None:
-        command = build_container_command(migrate_only=True)
-
-        self.assertEqual(
-            command,
-            ["load_award_attachments.py", "--ecs", "--migrate-only"],
-        )
 
 
 class BuildEnvironmentOverridesTest(unittest.TestCase):
@@ -141,7 +184,7 @@ class BuildRunTaskOverridesTest(unittest.TestCase):
         self.assertEqual(container["name"], "loader")
         self.assertEqual(
             container["command"],
-            ["load_award_attachments.py", "--ecs", "--dry-run", "--file-id", "9001"],
+            [*MODULE_CLI_PREFIX, "--dry-run", "--file-id", "9001"],
         )
 
     def test_includes_environment_override_when_secret_ids_given(self) -> None:
