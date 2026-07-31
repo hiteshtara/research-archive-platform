@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ~ Copyright (c) 2014. Boston University
+  ~
+  ~ Licensed under the Educational Community License, Version 2.0 (the "License"); you may not use this
+  ~ file except in compliance with the License. You may obtain a copy of the License at
+  ~
+  ~ http://www.opensource.org/licenses/ecl1.php
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software distributed under the License is
+  ~ distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND either express or
+  ~ implied.
+  ~
+  ~ See the License for the specific language governing permissions and limitations under the License.
+  -->
+<beans xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns="http://www.springframework.org/schema/beans"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                           http://www.springframework.org/schema/beans/spring-beans-3.0.xsd">
+
+
+    <bean id="sapIntegrationService" class="edu.bu.kuali.kra.award.sapintegration.SapIntegrationServiceImpl">
+        <property name="awardAmountInfoService" ref="awardAmountInfoService"/>
+        <property name="unitService" ref="unitService"/>
+        <property name="awardHierarchyService" ref="awardHierarchyService"/>
+        <property name="businessObjectService" ref="businessObjectService"/>
+        <property name="budgetRateAndBaseService" ref="budgetRateAndBaseService"/>
+        <property name="rolodexService" ref="rolodexService"/>
+        <property name="documentService" ref="documentService"/>
+        <property name="parameterService" ref="parameterService"/>
+    </bean>
+
+    <bean id="awardHierarchyUIService" class="edu.bu.kuali.kra.service.impl.AwardHierarchyUIServiceImpl"
+          scope="prototype">
+        <property name="businessObjectService" ref="businessObjectService" />
+        <property name="activePendingTransactionsService" ref="activePendingTransactionsService" />
+        <property name="awardHierarchyService" ref="awardHierarchyService" />
+    </bean>
+
+    <bean id="awardAmountInfoService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="awardAmountInfoService"/>
+    </bean>
+
+    <bean id="unitService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="unitService"/>
+    </bean>
+
+    <bean id="awardHierarchyService" class="edu.bu.kuali.kra.award.awardhierarchy.AwardHierarchyServiceImpl">
+        <property name="businessObjectService" ref="businessObjectService" />
+        <property name="documentService" ref="documentService" />
+        <property name="awardNumberService" ref="awardNumberService" />
+        <property name="versioningService" ref="versioningService" />
+        <property name="versionHistoryService" ref="versionHistoryService" />
+        <property name="awardAmountInfoService" ref="awardAmountInfoService" />
+        <property name="activePendingTransactionsService" ref="activePendingTransactionsService" />
+        <property name="parameterService" ref="parameterService" />
+        <property name="awardService" ref="awardService" />
+        <property name="awardVersionService" ref="awardVersionService" />
+    </bean>
+
+    <bean id="awardNumberService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="awardNumberService"/>
+    </bean>
+
+    <bean id="versioningService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="versioningService"/>
+    </bean>
+
+    <bean id="versionHistoryService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="versionHistoryService"/>
+    </bean>
+
+    <bean id="awardService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="awardService"/>
+    </bean>
+
+    <bean id="awardVersionService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="awardVersionService"/>
+    </bean>
+
+    <bean id="businessObjectService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="businessObjectService"/>
+    </bean>
+
+    <bean id="budgetRateAndBaseService" class="edu.bu.kuali.kra.award.sapintegration.BudgetRateAndBaseServiceImpl">
+        <property name="businessObjectService" ref="businessObjectService"/>
+    </bean>
+
+    <bean id="rolodexService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="rolodexService"/>
+    </bean>
+
+    <bean id="documentService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="documentService"/>
+    </bean>
+
+    <bean id="parameterService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="parameterService"/>
+    </bean>
+
+    <bean id="budgetSummaryService" class="org.kuali.rice.krad.config.GlobalResourceLoaderServiceFactoryBean">
+        <property name="serviceName" value="budgetSummaryService" />
+    </bean>
+
+</beans>
