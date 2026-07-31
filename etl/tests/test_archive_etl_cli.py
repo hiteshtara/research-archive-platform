@@ -15,7 +15,14 @@ def test_build_parser_requires_a_command() -> None:
 
 @pytest.mark.parametrize(
     "domain",
-    ["award", "negotiation", "subaward", "proposal", "award-attachment"],
+    [
+        "award",
+        "negotiation",
+        "subaward",
+        "proposal",
+        "award-attachment",
+        "protocol",
+    ],
 )
 def test_build_parser_accepts_each_domain_with_defaults(domain: str) -> None:
     args = build_parser().parse_args([domain])
@@ -40,6 +47,14 @@ def test_build_parser_accepts_check_with_no_extra_arguments() -> None:
     args = build_parser().parse_args(["check"])
 
     assert args.command == "check"
+    assert args.domain is None
+
+
+def test_build_parser_accepts_check_with_a_domain() -> None:
+    args = build_parser().parse_args(["check", "protocol"])
+
+    assert args.command == "check"
+    assert args.domain == "protocol"
 
 
 def test_run_domain_forwards_nothing_when_limit_is_not_given() -> None:
@@ -144,7 +159,39 @@ def test_run_check_returns_zero_when_both_checks_pass() -> None:
         patch("scripts.test_oracle_connection.main", return_value=0),
         patch("scripts.test_postgres_connection.main", return_value=0),
     ):
-        assert _run_check() == 0
+        assert _run_check(None) == 0
+
+
+def test_run_check_with_a_domain_also_runs_a_limited_smoke_test() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    with (
+        patch("scripts.test_oracle_connection.main", return_value=0),
+        patch("scripts.test_postgres_connection.main", return_value=0),
+        patch(
+            "archive_etl.__main__.importlib.import_module",
+            return_value=fake_module,
+        ) as import_module,
+    ):
+        assert _run_check("protocol") == 0
+
+    import_module.assert_called_once_with("load_protocols")
+    assert captured_argv == ["load_protocols.py", "--limit", "5"]
+
+
+def test_run_check_with_a_domain_skips_the_smoke_test_if_connectivity_fails() -> None:
+    with (
+        patch("scripts.test_oracle_connection.main", return_value=1),
+        patch("scripts.test_postgres_connection.main", return_value=0),
+        patch(
+            "archive_etl.__main__.importlib.import_module"
+        ) as import_module,
+    ):
+        assert _run_check("protocol") == 1
+
+    import_module.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -160,14 +207,22 @@ def test_run_check_returns_one_if_either_check_fails(
             return_value=postgres_result,
         ),
     ):
-        assert _run_check() == 1
+        assert _run_check(None) == 1
 
 
 def test_main_dispatches_check() -> None:
     with patch("archive_etl.__main__._run_check", return_value=0) as run_check:
         result = main(["check"])
 
-    run_check.assert_called_once_with()
+    run_check.assert_called_once_with(None)
+    assert result == 0
+
+
+def test_main_dispatches_check_with_a_domain() -> None:
+    with patch("archive_etl.__main__._run_check", return_value=0) as run_check:
+        result = main(["check", "protocol"])
+
+    run_check.assert_called_once_with("protocol")
     assert result == 0
 
 

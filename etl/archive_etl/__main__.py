@@ -1,7 +1,7 @@
 """Unified CLI entrypoint for the Research Archive ETL.
 
     uv run python -m archive_etl <domain> [--limit N]
-    uv run python -m archive_etl check
+    uv run python -m archive_etl check [<domain>]
 
 Oracle is the only supported source of structured data - there is no
 --source/--csv selection. This is a thin dispatcher over the existing
@@ -11,6 +11,11 @@ connectivity-check logic, only translates one consistent command shape into
 the arguments/functions those scripts already provide. Each domain script
 remains independently runnable exactly as before (e.g. `uv run python
 load_awards_from_csv.py --limit 10`).
+
+`check <domain>` runs the standard Oracle/Postgres connectivity check, then
+additionally exercises that domain's loader with a small `--limit`, so
+Oracle extraction and parent-resolution/transform logic get a read-only
+smoke test without a real load.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ DOMAIN_MODULES: dict[str, str] = {
     "subaward": "load_subawards_from_csv",
     "proposal": "load_proposals_from_csv",
     "award-attachment": "load_award_attachments",
+    "protocol": "load_protocols",
 }
 
 # Domain-specific extra CLI flags forwarded verbatim to the underlying
@@ -97,6 +103,8 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
     ],
 }
 
+_CHECK_DOMAIN_LIMIT = 5
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -112,11 +120,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser(
+    check_parser = subparsers.add_parser(
         "check",
         help=(
             "Validate Oracle and PostgreSQL connectivity (never prints "
             "secrets) without loading anything."
+        ),
+    )
+    check_parser.add_argument(
+        "domain",
+        nargs="?",
+        choices=sorted(DOMAIN_MODULES),
+        default=None,
+        help=(
+            "Optional. Also run this domain's loader with a small --limit "
+            "as a read-only smoke test of Oracle extraction and transform "
+            "logic, on top of the standard connectivity check."
         ),
     )
 
@@ -165,7 +184,7 @@ def _run_domain(domain: str, args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_check() -> int:
+def _run_check(domain: str | None) -> int:
     from scripts.test_oracle_connection import main as check_oracle
     from scripts.test_postgres_connection import main as check_postgres
 
@@ -177,6 +196,22 @@ def _run_check() -> int:
 
     if oracle_result != 0 or postgres_result != 0:
         return 1
+
+    if domain is not None:
+        print()
+        print(f"=== {domain.capitalize()} read-only smoke test (--limit {_CHECK_DOMAIN_LIMIT}) ===")
+        module = importlib.import_module(DOMAIN_MODULES[domain])
+        original_argv = sys.argv
+        sys.argv = [
+            f"{DOMAIN_MODULES[domain]}.py",
+            "--limit",
+            str(_CHECK_DOMAIN_LIMIT),
+        ]
+        try:
+            module.main()
+        finally:
+            sys.argv = original_argv
+
     return 0
 
 
@@ -184,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "check":
-        return _run_check()
+        return _run_check(args.domain)
     return _run_domain(args.command, args)
 
 

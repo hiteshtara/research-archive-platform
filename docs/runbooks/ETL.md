@@ -34,3 +34,20 @@ Proposal people (`archive.proposal_person`) had no verified Oracle
 extraction query and has been removed entirely (API, UI, ETL, and schema —
 see [`docs/DECISIONS.md`](../DECISIONS.md)).
 
+-------------------------------------------------------------------------------
+
+Protocol ETL
+
+`KCOEUS.PROTOCOL` / `PROTOCOL_PERSONS` / `PROTOCOL_UNITS` (Oracle)
+
+↓
+
+`protocol_version` / `protocol_person` / `protocol_unit`
+
+Independent of and additive to legacy IRB — not a replacement, and not the
+same schema as the removed Protocol Archive above. ETL only so far; no API
+or UI. `protocol_unit_administrator` is out of scope pending a verified
+Oracle source. See
+[`docs/PROTOCOL_ORACLE_LOADER.md`](../PROTOCOL_ORACLE_LOADER.md) for the
+full architecture, reconciliation metrics, and deployment procedure.
+
