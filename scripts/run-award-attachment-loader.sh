@@ -59,9 +59,9 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/run-award-attachment-loader.sh [--dry-run] [--upload] \
-#       [--migrate-only] [--show-upload-status] [--limit N] \
-#       [--file-id N] [--retry-failed] [--bucket NAME] [--prefix PREFIX] \
-#       [--image-uri URI]
+#       [--migrate-only] [--show-upload-status] [--load-file-id N] \
+#       [--limit N] [--file-id N] [--retry-failed] [--bucket NAME] \
+#       [--prefix PREFIX] [--image-uri URI]
 #
 # --image-uri <full-ecr-image-uri>: reuse an already-built-and-pushed
 #   image instead of building/pushing a new one. When given, this script
@@ -79,6 +79,16 @@ set -euo pipefail
 #   state from inside the ECS task without connecting to private RDS
 #   directly.
 #
+# --load-file-id N: bounded, idempotent metadata load for exactly one
+#   physical FILE_ID (and its reference rows only) - fixes "Oracle has
+#   this file, but archive.attachment_object doesn't, so --upload
+#   --file-id selects zero candidates." UPSERTs (never truncates or
+#   replaces the full tables), preserves an existing row's upload state,
+#   never reads a BLOB, never uploads to S3. Requires ORACLE_SECRET_ID
+#   (unlike --migrate-only/--show-upload-status, this reads Oracle).
+#   Combine with --dry-run to see inserted/updated/unchanged/missing
+#   counts without persisting anything.
+#
 # Examples:
 #   # Bootstrap a fresh database (apply migrations, validate schema, exit):
 #   POSTGRES_SECRET_ID=arn:...:postgres \
@@ -90,6 +100,11 @@ set -euo pipefail
 #   # Inspect PostgreSQL upload state for one file, read-only:
 #   POSTGRES_SECRET_ID=arn:...:postgres \
 #     scripts/run-award-attachment-loader.sh --show-upload-status --file-id 9001
+#
+#   # Load metadata for exactly one physical file, so a subsequent
+#   # --upload --file-id has something to find:
+#   POSTGRES_SECRET_ID=arn:...:postgres ORACLE_SECRET_ID=arn:...:oracle \
+#     scripts/run-award-attachment-loader.sh --load-file-id 1
 #
 #   # Batch upload of up to 100 pending/uploading files:
 #   scripts/run-award-attachment-loader.sh --upload --limit 100
@@ -116,6 +131,7 @@ CONTAINER_NAME="loader"
 : "${POSTGRES_SECRET_ID:?POSTGRES_SECRET_ID is not set - Secrets Manager ARN/name for the PostgreSQL secret (an identifier, never a credential)}"
 
 FILE_ID=""
+LOAD_FILE_ID=""
 LIMIT=""
 RETRY_FAILED=false
 DRY_RUN=false
@@ -129,6 +145,7 @@ IMAGE_URI_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --file-id) FILE_ID="$2"; shift 2 ;;
+    --load-file-id) LOAD_FILE_ID="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --retry-failed) RETRY_FAILED=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -248,6 +265,7 @@ echo "Registered: $NEW_REVISION_ARN"
 echo "=== Building command + environment override ==="
 OVERRIDE_ARGS=()
 [[ -n "$FILE_ID" ]] && OVERRIDE_ARGS+=(--file-id "$FILE_ID")
+[[ -n "$LOAD_FILE_ID" ]] && OVERRIDE_ARGS+=(--load-file-id "$LOAD_FILE_ID")
 [[ -n "$LIMIT" ]] && OVERRIDE_ARGS+=(--limit "$LIMIT")
 [[ "$RETRY_FAILED" == true ]] && OVERRIDE_ARGS+=(--retry-failed)
 [[ "$DRY_RUN" == true ]] && OVERRIDE_ARGS+=(--dry-run)

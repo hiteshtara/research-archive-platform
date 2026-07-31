@@ -169,6 +169,70 @@ lives only in Oracle), never writes to PostgreSQL, never touches S3.
 `--show-upload-status` is rejected at the argument-parsing level if
 `--ecs` isn't also given, or if `--file-id` isn't given.
 
+### Bounded single-file metadata load: `--load-file-id`
+
+**The bug this fixes**: Oracle can contain `FILE_ID=1` while
+`archive.attachment_object` has no row for it at all (a fresh database,
+or a file added to Oracle after the last full load). In that state,
+`--upload --file-id 1` correctly selects **zero** candidates — there is
+nothing in PostgreSQL to select, since `--upload` only ever picks from
+rows that already exist. `--load-file-id` closes that gap: a bounded,
+idempotent UPSERT for exactly one physical `file_id` (and its
+`award_attachment` reference rows only), so a subsequent `--upload
+--file-id` has something to find.
+
+```bash
+uv run python load_award_attachments.py --ecs --load-file-id 1
+```
+
+Unlike the full metadata load (which `TRUNCATE`s both tables and bulk
+`COPY`s everything), `--load-file-id`:
+- **Never truncates or replaces the full tables** — every other file's
+  row is left completely untouched.
+- **UPSERTs**, not inserts — safe to run against a database that
+  already has other rows loaded, and safe to re-run against the same
+  `file_id` repeatedly.
+- **Preserves an existing row's upload state** — `upload_status`,
+  `upload_attempts`, `last_error`, `sha256`, `s3_bucket`, `s3_key`,
+  `s3_etag`, and `uploaded_at` are never touched by the `UPDATE` branch
+  of the UPSERT if the row already exists (whatever a prior `--upload`
+  run recorded stays exactly as it was). Only a brand-new row gets those
+  columns' normal defaults (`PENDING`/`MISSING_SOURCE_CONTENT`, zero
+  attempts, no S3 state yet — exactly what `prepare_files()` already
+  computes for a fresh load).
+- **Never reads a BLOB** — the same physical-file and reference Oracle
+  queries the full load already uses, neither of which selects a blob
+  column.
+- **Never uploads to S3** — `--load-file-id` takes priority over
+  `--upload`/`--file-id`/`--limit` in `main()`'s dispatch if more than
+  one is given, so this guarantee holds even if they're combined by
+  mistake.
+- **Also reconciles reference rows for that file_id only** — every
+  `archive.award_attachment` row Oracle currently has for this
+  `file_id` is UPSERTed too (every column refreshed on conflict, since
+  that table carries no loader-owned mutable state the way
+  `attachment_object` does).
+
+Logs `inserted`/`updated`/`unchanged`/`missing` counts (aggregated
+across the file row and its reference rows): `missing=1` means the
+`file_id` wasn't found in Oracle at all (nothing else is attempted in
+that case); otherwise `missing=0` and the file row plus each reference
+row are each counted as exactly one of inserted/updated/unchanged.
+
+Combine with `--dry-run` to see accurate counts without persisting
+anything — the UPSERT actually runs (so the insert/update/unchanged
+classification is genuine, not simulated), but the transaction is
+rolled back instead of committed, including its own `load_run` audit
+row.
+
+`--load-file-id` does **not** require `--ecs` — like `--upload` and the
+ordinary metadata load, it works in local dev too (against a local
+Postgres tunnel and Oracle VPN access). In `--ecs` mode it relies on
+`_run_ecs_setup`'s normal startup validation (both PostgreSQL and
+Oracle connectivity, tables already existing) exactly like `--upload`
+does; outside `--ecs`, it applies pending migrations first, exactly
+like the ordinary metadata load does.
+
 ### Secrets Manager requirements
 
 | Credential | Environment variable | Shape | Precedence |
@@ -362,10 +426,10 @@ it to ECR, registers a new task-definition revision from the existing
 `research-archive-platform-dev-loader` family with that image, runs it as
 a one-off Fargate task, waits for completion, streams its CloudWatch
 logs, and exits with the task container's own exit code. It supports
-`--file-id`, `--limit`, `--retry-failed`, `--dry-run`, `--upload`,
-`--migrate-only`, `--show-upload-status`, `--bucket`, and `--prefix` —
-the same flags the loader itself accepts — translating them into the
-ECS `run-task --overrides`
+`--file-id`, `--load-file-id`, `--limit`, `--retry-failed`, `--dry-run`,
+`--upload`, `--migrate-only`, `--show-upload-status`, `--bucket`, and
+`--prefix` — the same flags the loader itself accepts — translating
+them into the ECS `run-task --overrides`
 JSON via `etl/scripts/build_award_attachment_ecs_overrides.py` (a small,
 pure, independently-tested function — see
 `etl/tests/test_build_award_attachment_ecs_overrides.py`).
@@ -411,6 +475,16 @@ POSTGRES_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research
 ```
 which generates the container command
 `["python", "-m", "archive_etl", "award-attachment", "--ecs", "--show-upload-status", "--file-id", "1"]`.
+
+Example — load metadata for exactly one physical file, so a subsequent
+`--upload --file-id` has something to find:
+```bash
+POSTGRES_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-4k6Ngz \
+ORACLE_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/oracle-ECgann \
+  scripts/run-award-attachment-loader.sh --load-file-id 1
+```
+which generates the container command
+`["python", "-m", "archive_etl", "award-attachment", "--ecs", "--load-file-id", "1"]`.
 
 **This script performs real AWS actions the moment it is invoked** (image
 build/push, task-definition registration, and — with `--upload` and

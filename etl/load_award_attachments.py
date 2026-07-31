@@ -451,6 +451,37 @@ def read_files_matching_ids(
     return pd.concat(collected, ignore_index=True)
 
 
+def read_references_matching_file_ids(
+    source: OracleDataSource, target_file_ids: set[int]
+) -> pd.DataFrame:
+    """Scan the Award attachment reference Oracle source batch by batch,
+    keeping only rows whose file_id is an exact match in target_file_ids.
+    Unlike read_files_matching_ids, this can never stop early once every
+    target has been "found once" - file_id is not unique on this source
+    (the same physical file is legitimately referenced by many
+    award_attachment rows), so an early stop after the first match per
+    file_id would silently drop later reference rows for that same
+    file_id. Always scans the full source."""
+    if not target_file_ids:
+        return pd.DataFrame()
+
+    targets = set(target_file_ids)
+    collected: list[pd.DataFrame] = []
+    batches = source.read_batches()
+    try:
+        for batch in batches:
+            batch_ids = pd.to_numeric(batch["file_id"], errors="coerce")
+            mask = batch_ids.isin(targets)
+            if mask.any():
+                collected.append(batch[mask])
+    finally:
+        batches.close()
+
+    if not collected:
+        return pd.DataFrame()
+    return pd.concat(collected, ignore_index=True)
+
+
 def build_sample_validation_report(
     references: pd.DataFrame,
     files: pd.DataFrame,
@@ -753,6 +784,292 @@ def verify_loaded_data(
             f"archive.award_attachment contains {orphan_references} rows "
             "referencing a file_id absent from archive.attachment_object"
         )
+
+
+# --- Bounded single-file metadata load (--load-file-id) --------------------
+#
+# Unlike the full load above (TRUNCATE + bulk COPY of everything), this is
+# an idempotent UPSERT scoped to exactly one physical file_id and its
+# reference rows - safe to run against a database that already has other
+# rows loaded, and safe to re-run. Never reads a BLOB (neither Oracle
+# query here selects a blob column) and never touches S3.
+
+_ATTACHMENT_OBJECT_METADATA_COLUMNS = [
+    "file_data_id",
+    "file_name",
+    "content_type",
+    "blob_source",
+    "file_size_bytes",
+    "oracle_update_timestamp",
+    "oracle_update_user",
+]
+
+_AWARD_ATTACHMENT_COLUMNS = [
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "document_id",
+    "file_id",
+    "type_code",
+    "description",
+    "document_status_code",
+    "oracle_update_timestamp",
+    "oracle_update_user",
+]
+
+
+def _sql_value(value: Any) -> Any:
+    """Convert a pandas scalar into a value safe to bind as a SQL
+    parameter - NaN/NaT become NULL, and a whole-number float (pandas'
+    representation of a nullable integer column, e.g. 9001.0) becomes a
+    real int. Mirrors archive_etl.upload.bulk_copy's _copy_value, applied
+    here to parameterized UPSERTs instead of a COPY buffer."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime()
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def upsert_attachment_object(
+    connection: Connection, file_row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.attachment_object row,
+    from Oracle-sourced metadata only. Deliberately never sets
+    upload_status/upload_attempts/last_error/sha256/s3_bucket/s3_key/
+    s3_etag/uploaded_at on an existing row - an existing row's upload
+    state (whatever a prior --upload run has done) is always preserved.
+    A brand-new row gets upload_status/upload_attempts/etc. from
+    file_row (as prepare_files() sets them: PENDING or
+    MISSING_SOURCE_CONTENT, zero attempts, no error/S3 state yet).
+    Returns exactly one of "inserted", "updated", "unchanged"."""
+    params = {
+        "file_id": _sql_value(file_row["file_id"]),
+        "load_id": load_id,
+        "upload_status": _sql_value(file_row.get("upload_status")),
+        "upload_attempts": _sql_value(file_row.get("upload_attempts", 0)),
+        "last_error": _sql_value(file_row.get("last_error")),
+        "sha256": _sql_value(file_row.get("sha256")),
+        "s3_bucket": _sql_value(file_row.get("s3_bucket")),
+        "s3_key": _sql_value(file_row.get("s3_key")),
+        "s3_etag": _sql_value(file_row.get("s3_etag")),
+        "uploaded_at": _sql_value(file_row.get("uploaded_at")),
+    }
+    for column in _ATTACHMENT_OBJECT_METADATA_COLUMNS:
+        params[column] = _sql_value(file_row.get(column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.attachment_object (
+                file_id, file_data_id, file_name, content_type, blob_source,
+                file_size_bytes, upload_status, upload_attempts, last_error,
+                sha256, s3_bucket, s3_key, s3_etag, uploaded_at,
+                oracle_update_timestamp, oracle_update_user, load_id
+            ) VALUES (
+                :file_id, :file_data_id, :file_name, :content_type,
+                :blob_source, :file_size_bytes, :upload_status,
+                :upload_attempts, :last_error, :sha256, :s3_bucket, :s3_key,
+                :s3_etag, :uploaded_at, :oracle_update_timestamp,
+                :oracle_update_user, :load_id
+            )
+            ON CONFLICT (file_id) DO UPDATE SET
+                file_data_id = EXCLUDED.file_data_id,
+                file_name = EXCLUDED.file_name,
+                content_type = EXCLUDED.content_type,
+                blob_source = EXCLUDED.blob_source,
+                file_size_bytes = EXCLUDED.file_size_bytes,
+                oracle_update_timestamp = EXCLUDED.oracle_update_timestamp,
+                oracle_update_user = EXCLUDED.oracle_update_user,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.attachment_object.file_data_id
+                    IS DISTINCT FROM EXCLUDED.file_data_id
+                OR archive.attachment_object.file_name
+                    IS DISTINCT FROM EXCLUDED.file_name
+                OR archive.attachment_object.content_type
+                    IS DISTINCT FROM EXCLUDED.content_type
+                OR archive.attachment_object.blob_source
+                    IS DISTINCT FROM EXCLUDED.blob_source
+                OR archive.attachment_object.file_size_bytes
+                    IS DISTINCT FROM EXCLUDED.file_size_bytes
+                OR archive.attachment_object.oracle_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.oracle_update_timestamp
+                OR archive.attachment_object.oracle_update_user
+                    IS DISTINCT FROM EXCLUDED.oracle_update_user
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_attachment(
+    connection: Connection, reference_row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_attachment row.
+    Unlike attachment_object, this table carries no loader-owned mutable
+    state (no upload tracking) - every column is refreshed from Oracle on
+    conflict. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params = {
+        "award_attachment_id": _sql_value(reference_row["award_attachment_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_ATTACHMENT_COLUMNS:
+        params[column] = _sql_value(reference_row.get(column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_attachment (
+                award_attachment_id, award_id, award_number, sequence_number,
+                document_id, file_id, type_code, description,
+                document_status_code, oracle_update_timestamp,
+                oracle_update_user, load_id
+            ) VALUES (
+                :award_attachment_id, :award_id, :award_number,
+                :sequence_number, :document_id, :file_id, :type_code,
+                :description, :document_status_code,
+                :oracle_update_timestamp, :oracle_update_user, :load_id
+            )
+            ON CONFLICT (award_attachment_id) DO UPDATE SET
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                document_id = EXCLUDED.document_id,
+                file_id = EXCLUDED.file_id,
+                type_code = EXCLUDED.type_code,
+                description = EXCLUDED.description,
+                document_status_code = EXCLUDED.document_status_code,
+                oracle_update_timestamp = EXCLUDED.oracle_update_timestamp,
+                oracle_update_user = EXCLUDED.oracle_update_user,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_attachment.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_attachment.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_attachment.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_attachment.document_id
+                    IS DISTINCT FROM EXCLUDED.document_id
+                OR archive.award_attachment.file_id
+                    IS DISTINCT FROM EXCLUDED.file_id
+                OR archive.award_attachment.type_code
+                    IS DISTINCT FROM EXCLUDED.type_code
+                OR archive.award_attachment.description
+                    IS DISTINCT FROM EXCLUDED.description
+                OR archive.award_attachment.document_status_code
+                    IS DISTINCT FROM EXCLUDED.document_status_code
+                OR archive.award_attachment.oracle_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.oracle_update_timestamp
+                OR archive.award_attachment.oracle_update_user
+                    IS DISTINCT FROM EXCLUDED.oracle_update_user
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def _run_load_file_id(
+    engine: Engine, file_id: int, *, dry_run: bool = False, run_id: str | None = None
+) -> dict[str, int]:
+    """--load-file-id: bounded, idempotent metadata load for exactly one
+    physical file_id (and its reference rows only) - the fix for "Oracle
+    has this file, but archive.attachment_object doesn't, so --upload
+    --file-id selects zero candidates." Never truncates or replaces the
+    full attachment tables (unlike the full load), never reads a BLOB,
+    never uploads to S3. With dry_run=True, every UPSERT still runs (so
+    the reported counts are accurate) but the transaction is rolled back
+    instead of committed - nothing is persisted."""
+    load_logger = logger.bind(stage="load_file_id", file_id=file_id, run_id=run_id)
+
+    files_raw = read_files_matching_ids(OracleDataSource(FILES_ORACLE_SQL), {file_id})
+    if files_raw.empty:
+        load_logger.info(
+            "file_id={} not found in Oracle - nothing to load "
+            "(inserted=0 updated=0 unchanged=0 missing=1)",
+            file_id,
+        )
+        return {
+            "file_id": file_id,
+            "inserted": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "missing": 1,
+        }
+
+    files = prepare_files(files_raw)
+    file_row = files.iloc[0]
+
+    references_raw = read_references_matching_file_ids(
+        OracleDataSource(REFERENCES_ORACLE_SQL), {file_id}
+    )
+    references = (
+        prepare_references(references_raw)
+        if not references_raw.empty
+        else references_raw
+    )
+
+    report = {"file_id": file_id, "inserted": 0, "updated": 0, "unchanged": 0, "missing": 0}
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = create_load_run(connection, 1 + len(references))
+
+            file_result = upsert_attachment_object(connection, file_row, load_id)
+            report[file_result] += 1
+
+            for _, reference_row in references.iterrows():
+                reference_result = upsert_award_attachment(
+                    connection, reference_row, load_id
+                )
+                report[reference_result] += 1
+
+            mark_load_complete(
+                connection,
+                load_id,
+                1 + len(references),
+                {
+                    "inserted": report["inserted"],
+                    "updated": report["updated"],
+                    "unchanged": report["unchanged"],
+                },
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    load_logger.info(
+        "Bounded metadata load for file_id={} ({} reference row(s)){}: "
+        "inserted={} updated={} unchanged={} missing={}",
+        file_id,
+        len(references),
+        " [DRY RUN - not persisted]" if dry_run else "",
+        report["inserted"],
+        report["updated"],
+        report["unchanged"],
+        report["missing"],
+    )
+
+    return report
 
 
 # --- Sprint 2: resumable S3 upload -----------------------------------------
@@ -1124,6 +1441,25 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--load-file-id",
+        type=int,
+        default=None,
+        help=(
+            "Bounded, idempotent metadata load for exactly one physical "
+            "FILE_ID (and its reference rows only) - fixes 'Oracle has "
+            "this file, but archive.attachment_object doesn't, so "
+            "--upload --file-id selects zero candidates.' UPSERTs "
+            "archive.attachment_object and archive.award_attachment for "
+            "this file_id only; never truncates or replaces the full "
+            "tables, never reads a BLOB, never uploads to S3. An "
+            "existing row's upload_status/upload_attempts/last_error/S3 "
+            "fields are always preserved, never overwritten. Logs "
+            "inserted/updated/unchanged/missing counts. Combine with "
+            "--dry-run to see those counts without persisting anything. "
+            "Takes priority over --upload/--file-id/--limit if given."
+        ),
+    )
+    parser.add_argument(
         "--retry-failed",
         action="store_true",
         help=(
@@ -1492,6 +1828,18 @@ def main() -> None:
         ecs_setup_short_circuited = _run_ecs_setup(arguments, run_id)
         if ecs_setup_short_circuited:
             return
+
+    if arguments.load_file_id is not None:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        _run_load_file_id(
+            engine,
+            arguments.load_file_id,
+            dry_run=arguments.dry_run,
+            run_id=run_id,
+        )
+        return
 
     if arguments.upload:
         _run_upload(arguments, run_id=run_id)

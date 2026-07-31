@@ -81,6 +81,14 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
             },
         ),
         (
+            "--load-file-id",
+            {
+                "type": int,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --load-file-id.",
+            },
+        ),
+        (
             "--retry-failed",
             {
                 "action": "store_true",

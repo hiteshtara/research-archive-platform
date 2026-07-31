@@ -52,6 +52,18 @@ class BuildContainerCommandTest(unittest.TestCase):
             [*MODULE_CLI_PREFIX, "--show-upload-status", "--file-id", "1"],
         )
 
+    def test_load_file_id_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(load_file_id=1)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--load-file-id", "1"])
+
+    def test_load_file_id_combines_with_dry_run(self) -> None:
+        command = build_container_command(load_file_id=1, dry_run=True)
+
+        self.assertEqual(
+            command, [*MODULE_CLI_PREFIX, "--dry-run", "--load-file-id", "1"]
+        )
+
     def test_file_id_dry_run_produces_the_exact_required_command(self) -> None:
         command = build_container_command(file_id=9001, dry_run=True)
 
@@ -285,10 +297,16 @@ class ParseArgsTest(unittest.TestCase):
         self.assertTrue(args.show_upload_status)
         self.assertEqual(args.file_id, 1)
 
+    def test_parses_load_file_id(self) -> None:
+        args = parse_args(["--load-file-id", "1"])
+
+        self.assertEqual(args.load_file_id, 1)
+
     def test_defaults_when_nothing_given(self) -> None:
         args = parse_args([])
 
         self.assertIsNone(args.file_id)
+        self.assertIsNone(args.load_file_id)
         self.assertIsNone(args.limit)
         self.assertFalse(args.retry_failed)
         self.assertFalse(args.dry_run)

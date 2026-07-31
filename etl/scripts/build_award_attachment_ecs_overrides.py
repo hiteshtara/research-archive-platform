@@ -1,9 +1,9 @@
 """Build the `aws ecs run-task --overrides` JSON for a one-off Award
 Attachment loader task run.
 
-Translates CLI pass-through flags (--file-id, --limit, --retry-failed,
---dry-run, --upload, --migrate-only, --show-upload-status) into the
-container command override
+Translates CLI pass-through flags (--file-id, --load-file-id, --limit,
+--retry-failed, --dry-run, --upload, --migrate-only,
+--show-upload-status) into the container command override
 for the "loader" container in the research-archive-platform-dev-loader
 task family (see terraform/modules/ecs/main.tf - not modified here), and
 translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
@@ -45,6 +45,7 @@ CONTAINER_NAME = "loader"
 def build_container_command(
     *,
     file_id: int | None = None,
+    load_file_id: int | None = None,
     limit: int | None = None,
     retry_failed: bool = False,
     dry_run: bool = False,
@@ -80,6 +81,8 @@ def build_container_command(
         command.extend(["--limit", str(limit)])
     if file_id is not None:
         command.extend(["--file-id", str(file_id)])
+    if load_file_id is not None:
+        command.extend(["--load-file-id", str(load_file_id)])
     if retry_failed:
         command.append("--retry-failed")
     if bucket:
@@ -124,6 +127,7 @@ def build_environment_overrides(
 def build_run_task_overrides(
     *,
     file_id: int | None = None,
+    load_file_id: int | None = None,
     limit: int | None = None,
     retry_failed: bool = False,
     dry_run: bool = False,
@@ -144,6 +148,7 @@ def build_run_task_overrides(
         "name": CONTAINER_NAME,
         "command": build_container_command(
             file_id=file_id,
+            load_file_id=load_file_id,
             limit=limit,
             retry_failed=retry_failed,
             dry_run=dry_run,
@@ -173,6 +178,7 @@ def build_run_task_overrides(
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file-id", type=int, default=None)
+    parser.add_argument("--load-file-id", type=int, default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -195,6 +201,7 @@ def main() -> None:
     args = parse_args()
     overrides = build_run_task_overrides(
         file_id=args.file_id,
+        load_file_id=args.load_file_id,
         limit=args.limit,
         retry_failed=args.retry_failed,
         dry_run=args.dry_run,

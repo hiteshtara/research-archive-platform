@@ -338,7 +338,12 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             patch.object(attachment_loader, "apply_migrations") as apply_migrations,
         ):
             parse_args.return_value = MagicMock(
-                limit=None, dry_run=True, upload=False, file_id=None, ecs=False
+                limit=None,
+                dry_run=True,
+                upload=False,
+                file_id=None,
+                load_file_id=None,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -361,7 +366,12 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             ) as create_engine,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False, file_id=None, ecs=False
+                limit=10,
+                dry_run=True,
+                upload=False,
+                file_id=None,
+                load_file_id=None,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -387,7 +397,12 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             ) as create_s3_client,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False, file_id=None, ecs=False
+                limit=10,
+                dry_run=True,
+                upload=False,
+                file_id=None,
+                load_file_id=None,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -424,7 +439,12 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
             patch.object(attachment_loader, "mark_load_complete") as mark_complete,
         ):
             parse_args.return_value = MagicMock(
-                limit=None, dry_run=False, upload=False, file_id=None, ecs=False
+                limit=None,
+                dry_run=False,
+                upload=False,
+                file_id=None,
+                load_file_id=None,
+                ecs=False,
             )
             create_engine.return_value = MagicMock()
             attachment_loader.main()
@@ -522,6 +542,87 @@ class ReadFilesMatchingIdsTest(unittest.TestCase):
         source = MagicMock()
 
         result = attachment_loader.read_files_matching_ids(source, set())
+
+        self.assertTrue(result.empty)
+        source.read_batches.assert_not_called()
+
+
+class ReadReferencesMatchingFileIdsTest(unittest.TestCase):
+    def test_collects_every_matching_reference_row_not_just_the_first(
+        self,
+    ) -> None:
+        # Unlike read_files_matching_ids, file_id is NOT unique on the
+        # reference source - the same physical file is legitimately
+        # referenced by many award_attachment rows. An early stop after
+        # the first match would silently drop the later ones.
+        def fake_batches():
+            yield pd.DataFrame(
+                [{"award_attachment_id": 1, "file_id": 9001}]
+            )
+            yield pd.DataFrame(
+                [{"award_attachment_id": 2, "file_id": 42}]
+            )
+            yield pd.DataFrame(
+                [{"award_attachment_id": 3, "file_id": 9001}]
+            )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = attachment_loader.read_references_matching_file_ids(
+            source, {9001}
+        )
+
+        self.assertEqual(
+            sorted(result["award_attachment_id"].tolist()), [1, 3]
+        )
+
+    def test_never_stops_early_even_after_every_target_has_a_match(
+        self,
+    ) -> None:
+        produced = {"batches": 0}
+
+        def fake_batches():
+            for i in range(50):
+                produced["batches"] += 1
+                yield pd.DataFrame(
+                    [{"award_attachment_id": i, "file_id": 1}]
+                )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = attachment_loader.read_references_matching_file_ids(
+            source, {1}
+        )
+
+        self.assertEqual(produced["batches"], 50)
+        self.assertEqual(len(result), 50)
+
+    def test_excludes_non_matching_rows(self) -> None:
+        def fake_batches():
+            yield pd.DataFrame(
+                [
+                    {"award_attachment_id": 1, "file_id": 1},
+                    {"award_attachment_id": 2, "file_id": 2},
+                ]
+            )
+
+        source = MagicMock()
+        source.read_batches.side_effect = lambda: fake_batches()
+
+        result = attachment_loader.read_references_matching_file_ids(
+            source, {1}
+        )
+
+        self.assertEqual(result["award_attachment_id"].tolist(), [1])
+
+    def test_returns_empty_dataframe_for_no_targets(self) -> None:
+        source = MagicMock()
+
+        result = attachment_loader.read_references_matching_file_ids(
+            source, set()
+        )
 
         self.assertTrue(result.empty)
         source.read_batches.assert_not_called()
@@ -1243,7 +1344,12 @@ class UploadGatingTest(unittest.TestCase):
             patch.object(attachment_loader, "_run_upload") as run_upload,
         ):
             parse_args.return_value = MagicMock(
-                limit=10, dry_run=True, upload=False, file_id=None, ecs=False
+                limit=10,
+                dry_run=True,
+                upload=False,
+                file_id=None,
+                load_file_id=None,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -1254,7 +1360,9 @@ class UploadGatingTest(unittest.TestCase):
             patch.object(attachment_loader, "parse_args") as parse_args,
             patch.object(attachment_loader, "_run_upload") as run_upload,
         ):
-            parse_args.return_value = MagicMock(upload=True, ecs=False)
+            parse_args.return_value = MagicMock(
+                upload=True, load_file_id=None, ecs=False
+            )
             attachment_loader.main()
 
         run_upload.assert_called_once()
@@ -1385,7 +1493,12 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
             ) as create_engine,
         ):
             parse_args.return_value = MagicMock(
-                upload=False, file_id=9001, limit=None, dry_run=True, ecs=False
+                upload=False,
+                file_id=9001,
+                load_file_id=None,
+                limit=None,
+                dry_run=True,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -1404,7 +1517,12 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
             ) as read_sample,
         ):
             parse_args.return_value = MagicMock(
-                upload=False, file_id=9001, limit=10, dry_run=True, ecs=False
+                upload=False,
+                file_id=9001,
+                load_file_id=None,
+                limit=10,
+                dry_run=True,
+                ecs=False,
             )
             attachment_loader.main()
 
@@ -1912,6 +2030,31 @@ class ParseArgsShowUploadStatusTest(unittest.TestCase):
         self.assertFalse(args.show_upload_status)
 
 
+class ParseArgsLoadFileIdTest(unittest.TestCase):
+    def test_parses_load_file_id(self) -> None:
+        args = attachment_loader.parse_args(["--load-file-id", "1"])
+
+        self.assertEqual(args.load_file_id, 1)
+
+    def test_defaults_to_none(self) -> None:
+        args = attachment_loader.parse_args([])
+
+        self.assertIsNone(args.load_file_id)
+
+    def test_does_not_require_ecs(self) -> None:
+        # Unlike --migrate-only/--show-upload-status, --load-file-id
+        # works in local dev too (matching --upload/plain metadata load).
+        args = attachment_loader.parse_args(["--load-file-id", "1"])
+
+        self.assertFalse(args.ecs)
+
+    def test_combines_with_dry_run(self) -> None:
+        args = attachment_loader.parse_args(["--load-file-id", "1", "--dry-run"])
+
+        self.assertEqual(args.load_file_id, 1)
+        self.assertTrue(args.dry_run)
+
+
 class MigrateOnlyMainIntegrationTest(unittest.TestCase):
     def test_main_returns_immediately_after_migrate_only_completes(self) -> None:
         with (
@@ -1977,6 +2120,7 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 upload=True,
                 bucket=None,
                 file_id=None,
+                load_file_id=None,
                 limit=None,
                 dry_run=False,
             )
@@ -2015,6 +2159,123 @@ class ShowUploadStatusMainIntegrationTest(unittest.TestCase):
         run_ecs_setup.assert_called_once()
         run_upload.assert_not_called()
         run_file_id_lookup.assert_not_called()
+
+
+class LoadFileIdMainIntegrationTest(unittest.TestCase):
+    def test_local_mode_applies_migrations_then_loads(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine"
+            ) as create_engine,
+            patch.object(attachment_loader, "apply_migrations") as apply_migrations,
+            patch.object(
+                attachment_loader, "_run_load_file_id"
+            ) as run_load_file_id,
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_file_id_lookup,
+        ):
+            engine = MagicMock()
+            create_engine.return_value = engine
+            parse_args.return_value = MagicMock(
+                ecs=False,
+                load_file_id=1,
+                dry_run=False,
+                upload=False,
+                file_id=None,
+            )
+            attachment_loader.main()
+
+        apply_migrations.assert_called_once()
+        self.assertEqual(apply_migrations.call_args.args[0], engine)
+        run_load_file_id.assert_called_once()
+        self.assertEqual(run_load_file_id.call_args.args[0], engine)
+        self.assertEqual(run_load_file_id.call_args.args[1], 1)
+        self.assertFalse(run_load_file_id.call_args.kwargs["dry_run"])
+        run_upload.assert_not_called()
+        run_file_id_lookup.assert_not_called()
+
+    def test_dry_run_is_forwarded(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "apply_migrations"),
+            patch.object(
+                attachment_loader, "_run_load_file_id"
+            ) as run_load_file_id,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=False,
+                load_file_id=1,
+                dry_run=True,
+                upload=False,
+                file_id=None,
+            )
+            attachment_loader.main()
+
+        self.assertTrue(run_load_file_id.call_args.kwargs["dry_run"])
+
+    def test_takes_priority_over_upload_and_file_id(self) -> None:
+        # upload/file_id are deliberately also set, to prove load_file_id
+        # short-circuits main() before either runs - --load-file-id must
+        # never upload to S3, even if --upload is also passed.
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "apply_migrations"),
+            patch.object(attachment_loader, "_run_load_file_id") as run_load_file_id,
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_file_id_lookup,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=False,
+                load_file_id=1,
+                dry_run=False,
+                upload=True,
+                file_id=9001,
+            )
+            attachment_loader.main()
+
+        run_load_file_id.assert_called_once()
+        run_upload.assert_not_called()
+        run_file_id_lookup.assert_not_called()
+
+    def test_ecs_mode_never_applies_migrations(self) -> None:
+        # --ecs requires migrations to already exist (validated by
+        # _run_ecs_setup) and never applies them itself - --load-file-id
+        # must not be an exception to that rule.
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "_run_ecs_setup", return_value=False
+            ),
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "apply_migrations") as apply_migrations,
+            patch.object(attachment_loader, "_run_load_file_id") as run_load_file_id,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=True,
+                migrate_only=False,
+                show_upload_status=False,
+                load_file_id=1,
+                dry_run=False,
+                upload=False,
+                file_id=None,
+            )
+            attachment_loader.main()
+
+        apply_migrations.assert_not_called()
+        run_load_file_id.assert_called_once()
 
 
 class OracleExtractionSqlFilesExistTest(unittest.TestCase):
