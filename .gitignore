@@ -57,6 +57,7 @@ exports/
 *.key
 .envrc
 ui/.env.development.local
+oracle.json
 
 # Local development
 research_archive.dump
