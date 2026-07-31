@@ -64,26 +64,6 @@ resource "aws_iam_role_policy_attachment" "execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-data "aws_iam_policy_document" "execution_secrets" {
-  statement {
-    effect = "Allow"
-
-    actions = [
-      "secretsmanager:GetSecretValue"
-    ]
-
-    resources = [
-      var.database_secret_arn
-    ]
-  }
-}
-
-resource "aws_iam_role_policy" "execution_secrets" {
-  name   = "${var.project_name}-${var.environment}-loader-secrets"
-  role   = aws_iam_role.execution.id
-  policy = data.aws_iam_policy_document.execution_secrets.json
-}
-
 resource "aws_iam_role" "task" {
   name               = "${var.project_name}-${var.environment}-loader-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
@@ -155,13 +135,17 @@ resource "aws_iam_role_policy" "task_secrets" {
 # them, scoped the same way, only if a future verification step needs
 # them.
 data "aws_iam_policy_document" "task_documents_s3" {
+  # s3:ListBucketMultipartUploads has no object-key equivalent - it lists
+  # in-progress multipart uploads for the whole bucket and does not accept
+  # an s3:prefix condition the way ListBucket's key-listing does. Kept in
+  # its own statement (below) rather than folded in here, where the
+  # prefix condition would silently not apply to it.
   statement {
     sid    = "ListDocumentsBucketForAwardAttachments"
     effect = "Allow"
 
     actions = [
-      "s3:ListBucket",
-      "s3:ListBucketMultipartUploads"
+      "s3:ListBucket"
     ]
 
     resources = [
@@ -171,8 +155,24 @@ data "aws_iam_policy_document" "task_documents_s3" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["award-files/by-file-id/*"]
+      values = [
+        "award-files/by-file-id",
+        "award-files/by-file-id/*"
+      ]
     }
+  }
+
+  statement {
+    sid    = "ListDocumentsBucketMultipartUploads"
+    effect = "Allow"
+
+    actions = [
+      "s3:ListBucketMultipartUploads"
+    ]
+
+    resources = [
+      var.documents_bucket_arn
+    ]
   }
 
   statement {
@@ -234,14 +234,15 @@ resource "aws_ecs_task_definition" "loader" {
         # variable from DATA_BUCKET_NAME above - that one is the
         # unrelated, IRB-only data bucket; this one is the documents
         # bucket load_award_attachments.py uploads to. Secret
-        # identifiers only (ARNs, not credentials) - the loader fetches
-        # username/password/dsn itself, at runtime, from Secrets
-        # Manager. POSTGRES_HOST/PORT/DB are intentionally not added
-        # here as plain values - they are already provided as plain
-        # environment variables via the `secrets` block below (ECS
-        # resolves those from the same PostgreSQL secret before the
-        # container starts), and duplicating the same variable name in
-        # both `environment` and `secrets` is invalid/undefined.
+        # identifiers only (ARNs, not credentials) - the loader resolves
+        # username/password/host/port/dbname itself, at runtime, from
+        # Secrets Manager via POSTGRES_SECRET_ID/ORACLE_SECRET_ID.
+        # Deliberately no `secrets` block on this container: ECS-native
+        # secret injection would put POSTGRES_USER/PASSWORD/HOST/PORT/DB
+        # into the container's plain environment before the loader's own
+        # startup validation ever runs, which is exactly what the
+        # hardened PostgreSQL secret resolution (etl/load_award_attachments.py)
+        # rejects in --ecs mode.
         {
           name  = "AWARD_ATTACHMENT_BUCKET_NAME"
           value = var.documents_bucket_name
@@ -253,29 +254,6 @@ resource "aws_ecs_task_definition" "loader" {
         {
           name  = "ORACLE_SECRET_ID"
           value = var.oracle_secret_arn
-        }
-      ]
-
-      secrets = [
-        {
-          name      = "POSTGRES_HOST"
-          valueFrom = "${var.database_secret_arn}:host::"
-        },
-        {
-          name      = "POSTGRES_PORT"
-          valueFrom = "${var.database_secret_arn}:port::"
-        },
-        {
-          name      = "POSTGRES_DB"
-          valueFrom = "${var.database_secret_arn}:dbname::"
-        },
-        {
-          name      = "POSTGRES_USER"
-          valueFrom = "${var.database_secret_arn}:username::"
-        },
-        {
-          name      = "POSTGRES_PASSWORD"
-          valueFrom = "${var.database_secret_arn}:password::"
         }
       ]
 
