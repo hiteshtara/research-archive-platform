@@ -1,7 +1,7 @@
 """Tests for the generic ETL batch framework (archive_etl.batch.framework
 / archive.etl_batch / archive.etl_batch_item) - see
 database/migrations/V037__create_etl_batch_framework.sql and
-docs/ETL_BATCH_FRAMEWORK.md.
+docs/architecture/ETL_BATCH_FRAMEWORK.md.
 
 Deliberately uses a made-up domain/entity_type pair ("TEST_DOMAIN"/
 "TEST_ENTITY") throughout, not "AWARD_ATTACHMENT"/"PHYSICAL_FILE" - the

@@ -1090,7 +1090,7 @@ def _run_load_file_id(
 # domain-specific glue: deciding which file_ids are candidates (Oracle
 # scan), doing the actual metadata load/upload for a file_id, and joining
 # the generic etl_batch_item table to this domain's own
-# attachment_object.upload_status. See docs/ETL_BATCH_FRAMEWORK.md.
+# attachment_object.upload_status. See docs/architecture/ETL_BATCH_FRAMEWORK.md.
 
 AWARD_ATTACHMENT_BATCH_DOMAIN = "AWARD_ATTACHMENT"
 AWARD_ATTACHMENT_BATCH_ENTITY_TYPE = "PHYSICAL_FILE"

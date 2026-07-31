@@ -2,7 +2,7 @@
 "select exactly N entities, then load/process exactly that membership"
 workflows (archive.etl_batch/archive.etl_batch_item - see
 database/migrations/V037__create_etl_batch_framework.sql and
-docs/ETL_BATCH_FRAMEWORK.md for the full design rationale).
+docs/architecture/ETL_BATCH_FRAMEWORK.md for the full design rationale).
 
 Domain-agnostic by construction: every function here takes an explicit
 `domain`/`entity_type` pair and operates only on entity_key (a plain
