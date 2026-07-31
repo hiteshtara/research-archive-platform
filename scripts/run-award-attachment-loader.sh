@@ -16,7 +16,8 @@ set -euo pipefail
 #
 # Required environment (no safe defaults - this script refuses to guess
 # them):
-#   ECR_REPOSITORY_URI   - ECR repository URI for the loader image
+#   ECR_REPOSITORY_URI   - ECR repository URI for the loader image. Not
+#                            required if --image-uri is given (see below).
 #   SUBNET_IDS            - comma-separated private subnet IDs for the
 #                            Fargate task (same VPC as the loader task's
 #                            security group)
@@ -59,7 +60,15 @@ set -euo pipefail
 # Usage:
 #   scripts/run-award-attachment-loader.sh [--dry-run] [--upload] \
 #       [--migrate-only] [--limit N] [--file-id N] [--retry-failed] \
-#       [--bucket NAME] [--prefix PREFIX]
+#       [--bucket NAME] [--prefix PREFIX] [--image-uri URI]
+#
+# --image-uri <full-ecr-image-uri>: reuse an already-built-and-pushed
+#   image instead of building/pushing a new one. When given, this script
+#   never invokes `docker build`, `docker login`, `aws ecr
+#   get-login-password`, or `docker push` - it registers a new task-
+#   definition revision directly from the supplied image URI. Useful for
+#   re-running against an image that was already validated, without
+#   rebuilding it (and without needing a local Docker daemon at all).
 #
 # Examples:
 #   # Bootstrap a fresh database (apply migrations, validate schema, exit):
@@ -74,6 +83,10 @@ set -euo pipefail
 #
 #   # Recovery after an interrupted run - retry FAILED rows too:
 #   scripts/run-award-attachment-loader.sh --upload --retry-failed
+#
+#   # Reuse an already-pushed image instead of building a new one:
+#   scripts/run-award-attachment-loader.sh --migrate-only \
+#       --image-uri 770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader:20260731T005343Z-b0d475d
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -85,9 +98,8 @@ TASK_FAMILY="${TASK_FAMILY:-${PROJECT_NAME}-${ENVIRONMENT}-loader}"
 LOG_GROUP="${LOG_GROUP:-/ecs/${PROJECT_NAME}-${ENVIRONMENT}-loader}"
 CONTAINER_NAME="loader"
 
-: "${ECR_REPOSITORY_URI:?ECR_REPOSITORY_URI is not set - set it to the loader image's ECR repository URI}"
 : "${SUBNET_IDS:?SUBNET_IDS is not set - comma-separated private subnet IDs for the Fargate task}"
-: "${SECURITY_GROUP_ID:?SECURITY_GROUP_ID is not set - the loader task's security group ID}"
+: "${SECURITY_GROUP_ID:?SECURITY_GROUP_ID is not set - the loader task\'s security group ID}"
 : "${POSTGRES_SECRET_ID:?POSTGRES_SECRET_ID is not set - Secrets Manager ARN/name for the PostgreSQL secret (an identifier, never a credential)}"
 
 FILE_ID=""
@@ -98,6 +110,7 @@ UPLOAD=false
 MIGRATE_ONLY=false
 BUCKET=""
 PREFIX=""
+IMAGE_URI_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -109,6 +122,7 @@ while [[ $# -gt 0 ]]; do
     --migrate-only) MIGRATE_ONLY=true; shift ;;
     --bucket) BUCKET="$2"; shift 2 ;;
     --prefix) PREFIX="$2"; shift 2 ;;
+    --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -117,61 +131,95 @@ if [[ "$MIGRATE_ONLY" == false ]]; then
   : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only)}"
 fi
 
+if [[ -z "$IMAGE_URI_OVERRIDE" ]]; then
+  : "${ECR_REPOSITORY_URI:?ECR_REPOSITORY_URI is not set - set it to the loader image\'s ECR repository URI, or pass --image-uri to reuse an already-pushed image}"
+fi
+
 if [[ "$UPLOAD" == true && "$DRY_RUN" == false ]]; then
   echo "=== WARNING: this will perform a REAL S3 upload run ==="
 fi
 
-echo "=== Building loader image ==="
-GIT_SHA="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
-IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)-${GIT_SHA}"
-IMAGE_URI="${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
-docker build \
-  --platform linux/amd64 \
-  -t "$IMAGE_URI" \
-  -f "$ROOT_DIR/etl/Dockerfile.loader" \
-  "$ROOT_DIR"
+if [[ -n "$IMAGE_URI_OVERRIDE" ]]; then
+  echo "=== Reusing already-pushed image (--image-uri): $IMAGE_URI_OVERRIDE ==="
+  IMAGE_URI="$IMAGE_URI_OVERRIDE"
+else
+  echo "=== Building loader image ==="
+  GIT_SHA="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+  IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)-${GIT_SHA}"
+  IMAGE_URI="${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
 
-echo "=== Pushing image to ECR ==="
-aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URI%%/*}"
-docker push "$IMAGE_URI"
+  docker build \
+    --platform linux/amd64 \
+    -t "$IMAGE_URI" \
+    -f "$ROOT_DIR/etl/Dockerfile.loader" \
+    "$ROOT_DIR"
+
+  echo "=== Pushing image to ECR ==="
+  aws ecr get-login-password --region "$AWS_REGION" \
+    | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URI%%/*}"
+  docker push "$IMAGE_URI"
+fi
 
 echo "=== Registering new task definition revision ==="
-CURRENT_TASKDEF="$(aws ecs describe-task-definition \
+CURRENT_TASKDEF_FILE="$TMP_DIR/current-taskdef.json"
+NEW_TASKDEF_FILE="$TMP_DIR/new-taskdef.json"
+
+aws ecs describe-task-definition \
   --task-definition "$TASK_FAMILY" \
   --region "$AWS_REGION" \
-  --query 'taskDefinition')"
+  --query 'taskDefinition' \
+  --output json \
+  > "$CURRENT_TASKDEF_FILE"
 
-NEW_TASKDEF="$(python3 - "$CONTAINER_NAME" "$IMAGE_URI" <<'PYEOF'
-import json
-import sys
+if [[ ! -s "$CURRENT_TASKDEF_FILE" ]]; then
+  echo "ERROR: aws ecs describe-task-definition returned no output for family '$TASK_FAMILY'" >&2
+  exit 1
+fi
 
-container_name, image_uri = sys.argv[1], sys.argv[2]
-taskdef = json.load(sys.stdin)
+if ! jq empty "$CURRENT_TASKDEF_FILE" 2>/dev/null; then
+  echo "ERROR: aws ecs describe-task-definition did not return valid JSON" >&2
+  exit 1
+fi
 
-for field in (
-    "taskDefinitionArn",
-    "revision",
-    "status",
-    "requiresAttributes",
-    "compatibilities",
-    "registeredAt",
-    "registeredBy",
-):
-    taskdef.pop(field, None)
+ACTUAL_FAMILY="$(jq -r '.family' "$CURRENT_TASKDEF_FILE")"
+if [[ "$ACTUAL_FAMILY" != "$TASK_FAMILY" ]]; then
+  echo "ERROR: current task definition family is '$ACTUAL_FAMILY', expected '$TASK_FAMILY'" >&2
+  exit 1
+fi
 
-for container in taskdef["containerDefinitions"]:
-    if container["name"] == container_name:
-        container["image"] = image_uri
+if ! jq -e --arg name "$CONTAINER_NAME" \
+  '(.containerDefinitions // []) | map(.name) | index($name) != null' \
+  "$CURRENT_TASKDEF_FILE" > /dev/null; then
+  echo "ERROR: no '$CONTAINER_NAME' container found in the current task definition" >&2
+  exit 1
+fi
 
-print(json.dumps(taskdef))
-PYEOF
-<<< "$CURRENT_TASKDEF")"
+(
+  cd "$ROOT_DIR/etl" \
+    && uv run python scripts/transform_loader_task_definition.py \
+         --input "$CURRENT_TASKDEF_FILE" \
+         --output "$NEW_TASKDEF_FILE" \
+         --container-name "$CONTAINER_NAME" \
+         --image-uri "$IMAGE_URI" \
+         --family "$TASK_FAMILY"
+)
+
+if [[ ! -s "$NEW_TASKDEF_FILE" ]]; then
+  echo "ERROR: task-definition transform produced no output" >&2
+  exit 1
+fi
+
+if ! jq empty "$NEW_TASKDEF_FILE" 2>/dev/null; then
+  echo "ERROR: task-definition transform produced invalid JSON" >&2
+  exit 1
+fi
 
 NEW_REVISION_ARN="$(aws ecs register-task-definition \
   --region "$AWS_REGION" \
-  --cli-input-json "$NEW_TASKDEF" \
+  --cli-input-json "file://${NEW_TASKDEF_FILE}" \
   --query 'taskDefinition.taskDefinitionArn' \
   --output text)"
 
