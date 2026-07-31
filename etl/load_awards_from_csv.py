@@ -36,6 +36,9 @@ PEOPLE_ORACLE_SQL = (
 PROPOSALS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "04_award_proposals.sql"
 )
+CUSTOM_DATA_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "05_award_custom_data.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "award_id",
@@ -62,6 +65,11 @@ PROPOSAL_REQUIRED_COLUMNS = {
     "award_funding_proposal_id",
     "award_id",
     "proposal_id",
+}
+
+CUSTOM_DATA_REQUIRED_COLUMNS = {
+    "award_custom_data_id",
+    "award_id",
 }
 
 
@@ -393,6 +401,34 @@ def prepare_proposals(
     return dataframe
 
 
+def prepare_custom_data(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        CUSTOM_DATA_REQUIRED_COLUMNS,
+        "award_custom_data.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_custom_data_id",
+            "award_id",
+            "sequence_number",
+            "custom_attribute_id",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
 def create_load_run(
     connection: Connection,
     total_rows: int,
@@ -576,11 +612,15 @@ def mark_load_failed(
 #
 # Unlike the full load above (TRUNCATE + bulk COPY of everything), this is
 # an idempotent UPSERT scoped to exactly one Award's version family and its
-# amount_info/person/funding_proposal child rows - safe to run against a
-# database that already has other Award data loaded, and safe to re-run.
-# Deliberately scoped to exactly the four tables the full load already
-# populates - no Award Budget, Award Custom Data, Award Reporting, Award
-# Contacts, Award Terms, or Time & Money workflow tables are touched here.
+# amount_info/person/funding_proposal/custom_data child rows - safe to run
+# against a database that already has other Award data loaded, and safe to
+# re-run. award_custom_data (Tier 1, see
+# docs/architecture/AWARD_DOMAIN_DECOMPOSITION.md) was added here as a 5th
+# child table alongside the original Phase 4A four; it depends only on
+# award_version(award_id), so it rides along on the same family-widened
+# load with no separate top-level load function. No Award Budget, Award
+# Reporting, Award Contacts, Award Terms, or Time & Money workflow tables
+# are touched here.
 #
 # WHY THIS WIDENS TO THE WHOLE award_number FAMILY, NOT JUST ONE award_id:
 # archive.award_version.is_primary_current is enforced by a partial unique
@@ -669,6 +709,17 @@ _AWARD_FUNDING_PROPOSAL_COLUMNS = [
     "award_id",
     "proposal_id",
     "active_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_CUSTOM_DATA_COLUMNS = [
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "custom_attribute_id",
+    "value",
     "source_update_timestamp",
     "source_update_user",
     "source_version_number",
@@ -1156,6 +1207,70 @@ def upsert_award_funding_proposal(
     return "inserted" if result["inserted"] else "updated"
 
 
+def upsert_award_custom_data(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_custom_data
+    row. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_custom_data_id": _sql_value(row["award_custom_data_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_CUSTOM_DATA_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_custom_data (
+                award_custom_data_id, award_id, award_number, sequence_number,
+                custom_attribute_id, value,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_custom_data_id, :award_id, :award_number,
+                :sequence_number, :custom_attribute_id, :value,
+                :source_update_timestamp, :source_update_user,
+                :source_version_number, :load_id
+            )
+            ON CONFLICT (award_custom_data_id) DO UPDATE SET
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                custom_attribute_id = EXCLUDED.custom_attribute_id,
+                value = EXCLUDED.value,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_custom_data.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_custom_data.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_custom_data.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_custom_data.custom_attribute_id
+                    IS DISTINCT FROM EXCLUDED.custom_attribute_id
+                OR archive.award_custom_data.value
+                    IS DISTINCT FROM EXCLUDED.value
+                OR archive.award_custom_data.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_custom_data.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_custom_data.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
 def _empty_load_award_id_report(award_id: int) -> dict[str, Any]:
     return {
         "award_id": award_id,
@@ -1173,6 +1288,9 @@ def _empty_load_award_id_report(award_id: int) -> dict[str, Any]:
         "funding_proposal_inserted": 0,
         "funding_proposal_updated": 0,
         "funding_proposal_unchanged": 0,
+        "custom_data_inserted": 0,
+        "custom_data_updated": 0,
+        "custom_data_unchanged": 0,
         "missing": 0,
     }
 
@@ -1183,9 +1301,9 @@ def _run_load_award_id(
     """--load-award-id: idempotent incremental UPSERT for exactly one
     award_id's ENTIRE award_number version family (see the module-level
     comment above for why this widens beyond the single requested
-    award_id) plus that family's amount_info/person/funding_proposal
-    child rows. Never truncates or replaces the full tables, never
-    touches Award Budget/Custom Data/Reporting/Contacts/Terms/Time and
+    award_id) plus that family's amount_info/person/funding_proposal/
+    custom_data child rows. Never truncates or replaces the full tables,
+    never touches Award Budget/Reporting/Contacts/Terms/Time and
     Money. With dry_run=True, every UPSERT still runs (so the reported
     counts are accurate) but the whole transaction is rolled back
     instead of committed."""
@@ -1228,6 +1346,15 @@ def _run_load_award_id(
         prepare_proposals(proposals_raw) if not proposals_raw.empty else proposals_raw
     )
 
+    custom_data_raw = read_award_children_matching_award_ids(
+        OracleDataSource(CUSTOM_DATA_ORACLE_SQL), family_award_ids
+    )
+    custom_data = (
+        prepare_custom_data(custom_data_raw)
+        if not custom_data_raw.empty
+        else custom_data_raw
+    )
+
     report = _empty_load_award_id_report(award_id)
     report["award_number"] = award_number
     report["family_size"] = len(family_award_ids)
@@ -1235,7 +1362,13 @@ def _run_load_award_id(
     with engine.connect() as connection:
         transaction = connection.begin()
         try:
-            total_rows = len(versions) + len(amounts) + len(people) + len(proposals)
+            total_rows = (
+                len(versions)
+                + len(amounts)
+                + len(people)
+                + len(proposals)
+                + len(custom_data)
+            )
             load_id = create_load_run(connection, total_rows)
 
             # Clear the family's old primary-current flag first, in its
@@ -1282,6 +1415,12 @@ def _run_load_award_id(
                 )
                 report[f"funding_proposal_{result}"] += 1
 
+            for _, custom_data_row in custom_data.iterrows():
+                result = upsert_award_custom_data(
+                    connection, custom_data_row, load_id
+                )
+                report[f"custom_data_{result}"] += 1
+
             mark_load_complete(connection, load_id, total_rows)
         except Exception:
             transaction.rollback()
@@ -1297,7 +1436,8 @@ def _run_load_award_id(
         "family_size={}){}: version(inserted={} updated={} unchanged={}) "
         "amount_info(inserted={} updated={} unchanged={}) "
         "person(inserted={} updated={} unchanged={}) "
-        "funding_proposal(inserted={} updated={} unchanged={})",
+        "funding_proposal(inserted={} updated={} unchanged={}) "
+        "custom_data(inserted={} updated={} unchanged={})",
         award_id,
         award_number,
         report["family_size"],
@@ -1314,6 +1454,9 @@ def _run_load_award_id(
         report["funding_proposal_inserted"],
         report["funding_proposal_updated"],
         report["funding_proposal_unchanged"],
+        report["custom_data_inserted"],
+        report["custom_data_updated"],
+        report["custom_data_unchanged"],
     )
     return report
 
@@ -1427,6 +1570,9 @@ def _run_load_award_batch(
         "funding_proposal_inserted": 0,
         "funding_proposal_updated": 0,
         "funding_proposal_unchanged": 0,
+        "custom_data_inserted": 0,
+        "custom_data_updated": 0,
+        "custom_data_unchanged": 0,
         "missing_in_oracle": 0,
     }
 
@@ -1474,6 +1620,9 @@ def _run_load_award_batch(
             "funding_proposal_inserted",
             "funding_proposal_updated",
             "funding_proposal_unchanged",
+            "custom_data_inserted",
+            "custom_data_updated",
+            "custom_data_unchanged",
         ):
             report[key] += family_report[key]
 
@@ -1545,10 +1694,10 @@ def parse_args(
             "Idempotent incremental UPSERT for exactly one award_id's "
             "entire award_number version family (not just that one "
             "award_id - see the module docstring above parse_args for "
-            "why) plus its amount_info/person/funding_proposal child "
-            "rows. Never truncates or replaces the full tables. Scoped "
-            "strictly to these four tables - no Award Budget/Custom "
-            "Data/Reporting/Contacts/Terms/Time and Money."
+            "why) plus its amount_info/person/funding_proposal/"
+            "custom_data child rows. Never truncates or replaces the "
+            "full tables. Scoped strictly to these five tables - no "
+            "Award Budget/Reporting/Contacts/Terms/Time and Money."
         ),
     )
     parser.add_argument(

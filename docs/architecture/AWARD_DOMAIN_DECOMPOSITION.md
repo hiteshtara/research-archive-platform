@@ -96,7 +96,7 @@ once Core Award's UPSERT primitives exist.
   nullable/optional), but the reference is only meaningful once Award
   Terms exists
 
-**Tier 1 — Award Custom Data**
+**Tier 1 — Award Custom Data** *(done)*
 - Tables (1): `AWARD_CUSTOM_DATA`
 - Depends on: Core Award only (plus a shared, cross-domain
   `CustomAttribute` lookup table already dealt with for
@@ -158,19 +158,21 @@ once Core Award's UPSERT primitives exist.
 - Tier 2 (Budget, Time and Money) are deliberately not scheduled until
   Tier 1 is complete, to prove the UPSERT+batch pattern repeatedly on
   simpler shapes first.
-- Award Custom Data is flagged as the recommended **first** Tier 1
-  subsystem to build, precisely because it reuses an already-proven
-  pattern from Negotiation/Subaward.
+- Award Custom Data was built first among Tier 1 subsystems, precisely
+  because it reused an already-proven pattern from
+  Negotiation/Subaward — confirmed low-risk, shipped with no design
+  surprises, riding along on the existing `--load-award-id`/batch
+  framework as a 5th child table with no new top-level load function or
+  new batch domain/entity_type.
 
 ## Recommended implementation order
 
 1. ~~Tier 0: Core Award (Phase 4A)~~ — done.
-2. Tier 1, in any order (suggested starting point: Award Custom Data,
-   for its near-zero design risk): Award People, Award Contacts, Award
-   Attachments, Award Terms, Award Reporting, Award Custom Data, Award
-   Subaward Summary.
-3. Tier 2: Award Time and Money before Award Budget.
+2. ~~Tier 1: Award Custom Data~~ — done.
+3. Remaining Tier 1, in any order: Award People, Award Contacts, Award
+   Attachments, Award Terms, Award Reporting, Award Subaward Summary.
+4. Tier 2: Award Time and Money before Award Budget.
 
 ## Date last updated
 
-2026-07-31.
+2026-07-31 (Award Custom Data marked done).

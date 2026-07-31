@@ -180,6 +180,12 @@ correctly.
   all — Award Attachment's full CLI convergence, `ETL_BATCH_FRAMEWORK.md`
   §"CLI surfaces", has no Award counterpart yet)
 - Any of the Tier 1/Tier 2 subsystems from `AWARD_DOMAIN_DECOMPOSITION.md`
+  — **except Award Custom Data, now done**; see
+  `AWARD_CUSTOM_DATA_DESIGN.md` for its own design record. It was added
+  directly to this same `_run_load_award_id`/`_run_load_award_batch`
+  incremental path as a 5th child table, with no new top-level load
+  function, no new batch domain/entity_type, and no changes to Phase
+  4A's four original tables.
 
 ## Open questions
 
@@ -225,9 +231,10 @@ correctly.
 8. Award CLI convergence (unified CLI, and — only if Award ever gets an
    ECS execution path — an override builder/deployment script), per
    `ETL_BATCH_FRAMEWORK.md`'s open questions.
-9. Tier 1 subsystems from `AWARD_DOMAIN_DECOMPOSITION.md` (Award Custom
-   Data recommended first).
+9. ~~Tier 1: Award Custom Data~~ — done, see `AWARD_CUSTOM_DATA_DESIGN.md`.
+10. Remaining Tier 1 subsystems from `AWARD_DOMAIN_DECOMPOSITION.md`.
 
 ## Date last updated
 
-2026-07-31 (Phase 4A implementation complete).
+2026-07-31 (Phase 4A implementation complete; Award Custom Data —
+Tier 1 — also done, see `AWARD_CUSTOM_DATA_DESIGN.md`).
