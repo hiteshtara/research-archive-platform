@@ -4,11 +4,15 @@ and the Award domain research this was designed from.
 
 Scoped strictly to the four tables load_awards_from_csv.py's full load
 already populates (archive.award_version, archive.award_amount_info,
-archive.award_person, archive.award_funding_proposal) plus
-archive.award_custom_data, a Tier 1 subsystem added to the same
-incremental UPSERT path since it depends only on award_version(award_id).
-No Award Budget, Reporting, Contacts, Terms, or Time and Money table is
-touched anywhere in this file.
+archive.award_person, archive.award_funding_proposal) plus four Tier 1
+subsystem tables added to the same incremental UPSERT path since each
+depends only on award_version(award_id) or a table that itself does:
+archive.award_custom_data, archive.award_person_unit,
+archive.award_person_credit_split, and
+archive.award_person_unit_credit_split (see
+docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md). No Award Budget,
+Reporting, Contacts, Terms, or Time and Money table is touched anywhere
+in this file.
 
 CLI-parsing tests run against the real argparse parser (no PostgreSQL).
 Everything that touches PostgreSQL runs against a real, uniquely-named,
@@ -180,6 +184,57 @@ def _custom_data_row(**overrides: object) -> dict:
     return row
 
 
+def _person_unit_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_person_unit_id": 901,
+        "award_person_id": 601,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "unit_number": "001",
+        "lead_unit_flag": "Y",
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _person_credit_split_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_person_credit_split_id": 1001,
+        "award_person_id": 601,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "inv_credit_type_code": "PRIME",
+        "credit": 100.0,
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _person_unit_credit_split_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_person_unit_credit_split_id": 1101,
+        "award_person_unit_id": 901,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "inv_credit_type_code": "PRIME",
+        "credit": 100.0,
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
 @unittest.skipUnless(_postgres_available(), "local PostgreSQL is not reachable")
 class _AwardPostgresTestCase(unittest.TestCase):
     db_prefix = "pytest_award_incremental"
@@ -232,12 +287,20 @@ class _AwardPostgresTestCase(unittest.TestCase):
         people: list[dict] | None = None,
         proposals: list[dict] | None = None,
         custom_data: list[dict] | None = None,
+        person_units: list[dict] | None = None,
+        person_credit_splits: list[dict] | None = None,
+        person_unit_credit_splits: list[dict] | None = None,
     ):
         versions_df = pd.DataFrame(versions or [])
         amounts_df = pd.DataFrame(amounts or [])
         people_df = pd.DataFrame(people or [])
         proposals_df = pd.DataFrame(proposals or [])
         custom_data_df = pd.DataFrame(custom_data or [])
+        person_units_df = pd.DataFrame(person_units or [])
+        person_credit_splits_df = pd.DataFrame(person_credit_splits or [])
+        person_unit_credit_splits_df = pd.DataFrame(
+            person_unit_credit_splits or []
+        )
 
         def _source(sql_path):
             if sql_path == award_loader.VERSIONS_ORACLE_SQL:
@@ -250,6 +313,12 @@ class _AwardPostgresTestCase(unittest.TestCase):
                 return _oracle_batches_stub([proposals_df])
             if sql_path == award_loader.CUSTOM_DATA_ORACLE_SQL:
                 return _oracle_batches_stub([custom_data_df])
+            if sql_path == award_loader.PERSON_UNITS_ORACLE_SQL:
+                return _oracle_batches_stub([person_units_df])
+            if sql_path == award_loader.PERSON_CREDIT_SPLITS_ORACLE_SQL:
+                return _oracle_batches_stub([person_credit_splits_df])
+            if sql_path == award_loader.PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL:
+                return _oracle_batches_stub([person_unit_credit_splits_df])
             raise AssertionError(f"unexpected Oracle source: {sql_path}")
 
         return patch.object(
@@ -367,13 +436,16 @@ class BoundedOracleReadersTest(unittest.TestCase):
 
 
 class RunLoadAwardIdTest(_AwardPostgresTestCase):
-    def test_first_load_inserts_all_five_tables(self) -> None:
+    def test_first_load_inserts_all_eight_tables(self) -> None:
         with self._patched_oracle(
             versions=[_version_row()],
             amounts=[_amount_row()],
             people=[_person_row()],
             proposals=[_proposal_row()],
             custom_data=[_custom_data_row()],
+            person_units=[_person_unit_row()],
+            person_credit_splits=[_person_credit_split_row()],
+            person_unit_credit_splits=[_person_unit_credit_split_row()],
         ):
             report = award_loader._run_load_award_id(self.engine, 1)
 
@@ -384,6 +456,9 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertEqual(report["person_inserted"], 1)
         self.assertEqual(report["funding_proposal_inserted"], 1)
         self.assertEqual(report["custom_data_inserted"], 1)
+        self.assertEqual(report["person_unit_inserted"], 1)
+        self.assertEqual(report["person_credit_split_inserted"], 1)
+        self.assertEqual(report["person_unit_credit_split_inserted"], 1)
 
         version_row = self._row("award_version", award_id=1)
         self.assertEqual(version_row["title"], "Test Award")
@@ -406,6 +481,28 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertEqual(custom_data_row["value"], "Some Value")
         self.assertEqual(custom_data_row["custom_attribute_id"], 42)
 
+        person_unit_row = self._row(
+            "award_person_unit", award_person_unit_id=901
+        )
+        self.assertEqual(person_unit_row["unit_number"], "001")
+        self.assertEqual(person_unit_row["lead_unit_flag"], "Y")
+
+        person_credit_split_row = self._row(
+            "award_person_credit_split", award_person_credit_split_id=1001
+        )
+        self.assertEqual(float(person_credit_split_row["credit"]), 100.0)
+
+        person_unit_credit_split_row = self._row(
+            "award_person_unit_credit_split",
+            award_person_unit_credit_split_id=1101,
+        )
+        self.assertEqual(
+            float(person_unit_credit_split_row["credit"]), 100.0
+        )
+        self.assertEqual(
+            person_unit_credit_split_row["award_person_unit_id"], 901
+        )
+
     def test_reload_with_no_oracle_changes_is_unchanged(self) -> None:
         with self._patched_oracle(
             versions=[_version_row()],
@@ -413,6 +510,9 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             people=[_person_row()],
             proposals=[_proposal_row()],
             custom_data=[_custom_data_row()],
+            person_units=[_person_unit_row()],
+            person_credit_splits=[_person_credit_split_row()],
+            person_unit_credit_splits=[_person_unit_credit_split_row()],
         ):
             award_loader._run_load_award_id(self.engine, 1)
             report = award_loader._run_load_award_id(self.engine, 1)
@@ -424,6 +524,54 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertEqual(report["person_unchanged"], 1)
         self.assertEqual(report["funding_proposal_unchanged"], 1)
         self.assertEqual(report["custom_data_unchanged"], 1)
+        self.assertEqual(report["person_unit_unchanged"], 1)
+        self.assertEqual(report["person_credit_split_unchanged"], 1)
+        self.assertEqual(report["person_unit_credit_split_unchanged"], 1)
+
+    def test_person_unit_credit_split_loads_correctly_when_its_parent_unit_is_new(
+        self,
+    ) -> None:
+        # award_person_unit_credit_split's FK parent (award_person_unit)
+        # is being inserted for the very first time in this same
+        # transaction - proves the load-order decision (unit before
+        # unit_credit_split) actually holds.
+        with self._patched_oracle(
+            versions=[_version_row()],
+            people=[_person_row()],
+            person_units=[_person_unit_row()],
+            person_unit_credit_splits=[_person_unit_credit_split_row()],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["person_unit_inserted"], 1)
+        self.assertEqual(report["person_unit_credit_split_inserted"], 1)
+
+        row = self._row(
+            "award_person_unit_credit_split",
+            award_person_unit_credit_split_id=1101,
+        )
+        self.assertEqual(row["award_person_unit_id"], 901)
+
+    def test_person_credit_split_value_change_produces_an_update(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row()],
+            people=[_person_row()],
+            person_credit_splits=[_person_credit_split_row()],
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        with self._patched_oracle(
+            versions=[_version_row()],
+            people=[_person_row()],
+            person_credit_splits=[_person_credit_split_row(credit=50.0)],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["person_credit_split_updated"], 1)
+        row = self._row(
+            "award_person_credit_split", award_person_credit_split_id=1001
+        )
+        self.assertEqual(float(row["credit"]), 50.0)
 
     def test_custom_data_value_change_produces_an_update(self) -> None:
         with self._patched_oracle(
@@ -475,11 +623,17 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             people=[_person_row()],
             proposals=[_proposal_row()],
             custom_data=[_custom_data_row()],
+            person_units=[_person_unit_row()],
+            person_credit_splits=[_person_credit_split_row()],
+            person_unit_credit_splits=[_person_unit_credit_split_row()],
         ):
             report = award_loader._run_load_award_id(self.engine, 1, dry_run=True)
 
         self.assertEqual(report["inserted"], 1)
         self.assertEqual(report["custom_data_inserted"], 1)
+        self.assertEqual(report["person_unit_inserted"], 1)
+        self.assertEqual(report["person_credit_split_inserted"], 1)
+        self.assertEqual(report["person_unit_credit_split_inserted"], 1)
 
         count = self._scalar("SELECT COUNT(*) FROM archive.award_version")
         self.assertEqual(count, 0)
@@ -487,6 +641,10 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             "SELECT COUNT(*) FROM archive.award_custom_data"
         )
         self.assertEqual(custom_data_count, 0)
+        person_unit_count = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_person_unit"
+        )
+        self.assertEqual(person_unit_count, 0)
         load_run_count = self._scalar("SELECT COUNT(*) FROM archive.load_run")
         self.assertEqual(load_run_count, 0)
 
@@ -575,6 +733,31 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         total = self._scalar("SELECT COUNT(*) FROM archive.award_custom_data")
         self.assertEqual(total, 2)
 
+    def test_person_units_do_not_touch_unrelated_existing_award(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row(award_id=2, award_number="A-0002")],
+            people=[_person_row(award_person_id=602, award_id=2, award_number="A-0002")],
+            person_units=[
+                _person_unit_row(
+                    award_person_unit_id=902,
+                    award_person_id=602,
+                    award_id=2,
+                    award_number="A-0002",
+                )
+            ],
+        ):
+            award_loader._run_load_award_id(self.engine, 2)
+
+        with self._patched_oracle(
+            versions=[_version_row(award_id=1, award_number="A-0001")],
+            people=[_person_row()],
+            person_units=[_person_unit_row()],
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        total = self._scalar("SELECT COUNT(*) FROM archive.award_person_unit")
+        self.assertEqual(total, 2)
+
     def test_never_creates_an_s3_client_or_touches_unrelated_domains(self) -> None:
         # Award has no BLOB/S3 concept at all - this is a structural
         # sanity check that _run_load_award_id's own module has no such
@@ -644,10 +827,27 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
                 _version_row(award_id=1, award_number="A-0001"),
                 _version_row(award_id=2, award_number="A-0002"),
             ],
+            people=[
+                _person_row(award_person_id=601, award_id=1),
+                _person_row(
+                    award_person_id=602, award_id=2, award_number="A-0002"
+                ),
+            ],
             custom_data=[
                 _custom_data_row(award_custom_data_id=801, award_id=1),
                 _custom_data_row(
                     award_custom_data_id=802, award_id=2, award_number="A-0002"
+                ),
+            ],
+            person_units=[
+                _person_unit_row(
+                    award_person_unit_id=901, award_person_id=601, award_id=1
+                ),
+                _person_unit_row(
+                    award_person_unit_id=902,
+                    award_person_id=602,
+                    award_id=2,
+                    award_number="A-0002",
                 ),
             ],
         ):
@@ -656,6 +856,7 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
         self.assertEqual(report["families_loaded"], 2)
         self.assertEqual(report["inserted"], 2)
         self.assertEqual(report["custom_data_inserted"], 2)
+        self.assertEqual(report["person_unit_inserted"], 2)
 
         total = self._scalar("SELECT COUNT(*) FROM archive.award_version")
         self.assertEqual(total, 2)
@@ -663,6 +864,10 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
             "SELECT COUNT(*) FROM archive.award_custom_data"
         )
         self.assertEqual(custom_data_total, 2)
+        person_unit_total = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_person_unit"
+        )
+        self.assertEqual(person_unit_total, 2)
 
     def test_deduplicates_award_ids_sharing_one_award_number(self) -> None:
         # award_id 1 and 2 are two sequence versions of the SAME

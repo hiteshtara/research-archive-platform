@@ -55,15 +55,24 @@ once Core Award's UPSERT primitives exist.
   piece not yet built; the other three shipped in Phase 4A
 - Independent: N/A — everything else waits on this
 
-**Tier 1 — Award People**
-- Tables (2): `AWARD_PERSONS`, `AWARD_UNIT_CONTACTS`
+**Tier 1 — Award People** *(done)*
+- Tables (4): `AWARD_PERSONS` (archived, Phase 4A), `AWARD_PERSON_UNITS`,
+  `AWARD_PERSON_CREDIT_SPLITS`, `AWARD_PERS_UNIT_CRED_SPLITS` — a real,
+  3-level-deep sub-hierarchy under `AwardPerson`
+  (`AwardPerson → AwardPersonUnit → AwardPersonUnitCreditSplit`, plus the
+  sibling `AwardPerson → AwardPersonCreditSplit`), corrected from this
+  entry's prior `AWARD_PERSONS`/`AWARD_UNIT_CONTACTS` pairing — see
+  `AWARD_PEOPLE_EXPANSION_DESIGN.md`'s Decisions section for why
+  `AWARD_UNIT_CONTACTS` was never actually part of this object graph.
+  `AWARD_UNIT_CONTACTS` remains fully out of scope (V033 removal,
+  unrevisited).
 - Depends on: Core Award only
-- Effort: Small — flat, single-level; `AWARD_PERSONS` has no DB
-  uniqueness constraint, so the UPSERT conflict key is simply its own
-  surrogate PK
-- Independent: yes — but `AWARD_UNIT_CONTACTS` specifically requires
-  re-opening the V033 removal decision before it can ship; `AWARD_PERSONS`
-  alone can proceed without that blocker
+- Effort: Small — flat/2-level, all four surrogate PKs share
+  `SEQUENCE_AWARD_ID`; `AWARD_PERSONS` has no DB uniqueness constraint,
+  so every UPSERT conflict key is simply its own surrogate PK
+- Independent: yes, fully — shipped without needing
+  `AWARD_UNIT_CONTACTS`'s V033 blocker at all, since that table was never
+  actually part of this subsystem
 
 **Tier 1 — Award Contacts**
 - Tables (1): `AWARD_SPONSOR_CONTACTS`
@@ -164,15 +173,31 @@ once Core Award's UPSERT primitives exist.
   surprises, riding along on the existing `--load-award-id`/batch
   framework as a 5th child table with no new top-level load function or
   new batch domain/entity_type.
+- Award People was built second, revealing that this entry's original
+  table list (`AWARD_PERSONS`/`AWARD_UNIT_CONTACTS`) was itself
+  incomplete — a fresh read of the upstream OJB mapping's
+  `org.kuali.kra.award.contacts` package found three real child/
+  grandchild tables (`AWARD_PERSON_UNITS`,
+  `AWARD_PERSON_CREDIT_SPLITS`, `AWARD_PERS_UNIT_CRED_SPLITS`) neither
+  this document nor `AWARD_DOMAIN_STUDY.md` had previously surfaced.
+  Shipped the same way as Custom Data — no new batch domain/entity_type,
+  riding along on the same family-widened load — with one added
+  wrinkle: none of the three carry `AWARD_ID` directly, so
+  `AWARD_ID`/`AWARD_NUMBER`/`SEQUENCE_NUMBER` are denormalized through
+  an Oracle-side `JOIN` back to `AWARD_PERSONS` (and, for the
+  grandchild, through `AWARD_PERSON_UNITS` as well) purely to keep
+  reusing the existing generic bounded reader unmodified.
 
 ## Recommended implementation order
 
 1. ~~Tier 0: Core Award (Phase 4A)~~ — done.
 2. ~~Tier 1: Award Custom Data~~ — done.
-3. Remaining Tier 1, in any order: Award People, Award Contacts, Award
-   Attachments, Award Terms, Award Reporting, Award Subaward Summary.
-4. Tier 2: Award Time and Money before Award Budget.
+3. ~~Tier 1: Award People~~ — done, see
+   `AWARD_PEOPLE_EXPANSION_DESIGN.md`.
+4. Remaining Tier 1, in any order: Award Contacts, Award Attachments,
+   Award Terms, Award Reporting, Award Subaward Summary.
+5. Tier 2: Award Time and Money before Award Budget.
 
 ## Date last updated
 
-2026-07-31 (Award Custom Data marked done).
+2026-07-31 (Award Custom Data and Award People marked done).

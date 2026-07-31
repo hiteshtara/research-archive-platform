@@ -39,6 +39,23 @@ PROPOSALS_ORACLE_SQL = (
 CUSTOM_DATA_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "05_award_custom_data.sql"
 )
+PERSON_UNITS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "06_award_person_units.sql"
+)
+PERSON_CREDIT_SPLITS_ORACLE_SQL = (
+    PROJECT_ROOT
+    / "sql"
+    / "extract"
+    / "award"
+    / "07_award_person_credit_splits.sql"
+)
+PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL = (
+    PROJECT_ROOT
+    / "sql"
+    / "extract"
+    / "award"
+    / "08_award_person_unit_credit_splits.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "award_id",
@@ -69,6 +86,24 @@ PROPOSAL_REQUIRED_COLUMNS = {
 
 CUSTOM_DATA_REQUIRED_COLUMNS = {
     "award_custom_data_id",
+    "award_id",
+}
+
+PERSON_UNIT_REQUIRED_COLUMNS = {
+    "award_person_unit_id",
+    "award_person_id",
+    "award_id",
+}
+
+PERSON_CREDIT_SPLIT_REQUIRED_COLUMNS = {
+    "award_person_credit_split_id",
+    "award_person_id",
+    "award_id",
+}
+
+PERSON_UNIT_CREDIT_SPLIT_REQUIRED_COLUMNS = {
+    "award_person_unit_credit_split_id",
+    "award_person_unit_id",
     "award_id",
 }
 
@@ -429,6 +464,92 @@ def prepare_custom_data(
     return dataframe
 
 
+def prepare_person_units(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        PERSON_UNIT_REQUIRED_COLUMNS,
+        "award_person_units.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_person_unit_id",
+            "award_person_id",
+            "award_id",
+            "sequence_number",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
+def prepare_person_credit_splits(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        PERSON_CREDIT_SPLIT_REQUIRED_COLUMNS,
+        "award_person_credit_splits.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_person_credit_split_id",
+            "award_person_id",
+            "award_id",
+            "sequence_number",
+            "credit",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
+def prepare_person_unit_credit_splits(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        PERSON_UNIT_CREDIT_SPLIT_REQUIRED_COLUMNS,
+        "award_person_unit_credit_splits.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_person_unit_credit_split_id",
+            "award_person_unit_id",
+            "award_id",
+            "sequence_number",
+            "credit",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
 def create_load_run(
     connection: Connection,
     total_rows: int,
@@ -612,15 +733,17 @@ def mark_load_failed(
 #
 # Unlike the full load above (TRUNCATE + bulk COPY of everything), this is
 # an idempotent UPSERT scoped to exactly one Award's version family and its
-# amount_info/person/funding_proposal/custom_data child rows - safe to run
+# amount_info/person/funding_proposal/custom_data/person_unit/
+# person_credit_split/person_unit_credit_split child rows - safe to run
 # against a database that already has other Award data loaded, and safe to
-# re-run. award_custom_data (Tier 1, see
-# docs/architecture/AWARD_DOMAIN_DECOMPOSITION.md) was added here as a 5th
-# child table alongside the original Phase 4A four; it depends only on
-# award_version(award_id), so it rides along on the same family-widened
-# load with no separate top-level load function. No Award Budget, Award
-# Reporting, Award Contacts, Award Terms, or Time & Money workflow tables
-# are touched here.
+# re-run. award_custom_data and the three Award People expansion tables
+# (Tier 1, see docs/architecture/AWARD_DOMAIN_DECOMPOSITION.md and
+# docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md) were added here
+# alongside the original Phase 4A four; each depends only on
+# award_version(award_id) or a table that itself does, so they all ride
+# along on the same family-widened load with no separate top-level load
+# function. No Award Budget, Award Reporting, Award Contacts, Award
+# Terms, or Time & Money workflow tables are touched here.
 #
 # WHY THIS WIDENS TO THE WHOLE award_number FAMILY, NOT JUST ONE award_id:
 # archive.award_version.is_primary_current is enforced by a partial unique
@@ -720,6 +843,42 @@ _AWARD_CUSTOM_DATA_COLUMNS = [
     "sequence_number",
     "custom_attribute_id",
     "value",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_PERSON_UNIT_COLUMNS = [
+    "award_person_id",
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "unit_number",
+    "lead_unit_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_PERSON_CREDIT_SPLIT_COLUMNS = [
+    "award_person_id",
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "inv_credit_type_code",
+    "credit",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_PERSON_UNIT_CREDIT_SPLIT_COLUMNS = [
+    "award_person_unit_id",
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "inv_credit_type_code",
+    "credit",
     "source_update_timestamp",
     "source_update_user",
     "source_version_number",
@@ -1271,6 +1430,213 @@ def upsert_award_custom_data(
     return "inserted" if result["inserted"] else "updated"
 
 
+def upsert_award_person_unit(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_person_unit
+    row. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_person_unit_id": _sql_value(row["award_person_unit_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_PERSON_UNIT_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_person_unit (
+                award_person_unit_id, award_person_id, award_id,
+                award_number, sequence_number, unit_number, lead_unit_flag,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_person_unit_id, :award_person_id, :award_id,
+                :award_number, :sequence_number, :unit_number,
+                :lead_unit_flag, :source_update_timestamp,
+                :source_update_user, :source_version_number, :load_id
+            )
+            ON CONFLICT (award_person_unit_id) DO UPDATE SET
+                award_person_id = EXCLUDED.award_person_id,
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                unit_number = EXCLUDED.unit_number,
+                lead_unit_flag = EXCLUDED.lead_unit_flag,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_person_unit.award_person_id
+                    IS DISTINCT FROM EXCLUDED.award_person_id
+                OR archive.award_person_unit.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_person_unit.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_person_unit.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_person_unit.unit_number
+                    IS DISTINCT FROM EXCLUDED.unit_number
+                OR archive.award_person_unit.lead_unit_flag
+                    IS DISTINCT FROM EXCLUDED.lead_unit_flag
+                OR archive.award_person_unit.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_person_unit.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_person_unit.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_person_credit_split(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one
+    archive.award_person_credit_split row. Returns exactly one of
+    "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_person_credit_split_id": _sql_value(
+            row["award_person_credit_split_id"]
+        ),
+        "load_id": load_id,
+    }
+    for column in _AWARD_PERSON_CREDIT_SPLIT_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_person_credit_split (
+                award_person_credit_split_id, award_person_id, award_id,
+                award_number, sequence_number, inv_credit_type_code, credit,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_person_credit_split_id, :award_person_id, :award_id,
+                :award_number, :sequence_number, :inv_credit_type_code,
+                :credit, :source_update_timestamp, :source_update_user,
+                :source_version_number, :load_id
+            )
+            ON CONFLICT (award_person_credit_split_id) DO UPDATE SET
+                award_person_id = EXCLUDED.award_person_id,
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                inv_credit_type_code = EXCLUDED.inv_credit_type_code,
+                credit = EXCLUDED.credit,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_person_credit_split.award_person_id
+                    IS DISTINCT FROM EXCLUDED.award_person_id
+                OR archive.award_person_credit_split.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_person_credit_split.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_person_credit_split.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_person_credit_split.inv_credit_type_code
+                    IS DISTINCT FROM EXCLUDED.inv_credit_type_code
+                OR archive.award_person_credit_split.credit
+                    IS DISTINCT FROM EXCLUDED.credit
+                OR archive.award_person_credit_split.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_person_credit_split.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_person_credit_split.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_person_unit_credit_split(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one
+    archive.award_person_unit_credit_split row. Returns exactly one of
+    "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_person_unit_credit_split_id": _sql_value(
+            row["award_person_unit_credit_split_id"]
+        ),
+        "load_id": load_id,
+    }
+    for column in _AWARD_PERSON_UNIT_CREDIT_SPLIT_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_person_unit_credit_split (
+                award_person_unit_credit_split_id, award_person_unit_id,
+                award_id, award_number, sequence_number,
+                inv_credit_type_code, credit, source_update_timestamp,
+                source_update_user, source_version_number, load_id
+            ) VALUES (
+                :award_person_unit_credit_split_id, :award_person_unit_id,
+                :award_id, :award_number, :sequence_number,
+                :inv_credit_type_code, :credit, :source_update_timestamp,
+                :source_update_user, :source_version_number, :load_id
+            )
+            ON CONFLICT (award_person_unit_credit_split_id) DO UPDATE SET
+                award_person_unit_id = EXCLUDED.award_person_unit_id,
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                inv_credit_type_code = EXCLUDED.inv_credit_type_code,
+                credit = EXCLUDED.credit,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_person_unit_credit_split.award_person_unit_id
+                    IS DISTINCT FROM EXCLUDED.award_person_unit_id
+                OR archive.award_person_unit_credit_split.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_person_unit_credit_split.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_person_unit_credit_split.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_person_unit_credit_split.inv_credit_type_code
+                    IS DISTINCT FROM EXCLUDED.inv_credit_type_code
+                OR archive.award_person_unit_credit_split.credit
+                    IS DISTINCT FROM EXCLUDED.credit
+                OR archive.award_person_unit_credit_split.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_person_unit_credit_split.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_person_unit_credit_split.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
 def _empty_load_award_id_report(award_id: int) -> dict[str, Any]:
     return {
         "award_id": award_id,
@@ -1291,6 +1657,15 @@ def _empty_load_award_id_report(award_id: int) -> dict[str, Any]:
         "custom_data_inserted": 0,
         "custom_data_updated": 0,
         "custom_data_unchanged": 0,
+        "person_unit_inserted": 0,
+        "person_unit_updated": 0,
+        "person_unit_unchanged": 0,
+        "person_credit_split_inserted": 0,
+        "person_credit_split_updated": 0,
+        "person_credit_split_unchanged": 0,
+        "person_unit_credit_split_inserted": 0,
+        "person_unit_credit_split_updated": 0,
+        "person_unit_credit_split_unchanged": 0,
         "missing": 0,
     }
 
@@ -1302,11 +1677,16 @@ def _run_load_award_id(
     award_id's ENTIRE award_number version family (see the module-level
     comment above for why this widens beyond the single requested
     award_id) plus that family's amount_info/person/funding_proposal/
-    custom_data child rows. Never truncates or replaces the full tables,
-    never touches Award Budget/Reporting/Contacts/Terms/Time and
-    Money. With dry_run=True, every UPSERT still runs (so the reported
-    counts are accurate) but the whole transaction is rolled back
-    instead of committed."""
+    custom_data/person_unit/person_credit_split/
+    person_unit_credit_split child rows. Never truncates or replaces the
+    full tables, never touches Award Budget/Reporting/Contacts/Terms/Time
+    and Money. person_unit_credit_split is upserted after person_unit
+    (its FK parent) and before person_credit_split (an unrelated
+    sibling, no ordering requirement against it) - see
+    docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md. With
+    dry_run=True, every UPSERT still runs (so the reported counts are
+    accurate) but the whole transaction is rolled back instead of
+    committed."""
     load_logger = logger.bind(stage="load_award_id", award_id=award_id, run_id=run_id)
 
     award_number = read_award_number_for_award_id(
@@ -1355,6 +1735,33 @@ def _run_load_award_id(
         else custom_data_raw
     )
 
+    person_units_raw = read_award_children_matching_award_ids(
+        OracleDataSource(PERSON_UNITS_ORACLE_SQL), family_award_ids
+    )
+    person_units = (
+        prepare_person_units(person_units_raw)
+        if not person_units_raw.empty
+        else person_units_raw
+    )
+
+    person_credit_splits_raw = read_award_children_matching_award_ids(
+        OracleDataSource(PERSON_CREDIT_SPLITS_ORACLE_SQL), family_award_ids
+    )
+    person_credit_splits = (
+        prepare_person_credit_splits(person_credit_splits_raw)
+        if not person_credit_splits_raw.empty
+        else person_credit_splits_raw
+    )
+
+    person_unit_credit_splits_raw = read_award_children_matching_award_ids(
+        OracleDataSource(PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL), family_award_ids
+    )
+    person_unit_credit_splits = (
+        prepare_person_unit_credit_splits(person_unit_credit_splits_raw)
+        if not person_unit_credit_splits_raw.empty
+        else person_unit_credit_splits_raw
+    )
+
     report = _empty_load_award_id_report(award_id)
     report["award_number"] = award_number
     report["family_size"] = len(family_award_ids)
@@ -1368,6 +1775,9 @@ def _run_load_award_id(
                 + len(people)
                 + len(proposals)
                 + len(custom_data)
+                + len(person_units)
+                + len(person_credit_splits)
+                + len(person_unit_credit_splits)
             )
             load_id = create_load_run(connection, total_rows)
 
@@ -1421,6 +1831,24 @@ def _run_load_award_id(
                 )
                 report[f"custom_data_{result}"] += 1
 
+            for _, person_unit_row in person_units.iterrows():
+                result = upsert_award_person_unit(
+                    connection, person_unit_row, load_id
+                )
+                report[f"person_unit_{result}"] += 1
+
+            for _, person_unit_credit_split_row in person_unit_credit_splits.iterrows():
+                result = upsert_award_person_unit_credit_split(
+                    connection, person_unit_credit_split_row, load_id
+                )
+                report[f"person_unit_credit_split_{result}"] += 1
+
+            for _, person_credit_split_row in person_credit_splits.iterrows():
+                result = upsert_award_person_credit_split(
+                    connection, person_credit_split_row, load_id
+                )
+                report[f"person_credit_split_{result}"] += 1
+
             mark_load_complete(connection, load_id, total_rows)
         except Exception:
             transaction.rollback()
@@ -1437,7 +1865,10 @@ def _run_load_award_id(
         "amount_info(inserted={} updated={} unchanged={}) "
         "person(inserted={} updated={} unchanged={}) "
         "funding_proposal(inserted={} updated={} unchanged={}) "
-        "custom_data(inserted={} updated={} unchanged={})",
+        "custom_data(inserted={} updated={} unchanged={}) "
+        "person_unit(inserted={} updated={} unchanged={}) "
+        "person_credit_split(inserted={} updated={} unchanged={}) "
+        "person_unit_credit_split(inserted={} updated={} unchanged={})",
         award_id,
         award_number,
         report["family_size"],
@@ -1457,6 +1888,15 @@ def _run_load_award_id(
         report["custom_data_inserted"],
         report["custom_data_updated"],
         report["custom_data_unchanged"],
+        report["person_unit_inserted"],
+        report["person_unit_updated"],
+        report["person_unit_unchanged"],
+        report["person_credit_split_inserted"],
+        report["person_credit_split_updated"],
+        report["person_credit_split_unchanged"],
+        report["person_unit_credit_split_inserted"],
+        report["person_unit_credit_split_updated"],
+        report["person_unit_credit_split_unchanged"],
     )
     return report
 
@@ -1573,6 +2013,15 @@ def _run_load_award_batch(
         "custom_data_inserted": 0,
         "custom_data_updated": 0,
         "custom_data_unchanged": 0,
+        "person_unit_inserted": 0,
+        "person_unit_updated": 0,
+        "person_unit_unchanged": 0,
+        "person_credit_split_inserted": 0,
+        "person_credit_split_updated": 0,
+        "person_credit_split_unchanged": 0,
+        "person_unit_credit_split_inserted": 0,
+        "person_unit_credit_split_updated": 0,
+        "person_unit_credit_split_unchanged": 0,
         "missing_in_oracle": 0,
     }
 
@@ -1623,6 +2072,15 @@ def _run_load_award_batch(
             "custom_data_inserted",
             "custom_data_updated",
             "custom_data_unchanged",
+            "person_unit_inserted",
+            "person_unit_updated",
+            "person_unit_unchanged",
+            "person_credit_split_inserted",
+            "person_credit_split_updated",
+            "person_credit_split_unchanged",
+            "person_unit_credit_split_inserted",
+            "person_unit_credit_split_updated",
+            "person_unit_credit_split_unchanged",
         ):
             report[key] += family_report[key]
 
@@ -1695,9 +2153,11 @@ def parse_args(
             "entire award_number version family (not just that one "
             "award_id - see the module docstring above parse_args for "
             "why) plus its amount_info/person/funding_proposal/"
-            "custom_data child rows. Never truncates or replaces the "
-            "full tables. Scoped strictly to these five tables - no "
-            "Award Budget/Reporting/Contacts/Terms/Time and Money."
+            "custom_data/person_unit/person_credit_split/"
+            "person_unit_credit_split child rows. Never truncates or "
+            "replaces the full tables. Scoped strictly to these eight "
+            "tables - no Award Budget/Reporting/Contacts/Terms/Time and "
+            "Money."
         ),
     )
     parser.add_argument(
