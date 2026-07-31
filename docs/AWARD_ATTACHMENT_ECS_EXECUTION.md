@@ -73,8 +73,9 @@ uv run mypy .
    `ORACLE_DSN` environment variable as the source of a credential.
    PostgreSQL username/password always come from the `POSTGRES_SECRET_ID`
    secret; Oracle username/password/dsn always come from the
-   `ORACLE_SECRET_ID` secret (skipped entirely for `--migrate-only` — see
-   below). PostgreSQL host/port/dbname come from the secret when present,
+   `ORACLE_SECRET_ID` secret (skipped entirely for `--migrate-only` and
+   `--show-upload-status` — see below). PostgreSQL host/port/dbname come
+   from the secret when present,
    otherwise from the plain (non-secret) `POSTGRES_HOST`/`POSTGRES_PORT`/
    `POSTGRES_DB` environment variables — those are connection routing
    info, not credentials, so a plain variable is an acceptable source for
@@ -142,12 +143,38 @@ use), then **exits successfully without ever touching Oracle, S3, or any
 attachment data**. `--migrate-only` is rejected at the argument-parsing
 level if `--ecs` isn't also given.
 
+### Inspecting PostgreSQL upload state: `--show-upload-status`
+
+There is no SSM tunnel or bastion host for the private RDS instance (see
+"Why `--ecs` exists" above) — the only way to inspect a specific file's
+upload state today is from inside the ECS task itself. `--show-upload-status`
+(requires `--file-id`) is a read-only diagnostic for exactly that:
+
+```bash
+uv run python load_award_attachments.py --ecs --show-upload-status --file-id 1
+```
+
+This resolves AWS identity and the PostgreSQL secret (skipping the
+Oracle secret entirely, exactly like `--migrate-only`), verifies
+PostgreSQL connectivity, runs a single `SELECT` against
+`archive.attachment_object` for the exact given `file_id`, logs
+`file_id`, `file_name`, `blob_source`, `upload_status`,
+`upload_attempts`, `s3_bucket`, `s3_key`, `uploaded_at`, and
+`last_error` (redacted, same as everywhere else in this loader), then
+**exits successfully (0)** — including when no row exists for that
+`file_id`, which is logged clearly as "metadata has not been loaded for
+this file_id" rather than treated as an error. Never reads a BLOB
+(`archive.attachment_object` has no BLOB column at all — source content
+lives only in Oracle), never writes to PostgreSQL, never touches S3.
+`--show-upload-status` is rejected at the argument-parsing level if
+`--ecs` isn't also given, or if `--file-id` isn't given.
+
 ### Secrets Manager requirements
 
 | Credential | Environment variable | Shape | Precedence |
 | --- | --- | --- | --- |
-| PostgreSQL | `POSTGRES_SECRET_ID` — required for every `--ecs` invocation, including `--migrate-only` | Verified against `terraform/modules/rds/main.tf`'s `aws_secretsmanager_secret_version.database`: `{"engine", "host", "port", "dbname", "username", "password"}`. `database` is also accepted as a synonym for `dbname`. | `username`/`password` **always** come from the secret — no environment-variable fallback, ever. `host`/`port`/`dbname` come from the secret when present; if the secret omits one, it falls back to the plain `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` environment variable; if neither source has it, resolution fails clearly. |
-| Oracle | `ORACLE_SECRET_ID` — required for every `--ecs` invocation **except** `--migrate-only` | **Container provisioned** — `aws_secretsmanager_secret.oracle` (`terraform/environments/dev/main.tf`) has been applied; the live loader task definition's `ORACLE_SECRET_ID` resolves to a real ARN (`research-archive-platform/dev/oracle-ECgann`). Terraform never creates an `aws_secretsmanager_secret_version`, so the *value* is not necessarily populated yet — confirm with an authorized operator before relying on it. Contract: `{"username": "...", "password": "...", "dsn": "..."}`, all three required. | All three fields always come from the secret — no environment-variable fallback in `--ecs` mode at all (unlike PostgreSQL's host/port/dbname, there is no non-sensitive subset of Oracle's contract). |
+| PostgreSQL | `POSTGRES_SECRET_ID` — required for every `--ecs` invocation, including `--migrate-only` and `--show-upload-status` | Verified against `terraform/modules/rds/main.tf`'s `aws_secretsmanager_secret_version.database`: `{"engine", "host", "port", "dbname", "username", "password"}`. `database` is also accepted as a synonym for `dbname`. | `username`/`password` **always** come from the secret — no environment-variable fallback, ever. `host`/`port`/`dbname` come from the secret when present; if the secret omits one, it falls back to the plain `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` environment variable; if neither source has it, resolution fails clearly. |
+| Oracle | `ORACLE_SECRET_ID` — required for every `--ecs` invocation **except** `--migrate-only` and `--show-upload-status` | **Container provisioned** — `aws_secretsmanager_secret.oracle` (`terraform/environments/dev/main.tf`) has been applied; the live loader task definition's `ORACLE_SECRET_ID` resolves to a real ARN (`research-archive-platform/dev/oracle-ECgann`). Terraform never creates an `aws_secretsmanager_secret_version`, so the *value* is not necessarily populated yet — confirm with an authorized operator before relying on it. Contract: `{"username": "...", "password": "...", "dsn": "..."}`, all three required. | All three fields always come from the secret — no environment-variable fallback in `--ecs` mode at all (unlike PostgreSQL's host/port/dbname, there is no non-sensitive subset of Oracle's contract). |
 
 Distinct, catchable exception types (`archive_etl/config/ecs.py`, all
 subclasses of `ConfigurationError`) distinguish *why* a secret failed to
@@ -224,11 +251,16 @@ order (`load_award_attachments.py`'s `_run_ecs_setup()`):
 2. Resolve ECS task-role identity via STS (`validate_aws_identity()`)
 3. Create **one** Secrets Manager client for the whole startup
 4. Load the PostgreSQL secret (always)
-5. Load the Oracle secret (**skipped** for `--migrate-only`)
+5. Load the Oracle secret (**skipped** for `--migrate-only` and
+   `--show-upload-status`)
 6. Verify PostgreSQL connectivity (`SELECT 1`)
 7. **If `--migrate-only`:** apply migrations, validate the resulting
    schema (steps 10–11, below, run here instead), then exit successfully
    — steps 8–9 and any file/upload processing never run
+7a. **If `--show-upload-status`:** run the read-only diagnostic `SELECT`
+    against `archive.attachment_object` for the given `--file-id`, then
+    exit successfully — same as `--migrate-only`, steps 8–9 and any
+    file/upload processing never run
 8. Verify Oracle connectivity (`SELECT 1 FROM DUAL`)
 9. Verify S3 bucket access (`HEAD` — skipped, not failed, if no bucket is
    configured at all, e.g. a metadata-only `--ecs` run with no
@@ -331,8 +363,9 @@ it to ECR, registers a new task-definition revision from the existing
 a one-off Fargate task, waits for completion, streams its CloudWatch
 logs, and exits with the task container's own exit code. It supports
 `--file-id`, `--limit`, `--retry-failed`, `--dry-run`, `--upload`,
-`--migrate-only`, `--bucket`, and `--prefix` — the same flags the loader
-itself accepts — translating them into the ECS `run-task --overrides`
+`--migrate-only`, `--show-upload-status`, `--bucket`, and `--prefix` —
+the same flags the loader itself accepts — translating them into the
+ECS `run-task --overrides`
 JSON via `etl/scripts/build_award_attachment_ecs_overrides.py` (a small,
 pure, independently-tested function — see
 `etl/tests/test_build_award_attachment_ecs_overrides.py`).
@@ -349,7 +382,8 @@ Secrets Manager.
 Required environment (no safe defaults — the script refuses to guess
 them): `ECR_REPOSITORY_URI`, `SUBNET_IDS`, `SECURITY_GROUP_ID`,
 `POSTGRES_SECRET_ID`. `ORACLE_SECRET_ID` is required unless
-`--migrate-only` is passed. See the script's own header comment for the
+`--migrate-only` or `--show-upload-status` is passed (`--show-upload-status`
+also requires `--file-id`). See the script's own header comment for the
 full list of optional overrides (`AWS_REGION`, `PROJECT_NAME`,
 `ENVIRONMENT`, `CLUSTER_NAME`, `TASK_FAMILY`, `POSTGRES_HOST`/`PORT`/`DB`,
 `AWARD_ATTACHMENT_BUCKET_NAME`).
@@ -369,6 +403,14 @@ filename is neither executable nor found via PATH lookup, which is
 exactly how an earlier version of this command failed in production
 (`exec: "load_award_attachments.py": executable file not found in
 $PATH`).
+
+Example — inspect PostgreSQL upload state for one file, read-only:
+```bash
+POSTGRES_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-4k6Ngz \
+  scripts/run-award-attachment-loader.sh --show-upload-status --file-id 1
+```
+which generates the container command
+`["python", "-m", "archive_etl", "award-attachment", "--ecs", "--show-upload-status", "--file-id", "1"]`.
 
 **This script performs real AWS actions the moment it is invoked** (image
 build/push, task-definition registration, and — with `--upload` and

@@ -114,6 +114,16 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 "help": "Forwarded to the underlying loader's --migrate-only.",
             },
         ),
+        (
+            "--show-upload-status",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--show-upload-status."
+                ),
+            },
+        ),
     ],
 }
 

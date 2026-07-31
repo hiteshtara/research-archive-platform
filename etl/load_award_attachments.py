@@ -1175,9 +1175,29 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "to already be applied and never applies them itself."
         ),
     )
+    parser.add_argument(
+        "--show-upload-status",
+        action="store_true",
+        help=(
+            "Valid only with --ecs; requires --file-id. Read-only "
+            "diagnostic: query archive.attachment_object for the exact "
+            "given file_id and log its file_name, blob_source, "
+            "upload_status, upload_attempts, s3_bucket, s3_key, "
+            "uploaded_at, and last_error, then exit successfully - "
+            "including when no row exists (logged clearly as metadata "
+            "not yet loaded, not an error). Never reads a BLOB, never "
+            "writes to PostgreSQL, never uploads to S3. Intended to be "
+            "run inside the ECS task so PostgreSQL upload state can be "
+            "inspected without a direct connection to private RDS."
+        ),
+    )
     parsed = parser.parse_args(arguments)
     if parsed.migrate_only and not parsed.ecs:
         parser.error("--migrate-only is only valid together with --ecs")
+    if parsed.show_upload_status and not parsed.ecs:
+        parser.error("--show-upload-status is only valid together with --ecs")
+    if parsed.show_upload_status and parsed.file_id is None:
+        parser.error("--show-upload-status requires --file-id")
     return parsed
 
 
@@ -1239,6 +1259,80 @@ def _run_file_id_lookup(file_id: int) -> dict[str, Any]:
     }
 
 
+def _run_show_upload_status(engine: Engine, file_id: int) -> dict[str, Any]:
+    """--show-upload-status: a targeted, read-only diagnostic for exactly
+    one file_id's PostgreSQL upload state - lets an operator inspect
+    archive.attachment_object from inside the ECS task without a direct
+    connection to private RDS. Only ever SELECTs; never writes to
+    PostgreSQL, never reads a BLOB (attachment_object has no BLOB column -
+    source content lives only in Oracle), and never touches S3. Logs
+    clearly, and returns successfully, whether or not a row exists for
+    this file_id - a missing row is expected/normal (metadata not yet
+    loaded), not an error condition."""
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT
+                    file_id,
+                    file_name,
+                    blob_source,
+                    upload_status,
+                    upload_attempts,
+                    s3_bucket,
+                    s3_key,
+                    uploaded_at,
+                    last_error
+                FROM archive.attachment_object
+                WHERE file_id = :file_id
+                """
+            ),
+            {"file_id": file_id},
+        ).mappings().one_or_none()
+
+    if row is None:
+        logger.info(
+            "file_id={}: no archive.attachment_object row found - "
+            "metadata has not been loaded for this file_id",
+            file_id,
+        )
+        return {"file_id": file_id, "found": False}
+
+    last_error = (
+        redact_error_message(row["last_error"])
+        if row["last_error"] is not None
+        else None
+    )
+
+    logger.info(
+        "file_id={} file_name={} blob_source={} upload_status={} "
+        "upload_attempts={} s3_bucket={} s3_key={} uploaded_at={} "
+        "last_error={}",
+        row["file_id"],
+        row["file_name"],
+        row["blob_source"],
+        row["upload_status"],
+        row["upload_attempts"],
+        row["s3_bucket"],
+        row["s3_key"],
+        row["uploaded_at"],
+        last_error,
+    )
+
+    return {
+        "file_id": row["file_id"],
+        "found": True,
+        "file_name": row["file_name"],
+        "blob_source": row["blob_source"],
+        "upload_status": row["upload_status"],
+        "upload_attempts": row["upload_attempts"],
+        "s3_bucket": row["s3_bucket"],
+        "s3_key": row["s3_key"],
+        "uploaded_at": row["uploaded_at"],
+        "last_error": last_error,
+    }
+
+
 def _read_coherent_sample(
     limit: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
@@ -1297,12 +1391,15 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     2. AWS task-role identity via STS
     3. one Secrets Manager client for the whole startup
     4. load the PostgreSQL secret (always required)
-    5. load the Oracle secret (skipped entirely for --migrate-only -
-       migration never touches Oracle)
+    5. load the Oracle secret (skipped entirely for --migrate-only and
+       --show-upload-status - neither touches Oracle)
     6. verify PostgreSQL connectivity
     7. if --migrate-only: apply migrations, validate the resulting
        schema, and return True so main() exits without ever reaching
        Oracle, S3, metadata, or upload code
+    7a. if --show-upload-status: run the read-only diagnostic query for
+        the given --file-id and return True, same as --migrate-only -
+        never reaches Oracle, S3, or upload code either
     8. verify Oracle connectivity
     9. verify S3 bucket access (skipped, not failed, if no bucket is
        configured at all)
@@ -1311,9 +1408,9 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
 
     Aborts immediately (lets the raised exception propagate) if any step
     fails - no upload or BLOB read may begin before every required check
-    for the requested mode passes. Returns True when --migrate-only
-    completed successfully (the caller must not proceed further), False
-    otherwise."""
+    for the requested mode passes. Returns True when --migrate-only or
+    --show-upload-status completed successfully (the caller must not
+    proceed further), False otherwise."""
     configure_structured_logging(run_id)
     logger.bind(stage="startup").info(
         "Starting in --ecs mode: run_id={}", run_id
@@ -1328,7 +1425,8 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     secrets_client = boto3.client("secretsmanager")
 
     configure_ecs_environment(
-        secrets_client, include_oracle=not arguments.migrate_only
+        secrets_client,
+        include_oracle=not (arguments.migrate_only or arguments.show_upload_status),
     )
 
     engine = create_postgres_engine()
@@ -1345,6 +1443,13 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
         logger.bind(stage="startup", status="migrate_only_complete").info(
             "Migration and schema validation complete"
         )
+        return True
+
+    if arguments.show_upload_status:
+        _run_show_upload_status(engine, arguments.file_id)
+        logger.bind(
+            stage="startup", status="show_upload_status_complete"
+        ).info("Upload-status lookup complete")
         return True
 
     validate_oracle_reachable(_connect_oracle)
@@ -1384,8 +1489,8 @@ def main() -> None:
     run_id = str(uuid.uuid4())
 
     if arguments.ecs:
-        migrate_only_complete = _run_ecs_setup(arguments, run_id)
-        if migrate_only_complete:
+        ecs_setup_short_circuited = _run_ecs_setup(arguments, run_id)
+        if ecs_setup_short_circuited:
             return
 
     if arguments.upload:

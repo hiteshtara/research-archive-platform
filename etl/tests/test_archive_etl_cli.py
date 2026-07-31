@@ -58,6 +58,16 @@ def test_build_parser_rejects_ecs_for_other_domains() -> None:
         build_parser().parse_args(["award", "--ecs"])
 
 
+def test_build_parser_accepts_award_attachment_show_upload_status() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--show-upload-status", "--file-id", "1"]
+    )
+
+    assert args.command == "award-attachment"
+    assert args.show_upload_status is True
+    assert args.file_id == 1
+
+
 def test_build_parser_accepts_check_with_no_extra_arguments() -> None:
     args = build_parser().parse_args(["check"])
 
@@ -173,6 +183,31 @@ def test_run_domain_forwards_ecs_and_migrate_only() -> None:
         "load_award_attachments.py",
         "--ecs",
         "--migrate-only",
+    ]
+
+
+def test_run_domain_forwards_show_upload_status_and_file_id() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--show-upload-status", "--file-id", "1"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--file-id",
+        "1",
+        "--ecs",
+        "--show-upload-status",
     ]
 
 

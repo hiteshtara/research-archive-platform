@@ -1412,6 +1412,114 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
         read_sample.assert_not_called()
 
 
+class RunShowUploadStatusTest(unittest.TestCase):
+    """--show-upload-status: a read-only PostgreSQL diagnostic for one
+    exact file_id. Never writes, never reads a BLOB (attachment_object
+    has no BLOB column), never touches S3."""
+
+    def _connection(self, *, row: dict | None) -> MagicMock:
+        engine = MagicMock()
+        connection = engine.connect.return_value.__enter__.return_value
+        connection.execute.return_value.mappings.return_value.one_or_none.return_value = (
+            row
+        )
+        return engine
+
+    def test_row_found_logs_every_required_field(self) -> None:
+        row = {
+            "file_id": 1,
+            "file_name": "Agreement.pdf",
+            "blob_source": "INLINE",
+            "upload_status": "UPLOADED",
+            "upload_attempts": 1,
+            "s3_bucket": "my-bucket",
+            "s3_key": "award-files/by-file-id/1/Agreement.pdf",
+            "uploaded_at": "2026-01-01 00:00:00",
+            "last_error": None,
+        }
+        engine = self._connection(row=row)
+
+        result = attachment_loader._run_show_upload_status(engine, 1)
+
+        self.assertEqual(result["found"], True)
+        self.assertEqual(result["file_id"], 1)
+        self.assertEqual(result["file_name"], "Agreement.pdf")
+        self.assertEqual(result["blob_source"], "INLINE")
+        self.assertEqual(result["upload_status"], "UPLOADED")
+        self.assertEqual(result["upload_attempts"], 1)
+        self.assertEqual(result["s3_bucket"], "my-bucket")
+        self.assertEqual(
+            result["s3_key"], "award-files/by-file-id/1/Agreement.pdf"
+        )
+        self.assertEqual(result["uploaded_at"], "2026-01-01 00:00:00")
+        self.assertIsNone(result["last_error"])
+
+    def test_queries_attachment_object_by_exact_file_id(self) -> None:
+        engine = self._connection(row=None)
+
+        attachment_loader._run_show_upload_status(engine, 42)
+
+        connection = engine.connect.return_value.__enter__.return_value
+        statement = str(connection.execute.call_args.args[0])
+        params = connection.execute.call_args.args[1]
+        self.assertIn("archive.attachment_object", statement)
+        self.assertEqual(params["file_id"], 42)
+
+    def test_no_row_logs_clearly_and_reports_not_found(self) -> None:
+        engine = self._connection(row=None)
+
+        result = attachment_loader._run_show_upload_status(engine, 999)
+
+        self.assertEqual(result, {"file_id": 999, "found": False})
+
+    def test_no_row_is_not_an_error(self) -> None:
+        # Exercises the exact requirement: exit 0 (no exception) when no
+        # row exists, not just "found=False" in the return value.
+        engine = self._connection(row=None)
+
+        try:
+            attachment_loader._run_show_upload_status(engine, 999)
+        except Exception as error:  # noqa: BLE001
+            self.fail(f"unexpected exception for a missing row: {error}")
+
+    def test_last_error_is_redacted_when_present(self) -> None:
+        row = {
+            "file_id": 1,
+            "file_name": "f.pdf",
+            "blob_source": "INLINE",
+            "upload_status": "FAILED",
+            "upload_attempts": 1,
+            "s3_bucket": None,
+            "s3_key": None,
+            "uploaded_at": None,
+            "last_error": "password=hunter2 failed",
+        }
+        engine = self._connection(row=row)
+
+        result = attachment_loader._run_show_upload_status(engine, 1)
+
+        self.assertNotIn("hunter2", result["last_error"])
+
+    def test_never_calls_execute_more_than_once(self) -> None:
+        # A pure, single SELECT - never a write statement alongside it.
+        engine = self._connection(row=None)
+
+        attachment_loader._run_show_upload_status(engine, 1)
+
+        connection = engine.connect.return_value.__enter__.return_value
+        connection.execute.assert_called_once()
+
+    def test_never_uses_engine_begin(self) -> None:
+        # engine.begin() is this module's write-transaction idiom
+        # (mark_file_uploaded/mark_file_upload_failed/etc. all use it) -
+        # a read-only diagnostic must never invoke it.
+        engine = self._connection(row=None)
+
+        attachment_loader._run_show_upload_status(engine, 1)
+
+        engine.begin.assert_not_called()
+
+
 class RunEcsSetupTest(unittest.TestCase):
     """Orchestration tests for _run_ecs_setup - every collaborator
     (Secrets Manager resolution, startup-validation checks, migrations)
@@ -1419,8 +1527,13 @@ class RunEcsSetupTest(unittest.TestCase):
     wires them together in the exact required order and short-circuits
     correctly for --migrate-only."""
 
-    def _run(self, *, migrate_only: bool) -> dict:
-        arguments = MagicMock(migrate_only=migrate_only, bucket=None)
+    def _run(self, *, migrate_only: bool, show_upload_status: bool = False) -> dict:
+        arguments = MagicMock(
+            migrate_only=migrate_only,
+            show_upload_status=show_upload_status,
+            bucket=None,
+            file_id=9001,
+        )
         calls: list[str] = []
 
         def _track(name, retval=None):
@@ -1470,6 +1583,11 @@ class RunEcsSetupTest(unittest.TestCase):
             ) as apply_migrations,
             patch.object(
                 attachment_loader,
+                "_run_show_upload_status",
+                side_effect=_track("_run_show_upload_status"),
+            ) as run_show_upload_status,
+            patch.object(
+                attachment_loader,
                 "validate_table_exists",
                 side_effect=_track("validate_table_exists"),
             ),
@@ -1510,6 +1628,7 @@ class RunEcsSetupTest(unittest.TestCase):
             "validate_oracle": validate_oracle,
             "create_s3": create_s3,
             "validate_bucket": validate_bucket,
+            "run_show_upload_status": run_show_upload_status,
         }
 
     def test_migrate_only_reaches_apply_migrations(self) -> None:
@@ -1542,6 +1661,33 @@ class RunEcsSetupTest(unittest.TestCase):
 
         result["create_s3"].assert_not_called()
         result["validate_bucket"].assert_not_called()
+
+    def test_show_upload_status_reaches_the_lookup(self) -> None:
+        result = self._run(migrate_only=False, show_upload_status=True)
+
+        self.assertIn("_run_show_upload_status", result["calls"])
+        self.assertTrue(result["result"])
+        result["run_show_upload_status"].assert_called_once()
+        self.assertEqual(result["run_show_upload_status"].call_args.args[1], 9001)
+
+    def test_show_upload_status_never_contacts_oracle(self) -> None:
+        result = self._run(migrate_only=False, show_upload_status=True)
+
+        self.assertNotIn("validate_oracle_reachable", result["calls"])
+        result["validate_oracle"].assert_not_called()
+        result["configure_env"].assert_called_once()
+        self.assertFalse(result["configure_env"].call_args.kwargs["include_oracle"])
+
+    def test_show_upload_status_never_contacts_s3(self) -> None:
+        result = self._run(migrate_only=False, show_upload_status=True)
+
+        result["create_s3"].assert_not_called()
+        result["validate_bucket"].assert_not_called()
+
+    def test_show_upload_status_never_applies_migrations(self) -> None:
+        result = self._run(migrate_only=False, show_upload_status=True)
+
+        result["apply_migrations"].assert_not_called()
 
     def test_identity_resolved_before_secrets_manager_client_created(self) -> None:
         calls = self._run(migrate_only=True)["calls"]
@@ -1588,7 +1734,9 @@ class RunEcsSetupTest(unittest.TestCase):
     def test_normal_flow_validates_bucket_between_oracle_and_tables_when_configured(
         self,
     ) -> None:
-        arguments = MagicMock(migrate_only=False, bucket="my-bucket")
+        arguments = MagicMock(
+            migrate_only=False, show_upload_status=False, bucket="my-bucket"
+        )
         calls: list[str] = []
 
         def _track(name, retval=None):
@@ -1649,7 +1797,9 @@ class RunEcsSetupTest(unittest.TestCase):
         different, IRB-only bucket wired into the same ECS task family -
         this proves the two can never be confused, even when both env
         vars are set to different values simultaneously."""
-        arguments = MagicMock(migrate_only=False, bucket=None)
+        arguments = MagicMock(
+            migrate_only=False, show_upload_status=False, bucket=None
+        )
 
         with (
             patch.object(attachment_loader, "configure_structured_logging"),
@@ -1688,7 +1838,9 @@ class RunEcsSetupTest(unittest.TestCase):
         self.assertEqual(validate_bucket.call_args.args[1], "correct-documents-bucket")
 
     def test_fails_fast_on_postgres_before_touching_oracle(self) -> None:
-        arguments = MagicMock(migrate_only=False, bucket=None)
+        arguments = MagicMock(
+            migrate_only=False, show_upload_status=False, bucket=None
+        )
 
         with (
             patch.object(attachment_loader, "configure_structured_logging"),
@@ -1732,6 +1884,32 @@ class ParseArgsMigrateOnlyTest(unittest.TestCase):
         args = attachment_loader.parse_args(["--ecs"])
 
         self.assertFalse(args.migrate_only)
+
+
+class ParseArgsShowUploadStatusTest(unittest.TestCase):
+    def test_requires_ecs(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(
+                ["--show-upload-status", "--file-id", "1"]
+            )
+
+    def test_requires_file_id(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(["--ecs", "--show-upload-status"])
+
+    def test_with_ecs_and_file_id_is_accepted(self) -> None:
+        args = attachment_loader.parse_args(
+            ["--ecs", "--show-upload-status", "--file-id", "1"]
+        )
+
+        self.assertTrue(args.show_upload_status)
+        self.assertTrue(args.ecs)
+        self.assertEqual(args.file_id, 1)
+
+    def test_ecs_without_show_upload_status_defaults_to_false(self) -> None:
+        args = attachment_loader.parse_args(["--ecs"])
+
+        self.assertFalse(args.show_upload_status)
 
 
 class MigrateOnlyMainIntegrationTest(unittest.TestCase):
@@ -1795,6 +1973,7 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
             parse_args.return_value = MagicMock(
                 ecs=True,
                 migrate_only=False,
+                show_upload_status=False,
                 upload=True,
                 bucket=None,
                 file_id=None,
@@ -1805,6 +1984,37 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 attachment_loader.main()
 
         run_upload.assert_not_called()
+
+
+class ShowUploadStatusMainIntegrationTest(unittest.TestCase):
+    def test_main_returns_immediately_after_show_upload_status_completes(
+        self,
+    ) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "_run_ecs_setup", return_value=True
+            ) as run_ecs_setup,
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_file_id_lookup,
+        ):
+            # upload/file_id are deliberately also set, to prove
+            # show_upload_status short-circuits main() before either runs.
+            parse_args.return_value = MagicMock(
+                ecs=True,
+                migrate_only=False,
+                show_upload_status=True,
+                upload=True,
+                file_id=1,
+                limit=None,
+            )
+            attachment_loader.main()
+
+        run_ecs_setup.assert_called_once()
+        run_upload.assert_not_called()
+        run_file_id_lookup.assert_not_called()
 
 
 class OracleExtractionSqlFilesExistTest(unittest.TestCase):

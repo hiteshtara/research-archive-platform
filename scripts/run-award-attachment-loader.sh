@@ -29,8 +29,8 @@ set -euo pipefail
 #                              validation, but the loader needs it for
 #                              every --ecs invocation including that one.
 #
-# Required for every --ecs invocation EXCEPT --migrate-only (which never
-# touches Oracle):
+# Required for every --ecs invocation EXCEPT --migrate-only and
+# --show-upload-status (neither touches Oracle):
 #   ORACLE_SECRET_ID   - Secrets Manager ARN/name for the Oracle secret
 #
 # Optional environment (sensible defaults matching the current
@@ -59,8 +59,9 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/run-award-attachment-loader.sh [--dry-run] [--upload] \
-#       [--migrate-only] [--limit N] [--file-id N] [--retry-failed] \
-#       [--bucket NAME] [--prefix PREFIX] [--image-uri URI]
+#       [--migrate-only] [--show-upload-status] [--limit N] \
+#       [--file-id N] [--retry-failed] [--bucket NAME] [--prefix PREFIX] \
+#       [--image-uri URI]
 #
 # --image-uri <full-ecr-image-uri>: reuse an already-built-and-pushed
 #   image instead of building/pushing a new one. When given, this script
@@ -70,6 +71,14 @@ set -euo pipefail
 #   re-running against an image that was already validated, without
 #   rebuilding it (and without needing a local Docker daemon at all).
 #
+# --show-upload-status (requires --file-id): read-only PostgreSQL
+#   diagnostic - reports archive.attachment_object's upload-related
+#   columns for exactly that file_id (or logs clearly that no metadata
+#   has been loaded for it), then exits 0. Never reads a BLOB, never
+#   writes to PostgreSQL, never uploads to S3. Lets you inspect upload
+#   state from inside the ECS task without connecting to private RDS
+#   directly.
+#
 # Examples:
 #   # Bootstrap a fresh database (apply migrations, validate schema, exit):
 #   POSTGRES_SECRET_ID=arn:...:postgres \
@@ -77,6 +86,10 @@ set -euo pipefail
 #
 #   # One-file validation, read-only, no PostgreSQL/S3 writes:
 #   scripts/run-award-attachment-loader.sh --file-id 9001 --dry-run
+#
+#   # Inspect PostgreSQL upload state for one file, read-only:
+#   POSTGRES_SECRET_ID=arn:...:postgres \
+#     scripts/run-award-attachment-loader.sh --show-upload-status --file-id 9001
 #
 #   # Batch upload of up to 100 pending/uploading files:
 #   scripts/run-award-attachment-loader.sh --upload --limit 100
@@ -108,6 +121,7 @@ RETRY_FAILED=false
 DRY_RUN=false
 UPLOAD=false
 MIGRATE_ONLY=false
+SHOW_UPLOAD_STATUS=false
 BUCKET=""
 PREFIX=""
 IMAGE_URI_OVERRIDE=""
@@ -120,6 +134,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     --upload) UPLOAD=true; shift ;;
     --migrate-only) MIGRATE_ONLY=true; shift ;;
+    --show-upload-status) SHOW_UPLOAD_STATUS=true; shift ;;
     --bucket) BUCKET="$2"; shift 2 ;;
     --prefix) PREFIX="$2"; shift 2 ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
@@ -127,8 +142,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$MIGRATE_ONLY" == false ]]; then
-  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only)}"
+if [[ "$SHOW_UPLOAD_STATUS" == true && -z "$FILE_ID" ]]; then
+  echo "ERROR: --show-upload-status requires --file-id" >&2
+  exit 1
+fi
+
+if [[ "$MIGRATE_ONLY" == false && "$SHOW_UPLOAD_STATUS" == false ]]; then
+  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only/--show-upload-status)}"
 fi
 
 if [[ -z "$IMAGE_URI_OVERRIDE" ]]; then
@@ -233,6 +253,7 @@ OVERRIDE_ARGS=()
 [[ "$DRY_RUN" == true ]] && OVERRIDE_ARGS+=(--dry-run)
 [[ "$UPLOAD" == true ]] && OVERRIDE_ARGS+=(--upload)
 [[ "$MIGRATE_ONLY" == true ]] && OVERRIDE_ARGS+=(--migrate-only)
+[[ "$SHOW_UPLOAD_STATUS" == true ]] && OVERRIDE_ARGS+=(--show-upload-status)
 [[ -n "$BUCKET" ]] && OVERRIDE_ARGS+=(--bucket "$BUCKET")
 [[ -n "$PREFIX" ]] && OVERRIDE_ARGS+=(--prefix "$PREFIX")
 

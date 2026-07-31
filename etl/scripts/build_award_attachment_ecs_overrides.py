@@ -2,7 +2,8 @@
 Attachment loader task run.
 
 Translates CLI pass-through flags (--file-id, --limit, --retry-failed,
---dry-run, --upload, --migrate-only) into the container command override
+--dry-run, --upload, --migrate-only, --show-upload-status) into the
+container command override
 for the "loader" container in the research-archive-platform-dev-loader
 task family (see terraform/modules/ecs/main.tf - not modified here), and
 translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
@@ -49,6 +50,7 @@ def build_container_command(
     dry_run: bool = False,
     upload: bool = False,
     migrate_only: bool = False,
+    show_upload_status: bool = False,
     bucket: str | None = None,
     prefix: str | None = None,
 ) -> list[str]:
@@ -68,6 +70,8 @@ def build_container_command(
 
     if migrate_only:
         command.append("--migrate-only")
+    if show_upload_status:
+        command.append("--show-upload-status")
     if upload:
         command.append("--upload")
     if dry_run:
@@ -125,6 +129,7 @@ def build_run_task_overrides(
     dry_run: bool = False,
     upload: bool = False,
     migrate_only: bool = False,
+    show_upload_status: bool = False,
     bucket: str | None = None,
     prefix: str | None = None,
     postgres_secret_id: str | None = None,
@@ -144,6 +149,7 @@ def build_run_task_overrides(
             dry_run=dry_run,
             upload=upload,
             migrate_only=migrate_only,
+            show_upload_status=show_upload_status,
             bucket=bucket,
             prefix=prefix,
         ),
@@ -172,6 +178,7 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--migrate-only", action="store_true")
+    parser.add_argument("--show-upload-status", action="store_true")
     parser.add_argument("--bucket", type=str, default=None)
     parser.add_argument("--prefix", type=str, default=None)
     parser.add_argument("--postgres-secret-id", type=str, default=None)
@@ -193,6 +200,7 @@ def main() -> None:
         dry_run=args.dry_run,
         upload=args.upload,
         migrate_only=args.migrate_only,
+        show_upload_status=args.show_upload_status,
         bucket=args.bucket,
         prefix=args.prefix,
         postgres_secret_id=args.postgres_secret_id,

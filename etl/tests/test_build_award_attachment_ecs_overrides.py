@@ -44,6 +44,14 @@ class BuildContainerCommandTest(unittest.TestCase):
             ],
         )
 
+    def test_show_upload_status_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(show_upload_status=True, file_id=1)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--show-upload-status", "--file-id", "1"],
+        )
+
     def test_file_id_dry_run_produces_the_exact_required_command(self) -> None:
         command = build_container_command(file_id=9001, dry_run=True)
 
@@ -271,6 +279,12 @@ class ParseArgsTest(unittest.TestCase):
 
         self.assertTrue(args.migrate_only)
 
+    def test_parses_show_upload_status(self) -> None:
+        args = parse_args(["--show-upload-status", "--file-id", "1"])
+
+        self.assertTrue(args.show_upload_status)
+        self.assertEqual(args.file_id, 1)
+
     def test_defaults_when_nothing_given(self) -> None:
         args = parse_args([])
 
@@ -280,6 +294,7 @@ class ParseArgsTest(unittest.TestCase):
         self.assertFalse(args.dry_run)
         self.assertFalse(args.upload)
         self.assertFalse(args.migrate_only)
+        self.assertFalse(args.show_upload_status)
         self.assertIsNone(args.bucket)
         self.assertIsNone(args.prefix)
         self.assertIsNone(args.postgres_secret_id)
