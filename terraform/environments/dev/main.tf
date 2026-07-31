@@ -46,6 +46,19 @@ resource "terraform_data" "config_guard" {
       condition     = var.api_domain_name == null || var.api_route53_zone_id != null
       error_message = "api_domain_name is set but api_route53_zone_id is not - provide the Route53 hosted zone ID that api_domain_name belongs to, so Terraform can create the DNS record pointing it at the ALB."
     }
+
+    precondition {
+      condition = (
+        !var.enable_oracle_peering ||
+        (
+          var.oracle_vpc_id != null &&
+          length(var.oracle_subnet_cidrs) > 0 &&
+          length(var.oracle_route_table_ids) > 0 &&
+          var.oracle_security_group_id != null
+        )
+      )
+      error_message = "enable_oracle_peering is true, so oracle_vpc_id, oracle_subnet_cidrs, oracle_route_table_ids, and oracle_security_group_id must all be set - see docs/ORACLE_STAGING_CONNECTIVITY.md."
+    }
   }
 }
 
@@ -63,6 +76,11 @@ module "vpc" {
   availability_zones   = var.availability_zones
 
   enable_nat_gateway = var.enable_nat_gateway
+
+  enable_oracle_peering  = var.enable_oracle_peering
+  oracle_vpc_id          = var.oracle_vpc_id
+  oracle_subnet_cidrs    = var.oracle_subnet_cidrs
+  oracle_route_table_ids = var.oracle_route_table_ids
 }
 
 module "rds" {
@@ -162,7 +180,8 @@ module "loader_ecs" {
   database_secret_arn        = module.rds.database_secret_arn
   database_security_group_id = module.rds.database_security_group_id
 
-  oracle_secret_arn = aws_secretsmanager_secret.oracle.arn
+  oracle_secret_arn        = aws_secretsmanager_secret.oracle.arn
+  oracle_security_group_id = var.oracle_security_group_id
 
   log_retention_days = var.loader_log_retention_days
 }

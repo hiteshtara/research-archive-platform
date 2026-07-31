@@ -43,6 +43,23 @@ database_allowed_cidrs = []
 enable_nat_gateway          = false
 use_private_subnets_for_api = false
 
+# BU Oracle staging connectivity (etl/load_award_attachments.py --ecs).
+# These resources already exist as manually created AWS infrastructure -
+# see docs/ORACLE_STAGING_CONNECTIVITY.md for the terraform import
+# commands needed to adopt them, and for which of these are owned by
+# this project versus shared BU infrastructure.
+enable_oracle_peering = true
+oracle_vpc_id         = "vpc-0290de1785982a52f" # BU Oracle staging VPC - not managed by this project
+oracle_subnet_cidrs = [
+  "10.58.33.0/25",
+  "10.58.33.128/25"
+]
+oracle_route_table_ids = [
+  "rtb-03aee2071636aad9e", # BU-owned - only the one return route is managed here
+  "rtb-04ca6e1a522dc2b08"
+]
+oracle_security_group_id = "sg-019199c2d80636821" # BU-owned Oracle RDS security group - only one ingress rule is managed here
+
 # --- Database ------------------------------------------------------------
 
 database_name             = "research_archive"

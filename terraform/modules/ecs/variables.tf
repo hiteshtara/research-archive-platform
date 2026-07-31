@@ -68,3 +68,9 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+variable "oracle_security_group_id" {
+  description = "BU-owned security group ID fronting the Oracle staging RDS instance. When set, grants that security group's TCP 1521 ingress from this loader's own security group (mirroring database_security_group_id's database_from_loader rule below). Leave null to skip - e.g. an environment with no Oracle connectivity configured. See docs/ORACLE_STAGING_CONNECTIVITY.md - the security group itself carries many unrelated rules from other BU systems and is never managed by this project, only this one rule."
+  type        = string
+  default     = null
+}

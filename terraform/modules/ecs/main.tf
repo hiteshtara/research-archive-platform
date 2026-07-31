@@ -54,6 +54,23 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_loader" {
   description = "PostgreSQL access from ECS loader"
 }
 
+# BU Oracle staging RDS - see docs/ORACLE_STAGING_CONNECTIVITY.md. The
+# description matches the rule BU's central IT already created manually
+# on the Oracle security group exactly, for a clean terraform import
+# with no plan diff.
+resource "aws_vpc_security_group_ingress_rule" "oracle_from_loader" {
+  count = var.oracle_security_group_id != null ? 1 : 0
+
+  security_group_id            = var.oracle_security_group_id
+  referenced_security_group_id = aws_security_group.loader.id
+
+  from_port   = 1521
+  to_port     = 1521
+  ip_protocol = "tcp"
+
+  description = "Research Archive Platform ECS loader"
+}
+
 resource "aws_iam_role" "execution" {
   name               = "${var.project_name}-${var.environment}-loader-execution-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
@@ -127,39 +144,36 @@ resource "aws_iam_role_policy" "task_secrets" {
   policy = data.aws_iam_policy_document.task_secrets.json
 }
 
-# Award Attachment loader's documents-bucket access, scoped to its own
-# key prefix (see DEFAULT_S3_KEY_PREFIX in load_award_attachments.py) -
-# entirely separate from task_s3 above, which covers the unrelated,
-# IRB-only data bucket. s3:GetObject/HeadObject are deliberately not
-# granted - this loader never reads back an uploaded object today; add
-# them, scoped the same way, only if a future verification step needs
-# them.
+# Award Attachment loader's documents-bucket access - entirely separate
+# from task_s3 above, which covers the unrelated, IRB-only data bucket.
 data "aws_iam_policy_document" "task_documents_s3" {
-  # s3:ListBucketMultipartUploads has no object-key equivalent - it lists
-  # in-progress multipart uploads for the whole bucket and does not accept
-  # an s3:prefix condition the way ListBucket's key-listing does. Kept in
-  # its own statement (below) rather than folded in here, where the
-  # prefix condition would silently not apply to it.
+  # s3:ListBucket/s3:HeadBucket (this loader's bucket-exists check,
+  # validate_bucket_exists -> boto3 head_bucket) and s3:GetBucketLocation
+  # are unrestricted at the bucket level - all three were previously
+  # conditioned on an s3:prefix matching award-files/by-file-id/*, but
+  # head_bucket (and the region lookup GetBucketLocation performs) never
+  # sends an s3:prefix in its request at all, so that condition silently
+  # denied the loader's own startup bucket-existence check. Sid matches
+  # the name this fix already shipped under, live. Neither action can
+  # return object content or list arbitrary keys outside what
+  # ListBucketMultipartUploads/UploadAwardAttachmentObjects below already
+  # scope - only ListBucket's object-listing form takes a prefix, and
+  # this loader never calls that form (it never lists the bucket's
+  # contents, only checks it exists and streams multipart uploads to a
+  # fixed key).
   statement {
-    sid    = "ListDocumentsBucketForAwardAttachments"
+    sid    = "ValidateDocumentsBucket"
     effect = "Allow"
 
     actions = [
-      "s3:ListBucket"
+      "s3:ListBucket",
+      "s3:GetBucketLocation",
+      "s3:HeadBucket"
     ]
 
     resources = [
       var.documents_bucket_arn
     ]
-
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values = [
-        "award-files/by-file-id",
-        "award-files/by-file-id/*"
-      ]
-    }
   }
 
   statement {
@@ -175,12 +189,18 @@ data "aws_iam_policy_document" "task_documents_s3" {
     ]
   }
 
+  # s3:GetObject is granted alongside the write actions below because
+  # the loader's own end-to-end validation needed it in practice
+  # (verifying a multipart upload's result) - despite this module's
+  # earlier assumption that this loader would never read back an
+  # uploaded object.
   statement {
     sid    = "UploadAwardAttachmentObjects"
     effect = "Allow"
 
     actions = [
       "s3:PutObject",
+      "s3:GetObject",
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts"
     ]

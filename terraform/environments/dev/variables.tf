@@ -80,6 +80,41 @@ variable "database_allowed_cidrs" {
   default     = []
 }
 
+# BU Oracle staging connectivity (etl/load_award_attachments.py --ecs).
+# The VPC peering connection, its routes, and the Oracle security-group
+# ingress rule already exist as manually created AWS resources - see
+# docs/ORACLE_STAGING_CONNECTIVITY.md for the terraform import commands
+# and which of these resources this project owns versus BU central IT.
+variable "enable_oracle_peering" {
+  description = "Peer this VPC with BU's Oracle staging VPC and add the routes/security-group ingress the ETL loader needs to reach the staging Oracle RDS instance directly. Defaults to false so other environments don't need to define the oracle_* variables below at all."
+  type        = bool
+  default     = false
+}
+
+variable "oracle_vpc_id" {
+  description = "BU Oracle staging VPC ID to peer with. Required when enable_oracle_peering is true."
+  type        = string
+  default     = null
+}
+
+variable "oracle_subnet_cidrs" {
+  description = "Oracle staging VPC subnet CIDRs containing the Oracle RDS instance - the loader's route table gets one route to each, via the peering connection. Required when enable_oracle_peering is true."
+  type        = list(string)
+  default     = []
+}
+
+variable "oracle_route_table_ids" {
+  description = "BU-owned route table IDs on the Oracle staging VPC side. Only a single return route back to this VPC's CIDR is added to each - the route tables themselves are not managed by this project. Required when enable_oracle_peering is true."
+  type        = list(string)
+  default     = []
+}
+
+variable "oracle_security_group_id" {
+  description = "BU-owned security group ID fronting the Oracle staging RDS instance. Only a single TCP 1521 ingress rule from the loader's own security group is added - the security group itself (which carries many unrelated rules from other BU systems) is not managed by this project. Required when enable_oracle_peering is true."
+  type        = string
+  default     = null
+}
+
 #
 # Database
 #
