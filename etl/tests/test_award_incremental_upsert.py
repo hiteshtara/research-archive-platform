@@ -4,15 +4,21 @@ and the Award domain research this was designed from.
 
 Scoped strictly to the four tables load_awards_from_csv.py's full load
 already populates (archive.award_version, archive.award_amount_info,
-archive.award_person, archive.award_funding_proposal) plus four Tier 1
+archive.award_person, archive.award_funding_proposal) plus nine Tier 1
 subsystem tables added to the same incremental UPSERT path since each
 depends only on award_version(award_id) or a table that itself does:
-archive.award_custom_data, archive.award_person_unit,
+archive.award_custom_data; archive.award_person_unit,
 archive.award_person_credit_split, and
 archive.award_person_unit_credit_split (see
-docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md). No Award Budget,
-Reporting, Contacts, Terms, or Time and Money table is touched anywhere
-in this file.
+docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md);
+archive.award_sponsor_term, archive.award_report_term, and
+archive.award_report_term_recipient (see
+docs/architecture/AWARD_TERMS_DESIGN.md); and
+archive.award_sponsor_contact and archive.award_unit_contact (see
+docs/architecture/AWARD_CONTACTS_DESIGN.md). No Award Budget,
+Reporting, Time and Money, or SAP transmission is touched anywhere in
+this file, and Award.basisOfPaymentCode/methodOfPaymentCode are
+deliberately not captured (see AWARD_TERMS_DESIGN.md).
 
 CLI-parsing tests run against the real argparse parser (no PostgreSQL).
 Everything that touches PostgreSQL runs against a real, uniquely-named,
@@ -29,16 +35,20 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import unittest
 import uuid
+from collections import Counter
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 import load_awards_from_csv as award_loader
+from archive_etl.pipeline.validation import normalize_column_name
 from archive_etl.upload.migrations import apply_migrations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -72,8 +82,33 @@ def _oracle_batches_stub(batches: list[pd.DataFrame]) -> MagicMock:
     def _generator():
         yield from batches
 
+    def _read_filtered(
+        *, column: str, values, chunk_size: int = 1000
+    ) -> pd.DataFrame:
+        # Test-only stand-in for the real OracleDataSource.read_filtered:
+        # simulates Oracle-side WHERE <column> IN (...) filtering by
+        # doing the equivalent pandas filter over the same fixture rows
+        # read_batches() would have yielded - production code (see
+        # load_awards_from_csv.read_award_number_for_award_id and
+        # friends) no longer scans/filters client-side itself, so the
+        # mock takes over exactly that responsibility for these tests.
+        if not values:
+            return pd.DataFrame()
+        non_empty = [batch for batch in batches if not batch.empty]
+        if not non_empty:
+            return pd.DataFrame()
+        combined = pd.concat(non_empty, ignore_index=True)
+        column_name = column.lower()
+        if column_name not in combined.columns:
+            return pd.DataFrame()
+        mask = combined[column_name].isin(list(values))
+        if not mask.any():
+            return pd.DataFrame()
+        return combined[mask].reset_index(drop=True)
+
     stub = MagicMock()
     stub.read_batches.side_effect = _generator
+    stub.read_filtered.side_effect = _read_filtered
     return stub
 
 
@@ -235,6 +270,233 @@ def _person_unit_credit_split_row(**overrides: object) -> dict:
     return row
 
 
+def _sponsor_term_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_sponsor_term_id": 1201,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "sponsor_term_id": 55,
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _report_term_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_report_term_id": 1301,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "report_class_code": "RC1",
+        "report_code": "R1",
+        "frequency_code": "F1",
+        "frequency_base_code": "FB1",
+        "osp_distribution_code": "D1",
+        "due_date": "2025-06-01",
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _report_term_recipient_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_report_term_recipient_id": 1401,
+        "award_report_term_id": 1301,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "contact_id": 7001,
+        "contact_type_code": "PI",
+        "rolodex_id": None,
+        "number_of_copies": 2,
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _sponsor_contact_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_sponsor_contact_id": 1501,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "rolodex_id": 8001,
+        "full_name": "Sponsor Contact",
+        "contact_role_code": "PO",
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _unit_contact_row(**overrides: object) -> dict:
+    row: dict[str, object] = {
+        "award_unit_contact_id": 1601,
+        "award_id": 1,
+        "award_number": "A-0001",
+        "sequence_number": 0,
+        "person_id": "P456",
+        "full_name": "Unit Contact",
+        "unit_contact_type": "UNIT_CONTACT",
+        "unit_administrator_type_code": "UA",
+        "unit_administrator_unit_number": "001",
+        "default_unit_contact": "Y",
+        "update_timestamp": "2025-01-01 00:00:00",
+        "update_user": "kcuser",
+        "ver_nbr": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+# --- SQL/transform contract: SQL output columns vs prepare_* -----------
+#
+# Bug this guards against: 10_award_report_terms.sql originally selected
+# art.AWARD_REPORT_TERMS_ID unaliased. Oracle's real column name for that
+# (AWARD_REPORT_TERMS_ID, matching the table name's plural "TERMS") lowercases
+# to award_report_terms_id - one letter off from the loader's own
+# award_report_term_id (singular, matching the Kuali Java field
+# awardReportTermId per repository-award.xml). Every hand-written fixture
+# above already uses the *correct* singular name, so those tests alone
+# could never catch a SQL-side aliasing mistake - only parsing the actual
+# .sql file's real SELECT list can. Do not "fix" this by loosening
+# require_columns, synthesizing an id, or falling back to a business key;
+# the correct fix is always an alias at the SQL boundary (or, if the
+# authoritative mapping disagrees, a rename in the loader) - never a
+# validation workaround.
+
+_COMMENT_LINE = re.compile(r"^\s*--")
+_SQLPLUS_SET_LINE = re.compile(r"^\s*SET\s+\w+", re.IGNORECASE)
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split a SELECT column list on commas, but only at paren-depth 0 -
+    a naive str.split(",") breaks on expressions like
+    NVL(aai.ANTICIPATED_TOTAL_DIRECT, 0) (02_award_amounts.sql), whose
+    own internal comma isn't a column separator. Found via the Award
+    load-performance benchmark script, which parses every extraction
+    file including that one; none of this module's own contract tests
+    happened to exercise it, so this latent bug had never been
+    triggered here - fixed proactively since it's the same parsing
+    logic."""
+    parts = []
+    depth = 0
+    current: list[str] = []
+    for char in text:
+        if char == "(":
+            depth += 1
+            current.append(char)
+        elif char == ")":
+            depth -= 1
+            current.append(char)
+        elif char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def _oracle_output_columns(sql_path: Path) -> list[str]:
+    """Parse a SELECT ... FROM column list the same way a real Oracle
+    cursor.description + normalize_column_name would name each result
+    column: an explicit "AS alias" wins, otherwise the part of the
+    expression after the last '.', then lowercased/underscored. This is
+    independent of load_awards_from_csv.py's own column-name
+    assumptions - it only knows how to read the .sql file's literal
+    text, so it fails the same way a real Oracle run would if the SQL
+    and the loader's expected columns ever drift apart again."""
+    lines = [
+        line
+        for line in sql_path.read_text(encoding="utf-8").splitlines()
+        if not _COMMENT_LINE.match(line) and not _SQLPLUS_SET_LINE.match(line)
+    ]
+    text = "\n".join(lines)
+    match = re.search(
+        r"SELECT\s+(.*?)\s+FROM\s", text, re.IGNORECASE | re.DOTALL
+    )
+    if match is None:
+        raise AssertionError(f"could not find a SELECT ... FROM in {sql_path}")
+
+    columns = []
+    for raw_expr in _split_top_level_commas(match.group(1)):
+        expr = raw_expr.strip()
+        if not expr:
+            continue
+        as_match = re.search(r"\bAS\b\s+([A-Za-z0-9_]+)\s*$", expr, re.IGNORECASE)
+        name = as_match.group(1) if as_match else expr.split(".")[-1]
+        columns.append(normalize_column_name(name))
+    return columns
+
+
+class AwardTermsSqlColumnContractTest(unittest.TestCase):
+    """No Postgres, no Oracle - just proves each Award Terms extraction
+    SQL file's real output columns satisfy its own prepare_* function's
+    required columns. Uses "1" as a placeholder value for every column;
+    convert_numeric/convert_dates both use errors="coerce", so any
+    placeholder is safe - only column *names*, not values, are under
+    test here."""
+
+    def test_sponsor_terms_sql_columns_satisfy_prepare_sponsor_terms(self) -> None:
+        columns = _oracle_output_columns(award_loader.SPONSOR_TERMS_ORACLE_SQL)
+        dataframe = pd.DataFrame([{column: "1" for column in columns}])
+        prepared = award_loader.prepare_sponsor_terms(dataframe)
+        self.assertIn("award_sponsor_term_id", prepared.columns)
+
+    def test_report_terms_sql_columns_satisfy_prepare_report_terms(self) -> None:
+        columns = _oracle_output_columns(award_loader.REPORT_TERMS_ORACLE_SQL)
+        dataframe = pd.DataFrame([{column: "1" for column in columns}])
+        prepared = award_loader.prepare_report_terms(dataframe)
+        self.assertIn("award_report_term_id", prepared.columns)
+
+    def test_report_term_recipients_sql_columns_satisfy_prepare_report_term_recipients(
+        self,
+    ) -> None:
+        columns = _oracle_output_columns(
+            award_loader.REPORT_TERM_RECIPIENTS_ORACLE_SQL
+        )
+        dataframe = pd.DataFrame([{column: "1" for column in columns}])
+        prepared = award_loader.prepare_report_term_recipients(dataframe)
+        self.assertIn("award_report_term_recipient_id", prepared.columns)
+        self.assertIn("award_report_term_id", prepared.columns)
+
+
+class AwardContactsSqlColumnContractTest(unittest.TestCase):
+    """Same rationale as AwardTermsSqlColumnContractTest - run
+    specifically against the two Award Contacts extraction files given
+    how recently the 10_award_report_terms.sql aliasing bug was found
+    and fixed. Neither AWARD_SPONSOR_CONTACT_ID nor
+    AWARD_UNIT_CONTACT_ID has a plural/singular mismatch against its
+    table name, but this proves that, rather than assuming it."""
+
+    def test_sponsor_contacts_sql_columns_satisfy_prepare_sponsor_contacts(
+        self,
+    ) -> None:
+        columns = _oracle_output_columns(award_loader.SPONSOR_CONTACTS_ORACLE_SQL)
+        dataframe = pd.DataFrame([{column: "1" for column in columns}])
+        prepared = award_loader.prepare_sponsor_contacts(dataframe)
+        self.assertIn("award_sponsor_contact_id", prepared.columns)
+
+    def test_unit_contacts_sql_columns_satisfy_prepare_unit_contacts(self) -> None:
+        columns = _oracle_output_columns(award_loader.UNIT_CONTACTS_ORACLE_SQL)
+        dataframe = pd.DataFrame([{column: "1" for column in columns}])
+        prepared = award_loader.prepare_unit_contacts(dataframe)
+        self.assertIn("award_unit_contact_id", prepared.columns)
+
+
 @unittest.skipUnless(_postgres_available(), "local PostgreSQL is not reachable")
 class _AwardPostgresTestCase(unittest.TestCase):
     db_prefix = "pytest_award_incremental"
@@ -290,6 +552,11 @@ class _AwardPostgresTestCase(unittest.TestCase):
         person_units: list[dict] | None = None,
         person_credit_splits: list[dict] | None = None,
         person_unit_credit_splits: list[dict] | None = None,
+        sponsor_terms: list[dict] | None = None,
+        report_terms: list[dict] | None = None,
+        report_term_recipients: list[dict] | None = None,
+        sponsor_contacts: list[dict] | None = None,
+        unit_contacts: list[dict] | None = None,
     ):
         versions_df = pd.DataFrame(versions or [])
         amounts_df = pd.DataFrame(amounts or [])
@@ -301,6 +568,13 @@ class _AwardPostgresTestCase(unittest.TestCase):
         person_unit_credit_splits_df = pd.DataFrame(
             person_unit_credit_splits or []
         )
+        sponsor_terms_df = pd.DataFrame(sponsor_terms or [])
+        report_terms_df = pd.DataFrame(report_terms or [])
+        report_term_recipients_df = pd.DataFrame(
+            report_term_recipients or []
+        )
+        sponsor_contacts_df = pd.DataFrame(sponsor_contacts or [])
+        unit_contacts_df = pd.DataFrame(unit_contacts or [])
 
         def _source(sql_path):
             if sql_path == award_loader.VERSIONS_ORACLE_SQL:
@@ -319,6 +593,16 @@ class _AwardPostgresTestCase(unittest.TestCase):
                 return _oracle_batches_stub([person_credit_splits_df])
             if sql_path == award_loader.PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL:
                 return _oracle_batches_stub([person_unit_credit_splits_df])
+            if sql_path == award_loader.SPONSOR_TERMS_ORACLE_SQL:
+                return _oracle_batches_stub([sponsor_terms_df])
+            if sql_path == award_loader.REPORT_TERMS_ORACLE_SQL:
+                return _oracle_batches_stub([report_terms_df])
+            if sql_path == award_loader.REPORT_TERM_RECIPIENTS_ORACLE_SQL:
+                return _oracle_batches_stub([report_term_recipients_df])
+            if sql_path == award_loader.SPONSOR_CONTACTS_ORACLE_SQL:
+                return _oracle_batches_stub([sponsor_contacts_df])
+            if sql_path == award_loader.UNIT_CONTACTS_ORACLE_SQL:
+                return _oracle_batches_stub([unit_contacts_df])
             raise AssertionError(f"unexpected Oracle source: {sql_path}")
 
         return patch.object(
@@ -384,7 +668,7 @@ class BoundedOracleReadersTest(unittest.TestCase):
         result = award_loader.read_award_number_for_award_id(source, 999)
         self.assertIsNone(result)
 
-    def test_read_award_versions_matching_award_numbers_scans_full_source(
+    def test_read_award_versions_matching_award_numbers_filters_by_bind_variables(
         self,
     ) -> None:
         source = _oracle_batches_stub(
@@ -403,7 +687,9 @@ class BoundedOracleReadersTest(unittest.TestCase):
         )
         self.assertEqual(sorted(result["award_id"].tolist()), [1, 2])
 
-    def test_read_award_children_matching_award_ids_scans_full_source(self) -> None:
+    def test_read_award_children_matching_award_ids_filters_by_bind_variables(
+        self,
+    ) -> None:
         source = _oracle_batches_stub(
             [
                 pd.DataFrame(
@@ -431,12 +717,39 @@ class BoundedOracleReadersTest(unittest.TestCase):
             ).empty
         )
 
+    def test_read_award_numbers_for_award_ids_resolves_every_id_in_one_call(
+        self,
+    ) -> None:
+        source = _oracle_batches_stub(
+            [
+                pd.DataFrame(
+                    [
+                        _version_row(award_id=1, award_number="A-1"),
+                        _version_row(award_id=2, award_number="A-2"),
+                        _version_row(award_id=3, award_number="A-3"),
+                    ]
+                )
+            ]
+        )
+        result = award_loader.read_award_numbers_for_award_ids(source, {1, 2, 999})
+
+        self.assertEqual(result, {1: "A-1", 2: "A-2"})
+        self.assertNotIn(999, result)
+
+    def test_read_award_numbers_for_award_ids_returns_empty_dict_for_empty_input(
+        self,
+    ) -> None:
+        source = _oracle_batches_stub([pd.DataFrame([_version_row()])])
+        self.assertEqual(
+            award_loader.read_award_numbers_for_award_ids(source, set()), {}
+        )
+
 
 # --- _run_load_award_id --------------------------------------------------
 
 
 class RunLoadAwardIdTest(_AwardPostgresTestCase):
-    def test_first_load_inserts_all_eight_tables(self) -> None:
+    def test_first_load_inserts_all_thirteen_tables(self) -> None:
         with self._patched_oracle(
             versions=[_version_row()],
             amounts=[_amount_row()],
@@ -446,6 +759,11 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             person_units=[_person_unit_row()],
             person_credit_splits=[_person_credit_split_row()],
             person_unit_credit_splits=[_person_unit_credit_split_row()],
+            sponsor_terms=[_sponsor_term_row()],
+            report_terms=[_report_term_row()],
+            report_term_recipients=[_report_term_recipient_row()],
+            sponsor_contacts=[_sponsor_contact_row()],
+            unit_contacts=[_unit_contact_row()],
         ):
             report = award_loader._run_load_award_id(self.engine, 1)
 
@@ -459,6 +777,11 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertEqual(report["person_unit_inserted"], 1)
         self.assertEqual(report["person_credit_split_inserted"], 1)
         self.assertEqual(report["person_unit_credit_split_inserted"], 1)
+        self.assertEqual(report["sponsor_term_inserted"], 1)
+        self.assertEqual(report["report_term_inserted"], 1)
+        self.assertEqual(report["report_term_recipient_inserted"], 1)
+        self.assertEqual(report["sponsor_contact_inserted"], 1)
+        self.assertEqual(report["unit_contact_inserted"], 1)
 
         version_row = self._row("award_version", award_id=1)
         self.assertEqual(version_row["title"], "Test Award")
@@ -503,6 +826,36 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             person_unit_credit_split_row["award_person_unit_id"], 901
         )
 
+        sponsor_term_row = self._row(
+            "award_sponsor_term", award_sponsor_term_id=1201
+        )
+        self.assertEqual(sponsor_term_row["sponsor_term_id"], 55)
+
+        report_term_row = self._row(
+            "award_report_term", award_report_term_id=1301
+        )
+        self.assertEqual(report_term_row["report_class_code"], "RC1")
+        self.assertEqual(report_term_row["osp_distribution_code"], "D1")
+
+        report_term_recipient_row = self._row(
+            "award_report_term_recipient",
+            award_report_term_recipient_id=1401,
+        )
+        self.assertEqual(report_term_recipient_row["award_report_term_id"], 1301)
+        self.assertEqual(report_term_recipient_row["number_of_copies"], 2)
+
+        sponsor_contact_row = self._row(
+            "award_sponsor_contact", award_sponsor_contact_id=1501
+        )
+        self.assertEqual(sponsor_contact_row["full_name"], "Sponsor Contact")
+        self.assertEqual(sponsor_contact_row["contact_role_code"], "PO")
+
+        unit_contact_row = self._row(
+            "award_unit_contact", award_unit_contact_id=1601
+        )
+        self.assertEqual(unit_contact_row["person_id"], "P456")
+        self.assertEqual(unit_contact_row["default_unit_contact"], "Y")
+
     def test_reload_with_no_oracle_changes_is_unchanged(self) -> None:
         with self._patched_oracle(
             versions=[_version_row()],
@@ -513,6 +866,11 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             person_units=[_person_unit_row()],
             person_credit_splits=[_person_credit_split_row()],
             person_unit_credit_splits=[_person_unit_credit_split_row()],
+            sponsor_terms=[_sponsor_term_row()],
+            report_terms=[_report_term_row()],
+            report_term_recipients=[_report_term_recipient_row()],
+            sponsor_contacts=[_sponsor_contact_row()],
+            unit_contacts=[_unit_contact_row()],
         ):
             award_loader._run_load_award_id(self.engine, 1)
             report = award_loader._run_load_award_id(self.engine, 1)
@@ -527,6 +885,11 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertEqual(report["person_unit_unchanged"], 1)
         self.assertEqual(report["person_credit_split_unchanged"], 1)
         self.assertEqual(report["person_unit_credit_split_unchanged"], 1)
+        self.assertEqual(report["sponsor_term_unchanged"], 1)
+        self.assertEqual(report["report_term_unchanged"], 1)
+        self.assertEqual(report["report_term_recipient_unchanged"], 1)
+        self.assertEqual(report["sponsor_contact_unchanged"], 1)
+        self.assertEqual(report["unit_contact_unchanged"], 1)
 
     def test_person_unit_credit_split_loads_correctly_when_its_parent_unit_is_new(
         self,
@@ -572,6 +935,121 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             "award_person_credit_split", award_person_credit_split_id=1001
         )
         self.assertEqual(float(row["credit"]), 50.0)
+
+    def test_report_term_recipient_loads_correctly_when_its_parent_term_is_new(
+        self,
+    ) -> None:
+        # award_report_term_recipient's FK parent (award_report_term) is
+        # being inserted for the very first time in this same
+        # transaction - proves the load-order decision (report_term
+        # before report_term_recipient) actually holds.
+        with self._patched_oracle(
+            versions=[_version_row()],
+            report_terms=[_report_term_row()],
+            report_term_recipients=[_report_term_recipient_row()],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["report_term_inserted"], 1)
+        self.assertEqual(report["report_term_recipient_inserted"], 1)
+
+        row = self._row(
+            "award_report_term_recipient",
+            award_report_term_recipient_id=1401,
+        )
+        self.assertEqual(row["award_report_term_id"], 1301)
+
+    def test_report_term_value_change_produces_an_update(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row()], report_terms=[_report_term_row()]
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        with self._patched_oracle(
+            versions=[_version_row()],
+            report_terms=[_report_term_row(report_code="R2")],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["report_term_updated"], 1)
+        row = self._row("award_report_term", award_report_term_id=1301)
+        self.assertEqual(row["report_code"], "R2")
+
+    def test_sponsor_terms_do_not_touch_unrelated_existing_award(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row(award_id=2, award_number="A-0002")],
+            sponsor_terms=[
+                _sponsor_term_row(
+                    award_sponsor_term_id=1202,
+                    award_id=2,
+                    award_number="A-0002",
+                )
+            ],
+        ):
+            award_loader._run_load_award_id(self.engine, 2)
+
+        with self._patched_oracle(
+            versions=[_version_row(award_id=1, award_number="A-0001")],
+            sponsor_terms=[_sponsor_term_row()],
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        total = self._scalar("SELECT COUNT(*) FROM archive.award_sponsor_term")
+        self.assertEqual(total, 2)
+
+    def test_sponsor_contact_value_change_produces_an_update(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row()], sponsor_contacts=[_sponsor_contact_row()]
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        with self._patched_oracle(
+            versions=[_version_row()],
+            sponsor_contacts=[_sponsor_contact_row(full_name="Changed Name")],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["sponsor_contact_updated"], 1)
+        row = self._row("award_sponsor_contact", award_sponsor_contact_id=1501)
+        self.assertEqual(row["full_name"], "Changed Name")
+
+    def test_unit_contact_value_change_produces_an_update(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row()], unit_contacts=[_unit_contact_row()]
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        with self._patched_oracle(
+            versions=[_version_row()],
+            unit_contacts=[_unit_contact_row(default_unit_contact="N")],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["unit_contact_updated"], 1)
+        row = self._row("award_unit_contact", award_unit_contact_id=1601)
+        self.assertEqual(row["default_unit_contact"], "N")
+
+    def test_unit_contacts_do_not_touch_unrelated_existing_award(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row(award_id=2, award_number="A-0002")],
+            unit_contacts=[
+                _unit_contact_row(
+                    award_unit_contact_id=1602,
+                    award_id=2,
+                    award_number="A-0002",
+                )
+            ],
+        ):
+            award_loader._run_load_award_id(self.engine, 2)
+
+        with self._patched_oracle(
+            versions=[_version_row(award_id=1, award_number="A-0001")],
+            unit_contacts=[_unit_contact_row()],
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        total = self._scalar("SELECT COUNT(*) FROM archive.award_unit_contact")
+        self.assertEqual(total, 2)
 
     def test_custom_data_value_change_produces_an_update(self) -> None:
         with self._patched_oracle(
@@ -626,6 +1104,11 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             person_units=[_person_unit_row()],
             person_credit_splits=[_person_credit_split_row()],
             person_unit_credit_splits=[_person_unit_credit_split_row()],
+            sponsor_terms=[_sponsor_term_row()],
+            report_terms=[_report_term_row()],
+            report_term_recipients=[_report_term_recipient_row()],
+            sponsor_contacts=[_sponsor_contact_row()],
+            unit_contacts=[_unit_contact_row()],
         ):
             report = award_loader._run_load_award_id(self.engine, 1, dry_run=True)
 
@@ -634,6 +1117,11 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertEqual(report["person_unit_inserted"], 1)
         self.assertEqual(report["person_credit_split_inserted"], 1)
         self.assertEqual(report["person_unit_credit_split_inserted"], 1)
+        self.assertEqual(report["sponsor_term_inserted"], 1)
+        self.assertEqual(report["report_term_inserted"], 1)
+        self.assertEqual(report["report_term_recipient_inserted"], 1)
+        self.assertEqual(report["sponsor_contact_inserted"], 1)
+        self.assertEqual(report["unit_contact_inserted"], 1)
 
         count = self._scalar("SELECT COUNT(*) FROM archive.award_version")
         self.assertEqual(count, 0)
@@ -645,6 +1133,22 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
             "SELECT COUNT(*) FROM archive.award_person_unit"
         )
         self.assertEqual(person_unit_count, 0)
+        sponsor_term_count = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_sponsor_term"
+        )
+        self.assertEqual(sponsor_term_count, 0)
+        report_term_count = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_report_term"
+        )
+        self.assertEqual(report_term_count, 0)
+        sponsor_contact_count = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_sponsor_contact"
+        )
+        self.assertEqual(sponsor_contact_count, 0)
+        unit_contact_count = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_unit_contact"
+        )
+        self.assertEqual(unit_contact_count, 0)
         load_run_count = self._scalar("SELECT COUNT(*) FROM archive.load_run")
         self.assertEqual(load_run_count, 0)
 
@@ -850,6 +1354,22 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
                     award_number="A-0002",
                 ),
             ],
+            report_terms=[
+                _report_term_row(award_report_term_id=1301, award_id=1),
+                _report_term_row(
+                    award_report_term_id=1302,
+                    award_id=2,
+                    award_number="A-0002",
+                ),
+            ],
+            unit_contacts=[
+                _unit_contact_row(award_unit_contact_id=1601, award_id=1),
+                _unit_contact_row(
+                    award_unit_contact_id=1602,
+                    award_id=2,
+                    award_number="A-0002",
+                ),
+            ],
         ):
             report = award_loader._run_load_award_batch(self.engine, batch_id)
 
@@ -857,6 +1377,8 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
         self.assertEqual(report["inserted"], 2)
         self.assertEqual(report["custom_data_inserted"], 2)
         self.assertEqual(report["person_unit_inserted"], 2)
+        self.assertEqual(report["report_term_inserted"], 2)
+        self.assertEqual(report["unit_contact_inserted"], 2)
 
         total = self._scalar("SELECT COUNT(*) FROM archive.award_version")
         self.assertEqual(total, 2)
@@ -868,6 +1390,14 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
             "SELECT COUNT(*) FROM archive.award_person_unit"
         )
         self.assertEqual(person_unit_total, 2)
+        report_term_total = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_report_term"
+        )
+        self.assertEqual(report_term_total, 2)
+        unit_contact_total = self._scalar(
+            "SELECT COUNT(*) FROM archive.award_unit_contact"
+        )
+        self.assertEqual(unit_contact_total, 2)
 
     def test_deduplicates_award_ids_sharing_one_award_number(self) -> None:
         # award_id 1 and 2 are two sequence versions of the SAME
@@ -933,6 +1463,112 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
             "SELECT COUNT(*) FROM archive.award_version WHERE award_id = 2"
         )
         self.assertEqual(count, 0)
+
+    def test_reads_each_oracle_table_exactly_once_for_the_whole_batch(self) -> None:
+        # The core guarantee of the bulk-batch refactor: every one of
+        # the thirteen Award extraction sources is read exactly once
+        # for this whole 3-family batch, not once per family (which
+        # would be the families x tables scaling this refactor
+        # removes). VERSIONS_ORACLE_SQL is legitimately read twice -
+        # once to resolve every requested award_id's award_number,
+        # once to resolve the batch-wide family version rows - still
+        # O(1) per batch, not O(families).
+        batch_id = self._create_batch([1, 2, 3])
+        with self._patched_oracle(
+            versions=[
+                _version_row(award_id=1, award_number="A-0001"),
+                _version_row(award_id=2, award_number="A-0002"),
+                _version_row(award_id=3, award_number="A-0003"),
+            ],
+            amounts=[
+                _amount_row(award_amount_info_id=501, award_id=1),
+                _amount_row(
+                    award_amount_info_id=502, award_id=2, award_number="A-0002"
+                ),
+                _amount_row(
+                    award_amount_info_id=503, award_id=3, award_number="A-0003"
+                ),
+            ],
+        ):
+            award_loader._run_load_award_batch(self.engine, batch_id)
+            call_paths = [
+                call.args[0]
+                for call in award_loader.OracleDataSource.call_args_list  # type: ignore[attr-defined]
+            ]
+
+        counts = Counter(call_paths)
+        self.assertEqual(counts[award_loader.VERSIONS_ORACLE_SQL], 2)
+        for sql_path in (
+            award_loader.AMOUNTS_ORACLE_SQL,
+            award_loader.PEOPLE_ORACLE_SQL,
+            award_loader.PROPOSALS_ORACLE_SQL,
+            award_loader.CUSTOM_DATA_ORACLE_SQL,
+            award_loader.PERSON_UNITS_ORACLE_SQL,
+            award_loader.PERSON_CREDIT_SPLITS_ORACLE_SQL,
+            award_loader.PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL,
+            award_loader.SPONSOR_TERMS_ORACLE_SQL,
+            award_loader.REPORT_TERMS_ORACLE_SQL,
+            award_loader.REPORT_TERM_RECIPIENTS_ORACLE_SQL,
+            award_loader.SPONSOR_CONTACTS_ORACLE_SQL,
+            award_loader.UNIT_CONTACTS_ORACLE_SQL,
+        ):
+            self.assertEqual(
+                counts[sql_path],
+                1,
+                f"{sql_path.name} was read {counts[sql_path]} time(s), expected 1",
+            )
+
+    def test_dry_run_persists_nothing_across_the_whole_batch(self) -> None:
+        batch_id = self._create_batch([1, 2])
+        with self._patched_oracle(
+            versions=[
+                _version_row(award_id=1, award_number="A-0001"),
+                _version_row(award_id=2, award_number="A-0002"),
+            ],
+        ):
+            report = award_loader._run_load_award_batch(
+                self.engine, batch_id, dry_run=True
+            )
+
+        self.assertEqual(report["inserted"], 2)
+        total = self._scalar("SELECT COUNT(*) FROM archive.award_version")
+        self.assertEqual(total, 0)
+        load_run_count = self._scalar("SELECT COUNT(*) FROM archive.load_run")
+        self.assertEqual(load_run_count, 0)
+
+        # Batch-item status bookkeeping is separate, always-committed
+        # bookkeeping, unaffected by the load transaction's rollback -
+        # exactly as before the refactor, now scoped to the whole batch.
+        item_1 = self._row("etl_batch_item", batch_id=batch_id, entity_key=1)
+        self.assertEqual(item_1["status"], "COMPLETED")
+
+    def test_one_bad_family_rolls_back_the_whole_batch(self) -> None:
+        # award_id=2's person_unit_credit_split references a
+        # person_unit that was never loaded in this batch - a genuine
+        # FK violation, deliberately injected to prove the whole batch
+        # (including the otherwise-valid award_id=1 family) rolls back
+        # together as one unit of work, per the refactor's "treat the
+        # batch as one unit of work" transaction design.
+        batch_id = self._create_batch([1, 2])
+        with self._patched_oracle(
+            versions=[
+                _version_row(award_id=1, award_number="A-0001"),
+                _version_row(award_id=2, award_number="A-0002"),
+            ],
+            person_unit_credit_splits=[
+                _person_unit_credit_split_row(
+                    award_person_unit_credit_split_id=1101,
+                    award_person_unit_id=99999,
+                    award_id=2,
+                    award_number="A-0002",
+                )
+            ],
+        ):
+            with self.assertRaises(IntegrityError):
+                award_loader._run_load_award_batch(self.engine, batch_id)
+
+        total = self._scalar("SELECT COUNT(*) FROM archive.award_version")
+        self.assertEqual(total, 0)
 
 
 class ShowAwardBatchTest(_AwardPostgresTestCase):

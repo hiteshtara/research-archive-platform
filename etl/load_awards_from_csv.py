@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,25 @@ PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL = (
     / "award"
     / "08_award_person_unit_credit_splits.sql"
 )
+SPONSOR_TERMS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "09_award_sponsor_terms.sql"
+)
+REPORT_TERMS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "10_award_report_terms.sql"
+)
+REPORT_TERM_RECIPIENTS_ORACLE_SQL = (
+    PROJECT_ROOT
+    / "sql"
+    / "extract"
+    / "award"
+    / "11_award_report_term_recipients.sql"
+)
+SPONSOR_CONTACTS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "12_award_sponsor_contacts.sql"
+)
+UNIT_CONTACTS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "13_award_unit_contacts.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "award_id",
@@ -104,6 +125,32 @@ PERSON_CREDIT_SPLIT_REQUIRED_COLUMNS = {
 PERSON_UNIT_CREDIT_SPLIT_REQUIRED_COLUMNS = {
     "award_person_unit_credit_split_id",
     "award_person_unit_id",
+    "award_id",
+}
+
+SPONSOR_TERM_REQUIRED_COLUMNS = {
+    "award_sponsor_term_id",
+    "award_id",
+}
+
+REPORT_TERM_REQUIRED_COLUMNS = {
+    "award_report_term_id",
+    "award_id",
+}
+
+REPORT_TERM_RECIPIENT_REQUIRED_COLUMNS = {
+    "award_report_term_recipient_id",
+    "award_report_term_id",
+    "award_id",
+}
+
+SPONSOR_CONTACT_REQUIRED_COLUMNS = {
+    "award_sponsor_contact_id",
+    "award_id",
+}
+
+UNIT_CONTACT_REQUIRED_COLUMNS = {
+    "award_unit_contact_id",
     "award_id",
 }
 
@@ -550,6 +597,147 @@ def prepare_person_unit_credit_splits(
     return dataframe
 
 
+def prepare_sponsor_terms(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        SPONSOR_TERM_REQUIRED_COLUMNS,
+        "award_sponsor_terms.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_sponsor_term_id",
+            "award_id",
+            "sequence_number",
+            "sponsor_term_id",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
+def prepare_report_terms(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        REPORT_TERM_REQUIRED_COLUMNS,
+        "award_report_terms.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_report_term_id",
+            "award_id",
+            "sequence_number",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp", "due_date"],
+    )
+
+    return dataframe
+
+
+def prepare_report_term_recipients(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        REPORT_TERM_RECIPIENT_REQUIRED_COLUMNS,
+        "award_report_term_recipients.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_report_term_recipient_id",
+            "award_report_term_id",
+            "award_id",
+            "sequence_number",
+            "contact_id",
+            "rolodex_id",
+            "number_of_copies",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
+def prepare_sponsor_contacts(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        SPONSOR_CONTACT_REQUIRED_COLUMNS,
+        "award_sponsor_contacts.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_sponsor_contact_id",
+            "award_id",
+            "sequence_number",
+            "rolodex_id",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
+def prepare_unit_contacts(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        UNIT_CONTACT_REQUIRED_COLUMNS,
+        "award_unit_contacts.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "award_unit_contact_id",
+            "award_id",
+            "sequence_number",
+            "ver_nbr",
+        ],
+    )
+
+    convert_dates(
+        dataframe,
+        ["update_timestamp"],
+    )
+
+    return dataframe
+
+
 def create_load_run(
     connection: Connection,
     total_rows: int,
@@ -734,16 +922,23 @@ def mark_load_failed(
 # Unlike the full load above (TRUNCATE + bulk COPY of everything), this is
 # an idempotent UPSERT scoped to exactly one Award's version family and its
 # amount_info/person/funding_proposal/custom_data/person_unit/
-# person_credit_split/person_unit_credit_split child rows - safe to run
-# against a database that already has other Award data loaded, and safe to
-# re-run. award_custom_data and the three Award People expansion tables
-# (Tier 1, see docs/architecture/AWARD_DOMAIN_DECOMPOSITION.md and
-# docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md) were added here
-# alongside the original Phase 4A four; each depends only on
-# award_version(award_id) or a table that itself does, so they all ride
-# along on the same family-widened load with no separate top-level load
-# function. No Award Budget, Award Reporting, Award Contacts, Award
-# Terms, or Time & Money workflow tables are touched here.
+# person_credit_split/person_unit_credit_split/sponsor_term/report_term/
+# report_term_recipient/sponsor_contact/unit_contact child rows - safe to
+# run against a database that already has other Award data loaded, and safe
+# to re-run. award_custom_data, the three Award People expansion tables, the
+# three Award Terms tables, and the two Award Contacts tables (all Tier 1,
+# see docs/architecture/AWARD_DOMAIN_DECOMPOSITION.md,
+# docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md,
+# docs/architecture/AWARD_TERMS_DESIGN.md, and
+# docs/architecture/AWARD_CONTACTS_DESIGN.md) were added here alongside the
+# original Phase 4A four; each depends only on award_version(award_id) or a
+# table that itself does, so they all ride along on the same family-widened
+# load with no separate top-level load function. No Award Budget, Award
+# Reporting, or Time & Money workflow tables are touched here, SAP
+# transmission is out of scope entirely, and Award.basisOfPaymentCode/
+# methodOfPaymentCode are deliberately not captured (see
+# AWARD_TERMS_DESIGN.md - would require a TRUNCATE-path change this work is
+# scoped not to make).
 #
 # WHY THIS WIDENS TO THE WHOLE award_number FAMILY, NOT JUST ONE award_id:
 # archive.award_version.is_primary_current is enforced by a partial unique
@@ -884,6 +1079,72 @@ _AWARD_PERSON_UNIT_CREDIT_SPLIT_COLUMNS = [
     "source_version_number",
 ]
 
+_AWARD_SPONSOR_TERM_COLUMNS = [
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "sponsor_term_id",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_REPORT_TERM_COLUMNS = [
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "report_class_code",
+    "report_code",
+    "frequency_code",
+    "frequency_base_code",
+    "osp_distribution_code",
+    "due_date",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_REPORT_TERM_RECIPIENT_COLUMNS = [
+    "award_report_term_id",
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "contact_id",
+    "contact_type_code",
+    "rolodex_id",
+    "number_of_copies",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_SPONSOR_CONTACT_COLUMNS = [
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "rolodex_id",
+    "full_name",
+    "contact_role_code",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_AWARD_UNIT_CONTACT_COLUMNS = [
+    "award_id",
+    "award_number",
+    "sequence_number",
+    "person_id",
+    "full_name",
+    "unit_contact_type",
+    "unit_administrator_type_code",
+    "unit_administrator_unit_number",
+    "default_unit_contact",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
 # Oracle-column-name -> archive-column-name renames, matching load_dataframe's
 # own rename table for the full load, applied here per-row via .get() with
 # the Oracle-side name below (prepare_amounts/prepare_people/prepare_proposals
@@ -924,81 +1185,73 @@ def _sql_value(value: Any) -> Any:
 def read_award_number_for_award_id(
     source: OracleDataSource, award_id: int
 ) -> str | None:
-    """Scan the Award version Oracle source, stopping as soon as the row
-    for this exact award_id is found (award_id is unique per row - it is
-    AWARD's own primary key), and return its award_number, or None if
+    """Resolve exactly one award_id's award_number via a single
+    Oracle-side WHERE AWARD_ID IN (:b0) bind-variable query
+    (OracleDataSource.read_filtered) instead of scanning the full Award
+    version source - award_id is unique per row (it is AWARD's own
+    primary key), so at most one row can match. Returns None if
     award_id isn't found at all. Used only to resolve which whole
     award_number version family a bounded --load-award-id request
-    belongs to."""
-    batches = source.read_batches()
-    try:
-        for batch in batches:
-            if batch.empty:
-                continue
-            ids = pd.to_numeric(batch["award_id"], errors="coerce")
-            match = batch[ids == award_id]
-            if not match.empty:
-                return str(match.iloc[0]["award_number"])
-    finally:
-        batches.close()
-    return None
+    belongs to. For resolving many award_ids at once (e.g.
+    --load-batch), use read_award_numbers_for_award_ids instead - it
+    does this in O(1) Oracle round trips per 1000 award_ids rather than
+    one round trip per award_id."""
+    result = source.read_filtered(column="AWARD_ID", values=[award_id])
+    if result.empty:
+        return None
+    return str(result.iloc[0]["award_number"])
+
+
+def read_award_numbers_for_award_ids(
+    source: OracleDataSource, award_ids: set[int]
+) -> dict[int, str]:
+    """Batch form of read_award_number_for_award_id: resolve every
+    award_id's award_number in one (chunked) set of Oracle-side
+    WHERE AWARD_ID IN (...) bind-variable queries, instead of one
+    Oracle round trip per award_id. Used by --load-batch to resolve an
+    entire batch's award_id -> award_number mapping up front. award_ids
+    absent from Oracle simply have no entry in the returned dict - the
+    caller distinguishes "missing" the same way the single-id form
+    does (a missing key vs. a None return)."""
+    if not award_ids:
+        return {}
+    result = source.read_filtered(column="AWARD_ID", values=list(award_ids))
+    if result.empty:
+        return {}
+    return {
+        int(row["award_id"]): str(row["award_number"])
+        for _, row in result.iterrows()
+    }
 
 
 def read_award_versions_matching_award_numbers(
     source: OracleDataSource, target_award_numbers: set[str]
 ) -> pd.DataFrame:
-    """Scan the Award version Oracle source, keeping only rows whose
-    award_number is an exact match in target_award_numbers. Always scans
-    the full source - award_number is not unique per row (one row per
-    sequence_number in the family), so an early stop after the first
-    match per award_number would silently drop older versions."""
+    """Resolve an entire award_number version family via a single
+    (chunked) set of Oracle-side WHERE AWARD_NUMBER IN (...)
+    bind-variable queries (OracleDataSource.read_filtered), instead of
+    scanning the full Award version source. Always resolves every
+    matching row - award_number is not unique per row (one row per
+    sequence_number in the family)."""
     if not target_award_numbers:
         return pd.DataFrame()
-
-    collected: list[pd.DataFrame] = []
-    batches = source.read_batches()
-    try:
-        for batch in batches:
-            if batch.empty:
-                continue
-            mask = batch["award_number"].isin(target_award_numbers)
-            if mask.any():
-                collected.append(batch[mask])
-    finally:
-        batches.close()
-
-    if not collected:
-        return pd.DataFrame()
-    return pd.concat(collected, ignore_index=True)
+    return source.read_filtered(
+        column="AWARD_NUMBER", values=list(target_award_numbers)
+    )
 
 
 def read_award_children_matching_award_ids(
     source: OracleDataSource, target_award_ids: set[int]
 ) -> pd.DataFrame:
-    """Shared by amounts/people/proposals: scan the full source, keeping
-    only rows whose award_id is an exact match in target_award_ids.
-    Always scans the full source - award_id is not unique on any of
-    these three sources (many amount/person/funding-proposal rows can
+    """Shared by every Award child table: resolve rows for exactly this
+    family's award_id values via a single (chunked) set of Oracle-side
+    WHERE AWARD_ID IN (...) bind-variable queries
+    (OracleDataSource.read_filtered), instead of scanning the full
+    source. award_id is not unique on any child table (many rows can
     share one award_id)."""
     if not target_award_ids:
         return pd.DataFrame()
-
-    collected: list[pd.DataFrame] = []
-    batches = source.read_batches()
-    try:
-        for batch in batches:
-            if batch.empty:
-                continue
-            ids = pd.to_numeric(batch["award_id"], errors="coerce")
-            mask = ids.isin(target_award_ids)
-            if mask.any():
-                collected.append(batch[mask])
-    finally:
-        batches.close()
-
-    if not collected:
-        return pd.DataFrame()
-    return pd.concat(collected, ignore_index=True)
+    return source.read_filtered(column="AWARD_ID", values=list(target_award_ids))
 
 
 def upsert_award_version(
@@ -1637,6 +1890,371 @@ def upsert_award_person_unit_credit_split(
     return "inserted" if result["inserted"] else "updated"
 
 
+def upsert_award_sponsor_term(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_sponsor_term
+    row. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_sponsor_term_id": _sql_value(row["award_sponsor_term_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_SPONSOR_TERM_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_sponsor_term (
+                award_sponsor_term_id, award_id, award_number,
+                sequence_number, sponsor_term_id,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_sponsor_term_id, :award_id, :award_number,
+                :sequence_number, :sponsor_term_id,
+                :source_update_timestamp, :source_update_user,
+                :source_version_number, :load_id
+            )
+            ON CONFLICT (award_sponsor_term_id) DO UPDATE SET
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                sponsor_term_id = EXCLUDED.sponsor_term_id,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_sponsor_term.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_sponsor_term.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_sponsor_term.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_sponsor_term.sponsor_term_id
+                    IS DISTINCT FROM EXCLUDED.sponsor_term_id
+                OR archive.award_sponsor_term.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_sponsor_term.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_sponsor_term.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_report_term(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_report_term
+    row. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_report_term_id": _sql_value(row["award_report_term_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_REPORT_TERM_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_report_term (
+                award_report_term_id, award_id, award_number,
+                sequence_number, report_class_code, report_code,
+                frequency_code, frequency_base_code, osp_distribution_code,
+                due_date, source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_report_term_id, :award_id, :award_number,
+                :sequence_number, :report_class_code, :report_code,
+                :frequency_code, :frequency_base_code,
+                :osp_distribution_code, :due_date,
+                :source_update_timestamp, :source_update_user,
+                :source_version_number, :load_id
+            )
+            ON CONFLICT (award_report_term_id) DO UPDATE SET
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                report_class_code = EXCLUDED.report_class_code,
+                report_code = EXCLUDED.report_code,
+                frequency_code = EXCLUDED.frequency_code,
+                frequency_base_code = EXCLUDED.frequency_base_code,
+                osp_distribution_code = EXCLUDED.osp_distribution_code,
+                due_date = EXCLUDED.due_date,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_report_term.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_report_term.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_report_term.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_report_term.report_class_code
+                    IS DISTINCT FROM EXCLUDED.report_class_code
+                OR archive.award_report_term.report_code
+                    IS DISTINCT FROM EXCLUDED.report_code
+                OR archive.award_report_term.frequency_code
+                    IS DISTINCT FROM EXCLUDED.frequency_code
+                OR archive.award_report_term.frequency_base_code
+                    IS DISTINCT FROM EXCLUDED.frequency_base_code
+                OR archive.award_report_term.osp_distribution_code
+                    IS DISTINCT FROM EXCLUDED.osp_distribution_code
+                OR archive.award_report_term.due_date
+                    IS DISTINCT FROM EXCLUDED.due_date
+                OR archive.award_report_term.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_report_term.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_report_term.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_report_term_recipient(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one
+    archive.award_report_term_recipient row. Returns exactly one of
+    "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_report_term_recipient_id": _sql_value(
+            row["award_report_term_recipient_id"]
+        ),
+        "load_id": load_id,
+    }
+    for column in _AWARD_REPORT_TERM_RECIPIENT_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_report_term_recipient (
+                award_report_term_recipient_id, award_report_term_id,
+                award_id, award_number, sequence_number, contact_id,
+                contact_type_code, rolodex_id, number_of_copies,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_report_term_recipient_id, :award_report_term_id,
+                :award_id, :award_number, :sequence_number, :contact_id,
+                :contact_type_code, :rolodex_id, :number_of_copies,
+                :source_update_timestamp, :source_update_user,
+                :source_version_number, :load_id
+            )
+            ON CONFLICT (award_report_term_recipient_id) DO UPDATE SET
+                award_report_term_id = EXCLUDED.award_report_term_id,
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                contact_id = EXCLUDED.contact_id,
+                contact_type_code = EXCLUDED.contact_type_code,
+                rolodex_id = EXCLUDED.rolodex_id,
+                number_of_copies = EXCLUDED.number_of_copies,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_report_term_recipient.award_report_term_id
+                    IS DISTINCT FROM EXCLUDED.award_report_term_id
+                OR archive.award_report_term_recipient.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_report_term_recipient.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_report_term_recipient.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_report_term_recipient.contact_id
+                    IS DISTINCT FROM EXCLUDED.contact_id
+                OR archive.award_report_term_recipient.contact_type_code
+                    IS DISTINCT FROM EXCLUDED.contact_type_code
+                OR archive.award_report_term_recipient.rolodex_id
+                    IS DISTINCT FROM EXCLUDED.rolodex_id
+                OR archive.award_report_term_recipient.number_of_copies
+                    IS DISTINCT FROM EXCLUDED.number_of_copies
+                OR archive.award_report_term_recipient.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_report_term_recipient.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_report_term_recipient.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_sponsor_contact(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_sponsor_contact
+    row. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_sponsor_contact_id": _sql_value(row["award_sponsor_contact_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_SPONSOR_CONTACT_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_sponsor_contact (
+                award_sponsor_contact_id, award_id, award_number,
+                sequence_number, rolodex_id, full_name, contact_role_code,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_sponsor_contact_id, :award_id, :award_number,
+                :sequence_number, :rolodex_id, :full_name,
+                :contact_role_code, :source_update_timestamp,
+                :source_update_user, :source_version_number, :load_id
+            )
+            ON CONFLICT (award_sponsor_contact_id) DO UPDATE SET
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                rolodex_id = EXCLUDED.rolodex_id,
+                full_name = EXCLUDED.full_name,
+                contact_role_code = EXCLUDED.contact_role_code,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_sponsor_contact.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_sponsor_contact.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_sponsor_contact.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_sponsor_contact.rolodex_id
+                    IS DISTINCT FROM EXCLUDED.rolodex_id
+                OR archive.award_sponsor_contact.full_name
+                    IS DISTINCT FROM EXCLUDED.full_name
+                OR archive.award_sponsor_contact.contact_role_code
+                    IS DISTINCT FROM EXCLUDED.contact_role_code
+                OR archive.award_sponsor_contact.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_sponsor_contact.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_sponsor_contact.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
+def upsert_award_unit_contact(
+    connection: Connection, row: pd.Series, load_id: int
+) -> str:
+    """Idempotent UPSERT of exactly one archive.award_unit_contact
+    row. Returns exactly one of "inserted", "updated", "unchanged"."""
+    params: dict[str, Any] = {
+        "award_unit_contact_id": _sql_value(row["award_unit_contact_id"]),
+        "load_id": load_id,
+    }
+    for column in _AWARD_UNIT_CONTACT_COLUMNS:
+        params[column] = _sql_value(_renamed(row, column))
+
+    result = connection.execute(
+        text(
+            """
+            INSERT INTO archive.award_unit_contact (
+                award_unit_contact_id, award_id, award_number,
+                sequence_number, person_id, full_name, unit_contact_type,
+                unit_administrator_type_code,
+                unit_administrator_unit_number, default_unit_contact,
+                source_update_timestamp, source_update_user,
+                source_version_number, load_id
+            ) VALUES (
+                :award_unit_contact_id, :award_id, :award_number,
+                :sequence_number, :person_id, :full_name,
+                :unit_contact_type, :unit_administrator_type_code,
+                :unit_administrator_unit_number, :default_unit_contact,
+                :source_update_timestamp, :source_update_user,
+                :source_version_number, :load_id
+            )
+            ON CONFLICT (award_unit_contact_id) DO UPDATE SET
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                sequence_number = EXCLUDED.sequence_number,
+                person_id = EXCLUDED.person_id,
+                full_name = EXCLUDED.full_name,
+                unit_contact_type = EXCLUDED.unit_contact_type,
+                unit_administrator_type_code = EXCLUDED.unit_administrator_type_code,
+                unit_administrator_unit_number = EXCLUDED.unit_administrator_unit_number,
+                default_unit_contact = EXCLUDED.default_unit_contact,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user,
+                source_version_number = EXCLUDED.source_version_number,
+                load_id = EXCLUDED.load_id
+            WHERE
+                archive.award_unit_contact.award_id
+                    IS DISTINCT FROM EXCLUDED.award_id
+                OR archive.award_unit_contact.award_number
+                    IS DISTINCT FROM EXCLUDED.award_number
+                OR archive.award_unit_contact.sequence_number
+                    IS DISTINCT FROM EXCLUDED.sequence_number
+                OR archive.award_unit_contact.person_id
+                    IS DISTINCT FROM EXCLUDED.person_id
+                OR archive.award_unit_contact.full_name
+                    IS DISTINCT FROM EXCLUDED.full_name
+                OR archive.award_unit_contact.unit_contact_type
+                    IS DISTINCT FROM EXCLUDED.unit_contact_type
+                OR archive.award_unit_contact.unit_administrator_type_code
+                    IS DISTINCT FROM EXCLUDED.unit_administrator_type_code
+                OR archive.award_unit_contact.unit_administrator_unit_number
+                    IS DISTINCT FROM EXCLUDED.unit_administrator_unit_number
+                OR archive.award_unit_contact.default_unit_contact
+                    IS DISTINCT FROM EXCLUDED.default_unit_contact
+                OR archive.award_unit_contact.source_update_timestamp
+                    IS DISTINCT FROM EXCLUDED.source_update_timestamp
+                OR archive.award_unit_contact.source_update_user
+                    IS DISTINCT FROM EXCLUDED.source_update_user
+                OR archive.award_unit_contact.source_version_number
+                    IS DISTINCT FROM EXCLUDED.source_version_number
+            RETURNING (xmax = 0) AS inserted
+            """
+        ),
+        params,
+    ).mappings().one_or_none()
+
+    if result is None:
+        return "unchanged"
+    return "inserted" if result["inserted"] else "updated"
+
+
 def _empty_load_award_id_report(award_id: int) -> dict[str, Any]:
     return {
         "award_id": award_id,
@@ -1666,7 +2284,23 @@ def _empty_load_award_id_report(award_id: int) -> dict[str, Any]:
         "person_unit_credit_split_inserted": 0,
         "person_unit_credit_split_updated": 0,
         "person_unit_credit_split_unchanged": 0,
+        "sponsor_term_inserted": 0,
+        "sponsor_term_updated": 0,
+        "sponsor_term_unchanged": 0,
+        "report_term_inserted": 0,
+        "report_term_updated": 0,
+        "report_term_unchanged": 0,
+        "report_term_recipient_inserted": 0,
+        "report_term_recipient_updated": 0,
+        "report_term_recipient_unchanged": 0,
+        "sponsor_contact_inserted": 0,
+        "sponsor_contact_updated": 0,
+        "sponsor_contact_unchanged": 0,
+        "unit_contact_inserted": 0,
+        "unit_contact_updated": 0,
+        "unit_contact_unchanged": 0,
         "missing": 0,
+        "elapsed_ms": 0.0,
     }
 
 
@@ -1677,17 +2311,28 @@ def _run_load_award_id(
     award_id's ENTIRE award_number version family (see the module-level
     comment above for why this widens beyond the single requested
     award_id) plus that family's amount_info/person/funding_proposal/
-    custom_data/person_unit/person_credit_split/
-    person_unit_credit_split child rows. Never truncates or replaces the
-    full tables, never touches Award Budget/Reporting/Contacts/Terms/Time
-    and Money. person_unit_credit_split is upserted after person_unit
-    (its FK parent) and before person_credit_split (an unrelated
-    sibling, no ordering requirement against it) - see
-    docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md. With
-    dry_run=True, every UPSERT still runs (so the reported counts are
-    accurate) but the whole transaction is rolled back instead of
-    committed."""
+    custom_data/person_unit/person_credit_split/person_unit_credit_split/
+    sponsor_term/report_term/report_term_recipient/sponsor_contact/
+    unit_contact child rows. Never truncates or replaces the full
+    tables, never touches Award Budget/Reporting/Time and Money or SAP
+    transmission, and does not capture Award.basisOfPaymentCode/
+    methodOfPaymentCode (see docs/architecture/AWARD_TERMS_DESIGN.md - a
+    deliberately deferred gap, not an oversight). person_unit_credit_split
+    is upserted after person_unit (its FK parent) and before
+    person_credit_split (an unrelated sibling, no ordering requirement
+    against it); similarly report_term_recipient is upserted after
+    report_term (its FK parent) - see
+    docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md and
+    docs/architecture/AWARD_TERMS_DESIGN.md. sponsor_contact/unit_contact
+    have no FK relationship to each other or to any other table added in
+    this pass - see docs/architecture/AWARD_CONTACTS_DESIGN.md, which
+    also records why archive.award_unit_contact (dropped in V033) was
+    reintroduced here with a corrected, double-verified schema rather
+    than restored as originally shipped. With dry_run=True, every UPSERT
+    still runs (so the reported counts are accurate) but the whole
+    transaction is rolled back instead of committed."""
     load_logger = logger.bind(stage="load_award_id", award_id=award_id, run_id=run_id)
+    started = time.perf_counter()
 
     award_number = read_award_number_for_award_id(
         OracleDataSource(VERSIONS_ORACLE_SQL), award_id
@@ -1698,6 +2343,7 @@ def _run_load_award_id(
         )
         report = _empty_load_award_id_report(award_id)
         report["missing"] = 1
+        report["elapsed_ms"] = (time.perf_counter() - started) * 1000
         return report
 
     versions = prepare_versions(
@@ -1762,6 +2408,51 @@ def _run_load_award_id(
         else person_unit_credit_splits_raw
     )
 
+    sponsor_terms_raw = read_award_children_matching_award_ids(
+        OracleDataSource(SPONSOR_TERMS_ORACLE_SQL), family_award_ids
+    )
+    sponsor_terms = (
+        prepare_sponsor_terms(sponsor_terms_raw)
+        if not sponsor_terms_raw.empty
+        else sponsor_terms_raw
+    )
+
+    report_terms_raw = read_award_children_matching_award_ids(
+        OracleDataSource(REPORT_TERMS_ORACLE_SQL), family_award_ids
+    )
+    report_terms = (
+        prepare_report_terms(report_terms_raw)
+        if not report_terms_raw.empty
+        else report_terms_raw
+    )
+
+    report_term_recipients_raw = read_award_children_matching_award_ids(
+        OracleDataSource(REPORT_TERM_RECIPIENTS_ORACLE_SQL), family_award_ids
+    )
+    report_term_recipients = (
+        prepare_report_term_recipients(report_term_recipients_raw)
+        if not report_term_recipients_raw.empty
+        else report_term_recipients_raw
+    )
+
+    sponsor_contacts_raw = read_award_children_matching_award_ids(
+        OracleDataSource(SPONSOR_CONTACTS_ORACLE_SQL), family_award_ids
+    )
+    sponsor_contacts = (
+        prepare_sponsor_contacts(sponsor_contacts_raw)
+        if not sponsor_contacts_raw.empty
+        else sponsor_contacts_raw
+    )
+
+    unit_contacts_raw = read_award_children_matching_award_ids(
+        OracleDataSource(UNIT_CONTACTS_ORACLE_SQL), family_award_ids
+    )
+    unit_contacts = (
+        prepare_unit_contacts(unit_contacts_raw)
+        if not unit_contacts_raw.empty
+        else unit_contacts_raw
+    )
+
     report = _empty_load_award_id_report(award_id)
     report["award_number"] = award_number
     report["family_size"] = len(family_award_ids)
@@ -1778,6 +2469,11 @@ def _run_load_award_id(
                 + len(person_units)
                 + len(person_credit_splits)
                 + len(person_unit_credit_splits)
+                + len(sponsor_terms)
+                + len(report_terms)
+                + len(report_term_recipients)
+                + len(sponsor_contacts)
+                + len(unit_contacts)
             )
             load_id = create_load_run(connection, total_rows)
 
@@ -1849,6 +2545,36 @@ def _run_load_award_id(
                 )
                 report[f"person_credit_split_{result}"] += 1
 
+            for _, sponsor_term_row in sponsor_terms.iterrows():
+                result = upsert_award_sponsor_term(
+                    connection, sponsor_term_row, load_id
+                )
+                report[f"sponsor_term_{result}"] += 1
+
+            for _, report_term_row in report_terms.iterrows():
+                result = upsert_award_report_term(
+                    connection, report_term_row, load_id
+                )
+                report[f"report_term_{result}"] += 1
+
+            for _, report_term_recipient_row in report_term_recipients.iterrows():
+                result = upsert_award_report_term_recipient(
+                    connection, report_term_recipient_row, load_id
+                )
+                report[f"report_term_recipient_{result}"] += 1
+
+            for _, sponsor_contact_row in sponsor_contacts.iterrows():
+                result = upsert_award_sponsor_contact(
+                    connection, sponsor_contact_row, load_id
+                )
+                report[f"sponsor_contact_{result}"] += 1
+
+            for _, unit_contact_row in unit_contacts.iterrows():
+                result = upsert_award_unit_contact(
+                    connection, unit_contact_row, load_id
+                )
+                report[f"unit_contact_{result}"] += 1
+
             mark_load_complete(connection, load_id, total_rows)
         except Exception:
             transaction.rollback()
@@ -1859,20 +2585,28 @@ def _run_load_award_id(
             else:
                 transaction.commit()
 
+    report["elapsed_ms"] = (time.perf_counter() - started) * 1000
+
     load_logger.info(
         "Incremental Award load for award_id={} (award_number={} "
-        "family_size={}){}: version(inserted={} updated={} unchanged={}) "
+        "family_size={}){} in {:.1f}ms: version(inserted={} updated={} unchanged={}) "
         "amount_info(inserted={} updated={} unchanged={}) "
         "person(inserted={} updated={} unchanged={}) "
         "funding_proposal(inserted={} updated={} unchanged={}) "
         "custom_data(inserted={} updated={} unchanged={}) "
         "person_unit(inserted={} updated={} unchanged={}) "
         "person_credit_split(inserted={} updated={} unchanged={}) "
-        "person_unit_credit_split(inserted={} updated={} unchanged={})",
+        "person_unit_credit_split(inserted={} updated={} unchanged={}) "
+        "sponsor_term(inserted={} updated={} unchanged={}) "
+        "report_term(inserted={} updated={} unchanged={}) "
+        "report_term_recipient(inserted={} updated={} unchanged={}) "
+        "sponsor_contact(inserted={} updated={} unchanged={}) "
+        "unit_contact(inserted={} updated={} unchanged={})",
         award_id,
         award_number,
         report["family_size"],
         " [DRY RUN - not persisted]" if dry_run else "",
+        report["elapsed_ms"],
         report["inserted"],
         report["updated"],
         report["unchanged"],
@@ -1897,6 +2631,21 @@ def _run_load_award_id(
         report["person_unit_credit_split_inserted"],
         report["person_unit_credit_split_updated"],
         report["person_unit_credit_split_unchanged"],
+        report["sponsor_term_inserted"],
+        report["sponsor_term_updated"],
+        report["sponsor_term_unchanged"],
+        report["report_term_inserted"],
+        report["report_term_updated"],
+        report["report_term_unchanged"],
+        report["report_term_recipient_inserted"],
+        report["report_term_recipient_updated"],
+        report["report_term_recipient_unchanged"],
+        report["sponsor_contact_inserted"],
+        report["sponsor_contact_updated"],
+        report["sponsor_contact_unchanged"],
+        report["unit_contact_inserted"],
+        report["unit_contact_updated"],
+        report["unit_contact_unchanged"],
     )
     return report
 
@@ -1967,24 +2716,40 @@ def _run_create_award_batch(
 def _run_load_award_batch(
     engine: Engine, batch_id: int, *, dry_run: bool = False, run_id: str | None = None
 ) -> dict[str, Any]:
-    """--load-batch: idempotent incremental load for exactly this
-    batch's recorded award_id membership. Each award_id's load widens to
-    its whole award_number family internally (see _run_load_award_id) -
-    batch *membership* itself is never modified by this. Distinct
-    award_ids in the same batch that happen to share an award_number are
-    only scanned from Oracle once (the second one's data was already
-    upserted as a side effect of the first's family scan).
+    """--load-batch: idempotent bulk load for this batch's entire
+    recorded award_id membership as ONE unit of work - this no longer
+    loops over _run_load_award_id. Every one of the thirteen Award
+    tables is read from Oracle exactly ONCE for the whole batch
+    (bind-variable WHERE ... IN pushdown, chunked at Oracle's
+    1000-element IN-list limit - see OracleDataSource.read_filtered),
+    instead of once per family: runtime now scales with the number of
+    Oracle tables, not families x tables. See
+    docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md "Bulk batch load
+    refactor" for the full design record and local benchmark.
 
-    Note on dry_run scope: each family's own UPSERT transaction rolls
-    back independently under dry_run (see _run_load_award_id) - the
-    batch-item status update for each award_id is a separate, always-
-    committed bookkeeping step ("was this item attempted"), not part of
-    that per-family rollback. This is an intentional, narrower dry_run
-    scope than the Award Attachment domain's single-transaction
-    metadata load, chosen because sharing one transaction across
-    multiple independently-resolved award_number families would be
-    awkward and wouldn't add real safety here."""
+    Every award_number family requested (directly, or indirectly via a
+    shared award_number with another batch member) is widened and
+    reloaded together, exactly as _run_load_award_id does for one
+    family - this reimplements that same family-widening UPSERT logic
+    at batch scale directly rather than delegating to it, so the two
+    functions no longer share a call relationship, only the same
+    per-row upsert_* functions and the same prepare_* functions
+    (called once across every family's rows together, not once per
+    family - prepare_versions's own ranking logic is already scoped
+    per award_number via groupby, so batching every family's rows into
+    one call is equivalent to, not a change from, calling it once per
+    family).
+
+    The whole batch's UPSERTs are ONE Postgres transaction - "treat the
+    batch as one unit of work" - a deliberate change from the old
+    per-family-transaction design: a single bad row anywhere now rolls
+    back every family in this batch, not just the families after it in
+    iteration order. Batch membership itself, and each award_id's
+    batch-item status update, remain separate, always-committed
+    bookkeeping - unaffected by dry_run or by a load-transaction
+    rollback, exactly as before."""
     load_logger = logger.bind(stage="load_award_batch", batch_id=batch_id, run_id=run_id)
+    batch_started = time.perf_counter()
 
     with engine.connect() as connection:
         award_ids = batch_framework.load_batch_membership(
@@ -2022,95 +2787,286 @@ def _run_load_award_batch(
         "person_unit_credit_split_inserted": 0,
         "person_unit_credit_split_updated": 0,
         "person_unit_credit_split_unchanged": 0,
+        "sponsor_term_inserted": 0,
+        "sponsor_term_updated": 0,
+        "sponsor_term_unchanged": 0,
+        "report_term_inserted": 0,
+        "report_term_updated": 0,
+        "report_term_unchanged": 0,
+        "report_term_recipient_inserted": 0,
+        "report_term_recipient_updated": 0,
+        "report_term_recipient_unchanged": 0,
+        "sponsor_contact_inserted": 0,
+        "sponsor_contact_updated": 0,
+        "sponsor_contact_unchanged": 0,
+        "unit_contact_inserted": 0,
+        "unit_contact_updated": 0,
+        "unit_contact_unchanged": 0,
         "missing_in_oracle": 0,
+        "elapsed_ms": 0.0,
     }
 
-    seen_award_numbers: set[str] = set()
-    for award_id in award_ids:
-        award_number = read_award_number_for_award_id(
-            OracleDataSource(VERSIONS_ORACLE_SQL), award_id
-        )
-        if award_number is None:
-            report["missing_in_oracle"] += 1
-            with engine.begin() as connection:
+    def _finish(missing_award_ids: list[int], completed_award_ids: list[int]) -> dict[str, Any]:
+        with engine.begin() as connection:
+            for award_id in missing_award_ids:
                 batch_framework.set_item_status(
                     connection,
                     batch_id,
                     award_id,
                     status=batch_framework.ITEM_STATUS_MISSING_SOURCE,
                 )
-            continue
-
-        if award_number in seen_award_numbers:
-            with engine.begin() as connection:
+            for award_id in completed_award_ids:
                 batch_framework.set_item_status(
                     connection,
                     batch_id,
                     award_id,
                     status=batch_framework.ITEM_STATUS_COMPLETED,
                 )
-            continue
-        seen_award_numbers.add(award_number)
-
-        family_report = _run_load_award_id(
-            engine, award_id, dry_run=dry_run, run_id=run_id
-        )
-        report["families_loaded"] += 1
-        for key in (
-            "inserted",
-            "updated",
-            "unchanged",
-            "amount_info_inserted",
-            "amount_info_updated",
-            "amount_info_unchanged",
-            "person_inserted",
-            "person_updated",
-            "person_unchanged",
-            "funding_proposal_inserted",
-            "funding_proposal_updated",
-            "funding_proposal_unchanged",
-            "custom_data_inserted",
-            "custom_data_updated",
-            "custom_data_unchanged",
-            "person_unit_inserted",
-            "person_unit_updated",
-            "person_unit_unchanged",
-            "person_credit_split_inserted",
-            "person_credit_split_updated",
-            "person_credit_split_unchanged",
-            "person_unit_credit_split_inserted",
-            "person_unit_credit_split_updated",
-            "person_unit_credit_split_unchanged",
-        ):
-            report[key] += family_report[key]
-
-        with engine.begin() as connection:
-            batch_framework.set_item_status(
-                connection,
-                batch_id,
-                award_id,
-                status=batch_framework.ITEM_STATUS_COMPLETED,
+            batch_framework.set_batch_status(
+                connection, batch_id, status=batch_framework.BATCH_STATUS_READY
             )
 
-    with engine.begin() as connection:
-        batch_framework.set_batch_status(
-            connection, batch_id, status=batch_framework.BATCH_STATUS_READY
+        report["elapsed_ms"] = (time.perf_counter() - batch_started) * 1000
+        load_logger.info(
+            "Batch Award load for batch_id={}{}: requested_award_ids={} "
+            "families_loaded={} in {:.1f}ms version(inserted={} updated={} "
+            "unchanged={}) missing_in_oracle={}",
+            batch_id,
+            " [DRY RUN - not persisted]" if dry_run else "",
+            report["requested_award_ids"],
+            report["families_loaded"],
+            report["elapsed_ms"],
+            report["inserted"],
+            report["updated"],
+            report["unchanged"],
+            report["missing_in_oracle"],
         )
+        return report
 
-    load_logger.info(
-        "Batch Award load for batch_id={}{}: requested_award_ids={} "
-        "families_loaded={} version(inserted={} updated={} unchanged={}) "
-        "missing_in_oracle={}",
-        batch_id,
-        " [DRY RUN - not persisted]" if dry_run else "",
-        report["requested_award_ids"],
-        report["families_loaded"],
-        report["inserted"],
-        report["updated"],
-        report["unchanged"],
-        report["missing_in_oracle"],
+    if not award_ids:
+        return _finish([], [])
+
+    # Step 1 ("resolve all Award families first"): resolve every batch
+    # member's award_number in one (chunked) set of Oracle round trips,
+    # instead of one query per award_id.
+    started = time.perf_counter()
+    award_numbers_by_id = read_award_numbers_for_award_ids(
+        OracleDataSource(VERSIONS_ORACLE_SQL), set(award_ids)
     )
-    return report
+    load_logger.info(
+        "Resolved {} of {} requested award_id(s) to award_number in {:.1f}ms",
+        len(award_numbers_by_id),
+        len(award_ids),
+        (time.perf_counter() - started) * 1000,
+    )
+
+    missing_award_ids = [
+        award_id for award_id in award_ids if award_id not in award_numbers_by_id
+    ]
+    completed_award_ids = [
+        award_id for award_id in award_ids if award_id in award_numbers_by_id
+    ]
+    distinct_award_numbers: set[str] = set(award_numbers_by_id.values())
+    report["missing_in_oracle"] = len(missing_award_ids)
+    report["families_loaded"] = len(distinct_award_numbers)
+
+    if not distinct_award_numbers:
+        return _finish(missing_award_ids, completed_award_ids)
+
+    # Step 2 ("resolve the complete Award family once"): resolve every
+    # distinct award_number's entire version family in one (chunked)
+    # Oracle round trip, for every family in this batch together.
+    versions = prepare_versions(
+        read_award_versions_matching_award_numbers(
+            OracleDataSource(VERSIONS_ORACLE_SQL), distinct_award_numbers
+        )
+    )
+    family_award_ids: set[int] = set(
+        versions["award_id"].dropna().astype("int64").tolist()
+    )
+
+    # Step 3 ("query each child table only for that family's award_id
+    # values", now for every family in the batch at once): read every
+    # child table exactly once, scoped to the union of every family's
+    # award_ids in this batch.
+    def _read_and_prepare(
+        sql_path: Path, prepare: Callable[[pd.DataFrame], pd.DataFrame]
+    ) -> pd.DataFrame:
+        raw = read_award_children_matching_award_ids(
+            OracleDataSource(sql_path), family_award_ids
+        )
+        return prepare(raw) if not raw.empty else raw
+
+    amounts = _read_and_prepare(AMOUNTS_ORACLE_SQL, prepare_amounts)
+    people = _read_and_prepare(PEOPLE_ORACLE_SQL, prepare_people)
+    proposals = _read_and_prepare(PROPOSALS_ORACLE_SQL, prepare_proposals)
+    custom_data = _read_and_prepare(CUSTOM_DATA_ORACLE_SQL, prepare_custom_data)
+    person_units = _read_and_prepare(PERSON_UNITS_ORACLE_SQL, prepare_person_units)
+    person_credit_splits = _read_and_prepare(
+        PERSON_CREDIT_SPLITS_ORACLE_SQL, prepare_person_credit_splits
+    )
+    person_unit_credit_splits = _read_and_prepare(
+        PERSON_UNIT_CREDIT_SPLITS_ORACLE_SQL, prepare_person_unit_credit_splits
+    )
+    sponsor_terms = _read_and_prepare(SPONSOR_TERMS_ORACLE_SQL, prepare_sponsor_terms)
+    report_terms = _read_and_prepare(REPORT_TERMS_ORACLE_SQL, prepare_report_terms)
+    report_term_recipients = _read_and_prepare(
+        REPORT_TERM_RECIPIENTS_ORACLE_SQL, prepare_report_term_recipients
+    )
+    sponsor_contacts = _read_and_prepare(
+        SPONSOR_CONTACTS_ORACLE_SQL, prepare_sponsor_contacts
+    )
+    unit_contacts = _read_and_prepare(UNIT_CONTACTS_ORACLE_SQL, prepare_unit_contacts)
+
+    # Step 4 ("build in-memory dictionaries keyed by award_id"): one
+    # winning (primary-current) award_id per award_number, computed
+    # once from the batch-wide versions dataframe.
+    primary_rows = versions.loc[versions["is_primary_current"] == True]  # noqa: E712
+    winning_award_id_by_number: dict[str, int] = dict(
+        zip(
+            primary_rows["award_number"],
+            primary_rows["award_id"].astype("int64"),
+            strict=True,
+        )
+    )
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            total_rows = (
+                len(versions)
+                + len(amounts)
+                + len(people)
+                + len(proposals)
+                + len(custom_data)
+                + len(person_units)
+                + len(person_credit_splits)
+                + len(person_unit_credit_splits)
+                + len(sponsor_terms)
+                + len(report_terms)
+                + len(report_term_recipients)
+                + len(sponsor_contacts)
+                + len(unit_contacts)
+            )
+            load_id = create_load_run(connection, total_rows)
+
+            # Clear every family's stale is_primary_current flag before
+            # any per-row UPSERT below might set a *different* row to
+            # TRUE - see the module-level comment on
+            # ux_award_one_primary_current for why ordering matters.
+            # One UPDATE per distinct award_number (executemany-style,
+            # a single connection.execute() call with a list of
+            # parameter dicts) - still pure Postgres work, not an
+            # Oracle round trip, so doing it per-family here does not
+            # reintroduce the families x tables scaling problem this
+            # refactor removes.
+            connection.execute(
+                text(
+                    "UPDATE archive.award_version SET is_primary_current = FALSE "
+                    "WHERE award_number = :award_number AND is_primary_current = TRUE "
+                    "AND award_id IS DISTINCT FROM :winning_award_id"
+                ),
+                [
+                    {
+                        "award_number": award_number,
+                        "winning_award_id": winning_award_id_by_number.get(
+                            award_number
+                        ),
+                    }
+                    for award_number in distinct_award_numbers
+                ],
+            )
+
+            # Step 5 ("perform bulk UPSERTs table by table"): every
+            # table's rows, across every family in the batch together -
+            # not grouped or re-looped by family.
+            for _, version_row in versions.iterrows():
+                result = upsert_award_version(connection, version_row, load_id)
+                report[result] += 1
+
+            for _, amount_row in amounts.iterrows():
+                result = upsert_award_amount_info(connection, amount_row, load_id)
+                report[f"amount_info_{result}"] += 1
+
+            for _, person_row in people.iterrows():
+                result = upsert_award_person(connection, person_row, load_id)
+                report[f"person_{result}"] += 1
+
+            for _, proposal_row in proposals.iterrows():
+                result = upsert_award_funding_proposal(
+                    connection, proposal_row, load_id
+                )
+                report[f"funding_proposal_{result}"] += 1
+
+            for _, custom_data_row in custom_data.iterrows():
+                result = upsert_award_custom_data(
+                    connection, custom_data_row, load_id
+                )
+                report[f"custom_data_{result}"] += 1
+
+            # person_unit before person_unit_credit_split (its FK
+            # parent) - see docs/architecture/AWARD_PEOPLE_EXPANSION_DESIGN.md.
+            for _, person_unit_row in person_units.iterrows():
+                result = upsert_award_person_unit(
+                    connection, person_unit_row, load_id
+                )
+                report[f"person_unit_{result}"] += 1
+
+            for _, person_unit_credit_split_row in person_unit_credit_splits.iterrows():
+                result = upsert_award_person_unit_credit_split(
+                    connection, person_unit_credit_split_row, load_id
+                )
+                report[f"person_unit_credit_split_{result}"] += 1
+
+            for _, person_credit_split_row in person_credit_splits.iterrows():
+                result = upsert_award_person_credit_split(
+                    connection, person_credit_split_row, load_id
+                )
+                report[f"person_credit_split_{result}"] += 1
+
+            for _, sponsor_term_row in sponsor_terms.iterrows():
+                result = upsert_award_sponsor_term(
+                    connection, sponsor_term_row, load_id
+                )
+                report[f"sponsor_term_{result}"] += 1
+
+            # report_term before report_term_recipient (its FK parent) -
+            # see docs/architecture/AWARD_TERMS_DESIGN.md.
+            for _, report_term_row in report_terms.iterrows():
+                result = upsert_award_report_term(
+                    connection, report_term_row, load_id
+                )
+                report[f"report_term_{result}"] += 1
+
+            for _, report_term_recipient_row in report_term_recipients.iterrows():
+                result = upsert_award_report_term_recipient(
+                    connection, report_term_recipient_row, load_id
+                )
+                report[f"report_term_recipient_{result}"] += 1
+
+            for _, sponsor_contact_row in sponsor_contacts.iterrows():
+                result = upsert_award_sponsor_contact(
+                    connection, sponsor_contact_row, load_id
+                )
+                report[f"sponsor_contact_{result}"] += 1
+
+            for _, unit_contact_row in unit_contacts.iterrows():
+                result = upsert_award_unit_contact(
+                    connection, unit_contact_row, load_id
+                )
+                report[f"unit_contact_{result}"] += 1
+
+            mark_load_complete(connection, load_id, total_rows)
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    return _finish(missing_award_ids, completed_award_ids)
 
 
 def parse_args(
@@ -2154,10 +3110,12 @@ def parse_args(
             "award_id - see the module docstring above parse_args for "
             "why) plus its amount_info/person/funding_proposal/"
             "custom_data/person_unit/person_credit_split/"
-            "person_unit_credit_split child rows. Never truncates or "
-            "replaces the full tables. Scoped strictly to these eight "
-            "tables - no Award Budget/Reporting/Contacts/Terms/Time and "
-            "Money."
+            "person_unit_credit_split/sponsor_term/report_term/"
+            "report_term_recipient/sponsor_contact/unit_contact child "
+            "rows. Never truncates or replaces the full tables. Scoped "
+            "strictly to these thirteen tables - no Award Budget/"
+            "Reporting/Time and Money/SAP transmission, and does not "
+            "capture Award.basisOfPaymentCode/methodOfPaymentCode."
         ),
     )
     parser.add_argument(

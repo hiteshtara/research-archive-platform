@@ -13,6 +13,7 @@ from archive_etl.pipeline.reconciliation import (
     table_count_reconciler,
 )
 from archive_etl.pipeline.sources import (
+    MAX_ORACLE_IN_LIST_SIZE,
     CsvDataSource,
     OracleDataSource,
     _materialize_oracle_value,
@@ -97,6 +98,158 @@ class PipelineSourceTest(unittest.TestCase):
         cursor.execute.assert_called_once_with(
             "SELECT 10 FROM dual"
         )
+
+
+class OracleDataSourceReadFilteredTest(unittest.TestCase):
+    """read_filtered() is the bind-variable, WHERE-pushdown alternative
+    to read()/read_batches()'s full-table scan - these tests exercise
+    its SQL wrapping, bind-variable construction, chunking, and safety
+    validation directly against a mocked oracledb connection, without
+    ever touching read()/read_batches() (unchanged, still the full-load
+    path)."""
+
+    def test_empty_values_short_circuits_without_opening_a_connection(self) -> None:
+        with TemporaryDirectory() as directory:
+            sql_path = Path(directory) / "rows.sql"
+            sql_path.write_text("SELECT a.AWARD_ID FROM AWARD a;", encoding="utf-8")
+
+            connect = Mock()
+            source = OracleDataSource(
+                sql_path,
+                connect=connect,
+                environ={
+                    "ORACLE_USER": "user",
+                    "ORACLE_PASSWORD": "password",
+                    "ORACLE_DSN": "dsn",
+                },
+            )
+
+            result = source.read_filtered(column="AWARD_ID", values=[])
+
+        self.assertTrue(result.empty)
+        connect.assert_not_called()
+
+    def test_wraps_the_source_query_and_binds_values_by_name(self) -> None:
+        with TemporaryDirectory() as directory:
+            sql_path = Path(directory) / "rows.sql"
+            sql_path.write_text(
+                "SET PAGESIZE 50000\nSELECT a.AWARD_ID FROM AWARD a;",
+                encoding="utf-8",
+            )
+
+            cursor = MagicMock()
+            cursor.__enter__.return_value = cursor
+            cursor.description = [("AWARD_ID",)]
+            cursor.fetchmany.side_effect = [[(1,), (2,)], []]
+            connection = MagicMock()
+            connection.__enter__.return_value = connection
+            connection.cursor.return_value = cursor
+
+            source = OracleDataSource(
+                sql_path,
+                connect=Mock(return_value=connection),
+                environ={
+                    "ORACLE_USER": "user",
+                    "ORACLE_PASSWORD": "password",
+                    "ORACLE_DSN": "dsn",
+                },
+            )
+
+            result = source.read_filtered(column="AWARD_ID", values=[1, 2])
+
+        cursor.execute.assert_called_once_with(
+            "SELECT * FROM (\n"
+            "SELECT a.AWARD_ID FROM AWARD a\n"
+            ") filtered_source WHERE AWARD_ID IN (:b0, :b1)",
+            {"b0": 1, "b1": 2},
+        )
+        self.assertEqual(sorted(result["award_id"].tolist()), [1, 2])
+
+    def test_deduplicates_values_before_binding(self) -> None:
+        with TemporaryDirectory() as directory:
+            sql_path = Path(directory) / "rows.sql"
+            sql_path.write_text("SELECT a.AWARD_ID FROM AWARD a;", encoding="utf-8")
+
+            cursor = MagicMock()
+            cursor.__enter__.return_value = cursor
+            cursor.description = [("AWARD_ID",)]
+            cursor.fetchmany.side_effect = [[(1,)], []]
+            connection = MagicMock()
+            connection.__enter__.return_value = connection
+            connection.cursor.return_value = cursor
+
+            source = OracleDataSource(
+                sql_path,
+                connect=Mock(return_value=connection),
+                environ={
+                    "ORACLE_USER": "user",
+                    "ORACLE_PASSWORD": "password",
+                    "ORACLE_DSN": "dsn",
+                },
+            )
+
+            source.read_filtered(column="AWARD_ID", values=[1, 1, 1])
+
+        cursor.execute.assert_called_once_with(
+            "SELECT * FROM (\n"
+            "SELECT a.AWARD_ID FROM AWARD a\n"
+            ") filtered_source WHERE AWARD_ID IN (:b0)",
+            {"b0": 1},
+        )
+
+    def test_chunks_values_at_the_oracle_in_list_limit(self) -> None:
+        with TemporaryDirectory() as directory:
+            sql_path = Path(directory) / "rows.sql"
+            sql_path.write_text("SELECT a.AWARD_ID FROM AWARD a;", encoding="utf-8")
+
+            cursor = MagicMock()
+            cursor.__enter__.return_value = cursor
+            cursor.description = [("AWARD_ID",)]
+            cursor.fetchmany.side_effect = [[(1,)], [], [(2,)], []]
+            connection = MagicMock()
+            connection.__enter__.return_value = connection
+            connection.cursor.return_value = cursor
+
+            source = OracleDataSource(
+                sql_path,
+                connect=Mock(return_value=connection),
+                environ={
+                    "ORACLE_USER": "user",
+                    "ORACLE_PASSWORD": "password",
+                    "ORACLE_DSN": "dsn",
+                },
+            )
+
+            values = list(range(MAX_ORACLE_IN_LIST_SIZE + 1))
+            result = source.read_filtered(column="AWARD_ID", values=values)
+
+        self.assertEqual(cursor.execute.call_count, 2)
+        first_params = cursor.execute.call_args_list[0].args[1]
+        second_params = cursor.execute.call_args_list[1].args[1]
+        self.assertEqual(len(first_params), MAX_ORACLE_IN_LIST_SIZE)
+        self.assertEqual(len(second_params), 1)
+        self.assertEqual(sorted(result["award_id"].tolist()), [1, 2])
+
+    def test_rejects_chunk_size_above_the_oracle_in_list_limit(self) -> None:
+        source = OracleDataSource(Path("unused.sql"), connect=Mock())
+        with self.assertRaises(ValueError):
+            source.read_filtered(
+                column="AWARD_ID",
+                values=[1],
+                chunk_size=MAX_ORACLE_IN_LIST_SIZE + 1,
+            )
+
+    def test_rejects_non_positive_chunk_size(self) -> None:
+        source = OracleDataSource(Path("unused.sql"), connect=Mock())
+        with self.assertRaises(ValueError):
+            source.read_filtered(column="AWARD_ID", values=[1], chunk_size=0)
+
+    def test_rejects_unsafe_column_identifiers(self) -> None:
+        source = OracleDataSource(Path("unused.sql"), connect=Mock())
+        with self.assertRaises(ValueError):
+            source.read_filtered(
+                column="AWARD_ID; DROP TABLE AWARD --", values=[1]
+            )
 
 
 class PostgreSQLPipelineTest(unittest.TestCase):
