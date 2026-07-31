@@ -48,8 +48,12 @@ separate Excel/Parquet-via-S3 export pipeline (`load_from_s3.py`,
 6. **Run a domain load:**
    ```bash
    uv run python -m archive_etl <domain>
-   # domain is one of: award, negotiation, subaward, proposal
+   # domain is one of: award, negotiation, subaward, proposal, protocol
    ```
+   Protocol has its own, more detailed runbook covering its
+   parent-resolution model, coherent `--limit` sampling, and
+   reconciliation metrics — see
+   [`docs/PROTOCOL_ORACLE_LOADER.md`](../PROTOCOL_ORACLE_LOADER.md).
 7. **Use `--limit` only for read-only validation**, never as a partial
    load. It truncates every dataset to at most `N` rows after reading,
    skips cross-dataset validation, and returns before any database write —

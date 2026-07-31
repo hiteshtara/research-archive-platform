@@ -37,6 +37,21 @@ Terraform as dead infrastructure (zero
 code references anywhere); `landing/`/`validation/` were kept because IRB's
 export pipeline actively uses those prefix namespaces.
 
+## Protocol Archive (rebuilt, Oracle-direct)
+
+The "not license to rebuild" note in the superseded section below has since
+been acted on deliberately: a new, independent Protocol Archive
+(`archive.protocol_version` / `protocol_person` / `protocol_unit`) was
+built on `feature/protocol-oracle-loader`, ETL-only so far (no API/UI). It
+is **not** a restoration of the schema below — smaller scope (no derived
+views, no unit-administrator table pending a verified Oracle source) — and
+it is **additive alongside legacy IRB**, not a replacement for it. See
+[`docs/PROTOCOL_ORACLE_LOADER.md`](PROTOCOL_ORACLE_LOADER.md) for the full
+architecture, and migration `V034__create_protocol_archive.sql`. The
+parent-resolution strategies below (`NUMBER_SEQUENCE`, `OWNER_CHAIN`) carry
+forward unchanged into this rebuild — they were re-verified, not
+re-derived.
+
 ## Superseded: Protocol Archive (removed)
 
 The decisions below were made while building a "Protocol Archive" module — a
