@@ -758,6 +758,33 @@ always-smallest-N behavior is preserved unchanged, opt-in only, via a new
 `--load-batch`, `--show-batch`, or any UPSERT logic. See
 `AWARD_BATCH_PRODUCTION_SELECTION_DESIGN.md`.
 
+2026-08-01: Tenth same-day follow-up: Award API Phase 1 implemented -
+`GET /api/awards/search`, `/{awardNumber}/hierarchy`, `/{awardId}/summary`,
+`/{awardId}/versions`, extending the existing concrete-service
+`AwardArchiveController`/`AwardArchiveService`/`AwardArchiveRepository`
+stack rather than a parallel backend. New migration `V053` adds trigram
+(`pg_trgm`) and root-lookup indexes; `AwardSearchPattern` normalizes user
+queries (including the app's own `*text*` wildcard syntax) into a single,
+always-parameterized ILIKE pattern. Manually verified end-to-end against
+the real local dev database (production batch-7 data, 282,214
+`award_version` rows) - this caught two real defects before they shipped:
+a `ConstraintViolationException` → 500 gap in `GlobalExceptionHandler`
+(now fixed app-wide, not just for this endpoint), and an
+`AwardSearchPattern` wildcard-detection bug (a literal `%` in a query was
+wrongly treated as the user's own wildcard, skipping the default
+substring wrap - caught by `AwardSearchPatternTest`, fixed by checking
+the original input for `*` rather than the escaped result for `%`).
+Hierarchy tree-building assumes `archive.award_hierarchy`'s root rows
+self-reference their own `award_number` (the table's `parent_award_number`
+is `NOT NULL`, so there is no "no parent" marker) - verified against
+temporarily-seeded synthetic rows in the real local database, since the
+currently-loaded batch has zero `award_hierarchy` rows to observe
+directly; this convention should be re-confirmed against real production
+hierarchy data before the React hierarchy UI ships. FAIN and a general
+Award-level "account type" remain confirmed absent from the schema and
+are omitted from every new response DTO. 38 new tests added (163 total,
+all passing). See `AWARD_SEARCH_API_DESIGN.md`.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration
