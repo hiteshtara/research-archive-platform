@@ -1,5 +1,6 @@
 package edu.bu.archive.config;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,6 +12,11 @@ import software.amazon.awssdk.services.s3.S3Client;
 public class AwsConfiguration {
 
     @Bean
+    @ConditionalOnProperty(
+            name = "app.attachments.storage",
+            havingValue = "s3",
+            matchIfMissing = true
+    )
     S3Client s3Client(
             @Value("${AWS_REGION:us-east-1}")
             String awsRegion

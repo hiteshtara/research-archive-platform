@@ -63,6 +63,11 @@ oracle.json
 research_archive.dump
 *.dump
 
+# Synthetic local-only attachment fixtures (see
+# scripts/generate-local-attachment-fixtures.py) - never real BU data,
+# but kept out of git regardless since they're regeneratable dev fixtures.
+local-data/
+
 # Local scripts
 scripts/run-local.sh
 
@@ -77,3 +82,4 @@ ui/dist/
 taskdef*.json
 screenshots/
 *-policy.json
+ui/.env.local
