@@ -390,13 +390,13 @@ variable "manage_amplify" {
 }
 
 variable "amplify_repository_url" {
-  description = "HTTPS URL of the GitHub repository Amplify builds from. Required when manage_amplify = true."
+  description = "HTTPS URL of the GitHub repository Amplify builds from. Optional even when manage_amplify = true - leave null (with amplify_github_access_token also null) to create/keep the app with no repository attached yet. See modules/amplify's own variable doc for the one-time Amplify GitHub App installation this requires and the narrow admin:repo_hook token scope needed."
   type        = string
   default     = null
 }
 
 variable "amplify_github_access_token" {
-  description = "GitHub personal access token (repo scope) for Amplify's repository connection. Required when manage_amplify = true. Never set this in a tfvars file - pass it via TF_VAR_amplify_github_access_token or a secret manager."
+  description = "GitHub personal access token, scoped to ONLY admin:repo_hook (not repo), used once by AWS to attach the Amplify GitHub App's webhook - AWS does not store it. Requires the Amplify GitHub App already installed against this repo (see modules/amplify's own variable doc). Never set this in a tfvars file - pass it via TF_VAR_amplify_github_access_token."
   type        = string
   default     = null
   sensitive   = true

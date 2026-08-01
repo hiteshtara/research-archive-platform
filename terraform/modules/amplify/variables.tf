@@ -9,13 +9,32 @@ variable "environment" {
 }
 
 variable "repository_url" {
-  description = "HTTPS URL of the GitHub repository to deploy (e.g. https://github.com/bu-ist/research-archive-platform). Leave null (with github_access_token also null) to create the app with no repository connected, then connect it manually via the AWS Console's GitHub App-based flow after the first apply - recommended, since it never requires a token that would persist in Terraform state."
+  description = "HTTPS URL of the GitHub repository to deploy (e.g. https://github.com/bu-ist/research-archive-platform). Leave null (with github_access_token also null) to create the app with no repository connected yet."
   type        = string
   default     = null
 }
 
 variable "github_access_token" {
-  description = "GitHub personal access token (repo scope) Amplify uses to connect to the repository. Only needed if you choose the legacy PAT-based connection instead of the recommended Console GitHub App flow (see repository_url). Never set this in a committed tfvars file - pass it via TF_VAR_github_access_token or a secret store. Note this still ends up stored in Terraform state - the AWS provider's aws_amplify_app resource has no write-only or CodeConnections-based alternative as of provider ~> 6.0 (verified against the provider schema)."
+  description = <<-EOT
+    A GitHub personal access token, used once by AWS to attach the
+    Amplify GitHub App's webhook/deploy key to repository_url - AWS
+    does not store it (confirmed against the provider's resource
+    schema/docs), and it is excluded from ignore_changes for exactly
+    that reason (tracking it would otherwise show a permanent phantom
+    diff every plan, since reads always come back empty).
+
+    Requires the Amplify GitHub App to already be installed against
+    this repo in your GitHub account/org - a one-time, per-account/
+    region, browser-based step with no Terraform equivalent:
+    https://github.com/apps/aws-amplify-<region>/installations/new
+
+    Scope this token to ONLY `admin:repo_hook` (GitHub Settings >
+    Developer settings > Personal access tokens) - broader scopes like
+    `repo` are not needed for this and should be avoided. Never set
+    this in a committed tfvars file - pass it via
+    TF_VAR_amplify_github_access_token instead, and consider revoking
+    it on GitHub after the apply that attaches the repository succeeds.
+    EOT
   type        = string
   default     = null
   sensitive   = true

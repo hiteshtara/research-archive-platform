@@ -887,6 +887,46 @@ redirect URLs) is still pending, as is end-to-end login/logout/token-
 refresh/search/hierarchy/summary/versions verification through the
 deployed UI - both blocked on that one manual step completing first.
 
+2026-08-01: Fourteenth same-day follow-up: converted the Amplify app
+(`d288p9gmoteftb`) from manually-deployed branches to a Git-connected
+`main` branch (repository: a personal-fork remote, by explicit
+instruction). Two real problems surfaced and were fixed along the way:
+
+1. `terraform plan -destroy -target='module.amplify[0].aws_amplify_branch.main'`
+   planned to also destroy the live API's ECS task definition/service -
+   `terraform graph` confirmed `aws_ecs_task_definition.api` depended on
+   `aws_amplify_app.ui` via the CORS local, which read
+   `module.amplify[0].branch_url` (branch-derived). Fixed by rebuilding
+   that local from `module.amplify[0].default_domain` (app-level) plus
+   the plain `var.amplify_branch_name` instead - identical resulting
+   string, but no dependency on the branch *resource*, so destroying/
+   recreating the branch no longer cascades into the API. `-target` on
+   a `-destroy` plan turned out to be unsafe here regardless (it pulled
+   in the API via a shared ancestor node even after the fix would have
+   otherwise prevented a *plain* apply from touching it) - branch
+   removal was done via `terraform state rm` (bookkeeping only) plus a
+   direct `aws amplify delete-branch` call instead of any `destroy`
+   plan.
+2. `aws_amplify_app`'s `access_token`-based repository attachment fails
+   via Terraform (`BadRequestException: You should at least provide one
+   valid token`) even with a valid classic PAT correctly scoped to
+   `admin:repo_hook` - confirmed it's a provider-specific issue, not a
+   token problem, by running the identical `repository`+`access-token`
+   via a raw `aws amplify update-app` CLI call, which succeeded
+   immediately (webhook created). Worked around by attaching the
+   repository via that direct AWS CLI call, then `terraform apply
+   -refresh-only` to resync state, then a normal `terraform apply` to
+   create the Git-backed branch (which needs no token at all). Worth
+   filing upstream against `terraform-provider-aws` - likely sending an
+   empty `oauth_token` alongside a valid `access_token`.
+
+App ID, default domain, all six `VITE_*` environment variables, the SPA
+`custom_rule`, and the API's ECS service were all confirmed unchanged
+throughout (the CORS-dependency fix above was verified specifically to
+guarantee the last one). State was backed up
+(`terraform state pull`) before any branch removal, per an explicit
+requirement to do so.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

@@ -252,11 +252,26 @@ locals {
   # Unlike ui_redirect_url/ui_logout_url above, this has no circular
   # dependency problem: module.amplify's own inputs never depend on the
   # API's CORS configuration, only the reverse, so Terraform can create
-  # the Amplify app first and use its real branch_url here within the
-  # same apply.
+  # the Amplify app first and use its real domain here within the same
+  # apply.
+  #
+  # Deliberately built from module.amplify[0].default_domain (an
+  # app-level attribute) and the plain var.amplify_branch_name, NOT
+  # from module.amplify[0].branch_url - branch_url is derived from
+  # aws_amplify_branch.main's own branch_name attribute, which makes
+  # anything consuming it transitively depend on that branch *resource*
+  # existing. That dependency is real, not cosmetic: destroying/
+  # recreating the branch (e.g. to convert it from a manually-deployed
+  # branch to a Git-backed one) previously cascaded into a plan to also
+  # destroy and recreate the API's ECS task definition/service, found
+  # via `terraform plan -destroy -target=...aws_amplify_branch.main`
+  # before this fix - see docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md's
+  # "Fourteenth same-day follow-up".
   cors_allowed_origins = compact(concat(
     ["http://localhost:5173"],
-    var.manage_amplify ? [module.amplify[0].branch_url] : []
+    var.manage_amplify
+    ? ["https://${var.amplify_branch_name}.${module.amplify[0].default_domain}"]
+    : []
   ))
 }
 
