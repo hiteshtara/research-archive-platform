@@ -60,6 +60,12 @@ PROJECT_ROOT = _resolve_project_root()
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "01_award_versions.sql"
 )
+# Candidate-enumeration query for --create-batch's production selection
+# mode only (see _run_create_award_batch) - not part of the 48-table
+# extraction/load sequence, never populates any archive.* table.
+AWARD_IDS_ASCENDING_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "award" / "award_ids_ascending.sql"
+)
 AMOUNTS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "02_award_amounts.sql"
 )
@@ -9007,16 +9013,21 @@ def _run_load_award_id(
 def _select_award_ids_ascending(
     source: OracleDataSource, requested_size: int
 ) -> list[int]:
-    """Award-specific selection - deliberately does NOT reuse
+    """--validation-overlap selection only (see _run_create_award_batch).
+    Deliberately does NOT reuse
     batch_framework.select_distinct_ascending_from_oracle_batches's
     early-stop optimization. That optimization is only correct when the
     underlying Oracle source is already ORDER BY the same column being
     selected (true for Award Attachment's physical-file scan, ORDER BY
-    FILE_ID). 01_award_versions.sql is ORDER BY AWARD_NUMBER,
-    SEQUENCE_NUMBER instead - award_id has no relationship to that sort
-    order - so stopping early after N distinct award_ids would not
-    select the N globally-smallest ones. This always scans the full
-    source and sorts every distinct award_id in Python instead."""
+    FILE_ID, and true for this module's own AWARD_IDS_ASCENDING_ORACLE_SQL
+    used by the production selection path below). 01_award_versions.sql
+    is ORDER BY AWARD_NUMBER, SEQUENCE_NUMBER instead - award_id has no
+    relationship to that sort order - so stopping early after N distinct
+    award_ids would not select the N globally-smallest ones. This always
+    scans the full source and sorts every distinct award_id in Python
+    instead - the same "smallest N, every time" behavior every batch
+    scale from 10 through 5000 has used so far, preserved here
+    unchanged and now reachable only via --validation-overlap."""
     all_award_ids: set[int] = set()
     batches = source.read_batches()
     try:
@@ -9030,32 +9041,122 @@ def _select_award_ids_ascending(
     return sorted(all_award_ids)[:requested_size]
 
 
+def _excluded_completed_and_active_award_ids(engine: Engine) -> set[int]:
+    """Production --create-batch's exclusion set: every award_id that
+    either
+
+    (a) is already COMPLETED as an etl_batch_item - regardless of that
+        item's own batch's overall status, since a batch can finish
+        PARTIAL/FAILED overall while still containing individually-
+        COMPLETED items, and those specific award_ids must never be
+        reselected - or
+
+    (b) belongs to a batch that is still active (READY or PROCESSING) -
+        so two batches can never concurrently claim the same award_id,
+        regardless of that item's own individual status within the
+        active batch.
+
+    Deliberately does NOT exclude FAILED or PENDING items belonging to
+    an already-resolved batch (COMPLETED/FAILED/PARTIAL/ABANDONED) -
+    the entire point of production selection is that an award_id which
+    never successfully completed remains eligible for a later batch to
+    pick up again, not permanently skipped. Read-only; touches only
+    archive.etl_batch/etl_batch_item, never Oracle."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                """
+                SELECT DISTINCT ebi.entity_key
+                FROM archive.etl_batch_item ebi
+                JOIN archive.etl_batch eb ON eb.batch_id = ebi.batch_id
+                WHERE eb.domain = :domain
+                  AND eb.entity_type = :entity_type
+                  AND (
+                        ebi.status = :completed_status
+                        OR eb.status IN (:ready_status, :processing_status)
+                  )
+                """
+            ),
+            {
+                "domain": AWARD_BATCH_DOMAIN,
+                "entity_type": AWARD_BATCH_ENTITY_TYPE,
+                "completed_status": batch_framework.ITEM_STATUS_COMPLETED,
+                "ready_status": batch_framework.BATCH_STATUS_READY,
+                "processing_status": batch_framework.BATCH_STATUS_PROCESSING,
+            },
+        ).scalars()
+        return {int(value) for value in rows}
+
+
 def _run_create_award_batch(
-    engine: Engine, requested_size: int, *, run_id: str | None = None
+    engine: Engine,
+    requested_size: int,
+    *,
+    validation_overlap: bool = False,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    """--create-batch: select exactly `requested_size` distinct award_ids
-    from Oracle, in stable ascending award_id order, and persist that
-    exact membership as a new batch via the generic batch framework
-    (archive.etl_batch/etl_batch_item). Unlike Award Attachment, there is
-    no "already uploaded" concept here - every award_id is an equally
-    valid candidate, and there is no BLOB/S3 concern anywhere in this
-    domain. Raises ValueError for a non-positive requested_size."""
+    """--create-batch: select exactly `requested_size` distinct award_ids,
+    in stable ascending award_id order, and persist that exact membership
+    as a new batch via the generic batch framework
+    (archive.etl_batch/etl_batch_item).
+
+    Two selection modes:
+
+    - Production (default, validation_overlap=False): excludes every
+      award_id already COMPLETED in a prior batch, and every award_id
+      currently claimed by a still-active (READY/PROCESSING) batch (see
+      _excluded_completed_and_active_award_ids) - so repeated
+      `--create-batch N` calls advance through the Award population
+      (batch 1: the smallest N eligible award_ids; batch 2: the next N
+      after excluding batch 1's now-COMPLETED items; and so on) instead
+      of reselecting the same smallest N every time. Uses
+      AWARD_IDS_ASCENDING_ORACLE_SQL (ORDER BY AWARD_ID) via the generic
+      batch_framework.select_distinct_ascending_from_oracle_batches,
+      which stops scanning as soon as `requested_size` non-excluded
+      distinct award_ids are found - the same early-stop pattern Award
+      Attachment's own _run_create_batch already uses for FILE_ID - so a
+      production call never loads the entire Oracle Award population
+      into memory.
+    - Validation/testing (validation_overlap=True): the original
+      always-smallest-N-award_ids behavior (see
+      _select_award_ids_ascending), preserved unchanged and documented
+      in AWARD_IMPLEMENTATION_ROADMAP.md as intentionally overlapping,
+      useful for repeat-idempotency checks at increasing scale - never
+      excludes anything, always does a full Oracle scan.
+
+    Unlike Award Attachment, there is no "already uploaded"/BLOB/S3
+    concept anywhere in this domain - "already loaded" here means
+    "COMPLETED as an etl_batch_item", checked entirely in PostgreSQL,
+    never against Oracle. Raises ValueError for a non-positive
+    requested_size, before touching Oracle or PostgreSQL."""
     if requested_size <= 0:
         raise ValueError(
             f"requested_size must be positive, got {requested_size}"
         )
 
-    selected_award_ids = _select_award_ids_ascending(
-        OracleDataSource(VERSIONS_ORACLE_SQL), requested_size
-    )
+    if validation_overlap:
+        selected_award_ids = _select_award_ids_ascending(
+            OracleDataSource(VERSIONS_ORACLE_SQL), requested_size
+        )
+        selection_strategy = "ORACLE_SCAN_ASCENDING_AWARD_ID_VALIDATION_OVERLAP"
+    else:
+        excluded_award_ids = _excluded_completed_and_active_award_ids(engine)
+        selected_award_ids = batch_framework.select_distinct_ascending_from_oracle_batches(
+            OracleDataSource(AWARD_IDS_ASCENDING_ORACLE_SQL).read_batches(),
+            id_column="award_id",
+            requested_size=requested_size,
+            excluded=excluded_award_ids,
+        )
+        selection_strategy = "ORACLE_SCAN_ASCENDING_AWARD_ID_EXCL_COMPLETED"
 
     result = batch_framework.create_batch(
         engine,
         domain=AWARD_BATCH_DOMAIN,
         entity_type=AWARD_BATCH_ENTITY_TYPE,
         requested_size=requested_size,
-        selection_strategy="ORACLE_SCAN_ASCENDING_AWARD_ID",
+        selection_strategy=selection_strategy,
         selected_keys=selected_award_ids,
+        selection_parameters={"validation_overlap": validation_overlap},
         run_id=run_id,
     )
 
@@ -10005,11 +10106,30 @@ def parse_args(
         default=None,
         metavar="N",
         help=(
-            "Select exactly N distinct award_ids from Oracle, in stable "
-            "ascending award_id order, and persist that exact membership "
-            "as a new batch (archive.etl_batch/etl_batch_item, the "
-            "generic ETL batch framework shared with Award Attachment). "
-            "N must be positive."
+            "Select exactly N distinct award_ids, in stable ascending "
+            "award_id order, and persist that exact membership as a new "
+            "batch (archive.etl_batch/etl_batch_item, the generic ETL "
+            "batch framework shared with Award Attachment). By default "
+            "(production mode), excludes award_ids already COMPLETED in "
+            "a prior batch and award_ids claimed by a still-active "
+            "READY/PROCESSING batch, so repeated calls advance through "
+            "the population instead of reselecting the same N every "
+            "time - see --validation-overlap for the old behavior. N "
+            "must be positive."
+        ),
+    )
+    parser.add_argument(
+        "--validation-overlap",
+        action="store_true",
+        help=(
+            "Valid only with --create-batch. Selects the smallest N "
+            "award_ids every time, with no exclusion of prior batches - "
+            "the original --create-batch behavior, intentionally "
+            "overlapping across increasing scales (see "
+            "AWARD_IMPLEMENTATION_ROADMAP.md), useful for repeat-"
+            "idempotency validation. Never use this for ongoing "
+            "production loading - it will keep reselecting and "
+            "reprocessing the same low-numbered award_ids."
         ),
     )
     parser.add_argument(
@@ -10094,6 +10214,8 @@ def parse_args(
         )
     if parsed.migrate_only and parsed.load_award_id is not None:
         parser.error("--migrate-only cannot be combined with --load-award-id")
+    if parsed.validation_overlap and parsed.create_batch is None:
+        parser.error("--validation-overlap is only valid together with --create-batch")
 
     return parsed
 
@@ -10112,7 +10234,10 @@ def main() -> None:
         if not arguments.ecs:
             apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         _run_create_award_batch(
-            engine, arguments.create_batch, run_id=run_id
+            engine,
+            arguments.create_batch,
+            validation_overlap=arguments.validation_overlap,
+            run_id=run_id,
         )
         return
 

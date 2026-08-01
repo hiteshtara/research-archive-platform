@@ -734,6 +734,30 @@ must be resolved - by deliberate decision, not by copying dev's wiring
 blindly - before the Award (or Award Attachment) loader is promoted to
 `test` or `prod`.
 
+2026-08-01: Ninth same-day follow-up: `--create-batch` now defaults to a
+**production** selection mode that advances through the Award population
+across repeated calls, instead of always reselecting the same smallest N
+award_ids. Prompted by a research pass confirming the prior always-
+overlapping behavior - intentional for the 10→100→1000 validation-scale
+test plan documented above, but never designed for ongoing production
+loading - wasted Oracle reads and reprocessing on every repeated call.
+Production mode excludes award_ids already `COMPLETED` as an
+`etl_batch_item` (regardless of that item's own batch's overall status)
+and award_ids claimed by a still-active (`READY`/`PROCESSING`) batch;
+`FAILED`/`PENDING` items in an already-resolved batch remain eligible, by
+design - production selection never permanently skips a failure. Reuses
+the shared `batch_framework.select_distinct_ascending_from_oracle_batches`
+early-stop helper (the same one Award Attachment's own `_run_create_batch`
+already uses for `FILE_ID`) against a new, narrowly-scoped `ORDER BY
+AWARD_ID` Oracle query (`sql/extract/award/award_ids_ascending.sql` -
+`01_award_versions.sql` itself is `ORDER BY AWARD_NUMBER, SEQUENCE_NUMBER`
+and can't support early-stopping by `award_id`), so a production call
+never loads the entire Oracle Award population into memory. The original
+always-smallest-N behavior is preserved unchanged, opt-in only, via a new
+`--validation-overlap` flag. Does not touch `--load-award-id`,
+`--load-batch`, `--show-batch`, or any UPSERT logic. See
+`AWARD_BATCH_PRODUCTION_SELECTION_DESIGN.md`.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

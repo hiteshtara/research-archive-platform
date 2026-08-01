@@ -68,6 +68,16 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
             },
         ),
         (
+            "--validation-overlap",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--validation-overlap."
+                ),
+            },
+        ),
+        (
             "--load-batch",
             {
                 "type": int,

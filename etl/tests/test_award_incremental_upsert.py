@@ -1936,6 +1936,7 @@ class _AwardPostgresTestCase(unittest.TestCase):
         transferring_sponsor: list[dict] | None = None,
         award_transmission: list[dict] | None = None,
         award_transmission_child: list[dict] | None = None,
+        award_ids: list[dict] | None = None,
     ):
         versions_df = pd.DataFrame(versions or [])
         amounts_df = pd.DataFrame(amounts or [])
@@ -1999,6 +2000,7 @@ class _AwardPostgresTestCase(unittest.TestCase):
         transferring_sponsor_df = pd.DataFrame(transferring_sponsor or [])
         award_transmission_df = pd.DataFrame(award_transmission or [])
         award_transmission_child_df = pd.DataFrame(award_transmission_child or [])
+        award_ids_df = pd.DataFrame(award_ids or [])
 
         def _source(sql_path):
             if sql_path == award_loader.VERSIONS_ORACLE_SQL:
@@ -2108,6 +2110,8 @@ class _AwardPostgresTestCase(unittest.TestCase):
                 return _oracle_batches_stub([award_transmission_df])
             if sql_path == award_loader.AWARD_TRANSMISSION_CHILD_ORACLE_SQL:
                 return _oracle_batches_stub([award_transmission_child_df])
+            if sql_path == award_loader.AWARD_IDS_ASCENDING_ORACLE_SQL:
+                return _oracle_batches_stub([award_ids_df])
             raise AssertionError(f"unexpected Oracle source: {sql_path}")
 
         return patch.object(
@@ -5697,13 +5701,20 @@ class RunCreateAwardBatchTest(_AwardPostgresTestCase):
             award_loader._run_create_award_batch(self.engine, 0)
 
     def test_selects_exactly_n_distinct_award_ids_ascending(self) -> None:
+        # --validation-overlap specifically: always the smallest N,
+        # sorted in Python from an unsorted underlying source - see
+        # CreateAwardBatchProductionSelectionTest for the default
+        # (production) selection mode's own behavior, which reads a
+        # different, already-ascending Oracle source instead.
         with self._patched_oracle(
             versions=[
                 _version_row(award_id=aid, award_number=f"A-{aid:04d}")
                 for aid in [5, 3, 1, 4, 2]
             ]
         ):
-            result = award_loader._run_create_award_batch(self.engine, 3)
+            result = award_loader._run_create_award_batch(
+                self.engine, 3, validation_overlap=True
+            )
 
         self.assertEqual(result["selected_award_ids"], [1, 2, 3])
         self.assertEqual(result["selected_count"], 3)
@@ -5712,11 +5723,231 @@ class RunCreateAwardBatchTest(_AwardPostgresTestCase):
         with self._patched_oracle(
             versions=[_version_row(award_id=1, award_number="A-0001")]
         ):
-            result = award_loader._run_create_award_batch(self.engine, 1)
+            result = award_loader._run_create_award_batch(
+                self.engine, 1, validation_overlap=True
+            )
 
         batch_row = self._row("etl_batch", batch_id=result["batch_id"])
         self.assertEqual(batch_row["domain"], "AWARD")
         self.assertEqual(batch_row["entity_type"], "AWARD")
+
+
+class CreateAwardBatchProductionSelectionTest(_AwardPostgresTestCase):
+    """Default (validation_overlap=False) --create-batch selection mode:
+    excludes award_ids already COMPLETED in a prior batch, and award_ids
+    claimed by a still-active (READY/PROCESSING) batch, so repeated
+    calls advance through the population instead of reselecting the
+    same smallest N every time. Uses AWARD_IDS_ASCENDING_ORACLE_SQL
+    (patched via the award_ids= kwarg), never VERSIONS_ORACLE_SQL."""
+
+    def _seed_batch(
+        self, award_ids: list[int], *, batch_status: str, item_status: str
+    ) -> int:
+        with self.engine.begin() as connection:
+            batch_id = connection.execute(
+                text(
+                    "INSERT INTO archive.etl_batch "
+                    "(domain, entity_type, requested_size, status, "
+                    "selection_strategy) "
+                    "VALUES ('AWARD', 'AWARD', :size, :batch_status, "
+                    "'TEST_FIXTURE') RETURNING batch_id"
+                ),
+                {"size": len(award_ids), "batch_status": batch_status},
+            ).scalar_one()
+            for ordinal, award_id in enumerate(award_ids, start=1):
+                connection.execute(
+                    text(
+                        "INSERT INTO archive.etl_batch_item "
+                        "(batch_id, entity_key, ordinal, status) "
+                        "VALUES (:batch_id, :award_id, :ordinal, :item_status)"
+                    ),
+                    {
+                        "batch_id": batch_id,
+                        "award_id": award_id,
+                        "ordinal": ordinal,
+                        "item_status": item_status,
+                    },
+                )
+        return int(batch_id)
+
+    def test_first_production_batch_selects_ids_1_through_5000(self) -> None:
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 5001)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5000)
+
+        self.assertEqual(result["selected_count"], 5000)
+        self.assertEqual(result["selected_award_ids"][0], 1)
+        self.assertEqual(result["selected_award_ids"][-1], 5000)
+        self.assertEqual(
+            result["selected_award_ids"], list(range(1, 5001))
+        )
+
+    def test_next_production_batch_selects_5001_through_10000_after_completion(
+        self,
+    ) -> None:
+        self._seed_batch(
+            list(range(1, 5001)),
+            batch_status="COMPLETED",
+            item_status="COMPLETED",
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 10001)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5000)
+
+        self.assertEqual(result["selected_count"], 5000)
+        self.assertEqual(
+            result["selected_award_ids"], list(range(5001, 10001))
+        )
+
+    def test_completed_ids_are_excluded_even_if_their_batch_is_not_fully_completed(
+        self,
+    ) -> None:
+        # A batch can be PARTIAL/FAILED overall while some of its own
+        # items individually succeeded - those specific award_ids must
+        # still never be reselected.
+        self._seed_batch(
+            [1, 2, 3], batch_status="PARTIAL", item_status="COMPLETED"
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [4, 5, 6, 7, 8])
+
+    def test_failed_ids_remain_eligible_once_their_batch_is_resolved(self) -> None:
+        self._seed_batch(
+            [1, 2, 3], batch_status="FAILED", item_status="FAILED"
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        # FAILED items in a resolved (non-active) batch are eligible
+        # again - production mode never permanently excludes a failure.
+        self.assertEqual(result["selected_award_ids"], [1, 2, 3, 4, 5])
+
+    def test_pending_ids_remain_eligible_once_their_batch_is_resolved(self) -> None:
+        self._seed_batch(
+            [1, 2, 3], batch_status="ABANDONED", item_status="PENDING"
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [1, 2, 3, 4, 5])
+
+    def test_ready_batch_items_are_not_selected_twice(self) -> None:
+        self._seed_batch(
+            [1, 2, 3], batch_status="READY", item_status="PENDING"
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [4, 5, 6, 7, 8])
+
+    def test_processing_batch_items_are_not_selected_twice(self) -> None:
+        self._seed_batch(
+            [1, 2, 3], batch_status="PROCESSING", item_status="PENDING"
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [4, 5, 6, 7, 8])
+
+    def test_created_and_metadata_loading_batches_do_not_exclude_their_items(
+        self,
+    ) -> None:
+        # Only READY/PROCESSING count as "active" for exclusion purposes
+        # - a batch that's merely CREATED or METADATA_LOADING (i.e. not
+        # yet confirmed READY to load) does not lock out its own
+        # award_ids from a fresh production batch.
+        self._seed_batch(
+            [1, 2, 3], batch_status="CREATED", item_status="PENDING"
+        )
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [1, 2, 3, 4, 5])
+
+    def test_validation_overlap_still_selects_smallest_n_every_time(self) -> None:
+        self._seed_batch(
+            list(range(1, 5001)),
+            batch_status="COMPLETED",
+            item_status="COMPLETED",
+        )
+
+        with self._patched_oracle(
+            versions=[
+                _version_row(award_id=aid, award_number=f"A-{aid:04d}")
+                for aid in range(1, 10001)
+            ]
+        ):
+            result = award_loader._run_create_award_batch(
+                self.engine, 5000, validation_overlap=True
+            )
+
+        # Completion state is entirely ignored in validation-overlap
+        # mode - always the smallest N, regardless of what's already
+        # COMPLETED elsewhere.
+        self.assertEqual(result["selected_award_ids"], list(range(1, 5001)))
+
+    def test_deterministic_rerun_with_no_state_change(self) -> None:
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 5001)]
+        ):
+            first = award_loader._run_create_award_batch(self.engine, 5000)
+            second = award_loader._run_create_award_batch(self.engine, 5000)
+
+        # No batch was completed/activated between the two calls, so
+        # the exclusion set is identical both times - same selection.
+        self.assertEqual(
+            first["selected_award_ids"], second["selected_award_ids"]
+        )
+        self.assertEqual(first["selected_award_ids"], list(range(1, 5001)))
+
+    def test_production_selection_strategy_is_recorded(self) -> None:
+        with self._patched_oracle(
+            award_ids=[{"award_id": 1}]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 1)
+
+        batch_row = self._row("etl_batch", batch_id=result["batch_id"])
+        self.assertEqual(
+            batch_row["selection_strategy"],
+            "ORACLE_SCAN_ASCENDING_AWARD_ID_EXCL_COMPLETED",
+        )
+
+    def test_validation_overlap_selection_strategy_is_recorded(self) -> None:
+        with self._patched_oracle(
+            versions=[_version_row(award_id=1, award_number="A-0001")]
+        ):
+            result = award_loader._run_create_award_batch(
+                self.engine, 1, validation_overlap=True
+            )
+
+        batch_row = self._row("etl_batch", batch_id=result["batch_id"])
+        self.assertEqual(
+            batch_row["selection_strategy"],
+            "ORACLE_SCAN_ASCENDING_AWARD_ID_VALIDATION_OVERLAP",
+        )
 
 
 class RunLoadAwardBatchTest(_AwardPostgresTestCase):
@@ -7383,7 +7614,7 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
 class ShowAwardBatchTest(_AwardPostgresTestCase):
     def test_generic_show_batch_works_for_award_domain(self) -> None:
         with self._patched_oracle(
-            versions=[_version_row(award_id=1, award_number="A-0001")]
+            award_ids=[{"award_id": 1}]
         ):
             result = award_loader._run_create_award_batch(self.engine, 1)
 

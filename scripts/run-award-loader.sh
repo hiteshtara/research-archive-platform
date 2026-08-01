@@ -50,6 +50,12 @@ set -euo pipefail
 #   POSTGRES_HOST/POSTGRES_PORT/POSTGRES_DB  - only needed as a fallback
 #     for whichever of host/port/dbname the PostgreSQL secret doesn't
 #     include itself
+#   POLL_INTERVAL_SECONDS (default: 15) - how often this script polls
+#     `aws ecs describe-tasks` while waiting for the task to stop. No
+#     overall timeout is applied - a long Award load is never treated
+#     as a failure just for taking a while; only the container's own
+#     real exit code (once it does stop) determines this script's exit
+#     status.
 #
 # None of POSTGRES_USER, POSTGRES_PASSWORD, ORACLE_USER, ORACLE_PASSWORD,
 # or ORACLE_DSN are ever read or passed through by this script.
@@ -327,11 +333,46 @@ RUN_TASK_OUTPUT="$(aws ecs run-task \
 TASK_ARN="$(echo "$RUN_TASK_OUTPUT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["tasks"][0]["taskArn"])')"
 echo "Task started: $TASK_ARN"
 
-echo "=== Waiting for task completion (this can take a few minutes) ==="
-aws ecs wait tasks-stopped \
-  --cluster "$CLUSTER_NAME" \
-  --tasks "$TASK_ARN" \
-  --region "$AWS_REGION"
+TASK_DESCRIBE_FILE="$TMP_DIR/task-describe.json"
+
+# `aws ecs wait tasks-stopped` has a fixed, non-configurable polling
+# budget (6s delay x 100 attempts = 10 minutes) - it raises a hard
+# "Waiter encountered a terminal failure state" error the moment that
+# budget is exhausted, even when the task is still running perfectly
+# normally (a large --create-batch/--load-batch Award load can easily
+# run past 10 minutes). That failure previously aborted this script via
+# set -e before it ever reached the exit-code check below, reporting an
+# alarming, misleading error for what may just be a still-running (or
+# already-succeeded) task. Poll manually instead, with no fixed
+# timeout, so a long Award load is never treated as a failure just for
+# taking a while - only the container's own real exit code (checked
+# below) ever determines this script's own exit status.
+POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-15}"
+echo "=== Waiting for task completion (polling every ${POLL_INTERVAL_SECONDS}s, no fixed timeout - safe for long Award loads) ==="
+
+while true; do
+  aws ecs describe-tasks \
+    --cluster "$CLUSTER_NAME" \
+    --tasks "$TASK_ARN" \
+    --region "$AWS_REGION" \
+    --output json \
+    > "$TASK_DESCRIBE_FILE"
+
+  LAST_STATUS="$(jq -r '.tasks[0].lastStatus // empty' "$TASK_DESCRIBE_FILE")"
+
+  if [[ -z "$LAST_STATUS" ]]; then
+    echo "ERROR: aws ecs describe-tasks returned no task for $TASK_ARN - it may already have been stopped and garbage-collected by ECS." >&2
+    exit 1
+  fi
+
+  if [[ "$LAST_STATUS" == "STOPPED" ]]; then
+    echo "Task stopped."
+    break
+  fi
+
+  echo "Task status: $LAST_STATUS - checking again in ${POLL_INTERVAL_SECONDS}s..."
+  sleep "$POLL_INTERVAL_SECONDS"
+done
 
 TASK_ID="${TASK_ARN##*/}"
 LOG_STREAM="loader/${CONTAINER_NAME}/${TASK_ID}"
@@ -343,14 +384,8 @@ aws logs tail "$LOG_GROUP" \
   --since 1h || echo "WARNING: could not tail logs - check the CloudWatch console directly."
 
 echo "=== Checking task exit code ==="
-TASK_DESCRIBE_FILE="$TMP_DIR/task-describe.json"
-aws ecs describe-tasks \
-  --cluster "$CLUSTER_NAME" \
-  --tasks "$TASK_ARN" \
-  --region "$AWS_REGION" \
-  --output json \
-  > "$TASK_DESCRIBE_FILE"
-
+# Reuses the describe-tasks payload captured the moment STOPPED was
+# first observed above - no need to call describe-tasks a second time.
 EXIT_CODE="$(jq -r --arg name "$CONTAINER_NAME" \
   '.tasks[0].containers[] | select(.name == $name) | .exitCode // empty' \
   "$TASK_DESCRIBE_FILE")"
