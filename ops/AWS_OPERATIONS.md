@@ -34,28 +34,29 @@ research-archive-platform
 
 App ID
 
-d33qc0afy3ltcj
+Do not hardcode this - the ID below (d33qc0afy3ltcj) belonged to the
+personal-account mirror, not BU's account. Get the real one fresh:
+
+cd terraform/environments/dev && terraform output -raw amplify_app_id
+
+(Same for the UI URL - use `terraform output -raw ui_url`.)
 
 Production Branch
 
 main
 
-UI
-
-https://main.d33qc0afy3ltcj.amplifyapp.com
-
 List Builds
 
 aws amplify list-jobs \
   --region us-east-1 \
-  --app-id d33qc0afy3ltcj \
+  --app-id "$(terraform output -raw amplify_app_id)" \
   --branch-name main
 
 List Branches
 
 aws amplify list-branches \
   --region us-east-1 \
-  --app-id d33qc0afy3ltcj
+  --app-id "$(terraform output -raw amplify_app_id)"
 
 List Apps
 
@@ -66,7 +67,7 @@ Trigger Build
 
 aws amplify start-job \
   --region us-east-1 \
-  --app-id d33qc0afy3ltcj \
+  --app-id "$(terraform output -raw amplify_app_id)" \
   --branch-name main \
   --job-type RELEASE
 

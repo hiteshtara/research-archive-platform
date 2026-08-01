@@ -75,7 +75,14 @@ app:
       client-id: ${COGNITO_CLIENT_ID}
 
   cors:
-    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,https://main.d33qc0afy3ltcj.amplifyapp.com}
+    # No non-localhost default - the real deployed UI origin(s) must be
+    # supplied via APP_CORS_ALLOWED_ORIGINS (wired from Terraform's
+    # Amplify branch_url; see terraform/environments/*/main.tf). An
+    # earlier version of this default hardcoded a personal AWS
+    # account's Amplify domain - see
+    # docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md's "Thirteenth
+    # same-day follow-up".
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
 
   attachments:
     # "s3" (default) reads from the private documents bucket via

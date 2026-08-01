@@ -13,6 +13,18 @@ resource "aws_amplify_app" "ui" {
     enable_auto_build = false
   }
 
+  # SPA routing fallback: a direct browser request for a React route
+  # (e.g. /awards/100004-00001) has no matching object in Amplify's
+  # static hosting - without this rule it 404s instead of loading the
+  # app, which then handles the route client-side. Excludes real static
+  # asset extensions so those still 404 correctly instead of falling
+  # back to index.html.
+  custom_rule {
+    source = "</^[^.]+$|\\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>"
+    target = "/index.html"
+    status = "200"
+  }
+
   tags = {
     Name = "${var.project_name}-${var.environment}-ui"
   }

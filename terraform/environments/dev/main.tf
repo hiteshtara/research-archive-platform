@@ -248,6 +248,16 @@ locals {
   )
 
   api_url = var.api_domain_name != null ? "https://${var.api_domain_name}" : module.api_service.alb_url
+
+  # Unlike ui_redirect_url/ui_logout_url above, this has no circular
+  # dependency problem: module.amplify's own inputs never depend on the
+  # API's CORS configuration, only the reverse, so Terraform can create
+  # the Amplify app first and use its real branch_url here within the
+  # same apply.
+  cors_allowed_origins = compact(concat(
+    ["http://localhost:5173"],
+    var.manage_amplify ? [module.amplify[0].branch_url] : []
+  ))
 }
 
 module "amplify" {
@@ -303,7 +313,10 @@ module "api_service" {
 
   documents_bucket_arn = module.archive_s3.documents_bucket_arn
 
-  additional_environment_variables = var.additional_api_environment_variables
+  additional_environment_variables = merge(
+    var.additional_api_environment_variables,
+    { APP_CORS_ALLOWED_ORIGINS = join(",", local.cors_allowed_origins) }
+  )
 
   additional_secrets = var.enable_openai_secret ? {
     OPENAI_API_KEY = "${module.openai_secret[0].openai_secret_arn}:apiKey::"

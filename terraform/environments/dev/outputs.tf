@@ -148,3 +148,8 @@ output "ui_url" {
   description = "Public URL of the deployed UI (only when manage_amplify = true; null otherwise, since the UI is externally hosted)."
   value       = var.manage_amplify ? module.amplify[0].branch_url : null
 }
+
+output "amplify_app_id" {
+  description = "Amplify app ID (only when manage_amplify = true; null otherwise). Needed for aws amplify CLI commands - never hardcode this, it's assigned by AWS at creation time and is account-specific."
+  value       = var.manage_amplify ? module.amplify[0].app_id : null
+}

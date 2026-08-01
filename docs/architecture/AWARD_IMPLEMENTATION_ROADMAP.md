@@ -856,6 +856,37 @@ mistake. BU SAML federation is deliberately deferred to a separate,
 later phase (`supported_identity_providers` is still `["COGNITO"]`
 only) rather than attempted in this same pass.
 
+2026-08-01: Thirteenth same-day follow-up: provisioned BU dev's Amplify
+frontend through Terraform (`manage_amplify = true`), completing the
+"UI hosting" side of the same personal-account-reference problem the
+last two follow-ups fixed on the API/Cognito side. Found the same
+class of leak in two more places: the API's own CORS default
+(`application.yml`/`WebCorsConfiguration.java`) hardcoded the personal
+Amplify domain as a fallback allowed-origin, and `ops/AWS_OPERATIONS.md`/
+`docs/AI_TROUBLESHOOTING.md` both used it in example commands - all
+fixed, with CORS now sourced from `APP_CORS_ALLOWED_ORIGINS`, wired at
+the Terraform level from the real Amplify app's own `branch_url` (no
+env-specific fallback default left in source). Confirmed and
+implemented a genuine (not assumed) circular dependency: Amplify's
+build environment needs Cognito's pool/client ID, while Cognito's
+`callback_urls`/`logout_urls` need Amplify's own domain - which is only
+known after the Amplify app resource is created - so Terraform cannot
+resolve both directions in one apply. CORS and SPA-routing fallback
+have no such cycle (one-directional dependencies only) and were wired
+in the same apply as app creation. Applied Stage 1 (app + branch
+created, `d288p9gmoteftb`, placeholder localhost redirect URLs, all six
+required `VITE_*` build env vars sourced from real BU Cognito/ALB
+values - confirmed via `aws amplify get-app` matching Terraform's
+config exactly). Repository connection (`bu-ist/research-archive-platform`,
+branch `main`) requires one unavoidable interactive step - Amplify's
+GitHub App OAuth authorization has no headless equivalent that avoids
+storing a PAT in Terraform state - deliberately left for manual
+completion via the Console rather than storing a token. Stage 2 (real
+Amplify domain into Cognito's callback/logout URLs and the UI's own
+redirect URLs) is still pending, as is end-to-end login/logout/token-
+refresh/search/hierarchy/summary/versions verification through the
+deployed UI - both blocked on that one manual step completing first.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

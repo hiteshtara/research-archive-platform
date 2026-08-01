@@ -150,11 +150,16 @@ Do not log:
 
 ### Verification
 
-Test the API route:
+Test the API route (get the real API URL and Amplify origin fresh -
+`terraform output api_url` and `terraform output -raw ui_url`
+from `terraform/environments/<env>` - a stale CloudFront/Amplify domain
+from a different AWS account produced this exact section's original
+example values):
 
 ```bash
+API_URL=$(terraform output -raw api_url)
 curl -i -X POST \
-  "https://d1t1nk2y2enmtq.cloudfront.net/api/ai/awards/100004-00001/summary"
+  "${API_URL}/api/ai/awards/100004-00001/summary"
 ```
 
 An unauthenticated `401` with `WWW-Authenticate: Bearer` proves the route reaches Spring Security.
@@ -162,9 +167,10 @@ An unauthenticated `401` with `WWW-Authenticate: Bearer` proves the route reache
 Test preflight:
 
 ```bash
+UI_ORIGIN=$(terraform output -raw ui_url)
 curl -i -X OPTIONS \
-  "https://d1t1nk2y2enmtq.cloudfront.net/api/ai/awards/100004-00001/summary" \
-  -H "Origin: https://main.d33qc0afy3ltcj.amplifyapp.com" \
+  "${API_URL}/api/ai/awards/100004-00001/summary" \
+  -H "Origin: ${UI_ORIGIN}" \
   -H "Access-Control-Request-Method: POST" \
   -H "Access-Control-Request-Headers: authorization,content-type"
 ```
@@ -173,7 +179,7 @@ Expected:
 
 ```text
 HTTP/2 200
-Access-Control-Allow-Origin: https://main.d33qc0afy3ltcj.amplifyapp.com
+Access-Control-Allow-Origin: <the UI_ORIGIN value above>
 Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
 Access-Control-Allow-Headers: authorization, content-type
 Access-Control-Allow-Credentials: true

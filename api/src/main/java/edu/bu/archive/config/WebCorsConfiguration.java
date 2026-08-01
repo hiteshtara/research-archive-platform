@@ -14,7 +14,7 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
 
     public WebCorsConfiguration(
             @Value(
-                    "${app.cors.allowed-origins:http://localhost:5173,https://main.d33qc0afy3ltcj.amplifyapp.com}"
+                    "${app.cors.allowed-origins:http://localhost:5173}"
             )
             List<String> allowedOrigins
     ) {
