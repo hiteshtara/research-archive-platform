@@ -13,9 +13,15 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { getAwardHierarchyV1, getAwardSummaryV1 } from "../../api/client";
+import { AwardAmountsSection } from "../../components/award/AwardAmountsSection";
+import { AwardAttachmentsSection } from "../../components/award/AwardAttachmentsSection";
 import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
+import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
+import { AwardPeopleSection } from "../../components/award/AwardPeopleSection";
+import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTransmissionsSection";
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
 import { AwardSummarySection } from "../../components/award/AwardSummarySection";
+import { AwardTermsSection } from "../../components/award/AwardTermsSection";
 import { AwardVersionsSection } from "../../components/award/AwardVersionsSection";
 import { ComingSoonSection } from "../../components/award/ComingSoonSection";
 import { flattenHierarchyNodes } from "../../components/award/hierarchyUtils";
@@ -24,18 +30,28 @@ import type { AwardHierarchyNode } from "../../types/api";
 const SECTIONS = [
   { key: "summary", label: "Summary" },
   { key: "versions", label: "Versions" },
-  { key: "people", label: "People" },
+  { key: "people", label: "People and Units" },
+  { key: "amounts", label: "Amounts" },
   { key: "budget", label: "Budget" },
   { key: "timeMoney", label: "Time & Money" },
   { key: "terms", label: "Terms" },
-  { key: "comments", label: "Comments" },
+  { key: "comments", label: "Comments and Notepad" },
   { key: "sap", label: "SAP Transmission History" },
   { key: "attachments", label: "Attachments" },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
-const IMPLEMENTED_SECTIONS = new Set<SectionKey>(["summary", "versions"]);
+const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
+  "summary",
+  "versions",
+  "people",
+  "amounts",
+  "terms",
+  "comments",
+  "sap",
+  "attachments",
+]);
 
 // Award Dashboard - the final stop in Search -> Search Results ->
 // Award Hierarchy -> Award Dashboard. Tab switches are local state (no
@@ -197,6 +213,30 @@ export function AwardDashboardPage() {
 
           {activeSection === "versions" && (
             <AwardVersionsSection awardId={awardId} />
+          )}
+
+          {activeSection === "people" && (
+            <AwardPeopleSection awardId={awardId} />
+          )}
+
+          {activeSection === "amounts" && (
+            <AwardAmountsSection awardId={awardId} />
+          )}
+
+          {activeSection === "terms" && (
+            <AwardTermsSection awardId={awardId} />
+          )}
+
+          {activeSection === "comments" && (
+            <AwardCommentsSection awardId={awardId} />
+          )}
+
+          {activeSection === "sap" && (
+            <AwardSapTransmissionsSection awardId={awardId} />
+          )}
+
+          {activeSection === "attachments" && (
+            <AwardAttachmentsSection awardId={awardId} />
           )}
 
           {!IMPLEMENTED_SECTIONS.has(activeSection) && (

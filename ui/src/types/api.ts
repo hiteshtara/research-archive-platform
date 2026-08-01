@@ -432,6 +432,160 @@ export interface AwardVersionV1 {
 
 export interface AwardVersionPageResponse extends PageResponse<AwardVersionV1> {}
 
+// --- Award API v1 Phase 2 (people / amounts / terms / comments / SAP / attachments) ---
+
+export interface AwardCreditSplitV1 {
+  creditTypeCode: string | null;
+  credit: number | null;
+}
+
+export interface AwardPersonUnitV1 {
+  unitNumber: string | null;
+  leadUnit: boolean;
+  creditSplits: AwardCreditSplitV1[];
+}
+
+export interface AwardPersonDetailV1 {
+  awardPersonId: number | null;
+  personId: string | null;
+  fullName: string | null;
+  contactRoleCode: string | null;
+  keyPersonProjectRole: string | null;
+  leadPrincipalInvestigator: boolean;
+  academicYearEffort: number | null;
+  calendarYearEffort: number | null;
+  summerEffort: number | null;
+  totalEffort: number | null;
+  units: AwardPersonUnitV1[];
+  creditSplits: AwardCreditSplitV1[];
+}
+
+export interface AwardAmountHistoryV1 {
+  awardAmountInfoId: number | null;
+  awardId: number | null;
+  awardNumber: string | null;
+  sequenceNumber: number | null;
+  obligatedTotalDirect: number | null;
+  obligatedTotalIndirect: number | null;
+  obligatedTotalAmount: number | null;
+  anticipatedChangeDirect: number | null;
+  anticipatedChangeIndirect: number | null;
+  anticipatedTotalDirect: number | null;
+  anticipatedTotalIndirect: number | null;
+  anticipatedTotalAmount: number | null;
+  awardEffectiveDate: string | null;
+  documentNumber: string | null;
+  sourceVersionNumber: number | null;
+}
+
+export interface AwardAmountHistoryPageResponse
+  extends PageResponse<AwardAmountHistoryV1> {}
+
+export interface AwardSponsorTermV1 {
+  awardSponsorTermId: number | null;
+  sponsorTermId: number | null;
+}
+
+export interface AwardReportTermRecipientV1 {
+  awardReportTermRecipientId: number | null;
+  contactId: number | null;
+  contactTypeCode: string | null;
+  rolodexId: number | null;
+  numberOfCopies: number | null;
+}
+
+export interface AwardReportTermV1 {
+  awardReportTermId: number | null;
+  reportClassCode: string | null;
+  reportCode: string | null;
+  frequencyCode: string | null;
+  frequencyBaseCode: string | null;
+  ospDistributionCode: string | null;
+  dueDate: string | null;
+  recipients: AwardReportTermRecipientV1[];
+}
+
+export interface AwardTermsV1 {
+  sponsorTerms: AwardSponsorTermV1[];
+  reportTerms: AwardReportTermV1[];
+}
+
+export interface AwardCommentV1 {
+  awardCommentId: number | null;
+  commentTypeCode: string | null;
+  checklistPrintFlag: string | null;
+  comments: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}
+
+export interface AwardNotepadEntryV1 {
+  awardNotepadId: number | null;
+  entryNumber: number | null;
+  noteTopic: string | null;
+  comments: string | null;
+  restrictedView: string | null;
+  sourceCreateTimestamp: string | null;
+  sourceCreateUser: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}
+
+export interface AwardCommentsV1 {
+  comments: AwardCommentV1[];
+  notepadEntries: AwardNotepadEntryV1[];
+}
+
+export interface AwardSapTransmissionChildV1 {
+  transmissionChildId: number | null;
+  awardNumber: string | null;
+  sequenceNumber: number | null;
+  parentDocumentNumber: string | null;
+  childDocumentNumber: string | null;
+  leadUnitNumber: string | null;
+  childType: string | null;
+  overheadKey: string | null;
+  baseCode: string | null;
+  offCampus: string | null;
+}
+
+export interface AwardSapTransmissionV1 {
+  transmissionId: number | null;
+  awardNumber: string | null;
+  sequenceNumber: number | null;
+  initiatorId: string | null;
+  transmitterId: string | null;
+  successIndicator: string | null;
+  successful: boolean;
+  transmissionDate: string | null;
+  basisOfPaymentCode: string | null;
+  accountTypeCode: number | null;
+  sponsorCode: string | null;
+  methodOfPaymentCode: string | null;
+  documentNumber: string | null;
+  sentData: string | null;
+  returnedData: string | null;
+  children: AwardSapTransmissionChildV1[];
+}
+
+export interface AwardSapTransmissionPageResponse
+  extends PageResponse<AwardSapTransmissionV1> {}
+
+export interface AwardAttachmentV1 {
+  awardAttachmentId: number | null;
+  awardNumber: string | null;
+  sequenceNumber: number | null;
+  fileName: string | null;
+  contentType: string | null;
+  description: string | null;
+  typeCode: string | null;
+  documentStatusCode: string | null;
+  fileSizeBytes: number | null;
+  uploadStatus: string | null;
+  downloadable: boolean;
+  oracleUpdateTimestamp: string | null;
+}
+
 export interface ProposalFamily {
   proposalNumber: string;
   title: string | null;

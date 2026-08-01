@@ -1,21 +1,45 @@
 package edu.bu.archive.application.award;
 
+import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonCreditSplitRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitCreditSplitRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
+import edu.bu.archive.adapter.out.persistence.AwardArchivedAttachment;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
+import edu.bu.archive.adapter.out.persistence.AwardAttachmentStorage;
 
 import org.springframework.stereotype.Service;
 
@@ -32,11 +56,14 @@ import java.util.Set;
 public class AwardArchiveService {
 
     private final AwardArchiveRepository repository;
+    private final AwardAttachmentStorage attachmentStorage;
 
     public AwardArchiveService(
-            AwardArchiveRepository repository
+            AwardArchiveRepository repository,
+            AwardAttachmentStorage attachmentStorage
     ) {
         this.repository = repository;
+        this.attachmentStorage = attachmentStorage;
     }
 
     public AwardWorkspaceResponse findWorkspace(
@@ -591,6 +618,355 @@ public class AwardArchiveService {
                 pageMetadata.first(),
                 pageMetadata.last()
         );
+    }
+
+    public List<AwardPersonDetailResponse> findPeople(long awardId) {
+        requireAwardNumberForId(awardId);
+
+        List<AwardPersonRow> personRows = repository.findPersonRows(awardId);
+        List<AwardPersonUnitRow> unitRows =
+                repository.findPersonUnitRows(awardId);
+        List<AwardPersonCreditSplitRow> personSplitRows =
+                repository.findPersonCreditSplitRows(awardId);
+        List<AwardPersonUnitCreditSplitRow> unitSplitRows =
+                repository.findPersonUnitCreditSplitRows(awardId);
+
+        Map<Long, List<AwardCreditSplitResponse>> unitSplitsByUnitId =
+                new LinkedHashMap<>();
+        for (AwardPersonUnitCreditSplitRow row : unitSplitRows) {
+            unitSplitsByUnitId
+                    .computeIfAbsent(
+                            row.awardPersonUnitId(),
+                            ignored -> new ArrayList<>()
+                    )
+                    .add(new AwardCreditSplitResponse(
+                            row.invCreditTypeCode(),
+                            row.credit()
+                    ));
+        }
+
+        Map<Long, List<AwardPersonUnitResponse>> unitsByPersonId =
+                new LinkedHashMap<>();
+        for (AwardPersonUnitRow row : unitRows) {
+            unitsByPersonId
+                    .computeIfAbsent(
+                            row.awardPersonId(),
+                            ignored -> new ArrayList<>()
+                    )
+                    .add(new AwardPersonUnitResponse(
+                            row.unitNumber(),
+                            isAffirmative(row.leadUnitFlag()),
+                            unitSplitsByUnitId.getOrDefault(
+                                    row.awardPersonUnitId(),
+                                    List.of()
+                            )
+                    ));
+        }
+
+        Map<Long, List<AwardCreditSplitResponse>> personSplitsByPersonId =
+                new LinkedHashMap<>();
+        for (AwardPersonCreditSplitRow row : personSplitRows) {
+            personSplitsByPersonId
+                    .computeIfAbsent(
+                            row.awardPersonId(),
+                            ignored -> new ArrayList<>()
+                    )
+                    .add(new AwardCreditSplitResponse(
+                            row.invCreditTypeCode(),
+                            row.credit()
+                    ));
+        }
+
+        return personRows.stream()
+                .map(row -> new AwardPersonDetailResponse(
+                        row.awardPersonId(),
+                        row.personId(),
+                        row.fullName(),
+                        row.contactRoleCode(),
+                        row.keyPersonProjectRole(),
+                        "PI".equalsIgnoreCase(
+                                row.contactRoleCode() == null
+                                        ? ""
+                                        : row.contactRoleCode().trim()
+                        ),
+                        row.academicYearEffort(),
+                        row.calendarYearEffort(),
+                        row.summerEffort(),
+                        row.totalEffort(),
+                        unitsByPersonId.getOrDefault(
+                                row.awardPersonId(),
+                                List.of()
+                        ),
+                        personSplitsByPersonId.getOrDefault(
+                                row.awardPersonId(),
+                                List.of()
+                        )
+                ))
+                .toList();
+    }
+
+    public PageResponse<AwardAmountHistoryResponse> findAmounts(
+            long awardId,
+            int page,
+            int size
+    ) {
+        String awardNumber = requireAwardNumberForId(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countAmountHistory(awardNumber);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
+
+        int offset = safePage * safeSize;
+
+        List<AwardAmountHistoryResponse> content =
+                repository.findAmountHistory(awardNumber, safeSize, offset);
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    public AwardTermsResponse findTerms(long awardId) {
+        requireAwardNumberForId(awardId);
+
+        List<AwardSponsorTermResponse> sponsorTerms =
+                repository.findSponsorTerms(awardId);
+        List<AwardReportTermRow> reportTermRows =
+                repository.findReportTermRows(awardId);
+        List<AwardReportTermRecipientRow> recipientRows =
+                repository.findReportTermRecipientRows(awardId);
+
+        Map<Long, List<AwardReportTermRecipientResponse>>
+                recipientsByReportTermId = new LinkedHashMap<>();
+        for (AwardReportTermRecipientRow row : recipientRows) {
+            recipientsByReportTermId
+                    .computeIfAbsent(
+                            row.awardReportTermId(),
+                            ignored -> new ArrayList<>()
+                    )
+                    .add(new AwardReportTermRecipientResponse(
+                            row.awardReportTermRecipientId(),
+                            row.contactId(),
+                            row.contactTypeCode(),
+                            row.rolodexId(),
+                            row.numberOfCopies()
+                    ));
+        }
+
+        List<AwardReportTermResponse> reportTerms = reportTermRows.stream()
+                .map(row -> new AwardReportTermResponse(
+                        row.awardReportTermId(),
+                        row.reportClassCode(),
+                        row.reportCode(),
+                        row.frequencyCode(),
+                        row.frequencyBaseCode(),
+                        row.ospDistributionCode(),
+                        row.dueDate(),
+                        recipientsByReportTermId.getOrDefault(
+                                row.awardReportTermId(),
+                                List.of()
+                        )
+                ))
+                .toList();
+
+        return new AwardTermsResponse(sponsorTerms, reportTerms);
+    }
+
+    public AwardCommentsResponse findComments(long awardId) {
+        String awardNumber = requireAwardNumberForId(awardId);
+
+        List<AwardCommentResponse> comments =
+                repository.findComments(awardId);
+        List<AwardNotepadEntryResponse> notepadEntries =
+                repository.findNotepadEntries(awardNumber);
+
+        return new AwardCommentsResponse(comments, notepadEntries);
+    }
+
+    public PageResponse<AwardSapTransmissionResponse> findSapTransmissions(
+            long awardId,
+            int page,
+            int size
+    ) {
+        requireAwardNumberForId(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countTransmissions(awardId);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
+
+        int offset = safePage * safeSize;
+
+        List<AwardSapTransmissionRow> rows =
+                repository.findTransmissionRows(awardId, safeSize, offset);
+
+        List<Long> transmissionIds = rows.stream()
+                .map(AwardSapTransmissionRow::transmissionId)
+                .toList();
+
+        List<AwardSapTransmissionChildRow> childRows =
+                repository.findTransmissionChildRows(transmissionIds);
+
+        Map<Long, List<AwardSapTransmissionChildResponse>>
+                childrenByTransmissionId = new LinkedHashMap<>();
+        for (AwardSapTransmissionChildRow row : childRows) {
+            childrenByTransmissionId
+                    .computeIfAbsent(
+                            row.transmissionId(),
+                            ignored -> new ArrayList<>()
+                    )
+                    .add(new AwardSapTransmissionChildResponse(
+                            row.transmissionChildId(),
+                            row.awardNumber(),
+                            row.sequenceNumber(),
+                            row.parentDocumentNumber(),
+                            row.childDocumentNumber(),
+                            row.leadUnitNumber(),
+                            row.childType(),
+                            row.overheadKey(),
+                            row.baseCode(),
+                            row.offCampus()
+                    ));
+        }
+
+        List<AwardSapTransmissionResponse> content = rows.stream()
+                .map(row -> new AwardSapTransmissionResponse(
+                        row.transmissionId(),
+                        row.awardNumber(),
+                        row.sequenceNumber(),
+                        row.initiatorId(),
+                        row.transmitterId(),
+                        row.successIndicator(),
+                        isAffirmative(row.successIndicator()),
+                        row.transmissionDate(),
+                        row.basisOfPaymentCode(),
+                        row.accountTypeCode(),
+                        row.sponsorCode(),
+                        row.methodOfPaymentCode(),
+                        row.documentNumber(),
+                        row.sentData(),
+                        row.returnedData(),
+                        childrenByTransmissionId.getOrDefault(
+                                row.transmissionId(),
+                                List.of()
+                        )
+                ))
+                .toList();
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    public List<AwardAttachmentResponse> findAttachments(long awardId) {
+        requireAwardNumberForId(awardId);
+        return repository.findAttachments(awardId);
+    }
+
+    public AwardAttachmentDownload downloadAttachment(
+            long awardId,
+            long attachmentId
+    ) {
+        requireAwardNumberForId(awardId);
+
+        if (attachmentId <= 0) {
+            throw new IllegalArgumentException(
+                    "Attachment ID must be positive"
+            );
+        }
+
+        long owner = repository.findAttachmentAwardId(attachmentId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Award attachment not found"
+                ));
+
+        if (owner != awardId) {
+            throw new NoSuchElementException(
+                    "Award attachment not found"
+            );
+        }
+
+        AwardArchivedAttachment archived =
+                repository.findArchivedAttachment(awardId, attachmentId)
+                        .filter(row ->
+                                "UPLOADED".equals(row.uploadStatus())
+                                        && row.s3Bucket() != null
+                                        && !row.s3Bucket().isBlank()
+                                        && row.s3Key() != null
+                                        && !row.s3Key().isBlank()
+                        )
+                        .orElseThrow(() -> new NoSuchElementException(
+                                "Archived attachment not found"
+                        ));
+
+        AwardAttachmentStorage.StoredObject object =
+                attachmentStorage.open(archived);
+
+        return new AwardAttachmentDownload(
+                safeFileName(archived.fileName(), attachmentId),
+                archived.contentType() == null
+                        || archived.contentType().isBlank()
+                        ? "application/octet-stream"
+                        : archived.contentType(),
+                object.contentLength(),
+                object.stream()
+        );
+    }
+
+    private String safeFileName(String fileName, long attachmentId) {
+        String candidate = fileName == null ? "" : fileName
+                .replace('\\', '/')
+                .replaceAll("[\\r\\n\\p{Cntrl}]", "");
+        candidate = candidate.substring(candidate.lastIndexOf('/') + 1)
+                .trim();
+        return candidate.isEmpty()
+                ? "attachment-" + attachmentId + ".bin"
+                : candidate;
+    }
+
+    private boolean isAffirmative(String flag) {
+        if (flag == null) {
+            return false;
+        }
+
+        return switch (flag.trim().toUpperCase()) {
+            case "Y", "YES", "TRUE", "1" -> true;
+            default -> false;
+        };
+    }
+
+    private String requireAwardNumberForId(long awardId) {
+        return repository.findAwardNumberForId(awardId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Award not found: " + awardId
+                ));
     }
 
     private AwardHierarchyNodeResponse buildHierarchyNode(

@@ -1,4 +1,5 @@
 import { accessToken } from "../auth";
+import { parseDownloadFilename } from "../features/award/awardSectionsPresentation.mjs";
 
 import type {
   AwardAiQuestionResponse,
@@ -383,6 +384,119 @@ export function getAwardVersionsV1(
   );
 }
 
+// --- Award API v1 Phase 2 (people / amounts / terms / comments / SAP / attachments) ---
+
+export function getAwardPeopleV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardPersonDetailV1[]> {
+  return request(`/api/v1/awards/${encodeURIComponent(awardId)}/people`, signal);
+}
+
+export function getAwardAmountsV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardAmountHistoryPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/amounts?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getAwardTermsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardTermsV1> {
+  return request(`/api/v1/awards/${encodeURIComponent(awardId)}/terms`, signal);
+}
+
+export function getAwardCommentsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardCommentsV1> {
+  return request(`/api/v1/awards/${encodeURIComponent(awardId)}/comments`, signal);
+}
+
+export function getAwardSapTransmissionsV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardSapTransmissionPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/sap-transmissions?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getAwardAttachmentsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardAttachmentV1[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/attachments`,
+    signal,
+  );
+}
+
+export async function downloadAwardAttachmentV1(
+  awardId: number,
+  attachmentId: number,
+  fallbackFileName: string,
+): Promise<void> {
+  const token = await accessToken();
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const path =
+    `/api/v1/awards/${encodeURIComponent(awardId)}` +
+    `/attachments/${encodeURIComponent(attachmentId)}/download`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This attachment is not available for download.");
+    }
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = parseDownloadFilename(
+    response.headers.get("Content-Disposition"),
+    fallbackFileName,
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
 export function generateAwardAiSummary(
   awardNumber: string,
   signal?: AbortSignal,
@@ -585,18 +699,6 @@ export function getSubawardAttachments(
   );
 }
 
-function downloadFileName(
-  contentDisposition: string | null,
-  fallback: string,
-): string {
-  const encoded = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i);
-  if (encoded?.[1]) {
-    return decodeURIComponent(encoded[1].replace(/^"|"$/g, ""));
-  }
-  const plain = contentDisposition?.match(/filename="?([^";]+)"?/i);
-  return plain?.[1] ?? fallback;
-}
-
 export async function downloadSubawardAttachment(
   subawardId: number,
   attachmentId: number,
@@ -625,7 +727,7 @@ export async function downloadSubawardAttachment(
   const blobUrl = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
   link.href = blobUrl;
-  link.download = downloadFileName(
+  link.download = parseDownloadFilename(
     response.headers.get("Content-Disposition"),
     fallbackFileName,
   );

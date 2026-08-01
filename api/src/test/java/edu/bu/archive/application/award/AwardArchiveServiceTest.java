@@ -9,6 +9,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
+import edu.bu.archive.adapter.out.persistence.AwardAttachmentStorage;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,10 @@ class AwardArchiveServiceTest {
     @BeforeEach
     void setUp() {
         repository = mock(AwardArchiveRepository.class);
-        service = new AwardArchiveService(repository);
+        service = new AwardArchiveService(
+                repository,
+                mock(AwardAttachmentStorage.class)
+        );
     }
 
     @Test

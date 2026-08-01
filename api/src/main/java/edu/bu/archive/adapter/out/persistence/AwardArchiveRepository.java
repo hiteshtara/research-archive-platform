@@ -1,10 +1,23 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonCreditSplitRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitCreditSplitRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
@@ -717,6 +730,442 @@ public class AwardArchiveRepository {
                 .single();
 
         return count == null ? 0L : count;
+    }
+
+    /*
+     * --- People and Units ------------------------------------------------
+     *
+     * Four targeted queries, all scoped to this one specific award_id
+     * (not "current"), assembled into nested AwardPersonDetailResponse
+     * objects in AwardArchiveService - none of the three child tables
+     * carry award_id in Oracle itself (denormalized at extraction time,
+     * see V039's header comment), but all three do here, so each can be
+     * queried directly rather than joined.
+     */
+    public List<AwardPersonRow> findPersonRows(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    award_person_id,
+                    person_id,
+                    full_name,
+                    contact_role_code,
+                    key_person_project_role,
+                    academic_year_effort,
+                    calendar_year_effort,
+                    summer_effort,
+                    total_effort
+                FROM archive.award_person
+                WHERE award_id = :awardId
+                ORDER BY
+                    CASE
+                        WHEN UPPER(TRIM(contact_role_code)) = 'PI'
+                        THEN 0
+                        ELSE 1
+                    END,
+                    full_name NULLS LAST,
+                    award_person_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardPersonRow.class)
+                .list();
+    }
+
+    public List<AwardPersonUnitRow> findPersonUnitRows(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    award_person_unit_id,
+                    award_person_id,
+                    unit_number,
+                    lead_unit_flag
+                FROM archive.award_person_unit
+                WHERE award_id = :awardId
+                ORDER BY award_person_id, award_person_unit_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardPersonUnitRow.class)
+                .list();
+    }
+
+    public List<AwardPersonCreditSplitRow> findPersonCreditSplitRows(
+            long awardId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    award_person_id,
+                    inv_credit_type_code,
+                    credit
+                FROM archive.award_person_credit_split
+                WHERE award_id = :awardId
+                ORDER BY award_person_id, award_person_credit_split_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardPersonCreditSplitRow.class)
+                .list();
+    }
+
+    public List<AwardPersonUnitCreditSplitRow> findPersonUnitCreditSplitRows(
+            long awardId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    award_person_unit_id,
+                    inv_credit_type_code,
+                    credit
+                FROM archive.award_person_unit_credit_split
+                WHERE award_id = :awardId
+                ORDER BY
+                    award_person_unit_id,
+                    award_person_unit_credit_split_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardPersonUnitCreditSplitRow.class)
+                .list();
+    }
+
+    /*
+     * --- Amounts -----------------------------------------------------
+     *
+     * Unlike the legacy /amounts (scoped to one "current" row), this
+     * returns the whole award_number family's amount history, newest
+     * first - the same family-wide shape as /versions. award_amount_info
+     * has no effective-date column of its own, so award_effective_date
+     * is joined in from award_version (see AwardAmountHistoryResponse).
+     */
+    public long countAmountHistory(String awardNumber) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_amount_info amount
+                INNER JOIN archive.award_version av
+                    ON av.award_id = amount.award_id
+                WHERE av.award_number = :awardNumber
+                """)
+                .param("awardNumber", awardNumber)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    public List<AwardAmountHistoryResponse> findAmountHistory(
+            String awardNumber,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    amount.award_amount_info_id,
+                    amount.award_id,
+                    amount.award_number,
+                    amount.sequence_number,
+                    amount.obligated_total_direct,
+                    amount.obligated_total_indirect,
+                    amount.obligated_total_amount,
+                    amount.anticipated_change_direct,
+                    amount.anticipated_change_indirect,
+                    amount.anticipated_total_direct,
+                    amount.anticipated_total_indirect,
+                    amount.anticipated_total_amount,
+                    av.award_effective_date,
+                    amount.tnm_document_number AS document_number,
+                    amount.source_version_number
+                FROM archive.award_amount_info amount
+                INNER JOIN archive.award_version av
+                    ON av.award_id = amount.award_id
+                WHERE av.award_number = :awardNumber
+                ORDER BY
+                    av.sequence_number DESC,
+                    amount.award_amount_info_id DESC
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("awardNumber", awardNumber)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AwardAmountHistoryResponse.class)
+                .list();
+    }
+
+    /*
+     * --- Terms ---------------------------------------------------------
+     *
+     * award_sponsor_term/award_report_term both carry award_id directly
+     * (see V040's header comment) - award_report_term_recipient does
+     * too, denormalized at extraction time, so it can be queried
+     * directly by award_id rather than batched by report-term IDs.
+     * Recipients are grouped onto their parent report term in
+     * AwardArchiveService.
+     */
+    public List<AwardSponsorTermResponse> findSponsorTerms(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    award_sponsor_term_id,
+                    sponsor_term_id
+                FROM archive.award_sponsor_term
+                WHERE award_id = :awardId
+                ORDER BY award_sponsor_term_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardSponsorTermResponse.class)
+                .list();
+    }
+
+    public List<AwardReportTermRow> findReportTermRows(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    award_report_term_id,
+                    report_class_code,
+                    report_code,
+                    frequency_code,
+                    frequency_base_code,
+                    osp_distribution_code,
+                    due_date
+                FROM archive.award_report_term
+                WHERE award_id = :awardId
+                ORDER BY award_report_term_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardReportTermRow.class)
+                .list();
+    }
+
+    public List<AwardReportTermRecipientRow> findReportTermRecipientRows(
+            long awardId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    award_report_term_recipient_id,
+                    award_report_term_id,
+                    contact_id,
+                    contact_type_code,
+                    rolodex_id,
+                    number_of_copies
+                FROM archive.award_report_term_recipient
+                WHERE award_id = :awardId
+                ORDER BY award_report_term_id, award_report_term_recipient_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardReportTermRecipientRow.class)
+                .list();
+    }
+
+    /*
+     * --- Comments and Notepad --------------------------------------------
+     *
+     * award_comment is scoped to this specific award_id (a real
+     * sequence_number column). award_notepad has NO sequence_number at
+     * all - it is scoped to the whole award_number family (see V042's
+     * header comment) - so it is looked up by award_number, not
+     * award_id.
+     */
+    public List<AwardCommentResponse> findComments(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    award_comment_id,
+                    comment_type_code,
+                    checklist_print_flag,
+                    comments,
+                    source_update_timestamp,
+                    source_update_user
+                FROM archive.award_comment
+                WHERE award_id = :awardId
+                ORDER BY
+                    source_update_timestamp DESC NULLS LAST,
+                    award_comment_id DESC
+                """)
+                .param("awardId", awardId)
+                .query(AwardCommentResponse.class)
+                .list();
+    }
+
+    public List<AwardNotepadEntryResponse> findNotepadEntries(
+            String awardNumber
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    award_notepad_id,
+                    entry_number,
+                    note_topic,
+                    comments,
+                    restricted_view,
+                    source_create_timestamp,
+                    source_create_user,
+                    source_update_timestamp,
+                    source_update_user
+                FROM archive.award_notepad
+                WHERE award_number = :awardNumber
+                ORDER BY entry_number DESC, award_notepad_id DESC
+                """)
+                .param("awardNumber", awardNumber)
+                .query(AwardNotepadEntryResponse.class)
+                .list();
+    }
+
+    /*
+     * --- SAP Transmission History -----------------------------------
+     *
+     * award_id on archive.award_transmission is the ROOT/primary Award
+     * of the transmitted hierarchy at the moment of the attempt, and can
+     * be reassigned in place by Oracle (see V052's header comment) - so
+     * this returns whatever transmissions are currently attributed to
+     * this specific award_id, not a family-wide history. Children are
+     * fetched in one batched second query and grouped onto their parent
+     * transmission in AwardArchiveService, the same two-query pattern
+     * used for the hierarchy tree.
+     */
+    public long countTransmissions(long awardId) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_transmission
+                WHERE award_id = :awardId
+                """)
+                .param("awardId", awardId)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    public List<AwardSapTransmissionRow> findTransmissionRows(
+            long awardId,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    transmission_id,
+                    award_number,
+                    sequence_number,
+                    initiator_id,
+                    transmitter_id,
+                    success_indicator,
+                    transmission_date,
+                    basis_of_payment_code,
+                    account_type_code,
+                    sponsor_code,
+                    method_of_payment_code,
+                    document_number,
+                    sent_data,
+                    returned_data
+                FROM archive.award_transmission
+                WHERE award_id = :awardId
+                ORDER BY
+                    transmission_date DESC NULLS LAST,
+                    transmission_id DESC
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("awardId", awardId)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AwardSapTransmissionRow.class)
+                .list();
+    }
+
+    public List<AwardSapTransmissionChildRow> findTransmissionChildRows(
+            Collection<Long> transmissionIds
+    ) {
+        if (transmissionIds.isEmpty()) {
+            return List.of();
+        }
+
+        return jdbc.sql("""
+                SELECT
+                    transmission_child_id,
+                    transmission_id,
+                    award_number,
+                    sequence_number,
+                    parent_document_number,
+                    child_document_number,
+                    lead_unit_number,
+                    child_type,
+                    overhead_key,
+                    base_code,
+                    off_campus
+                FROM archive.award_transmission_child
+                WHERE transmission_id IN (:transmissionIds)
+                ORDER BY transmission_id, transmission_child_id
+                """)
+                .param("transmissionIds", List.copyOf(transmissionIds))
+                .query(AwardSapTransmissionChildRow.class)
+                .list();
+    }
+
+    /*
+     * --- Attachments -----------------------------------------------------
+     *
+     * Joins the Sprint 1/2 Oracle-direct pair (archive.award_attachment +
+     * archive.attachment_object) - see V035/V036, not the older
+     * generic archive.archived_attachment table, which this domain does
+     * not use. downloadable mirrors the exact UPLOADED + non-blank
+     * bucket/key check downloadAttachment() enforces server-side, so a
+     * client can decide whether to show a download control without ever
+     * seeing s3Bucket/s3Key themselves.
+     */
+    public List<AwardAttachmentResponse> findAttachments(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    aa.award_attachment_id,
+                    aa.award_number,
+                    aa.sequence_number,
+                    ao.file_name,
+                    ao.content_type,
+                    aa.description,
+                    aa.type_code,
+                    aa.document_status_code,
+                    ao.file_size_bytes,
+                    ao.upload_status,
+                    (
+                        ao.upload_status = 'UPLOADED'
+                        AND ao.s3_bucket IS NOT NULL AND ao.s3_bucket <> ''
+                        AND ao.s3_key IS NOT NULL AND ao.s3_key <> ''
+                    ) AS downloadable,
+                    aa.oracle_update_timestamp
+                FROM archive.award_attachment aa
+                LEFT JOIN archive.attachment_object ao
+                    ON ao.file_id = aa.file_id
+                WHERE aa.award_id = :awardId
+                ORDER BY
+                    aa.oracle_update_timestamp DESC NULLS LAST,
+                    aa.award_attachment_id DESC
+                """)
+                .param("awardId", awardId)
+                .query(AwardAttachmentResponse.class)
+                .list();
+    }
+
+    public Optional<Long> findAttachmentAwardId(long attachmentId) {
+        return jdbc.sql("""
+                SELECT award_id
+                FROM archive.award_attachment
+                WHERE award_attachment_id = :attachmentId
+                """)
+                .param("attachmentId", attachmentId)
+                .query(Long.class)
+                .optional();
+    }
+
+    public Optional<AwardArchivedAttachment> findArchivedAttachment(
+            long awardId,
+            long attachmentId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    aa.award_attachment_id,
+                    aa.award_id,
+                    ao.file_name,
+                    ao.content_type,
+                    ao.s3_bucket,
+                    ao.s3_key,
+                    ao.file_size_bytes,
+                    ao.upload_status
+                FROM archive.award_attachment aa
+                LEFT JOIN archive.attachment_object ao
+                    ON ao.file_id = aa.file_id
+                WHERE aa.award_attachment_id = :attachmentId
+                  AND aa.award_id = :awardId
+                """)
+                .param("attachmentId", attachmentId)
+                .param("awardId", awardId)
+                .query(AwardArchivedAttachment.class)
+                .optional();
     }
 
 }

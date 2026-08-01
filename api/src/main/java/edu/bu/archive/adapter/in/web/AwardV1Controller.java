@@ -1,11 +1,18 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
+import edu.bu.archive.application.award.AwardAttachmentDownload;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -15,6 +22,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +32,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /*
  * Versioned Award API - stable, independent of JPA entities, archive
@@ -173,5 +187,187 @@ public class AwardV1Controller {
         return ResponseEntity.ok(
                 service.findVersions(awardId, page, size)
         );
+    }
+
+    @Operation(
+            summary = "List an Award's People and Units",
+            description = "Keyed by the surrogate award_id (one "
+                    + "specific version). Nests each person's "
+                    + "associated units and credit-split rows rather "
+                    + "than returning raw child-table rows "
+                    + "separately."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's people.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/people")
+    public ResponseEntity<List<AwardPersonDetailResponse>> people(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findPeople(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's amount history",
+            description = "Resolves awardId to its award_number "
+                    + "family, then returns every award_amount_info "
+                    + "row for that family, newest version first, "
+                    + "each joined back to its own award_version row "
+                    + "for effective-date context."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of amount history.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/amounts")
+    public ResponseEntity<PageResponse<AwardAmountHistoryResponse>> amounts(
+            @PathVariable
+            long awardId,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "50")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(service.findAmounts(awardId, page, size));
+    }
+
+    @Operation(
+            summary = "Get an Award's Terms",
+            description = "Keyed by the surrogate award_id. Returns "
+                    + "sponsor terms and report terms (each report "
+                    + "term nesting its own recipients) as two "
+                    + "separate groups - never merged."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's terms.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/terms")
+    public ResponseEntity<AwardTermsResponse> terms(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findTerms(awardId));
+    }
+
+    @Operation(
+            summary = "Get an Award's Comments and Notepad",
+            description = "Keyed by the surrogate award_id. Comments "
+                    + "are scoped to this specific version; notepad "
+                    + "entries have no sequence_number and are scoped "
+                    + "to the whole award_number family instead - see "
+                    + "AwardCommentsResponse."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's comments and notepad entries.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/comments")
+    public ResponseEntity<AwardCommentsResponse> comments(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findComments(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's SAP transmission history",
+            description = "Keyed by the surrogate award_id - "
+                    + "award_transmission.award_id is the root Award "
+                    + "of the transmitted hierarchy at the moment of "
+                    + "the attempt and can be reassigned by Oracle "
+                    + "over time, so this reflects whatever is "
+                    + "currently attributed to this award_id. "
+                    + "sent_data/returned_data are raw SOAP XML, "
+                    + "verbatim - a client must render them as text, "
+                    + "never as HTML."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of SAP transmission history.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/sap-transmissions")
+    public ResponseEntity<PageResponse<AwardSapTransmissionResponse>>
+            sapTransmissions(
+                    @PathVariable
+                    long awardId,
+
+                    @Parameter(description = "Zero-based page index.")
+                    @RequestParam(defaultValue = "0")
+                    @Min(0)
+                    int page,
+
+                    @Parameter(description = "Page size, 1-100.")
+                    @RequestParam(defaultValue = "25")
+                    @Min(1)
+                    @Max(100)
+                    int size
+            ) {
+        return ResponseEntity.ok(
+                service.findSapTransmissions(awardId, page, size)
+        );
+    }
+
+    @Operation(
+            summary = "List an Award's attachment metadata",
+            description = "Keyed by the surrogate award_id. Never "
+                    + "exposes the underlying S3 bucket/key - "
+                    + "downloadable indicates whether the download "
+                    + "endpoint below will succeed."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's attachment metadata.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/attachments")
+    public ResponseEntity<List<AwardAttachmentResponse>> attachments(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findAttachments(awardId));
+    }
+
+    @Operation(
+            summary = "Download an Award attachment",
+            description = "Streams the underlying object from private "
+                    + "S3 storage (or, in local dev, a fixture on "
+                    + "disk) - never redirects to a raw S3 URL and "
+                    + "never exposes the bucket/key."
+    )
+    @ApiResponse(responseCode = "200", description = "The attachment content.")
+    @ApiResponse(responseCode = "404", description = "No such award_id/attachment, or it is not downloadable.")
+    @GetMapping("/{awardId}/attachments/{attachmentId}/download")
+    public ResponseEntity<StreamingResponseBody> downloadAttachment(
+            @PathVariable
+            long awardId,
+
+            @PathVariable
+            long attachmentId
+    ) {
+        AwardAttachmentDownload download =
+                service.downloadAttachment(awardId, attachmentId);
+
+        StreamingResponseBody body = output -> {
+            try (var input = download.stream()) {
+                input.transferTo(output);
+            }
+        };
+
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(download.mimeType());
+        } catch (Exception ignored) {
+            mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        }
+
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(download.fileName(), StandardCharsets.UTF_8)
+                .build();
+
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(download.contentLength())
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        disposition.toString()
+                )
+                .body(body);
     }
 }

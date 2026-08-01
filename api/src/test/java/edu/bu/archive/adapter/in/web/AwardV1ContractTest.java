@@ -6,10 +6,24 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 
 import org.junit.jupiter.api.Test;
@@ -165,6 +179,149 @@ class AwardV1ContractTest {
                 .isTrue();
         assertThat(node.get("updateTimestamp").asText())
                 .isEqualTo("2015-02-11T15:26:17");
+    }
+
+    @Test
+    void personDetailShapeIsStableAndNestsUnitsAndCreditSplits()
+            throws Exception {
+        AwardPersonDetailResponse person = new AwardPersonDetailResponse(
+                10L, "P100", "MICHAEL MCCLEAN", "PI", "PI", true,
+                BigDecimal.ONE, BigDecimal.ONE, null, BigDecimal.ONE,
+                List.of(new AwardPersonUnitResponse(
+                        "SPH-ENV", true,
+                        List.of(new AwardCreditSplitResponse(
+                                "OVERHEAD", BigDecimal.TEN
+                        ))
+                )),
+                List.of(new AwardCreditSplitResponse(
+                        "PROJECT", BigDecimal.TEN
+                ))
+        );
+
+        assertFieldNames(person, Set.of(
+                "awardPersonId", "personId", "fullName", "contactRoleCode",
+                "keyPersonProjectRole", "leadPrincipalInvestigator",
+                "academicYearEffort", "calendarYearEffort", "summerEffort",
+                "totalEffort", "units", "creditSplits"
+        ));
+
+        JsonNode unit = objectMapper.valueToTree(person).get("units").get(0);
+        assertFieldNames(unit, Set.of("unitNumber", "leadUnit", "creditSplits"));
+    }
+
+    @Test
+    void amountHistoryShapeIsStableAndWrappedInThePageEnvelope()
+            throws Exception {
+        AwardAmountHistoryResponse amount = new AwardAmountHistoryResponse(
+                1L, 3L, "100004-00003", 1, BigDecimal.TEN, BigDecimal.ONE,
+                BigDecimal.TEN, null, null, null, null, BigDecimal.TEN,
+                LocalDate.of(2020, 1, 1), "DOC-1", 1L
+        );
+
+        assertFieldNames(amount, Set.of(
+                "awardAmountInfoId", "awardId", "awardNumber",
+                "sequenceNumber", "obligatedTotalDirect",
+                "obligatedTotalIndirect", "obligatedTotalAmount",
+                "anticipatedChangeDirect", "anticipatedChangeIndirect",
+                "anticipatedTotalDirect", "anticipatedTotalIndirect",
+                "anticipatedTotalAmount", "awardEffectiveDate",
+                "documentNumber", "sourceVersionNumber"
+        ));
+    }
+
+    @Test
+    void termsShapeIsStableAndSeparatesSponsorFromReportTerms()
+            throws Exception {
+        AwardTermsResponse terms = new AwardTermsResponse(
+                List.of(new AwardSponsorTermResponse(1L, 555L)),
+                List.of(new AwardReportTermResponse(
+                        200L, "FINANCIAL", "FIN-1", "ANNUAL",
+                        "ANNIVERSARY", "PI", LocalDate.of(2021, 6, 30),
+                        List.of(new AwardReportTermRecipientResponse(
+                                900L, 42L, "PI", null, 1
+                        ))
+                ))
+        );
+
+        assertFieldNames(terms, Set.of("sponsorTerms", "reportTerms"));
+
+        JsonNode reportTerm =
+                objectMapper.valueToTree(terms).get("reportTerms").get(0);
+        assertFieldNames(reportTerm, Set.of(
+                "awardReportTermId", "reportClassCode", "reportCode",
+                "frequencyCode", "frequencyBaseCode", "ospDistributionCode",
+                "dueDate", "recipients"
+        ));
+    }
+
+    @Test
+    void commentsShapeIsStableAndKeepsNotepadSeparate() throws Exception {
+        AwardCommentsResponse comments = new AwardCommentsResponse(
+                List.of(new AwardCommentResponse(
+                        1L, "GENERAL", "N", "text",
+                        LocalDateTime.of(2021, 1, 1, 0, 0), "jsmith"
+                )),
+                List.of(new AwardNotepadEntryResponse(
+                        1L, 1, "Kickoff", "note", "N",
+                        LocalDateTime.of(2020, 1, 1, 0, 0), "jsmith",
+                        LocalDateTime.of(2020, 1, 1, 0, 0), "jsmith"
+                ))
+        );
+
+        assertFieldNames(comments, Set.of("comments", "notepadEntries"));
+    }
+
+    @Test
+    void sapTransmissionShapeIsStableAndNeverRendersXmlAsHtmlByItself()
+            throws Exception {
+        AwardSapTransmissionResponse transmission =
+                new AwardSapTransmissionResponse(
+                        700L, "100004-00003", 1, "jsmith", "SAP-GW", "Y",
+                        true, LocalDate.of(2021, 3, 1), "1", 28, "NIH",
+                        "28", "DOC-1", "<xml>sent</xml>",
+                        "<xml>returned</xml>",
+                        List.of(new AwardSapTransmissionChildResponse(
+                                800L, "100004-00099", 1, "DOC-1", "DOC-2",
+                                "SPH", "SUB", "OH1", "B1", "N"
+                        ))
+                );
+
+        assertFieldNames(transmission, Set.of(
+                "transmissionId", "awardNumber", "sequenceNumber",
+                "initiatorId", "transmitterId", "successIndicator",
+                "successful", "transmissionDate", "basisOfPaymentCode",
+                "accountTypeCode", "sponsorCode", "methodOfPaymentCode",
+                "documentNumber", "sentData", "returnedData", "children"
+        ));
+
+        // sentData/returnedData must stay a plain JSON string - never a
+        // nested object a client might mistake for pre-parsed/escaped
+        // markup.
+        JsonNode node = objectMapper.valueToTree(transmission);
+        assertThat(node.get("sentData").isTextual()).isTrue();
+        assertThat(node.get("sentData").asText())
+                .isEqualTo("<xml>sent</xml>");
+    }
+
+    @Test
+    void attachmentShapeIsStableAndNeverExposesS3BucketOrKey()
+            throws Exception {
+        AwardAttachmentResponse attachment = new AwardAttachmentResponse(
+                500L, "100004-00003", 1, "budget.pdf", "application/pdf",
+                "Budget justification", "BUD", "COMPLETE", 1024L,
+                "UPLOADED", true, LocalDateTime.of(2021, 1, 1, 0, 0)
+        );
+
+        assertFieldNames(attachment, Set.of(
+                "awardAttachmentId", "awardNumber", "sequenceNumber",
+                "fileName", "contentType", "description", "typeCode",
+                "documentStatusCode", "fileSizeBytes", "uploadStatus",
+                "downloadable", "oracleUpdateTimestamp"
+        ));
+
+        String json = objectMapper.writeValueAsString(attachment);
+        assertThat(json).doesNotContainIgnoringCase("s3Bucket");
+        assertThat(json).doesNotContainIgnoringCase("s3Key");
     }
 
     private void assertFieldNames(Object value, Set<String> expected)
