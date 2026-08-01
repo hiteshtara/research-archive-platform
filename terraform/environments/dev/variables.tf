@@ -369,6 +369,12 @@ variable "cognito_mfa_configuration" {
   }
 }
 
+variable "cognito_allow_admin_password_auth" {
+  description = "Allow obtaining tokens via admin-initiate-auth (email + password, no browser) for admin-created dev/test users. Temporary dev-auth convenience only - see modules/cognito's own variable doc. Only used when manage_cognito = true."
+  type        = bool
+  default     = false
+}
+
 #
 # Amplify / UI hosting
 #

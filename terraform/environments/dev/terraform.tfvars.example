@@ -1,7 +1,14 @@
 # Copy to terraform.tfvars and fill in real values for your account.
-# terraform.tfvars for this "dev" environment is already tracked in git
-# (it contains no secrets - see README), but if you are standing up your
-# own environment, start from this file instead.
+# terraform.tfvars is gitignored (see terraform/.gitignore) - it is NOT
+# tracked in git and never has been, despite an earlier version of this
+# comment claiming otherwise. That false claim, combined with dev's
+# real terraform.tfvars existing only on individual machines, is part
+# of how dev's Cognito configuration once silently pointed at a user
+# pool in a different AWS account for an unknown period - see
+# docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md's "Twelfth same-day
+# follow-up." Treat this file (the tracked example) as the source of
+# truth for what dev's terraform.tfvars *should* contain; don't assume
+# an existing local terraform.tfvars is correct just because it exists.
 #
 # Never put amplify_github_access_token, or any other secret, in this file
 # or in terraform.tfvars. Pass secrets via TF_VAR_<name> environment
@@ -98,22 +105,41 @@ api_route53_zone_id  = null
 
 # --- Cognito -------------------------------------------------------------
 
-# Option A (shown here): bring your own existing User Pool.
-manage_cognito           = false
-cognito_issuer_uri       = "https://cognito-idp.REGION.amazonaws.com/REPLACE_WITH_USER_POOL_ID"
-cognito_client_id        = "REPLACE_WITH_APP_CLIENT_ID"
-cognito_user_pool_id     = "REPLACE_WITH_USER_POOL_ID"
-# Only needed if manage_amplify = true below.
-# cognito_hosted_ui_domain = "https://REPLACE_WITH_DOMAIN.auth.REGION.amazoncognito.com"
+# Option A (shown here, and what dev actually uses): let Terraform
+# create and own the User Pool via modules/cognito - a public SPA app
+# client (no client secret, authorization-code OAuth flow, Cognito-only
+# sign-in). Prefer this over Option B unless you are deliberately
+# adopting a pool that already exists *in this same AWS account* -
+# bringing in a pool ID/issuer from any other account will silently
+# misconfigure both the API and the UI with no error until someone
+# tries to actually authenticate (see the incident referenced above).
+manage_cognito         = true
+cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
+cognito_logout_urls    = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
+cognito_advanced_security_mode = "AUDIT"   # OFF, AUDIT, or ENFORCED
+cognito_deletion_protection    = "INACTIVE" # ACTIVE or INACTIVE
+cognito_mfa_configuration      = "OFF"     # OFF, ON, or OPTIONAL
+# The UI's Amplify.configure() call requires a Hosted UI domain to
+# initialize at all, even before any real browser-based login is
+# tested - domain prefixes must be globally unique.
+cognito_hosted_ui_domain_prefix = "REPLACE_WITH_A_GLOBALLY_UNIQUE_PREFIX"
+# Dev/test convenience ONLY - lets a token be obtained for an
+# admin-created user via `aws cognito-idp admin-initiate-auth`, no
+# browser needed. Never enable this once real end users authenticate
+# through Hosted UI/federation - see the variable's own doc in
+# modules/cognito/variables.tf.
+# cognito_allow_admin_password_auth = true
 
-# Option B: let Terraform create the pool - set manage_cognito = true and
-# fill these in instead (delete the four lines above):
-# manage_cognito         = true
-# cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
-# cognito_logout_urls    = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
-# cognito_advanced_security_mode = "AUDIT"   # OFF, AUDIT, or ENFORCED
-# cognito_deletion_protection    = false     # ACTIVE or INACTIVE (as a string)
-# cognito_mfa_configuration      = "OFF"     # OFF, ON, or OPTIONAL
+# Option B: bring your own existing User Pool that already exists *in
+# this same AWS account* (confirm with `aws cognito-idp describe-user-pool
+# --user-pool-id ...` first) - set manage_cognito = false and fill
+# these in instead (delete the block above):
+# manage_cognito           = false
+# cognito_issuer_uri       = "https://cognito-idp.REGION.amazonaws.com/REPLACE_WITH_USER_POOL_ID"
+# cognito_client_id        = "REPLACE_WITH_APP_CLIENT_ID"
+# cognito_user_pool_id     = "REPLACE_WITH_USER_POOL_ID"
+# # Only needed if manage_amplify = true below.
+# cognito_hosted_ui_domain = "https://REPLACE_WITH_DOMAIN.auth.REGION.amazoncognito.com"
 
 # --- Amplify / UI hosting --------------------------------------------------
 

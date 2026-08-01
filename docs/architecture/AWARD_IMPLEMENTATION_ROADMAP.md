@@ -815,6 +815,47 @@ left unversioned and untouched - migrating it is flagged as a follow-up
 decision, not made unilaterally. See
 `AWARD_SEARCH_API_DESIGN.md`'s "Extensibility review" addendum.
 
+2026-08-01: Twelfth same-day follow-up: the fix above (deploy-api.sh's
+hardcoded account ID) turned out to have a sibling problem. BU dev's
+Terraform config had `manage_cognito = false` with a comment claiming
+the pool was "created outside Terraform," supplying a specific user
+pool ID/client ID/issuer URI as that existing pool - but that pool does
+not exist in BU account `770203350335` at all; it exists in the same
+unrelated personal AWS account as the earlier ECR incident. Both the
+API's `COGNITO_ISSUER_URI` and (had one existed) the UI's Amplify build
+environment were configured against this invalid-for-BU issuer.
+Resolved by flipping `manage_cognito = true` so Terraform creates and
+owns a real BU pool via the already-written `modules/cognito` (public
+SPA app client: no client secret, authorization-code flow, Cognito-only
+sign-in - already matched the working pattern with no changes needed),
+plus a new, off-by-default `allow_admin_password_auth` module variable
+(enabled only for BU dev) so a token can be obtained for an
+admin-created test user via `admin-initiate-auth` without a browser or
+an SRP client implementation - explicitly documented as temporary dev
+authentication, not the production identity design. Also added a
+Hosted UI domain, discovered necessary only because the UI's own
+`Amplify.configure()` call hard-requires one to even initialize
+(`ui/src/auth.ts` throws at import time otherwise), independent of
+whether Hosted UI's browser login is actually being exercised yet. A
+new BU-owned pool/client were created (`terraform apply`, 3 resources
+added), the API's ECS task definition was replaced in-place with the
+corrected issuer (same image digest, since `ops/deploy-api.sh` already
+pushes `:latest` alongside its immutable tag), two dev test users were
+created directly via `admin-create-user`, and `/api/v1/awards/search`
+was confirmed returning real data through the ALB with real Cognito
+access tokens for both. No BU Amplify app exists yet at all
+(`manage_amplify` has always been `false`, confirmed via
+`aws amplify list-apps` returning empty) - the UI is run locally
+(`ui/.env.local`, gitignored) against this environment for now; that
+file was updated with the new BU-owned pool/client/domain values.
+Access tokens must be used for `/api/**` (not ID tokens - Spring
+Security's resource server rejects `token_use=id` with an explicit
+`invalid_token`/`token_use claim is not valid` error), a distinction
+worth documenting since ID vs. access token confusion is an easy
+mistake. BU SAML federation is deliberately deferred to a separate,
+later phase (`supported_identity_providers` is still `["COGNITO"]`
+only) rather than attempted in this same pass.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

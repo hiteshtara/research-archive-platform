@@ -208,9 +208,10 @@ module "cognito" {
   logout_urls             = var.cognito_logout_urls
   hosted_ui_domain_prefix = var.cognito_hosted_ui_domain_prefix
 
-  advanced_security_mode = var.cognito_advanced_security_mode
-  deletion_protection    = var.cognito_deletion_protection
-  mfa_configuration      = var.cognito_mfa_configuration
+  advanced_security_mode    = var.cognito_advanced_security_mode
+  deletion_protection       = var.cognito_deletion_protection
+  mfa_configuration         = var.cognito_mfa_configuration
+  allow_admin_password_auth = var.cognito_allow_admin_password_auth
 }
 
 locals {

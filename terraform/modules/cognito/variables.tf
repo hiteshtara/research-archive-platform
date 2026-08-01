@@ -71,3 +71,21 @@ variable "mfa_configuration" {
     error_message = "mfa_configuration must be one of: OFF, ON, OPTIONAL."
   }
 }
+
+variable "allow_admin_password_auth" {
+  description = <<-EOT
+    Adds ALLOW_ADMIN_USER_PASSWORD_AUTH to the app client's explicit_auth_flows,
+    allowing a token to be obtained directly via `aws cognito-idp
+    admin-initiate-auth` (email + password, no browser, no SRP client
+    implementation needed) for an admin-created user.
+
+    This exists solely for exercising the API/UI wiring against
+    temporary, admin-created dev/test users before real end-user
+    authentication (BU SAML federation, or a browser-based Hosted UI
+    login) is in place - it is not itself an identity design. Leave
+    false once real users authenticate through Hosted UI/federation, so
+    this flow can't be used to bypass that.
+    EOT
+  type        = bool
+  default     = false
+}

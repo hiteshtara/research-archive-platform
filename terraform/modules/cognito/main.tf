@@ -61,10 +61,10 @@ resource "aws_cognito_user_pool_client" "app" {
   callback_urls = var.callback_urls
   logout_urls   = var.logout_urls
 
-  explicit_auth_flows = [
-    "ALLOW_USER_SRP_AUTH",
-    "ALLOW_REFRESH_TOKEN_AUTH"
-  ]
+  explicit_auth_flows = concat(
+    ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
+    var.allow_admin_password_auth ? ["ALLOW_ADMIN_USER_PASSWORD_AUTH"] : []
+  )
 
   prevent_user_existence_errors = "ENABLED"
 
