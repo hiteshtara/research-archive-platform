@@ -1,0 +1,139 @@
+<svg viewBox="0 0 1160 840" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Research Archive Platform database loaders mapped to the archive schema</title>
+<desc>Seven ETL loaders, one per domain, each write into one parent table and that table's child tables in the shared PostgreSQL archive schema: Award, Proposal, Negotiation, Subaward, Protocol, IRB, and Attachments. Every loader also writes audit rows to load_run and load_rejection and applies pending migrations, omitted per row for readability.</desc>
+<defs>
+<style>
+  svg { --bg:#ffffff; --panel:#f7f8fa; --border:#d7dce2; --borderStrong:#b7c0ca; --text:#1f2937; --textMut:#6b7280; --accent:#2563eb; --accentSoft:#e0e9fd; --accent2:#0f766e; --accent2Soft:#dcf3f0; }
+  .title { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:19px; font-weight:700; }
+  .subtitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:12px; }
+  .colhead { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10.5px; font-weight:700; letter-spacing:.06em; }
+  .label { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:12.5px; font-weight:600; }
+  .sub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10px; }
+  .box { fill:var(--panel); stroke:var(--borderStrong); stroke-width:1.3; }
+  .boxAccent { fill:var(--accentSoft); stroke:var(--accent); stroke-width:1.3; }
+  .boxAccent2 { fill:var(--accent2Soft); stroke:var(--accent2); stroke-width:1.3; }
+  .flow { stroke:var(--borderStrong); stroke-width:1.4; fill:none; }
+</style>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--borderStrong)"/></marker>
+</defs>
+
+<rect x="0" y="0" width="1160" height="840" fill="var(--bg)"/>
+<text x="580" y="27" text-anchor="middle" class="title">Database Loaders → archive schema</text>
+<text x="580" y="45" text-anchor="middle" class="subtitle">Each load_*.py / archive_etl loader owns one parent table and that table's child tables — one shared PostgreSQL instance</text>
+
+<text x="40" y="70" class="colhead">LOADER</text>
+<text x="300" y="70" class="colhead">PARENT TABLE</text>
+<text x="560" y="70" class="colhead">CHILD TABLES</text>
+
+<!-- Row generator: 7 rows, top y values -->
+<!-- Row 1: Award -->
+<rect x="40" y="80" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="110" text-anchor="middle" class="label">load_awards_from_csv.py</text>
+<text x="155" y="126" text-anchor="middle" class="sub">Oracle-direct, no CSV path</text>
+<rect x="300" y="80" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="110" text-anchor="middle" class="label">archive.award_version</text>
+<text x="415" y="126" text-anchor="middle" class="sub">PK award_id · uniq (award_number, sequence_number)</text>
+<rect x="560" y="80" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="106" text-anchor="middle" class="label">~45 child tables</text>
+<text x="840" y="122" text-anchor="middle" class="sub">amounts · people · budget · terms · compliance</text>
+<text x="840" y="136" text-anchor="middle" class="sub">SAP transmission · custom data · hierarchy</text>
+<path d="M270,115 L300,115" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,115 L560,115" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Row 2: Proposal -->
+<rect x="40" y="164" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="194" text-anchor="middle" class="label">load_proposals_from_csv.py</text>
+<text x="155" y="210" text-anchor="middle" class="sub">Oracle-direct, no CSV path</text>
+<rect x="300" y="164" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="194" text-anchor="middle" class="label">archive.proposal_version</text>
+<text x="415" y="210" text-anchor="middle" class="sub">PK (proposal_id, version_number)</text>
+<rect x="560" y="164" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="199" text-anchor="middle" class="label">2 child tables</text>
+<text x="840" y="215" text-anchor="middle" class="sub">proposal_person · proposal_award</text>
+<path d="M270,199 L300,199" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,199 L560,199" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Row 3: Negotiation -->
+<rect x="40" y="248" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="278" text-anchor="middle" class="label">load_negotiations_from_csv.py</text>
+<text x="155" y="294" text-anchor="middle" class="sub">Oracle-direct, no CSV path</text>
+<rect x="300" y="248" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="284" text-anchor="middle" class="label">archive.negotiation</text>
+<text x="415" y="300" text-anchor="middle" class="sub">PK negotiation_id</text>
+<rect x="560" y="248" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="283" text-anchor="middle" class="label">4 child tables</text>
+<text x="840" y="299" text-anchor="middle" class="sub">activity · custom_data · notification · unassociated_detail</text>
+<path d="M270,283 L300,283" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,283 L560,283" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Row 4: Subaward -->
+<rect x="40" y="332" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="362" text-anchor="middle" class="label">load_subawards_from_csv.py</text>
+<text x="155" y="378" text-anchor="middle" class="sub">Oracle-direct, no CSV path</text>
+<rect x="300" y="332" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="368" text-anchor="middle" class="label">archive.subaward</text>
+<text x="415" y="384" text-anchor="middle" class="sub">PK subaward_id</text>
+<rect x="560" y="332" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="358" text-anchor="middle" class="label">10 child tables</text>
+<text x="840" y="374" text-anchor="middle" class="sub">amount · contact · funding · closeout · report · notepad</text>
+<text x="840" y="388" text-anchor="middle" class="sub">notification · template_info · custom_data · attachment</text>
+<path d="M270,367 L300,367" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,367 L560,367" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Row 5: Protocol -->
+<rect x="40" y="416" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="446" text-anchor="middle" class="label">load_protocols.py</text>
+<text x="155" y="462" text-anchor="middle" class="sub">Oracle-direct, own parent resolution</text>
+<rect x="300" y="416" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="452" text-anchor="middle" class="label">archive.protocol_version</text>
+<text x="415" y="468" text-anchor="middle" class="sub">PK protocol_id · uniq (number, sequence)</text>
+<rect x="560" y="416" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="451" text-anchor="middle" class="label">2 child tables</text>
+<text x="840" y="467" text-anchor="middle" class="sub">protocol_person · protocol_unit</text>
+<path d="M270,451 L300,451" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,451 L560,451" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Row 6: IRB -->
+<rect x="40" y="500" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="530" text-anchor="middle" class="label">load_from_s3.py</text>
+<text x="155" y="546" text-anchor="middle" class="sub">load_composite_from_s3.py</text>
+<rect x="300" y="500" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="530" text-anchor="middle" class="label">archive.research_record</text>
+<text x="415" y="546" text-anchor="middle" class="sub">+ archive.irb_protocol</text>
+<rect x="560" y="500" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="526" text-anchor="middle" class="label">4 child tables (historical composite)</text>
+<text x="840" y="542" text-anchor="middle" class="sub">irb_protocol_version · irb_submission</text>
+<text x="840" y="556" text-anchor="middle" class="sub">irb_funding_source · irb_timeline_event</text>
+<path d="M270,535 L300,535" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,535 L560,535" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Row 7: Attachments -->
+<rect x="40" y="584" width="230" height="70" rx="8" class="box"/>
+<text x="155" y="608" text-anchor="middle" class="label">archive_attachments.py</text>
+<text x="155" y="622" text-anchor="middle" class="sub">archive_subaward_attachments.py</text>
+<text x="155" y="636" text-anchor="middle" class="sub">load_award_attachments.py --ecs</text>
+<rect x="300" y="584" width="230" height="70" rx="8" class="boxAccent"/>
+<text x="415" y="614" text-anchor="middle" class="label">archive.attachment_object</text>
+<text x="415" y="630" text-anchor="middle" class="sub">PK file_id · one row per physical file</text>
+<rect x="560" y="584" width="560" height="70" rx="8" class="boxAccent2"/>
+<text x="840" y="610" text-anchor="middle" class="label">3 related tables</text>
+<text x="840" y="626" text-anchor="middle" class="sub">award_attachment · subaward_attachment_archive</text>
+<text x="840" y="640" text-anchor="middle" class="sub">archived_attachment (cross-module)</text>
+<path d="M270,619 L300,619" class="flow" marker-end="url(#arrow)"/>
+<path d="M530,619 L560,619" class="flow" marker-end="url(#arrow)"/>
+
+<!-- Cross-cutting note -->
+<rect x="40" y="678" width="1080" height="56" rx="8" class="box" stroke-dasharray="4 3"/>
+<text x="580" y="700" text-anchor="middle" class="sub">Every loader above also writes archive.load_run / load_rejection (audit trail, before risky work) and applies pending</text>
+<text x="580" y="715" text-anchor="middle" class="sub">database/migrations/*.sql via upload/migrations.py — one shared mechanism, omitted per row above to keep this readable.</text>
+
+<!-- Legend -->
+<rect x="330" y="760" width="18" height="13" rx="3" class="box"/>
+<text x="354" y="771" class="sub">loader script</text>
+<rect x="470" y="760" width="18" height="13" rx="3" class="boxAccent"/>
+<text x="494" y="771" class="sub">parent table (surrogate/composite key)</text>
+<rect x="720" y="760" width="18" height="13" rx="3" class="boxAccent2"/>
+<text x="744" y="771" class="sub">child / related tables</text>
+
+<text x="580" y="805" text-anchor="middle" class="subtitle">All 7 parent tables + their children live in one Postgres instance, schema archive — see DATABASE_SCHEMA.md for full column-level detail.</text>
+</svg>

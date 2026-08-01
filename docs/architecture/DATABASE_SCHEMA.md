@@ -1,5 +1,7 @@
 # Database Schema Reference
 
+![Database loaders to schema diagram](DATABASE_LOADERS_DIAGRAM.svg)
+
 A map of what's actually in `database/migrations/` (V001–V052), organized
 by domain. This is the "what tables exist and how do they relate" doc; for
 *why* a table is shaped the way it is, see the per-domain `*_DESIGN.md` /

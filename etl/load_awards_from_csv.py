@@ -8,19 +8,50 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import boto3
+import oracledb
 import pandas as pd
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from archive_etl.batch import framework as batch_framework
+from archive_etl.config.ecs import configure_ecs_environment
+from archive_etl.config.settings import require_oracle_environment
+from archive_etl.config.startup_validation import (
+    validate_aws_identity,
+    validate_oracle_reachable,
+    validate_postgres_reachable,
+    validate_table_exists,
+)
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
+from archive_etl.utils.structured_logging import configure_structured_logging
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+def _resolve_project_root() -> Path:
+    """Locate the directory containing sql/extract/award/ and
+    database/migrations/ relative to this file. Two layouts are
+    supported, mirroring load_award_attachments.py's own
+    _resolve_project_root() exactly (not shared code - kept local to
+    each loader, same as _connect_oracle - but the same technique): the
+    local repo checkout (this file at
+    <repo>/etl/load_awards_from_csv.py, so the project root is one
+    level up) and the ECS loader container image (this file copied
+    flatly to /app/load_awards_from_csv.py alongside sql/ and
+    database/migrations/ copied directly under /app - see
+    etl/Dockerfile.loader), where the project root is this file's own
+    parent directory."""
+    container_root = Path(__file__).resolve().parent
+    if (container_root / "sql").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 # Oracle extraction queries exist for versions/amounts/people/proposals.
 # Award unit contacts had no verified Oracle extraction query and has been
@@ -2190,19 +2221,125 @@ def load_dataframe(
         table=table_name,
     )
 
+# Every Award-owned archive table as of V052 (confirmed by inventorying
+# every INSERT INTO archive.* target across every upsert_award_*/
+# load_dataframe call in this module, then cross-checking against a real
+# Postgres instance with every migration through V052 applied - not
+# hand-maintained from memory). 44 of these have a real Postgres FK,
+# direct or transitive, into one of the four original full-load tables
+# (award_version/award_amount_info/award_person/award_funding_proposal);
+# the remaining 7 (award_amount_transaction, award_hierarchy,
+# award_subcontracting_budgeted_goals, pending_transaction,
+# pending_transaction_extension, time_and_money_document,
+# transaction_detail) reference Award only via a bare, unenforced
+# award_id/award_number column - the same cross-award_number-family
+# treatment documented on AWARD_TIME_AND_MONEY_DESIGN.md and
+# SAP_AWARD_TRANSMISSION_ARCHIVE_DESIGN.md - and have no Postgres FK to
+# any of the four at all. Deliberately excludes archive.award_attachment/
+# archive.attachment_object/archive.archived_attachment: those belong to
+# the separate Award Attachment loader (etl/load_award_attachments.py),
+# never to this module's full load. Deliberately excludes archive.load_run:
+# shared provenance table across every domain, not Award-owned.
+_AWARD_OWNED_TABLES: tuple[str, ...] = (
+    # Budget (5-level bundle, deepest children first)
+    "award_budget_line_item_calculated_amount",
+    "award_budget_personnel_calculated_amount",
+    "award_budget_period_summary_calculated_amount",
+    "award_budget_line_item",
+    "award_budget_personnel_detail",
+    "award_budget_person",
+    "award_budget_period",
+    "award_budget_limit",
+    "award_budget",
+    # Budget Person / Transferring Sponsor bundle
+    "award_transferring_sponsor",
+    # SAP Award Transmission History bundle
+    "award_transmission_child",
+    "award_transmission",
+    # Extension / CGB bundle
+    "award_extension",
+    "award_cgb",
+    # Comment bundle
+    "award_comment",
+    # Special Approvals / Compliance bundle
+    "award_special_review_exemption",
+    "award_special_review",
+    "award_science_keyword",
+    "award_cost_share",
+    "award_approved_foreign_travel",
+    "award_approved_equipment",
+    "award_subcontracting_budgeted_goals",
+    # Reporting / Subaward Summary bundle
+    "award_approved_subaward",
+    "award_payment_schedule",
+    "award_closeout",
+    # Notepad bundle
+    "award_notepad",
+    # Contacts bundle
+    "award_unit_contact",
+    "award_sponsor_contact",
+    # Terms bundle
+    "award_report_term_recipient",
+    "award_report_term",
+    "award_sponsor_term",
+    "award_fanda_rate",
+    "award_cfda",
+    # People hierarchy bundle
+    "award_person_unit_credit_split",
+    "award_person_credit_split",
+    "award_person_unit",
+    # Custom data bundle
+    "award_custom_data",
+    # Time and Money bundle (bare Award-number references - see comment above)
+    "award_direct_fanda_distribution",
+    "award_amount_transaction",
+    "transaction_detail",
+    "pending_transaction_extension",
+    "pending_transaction",
+    "time_and_money_document",
+    "award_hierarchy",
+    # Core Award (the original four full-load tables)
+    "award_funding_proposal",
+    "award_person",
+    "award_amount_info",
+    "award_version",
+)
+
+
 def clear_existing_award_data(
     connection: Connection,
 ) -> None:
-    logger.info("Clearing existing Award archive data")
+    """Reset every Award-owned table for the legacy full load
+    (--load-award-id/--load-batch are unaffected - they UPSERT and never
+    call this). A single combined TRUNCATE naming every Award-owned
+    table explicitly, rather than TRUNCATE ... CASCADE on just the four
+    original tables: Postgres requires every table that has an FK into
+    any table named in a TRUNCATE statement to also appear in that same
+    statement (or be CASCADEd), so this list is both the mechanism and
+    the safety boundary - if a future bundle adds a 49th Award table and
+    someone forgets to add it here, this raises a real Postgres error
+    the next full load run, rather than CASCADE silently reaching it (or
+    worse, reaching into a table this function was never meant to
+    touch). Confirmed (see docs/architecture/AWARD_FULL_LOAD_RESET.md)
+    that no table outside this list - in particular no Proposal,
+    Negotiation, Protocol, Subaward, or Attachment table - has any FK
+    into any table in this list, so this single statement can never
+    reach outside the Award domain. Listed in leaf-to-root order for
+    readability only - a single combined TRUNCATE is one atomic
+    statement, so intra-list order has no effect on correctness here."""
+    logger.info(
+        "Clearing existing Award archive data ({} tables)",
+        len(_AWARD_OWNED_TABLES),
+    )
 
+    table_list = ",\n                ".join(
+        f"archive.{table}" for table in _AWARD_OWNED_TABLES
+    )
     connection.execute(
         text(
-            """
+            f"""
             TRUNCATE TABLE
-                archive.award_funding_proposal,
-                archive.award_person,
-                archive.award_amount_info,
-                archive.award_version
+                {table_list}
             RESTART IDENTITY;
             """
         )
@@ -2380,6 +2517,128 @@ def mark_load_failed(
 
 AWARD_BATCH_DOMAIN = "AWARD"
 AWARD_BATCH_ENTITY_TYPE = "AWARD"
+
+
+def _connect_oracle() -> oracledb.Connection:
+    """Mirrors load_award_attachments.py's own private _connect_oracle()
+    exactly (not shared from there - that file is not modified as part
+    of this change) - reads the same already-shared
+    require_oracle_environment() credential resolver, so --ecs mode's
+    configure_ecs_environment() (which writes ORACLE_USER/PASSWORD/DSN
+    into os.environ after resolving them from Secrets Manager) works
+    unchanged for this loader too."""
+    credentials = require_oracle_environment()
+    return oracledb.connect(
+        user=credentials["ORACLE_USER"],
+        password=credentials["ORACLE_PASSWORD"],
+        dsn=credentials["ORACLE_DSN"],
+    )
+
+
+def _run_show_batch(engine: Engine, batch_id: int) -> dict[str, Any]:
+    """Read-only batch status report - shared by main()'s local
+    --show-batch dispatch and --ecs mode's startup short-circuit, so the
+    two never drift apart."""
+    report = batch_framework.show_batch(
+        engine,
+        batch_id,
+        domain=AWARD_BATCH_DOMAIN,
+        entity_type=AWARD_BATCH_ENTITY_TYPE,
+    )
+    logger.bind(stage="show_batch", batch_id=batch_id).info(
+        "batch_id={} found={} status={} total_items={} pending={} "
+        "processing={} completed={} failed={} missing_source={} "
+        "skipped={}",
+        report["batch_id"],
+        report["found"],
+        report.get("status"),
+        report.get("total_items"),
+        report.get("pending"),
+        report.get("processing"),
+        report.get("completed"),
+        report.get("failed"),
+        report.get("missing_source"),
+        report.get("skipped"),
+    )
+    return report
+
+
+def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
+    """--ecs mode setup, mirroring load_award_attachments.py's
+    _run_ecs_setup() exactly in shape (not shared code - that file is
+    not modified as part of this change - but the same sequence and the
+    same underlying shared utilities: configure_structured_logging,
+    validate_aws_identity, configure_ecs_environment,
+    create_postgres_engine, validate_postgres_reachable,
+    validate_oracle_reachable, validate_table_exists), in exactly this
+    order:
+
+    1. structured logging
+    2. AWS task-role identity via STS
+    3. one Secrets Manager client for the whole startup
+    4. load the PostgreSQL secret (always required)
+    5. load the Oracle secret (skipped entirely for --migrate-only and
+       --show-batch - neither touches Oracle)
+    6. verify PostgreSQL connectivity
+    7. if --migrate-only: apply migrations, validate the resulting
+       schema, and return True so main() exits without ever reaching
+       Oracle or Award data
+    7a. if --show-batch: run the read-only batch status report and
+        return True, same as --migrate-only - PostgreSQL only
+    8. verify Oracle connectivity
+
+    Aborts immediately (lets the raised exception propagate) if any step
+    fails - no Award data may be read before every required check for
+    the requested mode passes. Returns True when --migrate-only or
+    --show-batch completed successfully (the caller must not proceed
+    further), False otherwise."""
+    configure_structured_logging(run_id)
+    logger.bind(stage="startup").info(
+        "Starting in --ecs mode: run_id={}", run_id
+    )
+
+    identity = validate_aws_identity(boto3.client("sts"))
+    logger.bind(stage="startup").info(
+        "AWS identity resolved via ECS task role: account={}",
+        identity["account"],
+    )
+
+    secrets_client = boto3.client("secretsmanager")
+
+    configure_ecs_environment(
+        secrets_client,
+        include_oracle=not (
+            arguments.migrate_only or arguments.show_batch is not None
+        ),
+    )
+
+    engine = create_postgres_engine()
+    validate_postgres_reachable(engine)
+    logger.bind(stage="startup").info("PostgreSQL reachable")
+
+    if arguments.migrate_only:
+        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        logger.bind(stage="startup").info("Migrations applied")
+
+        validate_table_exists(engine, "award_version")
+        validate_table_exists(engine, "award_transmission_child")
+        logger.bind(stage="startup", status="migrate_only_complete").info(
+            "Migration and schema validation complete"
+        )
+        return True
+
+    if arguments.show_batch is not None:
+        _run_show_batch(engine, arguments.show_batch)
+        logger.bind(stage="startup", status="show_batch_complete").info(
+            "Batch status report complete"
+        )
+        return True
+
+    validate_oracle_reachable(_connect_oracle)
+    logger.bind(stage="startup").info("Oracle reachable")
+
+    logger.bind(stage="startup").info("Startup validation passed")
+    return False
 
 _AWARD_VERSION_COLUMNS = [
     "award_number",
@@ -9775,7 +10034,41 @@ def parse_args(
             "anything."
         ),
     )
+    parser.add_argument(
+        "--ecs",
+        action="store_true",
+        help=(
+            "Production execution mode for the ECS loader task: resolve "
+            "PostgreSQL/Oracle credentials from AWS Secrets Manager only "
+            "(POSTGRES_SECRET_ID/ORACLE_SECRET_ID - never a plaintext "
+            "environment variable, never a local .env export), switch to "
+            "structured JSON logging for CloudWatch, and run startup "
+            "validation (AWS identity, secrets, PostgreSQL/Oracle "
+            "reachable) before processing anything - aborts immediately "
+            "on any failure. Requires the schema to already exist - see "
+            "--migrate-only to bootstrap a fresh database. Local "
+            "execution (no --ecs) is completely unaffected: it continues "
+            "reading POSTGRES_*/ORACLE_* directly from the environment, "
+            "exactly as before."
+        ),
+    )
+    parser.add_argument(
+        "--migrate-only",
+        action="store_true",
+        help=(
+            "Valid only with --ecs. Resolve AWS identity and the "
+            "PostgreSQL secret, verify PostgreSQL connectivity, apply "
+            "pending database migrations, validate the resulting schema, "
+            "then exit successfully - without ever touching Oracle or "
+            "any Award data. Use this once to bootstrap a fresh "
+            "database; every other --ecs invocation requires migrations "
+            "to already be applied and never applies them itself."
+        ),
+    )
     parsed = parser.parse_args(arguments)
+
+    if parsed.migrate_only and not parsed.ecs:
+        parser.error("--migrate-only is only valid together with --ecs")
 
     batch_verbs = [
         ("--create-batch", parsed.create_batch),
@@ -9795,6 +10088,12 @@ def parse_args(
             f"{active_batch_verbs[0]} cannot be combined with "
             "--load-award-id"
         )
+    if parsed.migrate_only and active_batch_verbs:
+        parser.error(
+            f"--migrate-only cannot be combined with {active_batch_verbs[0]}"
+        )
+    if parsed.migrate_only and parsed.load_award_id is not None:
+        parser.error("--migrate-only cannot be combined with --load-award-id")
 
     return parsed
 
@@ -9803,9 +10102,15 @@ def main() -> None:
     arguments = parse_args()
     run_id = str(uuid.uuid4())
 
+    if arguments.ecs:
+        ecs_setup_short_circuited = _run_ecs_setup(arguments, run_id)
+        if ecs_setup_short_circuited:
+            return
+
     if arguments.create_batch is not None:
         engine = create_postgres_engine()
-        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         _run_create_award_batch(
             engine, arguments.create_batch, run_id=run_id
         )
@@ -9813,7 +10118,8 @@ def main() -> None:
 
     if arguments.load_batch is not None:
         engine = create_postgres_engine()
-        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         _run_load_award_batch(
             engine, arguments.load_batch, dry_run=arguments.dry_run, run_id=run_id
         )
@@ -9821,32 +10127,13 @@ def main() -> None:
 
     if arguments.show_batch is not None:
         engine = create_postgres_engine()
-        report = batch_framework.show_batch(
-            engine,
-            arguments.show_batch,
-            domain=AWARD_BATCH_DOMAIN,
-            entity_type=AWARD_BATCH_ENTITY_TYPE,
-        )
-        logger.bind(stage="show_batch", batch_id=arguments.show_batch).info(
-            "batch_id={} found={} status={} total_items={} pending={} "
-            "processing={} completed={} failed={} missing_source={} "
-            "skipped={}",
-            report["batch_id"],
-            report["found"],
-            report.get("status"),
-            report.get("total_items"),
-            report.get("pending"),
-            report.get("processing"),
-            report.get("completed"),
-            report.get("failed"),
-            report.get("missing_source"),
-            report.get("skipped"),
-        )
+        _run_show_batch(engine, arguments.show_batch)
         return
 
     if arguments.load_award_id is not None:
         engine = create_postgres_engine()
-        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         _run_load_award_id(
             engine,
             arguments.load_award_id,
@@ -9915,10 +10202,11 @@ def main() -> None:
         "database/migrations",
     )
 
-    apply_migrations(
-        engine,
-        migration_path,
-    )
+    if not arguments.ecs:
+        apply_migrations(
+            engine,
+            migration_path,
+        )
 
     # The STARTED load_run row is committed in its own transaction, before
     # the risky work below begins. If it were created inside the same

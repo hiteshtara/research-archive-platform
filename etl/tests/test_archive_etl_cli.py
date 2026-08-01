@@ -40,7 +40,7 @@ def test_build_parser_accepts_award_attachment_dry_run() -> None:
 
 def test_build_parser_rejects_dry_run_for_other_domains() -> None:
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["award", "--dry-run"])
+        build_parser().parse_args(["negotiation", "--dry-run"])
 
 
 def test_build_parser_accepts_award_attachment_ecs_migrate_only() -> None:
@@ -55,7 +55,172 @@ def test_build_parser_accepts_award_attachment_ecs_migrate_only() -> None:
 
 def test_build_parser_rejects_ecs_for_other_domains() -> None:
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["award", "--ecs"])
+        build_parser().parse_args(["negotiation", "--ecs"])
+
+
+def test_build_parser_accepts_award_dry_run() -> None:
+    args = build_parser().parse_args(["award", "--dry-run"])
+
+    assert args.command == "award"
+    assert args.dry_run is True
+
+
+def test_build_parser_accepts_award_load_award_id() -> None:
+    args = build_parser().parse_args(["award", "--load-award-id", "42"])
+
+    assert args.command == "award"
+    assert args.load_award_id == 42
+
+
+def test_build_parser_accepts_award_create_batch() -> None:
+    args = build_parser().parse_args(["award", "--create-batch", "10"])
+
+    assert args.create_batch == 10
+
+
+def test_build_parser_accepts_award_load_batch() -> None:
+    args = build_parser().parse_args(["award", "--load-batch", "5"])
+
+    assert args.load_batch == 5
+
+
+def test_build_parser_accepts_award_show_batch() -> None:
+    args = build_parser().parse_args(["award", "--show-batch", "5"])
+
+    assert args.show_batch == 5
+
+
+def test_build_parser_accepts_award_ecs_migrate_only() -> None:
+    args = build_parser().parse_args(["award", "--ecs", "--migrate-only"])
+
+    assert args.command == "award"
+    assert args.ecs is True
+    assert args.migrate_only is True
+
+
+def test_build_parser_rejects_load_award_id_for_award_attachment() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["award-attachment", "--load-award-id", "1"])
+
+
+def test_run_domain_forwards_award_dry_run() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award", "--dry-run"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award", args)
+
+    import_module.assert_called_once_with("load_awards_from_csv")
+    assert captured_argv == ["load_awards_from_csv.py", "--dry-run"]
+
+
+def test_run_domain_forwards_award_load_award_id() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award", "--load-award-id", "42", "--dry-run"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award", args)
+
+    import_module.assert_called_once_with("load_awards_from_csv")
+    assert captured_argv == [
+        "load_awards_from_csv.py",
+        "--dry-run",
+        "--load-award-id",
+        "42",
+    ]
+
+
+def test_run_domain_forwards_award_create_batch() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award", "--create-batch", "10"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award", args)
+
+    import_module.assert_called_once_with("load_awards_from_csv")
+    assert captured_argv == ["load_awards_from_csv.py", "--create-batch", "10"]
+
+
+def test_run_domain_forwards_award_load_batch_with_dry_run() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award", "--load-batch", "5", "--dry-run"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award", args)
+
+    import_module.assert_called_once_with("load_awards_from_csv")
+    assert captured_argv == [
+        "load_awards_from_csv.py",
+        "--dry-run",
+        "--load-batch",
+        "5",
+    ]
+
+
+def test_run_domain_forwards_award_show_batch() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award", "--show-batch", "5"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award", args)
+
+    import_module.assert_called_once_with("load_awards_from_csv")
+    assert captured_argv == ["load_awards_from_csv.py", "--show-batch", "5"]
+
+
+def test_run_domain_forwards_award_ecs_migrate_only() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award", "--ecs", "--migrate-only"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award", args)
+
+    import_module.assert_called_once_with("load_awards_from_csv")
+    assert captured_argv == [
+        "load_awards_from_csv.py",
+        "--ecs",
+        "--migrate-only",
+    ]
 
 
 def test_build_parser_accepts_award_attachment_show_upload_status() -> None:

@@ -2154,6 +2154,56 @@ class ParseArgsAwardIncrementalTest(unittest.TestCase):
         self.assertEqual(args.load_award_id, 1)
         self.assertTrue(args.dry_run)
 
+    def test_ecs_and_migrate_only_default_to_false(self) -> None:
+        args = award_loader.parse_args([])
+        self.assertFalse(args.ecs)
+        self.assertFalse(args.migrate_only)
+
+    def test_ecs_parses_alone(self) -> None:
+        args = award_loader.parse_args(["--ecs"])
+        self.assertTrue(args.ecs)
+        self.assertFalse(args.migrate_only)
+
+    def test_ecs_migrate_only_parses_together(self) -> None:
+        args = award_loader.parse_args(["--ecs", "--migrate-only"])
+        self.assertTrue(args.ecs)
+        self.assertTrue(args.migrate_only)
+
+    def test_migrate_only_requires_ecs(self) -> None:
+        with self.assertRaises(SystemExit):
+            award_loader.parse_args(["--migrate-only"])
+
+    def test_migrate_only_cannot_combine_with_create_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            award_loader.parse_args(
+                ["--ecs", "--migrate-only", "--create-batch", "10"]
+            )
+
+    def test_migrate_only_cannot_combine_with_load_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            award_loader.parse_args(
+                ["--ecs", "--migrate-only", "--load-batch", "5"]
+            )
+
+    def test_migrate_only_cannot_combine_with_show_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            award_loader.parse_args(
+                ["--ecs", "--migrate-only", "--show-batch", "5"]
+            )
+
+    def test_migrate_only_cannot_combine_with_load_award_id(self) -> None:
+        with self.assertRaises(SystemExit):
+            award_loader.parse_args(
+                ["--ecs", "--migrate-only", "--load-award-id", "1"]
+            )
+
+    def test_show_batch_does_not_require_ecs(self) -> None:
+        # --show-batch is a local-mode-compatible verb too (no --ecs
+        # requirement of its own) - only --migrate-only is gated on --ecs.
+        args = award_loader.parse_args(["--show-batch", "5"])
+        self.assertEqual(args.show_batch, 5)
+        self.assertFalse(args.ecs)
+
 
 # --- bounded Oracle readers (mocked Oracle, no Postgres needed) ---------
 
@@ -7350,6 +7400,497 @@ class ShowAwardBatchTest(_AwardPostgresTestCase):
         self.assertEqual(report["total_items"], 1)
 
 
+class ClearExistingAwardDataTest(_AwardPostgresTestCase):
+    """clear_existing_award_data() is the legacy full load's reset step -
+    --load-award-id/--load-batch never call it (both UPSERT). Proves it
+    clears every one of the 48 Award-owned tables through V052 without
+    an FK violation, and never touches a Proposal/Negotiation/Protocol/
+    Subaward/Attachment table."""
+
+    def test_clears_every_award_table_without_fk_violation_and_leaves_other_domains_untouched(
+        self,
+    ) -> None:
+        # Populate representative rows across the full Award hierarchy
+        # via the real incremental loader (not hand-written INSERTs) -
+        # this exercises the exact same 44 child tables (plus the 4
+        # core tables) a real load creates, including the deepest
+        # Budget bundle and both SAP transmission tables.
+        with self._patched_oracle(
+            versions=[_version_row()],
+            amounts=[_amount_row()],
+            people=[_person_row()],
+            proposals=[_proposal_row()],
+            custom_data=[_custom_data_row()],
+            person_units=[_person_unit_row()],
+            person_credit_splits=[_person_credit_split_row()],
+            person_unit_credit_splits=[_person_unit_credit_split_row()],
+            sponsor_terms=[_sponsor_term_row()],
+            report_terms=[_report_term_row()],
+            report_term_recipients=[_report_term_recipient_row()],
+            sponsor_contacts=[_sponsor_contact_row()],
+            unit_contacts=[_unit_contact_row()],
+            notepad=[_notepad_row()],
+            closeout=[_closeout_row()],
+            payment_schedule=[_payment_schedule_row()],
+            approved_subaward=[_approved_subaward_row()],
+            cfda=[_cfda_row()],
+            cost_share=[_cost_share_row()],
+            fanda_rate=[_fanda_rate_row()],
+            science_keyword=[_science_keyword_row()],
+            special_review=[_special_review_row()],
+            special_review_exemption=[_special_review_exemption_row()],
+            approved_equipment=[_approved_equipment_row()],
+            approved_foreign_travel=[_approved_foreign_travel_row()],
+            subcontracting_budgeted_goals=[_subcontracting_budgeted_goals_row()],
+            comment=[_award_comment_row()],
+            extension=[_award_extension_row()],
+            cgb=[_award_cgb_row()],
+            hierarchy=[_award_hierarchy_row()],
+            tnm_document=[_time_and_money_document_row()],
+            pending_transaction=[_pending_transaction_row()],
+            pending_transaction_extension=[_pending_transaction_extension_row()],
+            transaction_detail=[_transaction_detail_row()],
+            award_amount_transaction=[_award_amount_transaction_row()],
+            fanda_distribution=[_award_direct_fanda_distribution_row()],
+            budget=[_award_budget_row()],
+            budget_limit=[_award_budget_limit_row()],
+            budget_period=[_award_budget_period_row()],
+            budget_line_item=[_award_budget_line_item_row()],
+            budget_line_item_calculated_amount=[
+                _award_budget_line_item_calculated_amount_row()
+            ],
+            budget_personnel_detail=[_award_budget_personnel_detail_row()],
+            budget_personnel_calculated_amount=[
+                _award_budget_personnel_calculated_amount_row()
+            ],
+            budget_period_summary_calculated_amount=[
+                _award_budget_period_summary_calculated_amount_row()
+            ],
+            budget_person=[_award_budget_person_row()],
+            transferring_sponsor=[_award_transferring_sponsor_row()],
+            award_transmission=[_award_transmission_row()],
+            award_transmission_child=[_award_transmission_child_row()],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+        self.assertEqual(report["inserted"], 1)
+
+        # Plant one row in a representative table from every domain
+        # clear_existing_award_data() must never touch, so an accidental
+        # widening of its table list (or a switch to CASCADE) would be
+        # caught by the "still there afterward" assertions below.
+        with self.engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO archive.negotiation (negotiation_id) "
+                    "VALUES (900001)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO archive.proposal_version "
+                    "(proposal_id, proposal_number, version_number) "
+                    "VALUES (900001, 'P-900001', 1)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO archive.protocol_version "
+                    "(protocol_id, protocol_number, sequence_number) "
+                    "VALUES (900001, 'PROT-900001', 1)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO archive.subaward "
+                    "(subaward_id, sequence_number, subaward_code) "
+                    "VALUES (900001, 1, 'SA-900001')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO archive.attachment_object (file_id) "
+                    "VALUES (900001)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO archive.award_attachment "
+                    "(award_attachment_id, award_id, award_number, "
+                    "sequence_number) VALUES (900001, 1, 'A-0001', 0)"
+                )
+            )
+
+        # Every Award table genuinely has data before clearing - a
+        # sanity check that the fixture load above actually worked, so
+        # the "empty afterward" assertions aren't vacuously true.
+        for table in award_loader._AWARD_OWNED_TABLES:
+            row_count = int(self._scalar(f"SELECT COUNT(*) FROM archive.{table}"))  # type: ignore[call-overload]
+            self.assertTrue(
+                row_count > 0,
+                f"expected archive.{table} to have rows before clearing",
+            )
+
+        # The actual behavior under test: must not raise (no FK
+        # violation), despite clearing 48 interrelated tables via a
+        # single combined TRUNCATE with no CASCADE keyword.
+        with self.engine.begin() as connection:
+            award_loader.clear_existing_award_data(connection)
+
+        for table in award_loader._AWARD_OWNED_TABLES:
+            self.assertEqual(
+                self._scalar(f"SELECT COUNT(*) FROM archive.{table}"),
+                0,
+                f"expected archive.{table} to be empty after clearing",
+            )
+
+        # Every non-Award domain's planted row must still be there,
+        # completely untouched.
+        self.assertEqual(
+            self._scalar(
+                "SELECT COUNT(*) FROM archive.negotiation "
+                "WHERE negotiation_id = 900001"
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._scalar(
+                "SELECT COUNT(*) FROM archive.proposal_version "
+                "WHERE proposal_id = 900001"
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._scalar(
+                "SELECT COUNT(*) FROM archive.protocol_version "
+                "WHERE protocol_id = 900001"
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._scalar(
+                "SELECT COUNT(*) FROM archive.subaward "
+                "WHERE subaward_id = 900001"
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._scalar(
+                "SELECT COUNT(*) FROM archive.attachment_object "
+                "WHERE file_id = 900001"
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._scalar(
+                "SELECT COUNT(*) FROM archive.award_attachment "
+                "WHERE award_attachment_id = 900001"
+            ),
+            1,
+        )
+
+        # load_run itself (shared provenance across every domain, not
+        # Award-owned) must also survive - clear_existing_award_data()
+        # only ever clears tables Award data is inserted into, never
+        # the shared load-tracking table those inserts reference.
+        load_run_count = int(self._scalar("SELECT COUNT(*) FROM archive.load_run"))  # type: ignore[call-overload]
+        self.assertTrue(load_run_count > 0)
+
+    def test_uses_restart_identity_and_is_a_harmless_no_op_on_these_tables(
+        self,
+    ) -> None:
+        # Every Award-owned table's PK is populated directly from
+        # Oracle's own real business/surrogate key (award_id,
+        # transmission_id, etc.) - none uses a Postgres SERIAL/IDENTITY
+        # column, so RESTART IDENTITY has no sequence to reset for any
+        # of them. Kept in the TRUNCATE statement anyway (matching the
+        # original 4-table implementation) since it is a no-op here,
+        # not a functional requirement - this test proves it stays a
+        # harmless no-op (no error) rather than something relied upon.
+        with self._patched_oracle(versions=[_version_row()]):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        with self.engine.begin() as connection:
+            award_loader.clear_existing_award_data(connection)
+
+        sequence_count = self._scalar(
+            "SELECT COUNT(*) FROM pg_sequences WHERE schemaname = 'archive' "
+            "AND sequencename LIKE 'award_%'"
+        )
+        self.assertEqual(sequence_count, 0)
+
+    def test_reload_after_clear_reinserts_cleanly(self) -> None:
+        # A full load run always clears then reloads in the same
+        # transaction (see main()) - proves that sequence genuinely
+        # works end to end: the exact same award_id can be re-inserted
+        # immediately after clearing, with no leftover row/constraint
+        # blocking it.
+        with self._patched_oracle(
+            versions=[_version_row()],
+            amounts=[_amount_row()],
+            award_transmission=[_award_transmission_row()],
+        ):
+            award_loader._run_load_award_id(self.engine, 1)
+
+        with self.engine.begin() as connection:
+            award_loader.clear_existing_award_data(connection)
+
+        with self._patched_oracle(
+            versions=[_version_row()],
+            amounts=[_amount_row()],
+            award_transmission=[_award_transmission_row()],
+        ):
+            report = award_loader._run_load_award_id(self.engine, 1)
+
+        self.assertEqual(report["inserted"], 1)
+        self.assertEqual(report["amount_info_inserted"], 1)
+        self.assertEqual(report["award_transmission_inserted"], 1)
+        version_row = self._row("award_version", award_id=1)
+        self.assertEqual(version_row["title"], "Test Award")
+
+
+class RunEcsSetupOrchestrationTest(unittest.TestCase):
+    """Orchestration tests for _run_ecs_setup - every collaborator
+    (Secrets Manager resolution, startup-validation checks, migrations)
+    has its own focused unit tests elsewhere (archive_etl.config.ecs,
+    archive_etl.config.startup_validation); these prove _run_ecs_setup
+    wires them together in the exact required order and short-circuits
+    correctly for --migrate-only/--show-batch. Mirrors
+    load_award_attachments.py's own equivalent test class in shape -
+    that file is not modified or imported from here."""
+
+    def _run(
+        self, *, migrate_only: bool, show_batch: int | None = None
+    ) -> dict:
+        arguments = MagicMock(
+            migrate_only=migrate_only,
+            show_batch=show_batch,
+        )
+        calls: list[str] = []
+
+        def _track(name, retval=None):
+            def _fn(*args, **kwargs):
+                calls.append(name)
+                return retval
+
+            return _fn
+
+        def _boto3_client_side_effect(service_name, *args, **kwargs):
+            calls.append(f"boto3.client({service_name})")
+            return MagicMock()
+
+        with (
+            patch.object(
+                award_loader,
+                "configure_structured_logging",
+                side_effect=_track("configure_structured_logging"),
+            ) as configure_logging,
+            patch.object(
+                award_loader,
+                "validate_aws_identity",
+                side_effect=_track(
+                    "validate_aws_identity", {"account": "123", "arn": "arn:x"}
+                ),
+            ) as validate_identity,
+            patch.object(
+                award_loader.boto3,
+                "client",
+                side_effect=_boto3_client_side_effect,
+            ) as boto3_client,
+            patch.object(
+                award_loader,
+                "configure_ecs_environment",
+                side_effect=_track("configure_ecs_environment"),
+            ) as configure_env,
+            patch.object(
+                award_loader,
+                "create_postgres_engine",
+                side_effect=_track("create_postgres_engine", MagicMock()),
+            ),
+            patch.object(
+                award_loader,
+                "validate_postgres_reachable",
+                side_effect=_track("validate_postgres_reachable"),
+            ),
+            patch.object(
+                award_loader,
+                "apply_migrations",
+                side_effect=_track("apply_migrations"),
+            ) as apply_migrations,
+            patch.object(
+                award_loader,
+                "_run_show_batch",
+                side_effect=_track("_run_show_batch"),
+            ) as run_show_batch,
+            patch.object(
+                award_loader,
+                "validate_table_exists",
+                side_effect=_track("validate_table_exists"),
+            ) as validate_table,
+            patch.object(
+                award_loader,
+                "validate_oracle_reachable",
+                side_effect=_track("validate_oracle_reachable"),
+            ) as validate_oracle,
+        ):
+            result = award_loader._run_ecs_setup(arguments, "run-1")
+
+        return {
+            "result": result,
+            "calls": calls,
+            "validate_identity": validate_identity,
+            "boto3_client": boto3_client,
+            "configure_env": configure_env,
+            "apply_migrations": apply_migrations,
+            "validate_oracle": validate_oracle,
+            "validate_table": validate_table,
+            "run_show_batch": run_show_batch,
+            "configure_logging": configure_logging,
+        }
+
+    def test_structured_logging_configured_first_with_run_id(self) -> None:
+        result = self._run(migrate_only=True)
+
+        result["configure_logging"].assert_called_once_with("run-1")
+        self.assertEqual(result["calls"][0], "configure_structured_logging")
+
+    def test_migrate_only_reaches_apply_migrations_and_returns_true(self) -> None:
+        result = self._run(migrate_only=True)
+
+        self.assertIn("apply_migrations", result["calls"])
+        self.assertTrue(result["result"])
+
+    def test_migrate_only_validates_schema_after_migrating_not_before(self) -> None:
+        calls = self._run(migrate_only=True)["calls"]
+
+        self.assertLess(
+            calls.index("apply_migrations"), calls.index("validate_table_exists")
+        )
+
+    def test_migrate_only_never_contacts_oracle(self) -> None:
+        result = self._run(migrate_only=True)
+
+        self.assertNotIn("validate_oracle_reachable", result["calls"])
+        result["validate_oracle"].assert_not_called()
+        result["configure_env"].assert_called_once()
+        self.assertFalse(result["configure_env"].call_args.kwargs["include_oracle"])
+
+    def test_migrate_only_validates_two_award_tables(self) -> None:
+        result = self._run(migrate_only=True)
+
+        self.assertEqual(result["validate_table"].call_count, 2)
+        checked_tables = {
+            call.args[1] for call in result["validate_table"].call_args_list
+        }
+        self.assertEqual(
+            checked_tables, {"award_version", "award_transmission_child"}
+        )
+
+    def test_show_batch_reaches_the_report_and_returns_true(self) -> None:
+        result = self._run(migrate_only=False, show_batch=5)
+
+        self.assertIn("_run_show_batch", result["calls"])
+        self.assertTrue(result["result"])
+        result["run_show_batch"].assert_called_once()
+        self.assertEqual(result["run_show_batch"].call_args.args[1], 5)
+
+    def test_show_batch_never_contacts_oracle(self) -> None:
+        result = self._run(migrate_only=False, show_batch=5)
+
+        self.assertNotIn("validate_oracle_reachable", result["calls"])
+        result["validate_oracle"].assert_not_called()
+        result["configure_env"].assert_called_once()
+        self.assertFalse(result["configure_env"].call_args.kwargs["include_oracle"])
+
+    def test_show_batch_never_applies_migrations(self) -> None:
+        result = self._run(migrate_only=False, show_batch=5)
+
+        result["apply_migrations"].assert_not_called()
+
+    def test_identity_resolved_before_secrets_manager_client_created(self) -> None:
+        calls = self._run(migrate_only=True)["calls"]
+
+        self.assertLess(
+            calls.index("validate_aws_identity"),
+            calls.index("boto3.client(secretsmanager)"),
+        )
+
+    def test_creates_exactly_one_secrets_manager_client(self) -> None:
+        result = self._run(migrate_only=True)
+
+        secretsmanager_calls = [
+            call
+            for call in result["boto3_client"].call_args_list
+            if call.args == ("secretsmanager",)
+        ]
+        self.assertEqual(len(secretsmanager_calls), 1)
+
+    def test_secrets_loaded_before_postgres_connectivity_check(self) -> None:
+        calls = self._run(migrate_only=True)["calls"]
+
+        self.assertLess(
+            calls.index("configure_ecs_environment"),
+            calls.index("validate_postgres_reachable"),
+        )
+
+    def test_normal_flow_reaches_oracle_after_postgres_and_returns_false(
+        self,
+    ) -> None:
+        result = self._run(migrate_only=False)
+        calls = result["calls"]
+
+        self.assertNotIn("apply_migrations", calls)
+        self.assertFalse(result["result"])
+        self.assertLess(
+            calls.index("validate_postgres_reachable"),
+            calls.index("validate_oracle_reachable"),
+        )
+
+    def test_normal_flow_resolves_oracle_credentials(self) -> None:
+        result = self._run(migrate_only=False)
+
+        result["configure_env"].assert_called_once()
+        self.assertTrue(result["configure_env"].call_args.kwargs["include_oracle"])
+
+    def test_missing_secret_failure_propagates_uncaught(self) -> None:
+        # _run_ecs_setup must never swallow a Secrets Manager resolution
+        # failure (e.g. POSTGRES_SECRET_ID unset, or the secret missing a
+        # required key) - configure_ecs_environment's own
+        # ConfigurationError (see archive_etl.config.ecs, already
+        # covered by its own extensive test suite in
+        # tests/test_ecs_config.py - not duplicated here) must reach the
+        # caller so the ECS task exits nonzero, never reaching
+        # PostgreSQL, migrations, or Oracle.
+        from archive_etl.config.settings import ConfigurationError
+
+        arguments = MagicMock(migrate_only=True, show_batch=None)
+
+        with (
+            patch.object(award_loader, "configure_structured_logging"),
+            patch.object(
+                award_loader,
+                "validate_aws_identity",
+                return_value={"account": "123", "arn": "arn:x"},
+            ),
+            patch.object(award_loader.boto3, "client", return_value=MagicMock()),
+            patch.object(
+                award_loader,
+                "configure_ecs_environment",
+                side_effect=ConfigurationError(
+                    "POSTGRES_SECRET_ID is not set"
+                ),
+            ),
+            patch.object(
+                award_loader, "create_postgres_engine"
+            ) as create_engine,
+            patch.object(award_loader, "apply_migrations") as apply_migrations,
+        ):
+            with self.assertRaises(ConfigurationError):
+                award_loader._run_ecs_setup(arguments, "run-1")
+
+        create_engine.assert_not_called()
+        apply_migrations.assert_not_called()
+
+
 class MainDispatchTest(unittest.TestCase):
     """Proves main() routes each new verb to its own function and returns
     immediately, without ever falling through to the full-load path -
@@ -7371,6 +7912,8 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 dry_run=False,
+                ecs=False,
+                migrate_only=False,
             )
             award_loader.main()
 
@@ -7392,6 +7935,8 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 dry_run=False,
+                ecs=False,
+                migrate_only=False,
             )
             award_loader.main()
 
@@ -7413,6 +7958,8 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=5,
                 show_batch=None,
                 dry_run=True,
+                ecs=False,
+                migrate_only=False,
             )
             award_loader.main()
 
@@ -7439,10 +7986,125 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=5,
                 dry_run=False,
+                ecs=False,
+                migrate_only=False,
             )
             award_loader.main()
 
         show_batch.assert_called_once()
+        apply_migrations.assert_not_called()
+
+    def test_ecs_mode_runs_startup_setup_before_dispatch(self) -> None:
+        with (
+            patch.object(award_loader, "parse_args") as parse_args,
+            patch.object(
+                award_loader, "_run_ecs_setup", return_value=False
+            ) as run_ecs_setup,
+            patch.object(
+                award_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(award_loader, "apply_migrations") as apply_migrations,
+            patch.object(award_loader, "_run_create_award_batch") as run_create,
+        ):
+            parse_args.return_value = MagicMock(
+                load_award_id=None,
+                create_batch=10,
+                load_batch=None,
+                show_batch=None,
+                dry_run=False,
+                ecs=True,
+                migrate_only=False,
+            )
+            award_loader.main()
+
+        run_ecs_setup.assert_called_once()
+        run_create.assert_called_once()
+        # --ecs mode never applies migrations itself - only --migrate-only
+        # does, inside _run_ecs_setup (already proven separately by
+        # RunEcsSetupOrchestrationTest); every other --ecs invocation
+        # requires migrations to already be applied.
+        apply_migrations.assert_not_called()
+
+    def test_ecs_mode_short_circuits_main_when_migrate_only_completes(self) -> None:
+        with (
+            patch.object(award_loader, "parse_args") as parse_args,
+            patch.object(
+                award_loader, "_run_ecs_setup", return_value=True
+            ) as run_ecs_setup,
+            patch.object(award_loader, "create_postgres_engine") as create_engine,
+            patch.object(award_loader, "_run_create_award_batch") as run_create,
+        ):
+            parse_args.return_value = MagicMock(
+                load_award_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                dry_run=False,
+                ecs=True,
+                migrate_only=True,
+            )
+            award_loader.main()
+
+        run_ecs_setup.assert_called_once()
+        # main() must return immediately once _run_ecs_setup signals
+        # --migrate-only completed - never reach any dispatch branch or
+        # call create_postgres_engine() a second time.
+        create_engine.assert_not_called()
+        run_create.assert_not_called()
+
+    def test_ecs_mode_load_batch_never_applies_migrations(self) -> None:
+        with (
+            patch.object(award_loader, "parse_args") as parse_args,
+            patch.object(
+                award_loader, "_run_ecs_setup", return_value=False
+            ),
+            patch.object(
+                award_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(award_loader, "apply_migrations") as apply_migrations,
+            patch.object(award_loader, "_run_load_award_batch") as run_load_batch,
+        ):
+            parse_args.return_value = MagicMock(
+                load_award_id=None,
+                create_batch=None,
+                load_batch=5,
+                show_batch=None,
+                dry_run=True,
+                ecs=True,
+                migrate_only=False,
+            )
+            award_loader.main()
+
+        run_load_batch.assert_called_once()
+        self.assertEqual(run_load_batch.call_args.args[1], 5)
+        self.assertTrue(run_load_batch.call_args.kwargs["dry_run"])
+        apply_migrations.assert_not_called()
+
+    def test_ecs_mode_load_award_id_never_applies_migrations(self) -> None:
+        with (
+            patch.object(award_loader, "parse_args") as parse_args,
+            patch.object(
+                award_loader, "_run_ecs_setup", return_value=False
+            ),
+            patch.object(
+                award_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(award_loader, "apply_migrations") as apply_migrations,
+            patch.object(award_loader, "_run_load_award_id") as run_load_award_id,
+        ):
+            parse_args.return_value = MagicMock(
+                load_award_id=7,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                dry_run=False,
+                ecs=True,
+                migrate_only=False,
+            )
+            award_loader.main()
+
+        run_load_award_id.assert_called_once()
+        self.assertEqual(run_load_award_id.call_args.args[1], 7)
         apply_migrations.assert_not_called()
 
     def test_none_of_the_new_verbs_run_the_full_load(self) -> None:
@@ -7457,6 +8119,8 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 dry_run=False,
+                ecs=False,
+                migrate_only=False,
             )
             create_engine.return_value = MagicMock()
             with patch.object(award_loader, "apply_migrations"):

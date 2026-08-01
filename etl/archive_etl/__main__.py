@@ -34,13 +34,72 @@ DOMAIN_MODULES: dict[str, str] = {
 }
 
 # Domain-specific extra CLI flags forwarded verbatim to the underlying
-# loader, beyond the universal --limit every domain already gets. Only
-# award-attachment needs any of this today - --limit alone already implies
-# "no database write" for every other domain (see each domain's --limit
-# help text). `default=None` on a non-store_true entry means "don't
-# forward it at all unless explicitly given" - the underlying loader's own
+# loader, beyond the universal --limit every domain already gets.
+# --limit alone already implies "no database write" for every domain
+# that has nothing else listed here (see each domain's --limit help
+# text). `default=None` on a non-store_true entry means "don't forward
+# it at all unless explicitly given" - the underlying loader's own
 # default then applies.
 _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
+    "award": [
+        (
+            "--dry-run",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --dry-run.",
+            },
+        ),
+        (
+            "--load-award-id",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "AWARD_ID",
+                "help": "Forwarded to the underlying loader's --load-award-id.",
+            },
+        ),
+        (
+            "--create-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "N",
+                "help": "Forwarded to the underlying loader's --create-batch.",
+            },
+        ),
+        (
+            "--load-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --load-batch.",
+            },
+        ),
+        (
+            "--show-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --show-batch.",
+            },
+        ),
+        (
+            "--ecs",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --ecs.",
+            },
+        ),
+        (
+            "--migrate-only",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --migrate-only.",
+            },
+        ),
+    ],
     "award-attachment": [
         (
             "--dry-run",

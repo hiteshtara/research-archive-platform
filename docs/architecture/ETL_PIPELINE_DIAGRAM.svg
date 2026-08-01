@@ -1,0 +1,137 @@
+<svg viewBox="0 0 1180 700" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Research Archive Platform ETL pipeline (etl/)</title>
+<desc>Oracle (Kuali, via BU VPN) and an S3-based IRB Parquet export both feed a shared extract, validate, transform, load pipeline that writes into the PostgreSQL archive schema, with load_run/load_rejection audit rows and Flyway-named migrations applied by the ETL itself. A separate document/attachment archival track streams BLOBs from Oracle through a resumable batch framework into an S3 documents bucket, recording metadata rows back in Postgres. A unified CLI and per-domain scripts are the entry points; reconciliation and recovery scripts read the audit trail to find and rerun failed loads.</desc>
+<defs>
+<style>
+  svg { --bg:#ffffff; --panel:#f7f8fa; --border:#d7dce2; --borderStrong:#b7c0ca; --text:#1f2937; --textMut:#6b7280; --accent:#2563eb; --accentSoft:#e0e9fd; --accent2:#0f766e; --accent2Soft:#dcf3f0; --accent3:#7c3aed; --accent3Soft:#efe9fd; }
+  .title { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:19px; font-weight:700; }
+  .subtitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:12px; }
+  .grouplabel { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10.5px; font-weight:700; letter-spacing:.05em; }
+  .label { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:13px; font-weight:600; }
+  .sub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10px; }
+  .edge { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:9.5px; }
+  .box { fill:var(--panel); stroke:var(--borderStrong); stroke-width:1.4; }
+  .boxAccent { fill:var(--accentSoft); stroke:var(--accent); stroke-width:1.4; }
+  .boxAccent2 { fill:var(--accent2Soft); stroke:var(--accent2); stroke-width:1.4; }
+  .boxAccent3 { fill:var(--accent3Soft); stroke:var(--accent3); stroke-width:1.4; }
+  .flow { stroke:var(--accent); stroke-width:1.7; fill:none; }
+  .flowMut { stroke:var(--borderStrong); stroke-width:1.3; fill:none; }
+  .flowDash { stroke:var(--textMut); stroke-width:1.2; fill:none; stroke-dasharray:4 3; }
+</style>
+<marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+<marker id="arrowMut" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--textMut)"/></marker>
+</defs>
+
+<rect x="0" y="0" width="1180" height="700" fill="var(--bg)"/>
+<text x="590" y="27" text-anchor="middle" class="title">ETL Pipeline — Python (etl/)</text>
+<text x="590" y="45" text-anchor="middle" class="subtitle">archive_etl/* · one load_*.py per domain · idempotent, truncate-then-reload inside one transaction</text>
+
+<!-- Row 1: sources -->
+<rect x="140" y="66" width="250" height="58" rx="9" class="boxAccent"/>
+<text x="265" y="90" text-anchor="middle" class="label">Oracle (Kuali)</text>
+<text x="265" y="105" text-anchor="middle" class="sub">BU VPN · read-only · 5 domains</text>
+
+<rect x="430" y="66" width="250" height="58" rx="9" class="boxAccent"/>
+<text x="555" y="90" text-anchor="middle" class="label">S3: IRB Parquet export</text>
+<text x="555" y="105" text-anchor="middle" class="sub">manual Kuali Excel export</text>
+
+<!-- Row 2: pipeline stages -->
+<rect x="110" y="188" width="230" height="60" rx="9" class="boxAccent"/>
+<text x="225" y="212" text-anchor="middle" class="label">Extract</text>
+<text x="225" y="227" text-anchor="middle" class="sub">pipeline/sources.py</text>
+<text x="225" y="240" text-anchor="middle" class="sub">chunked, bind-var filtered</text>
+
+<rect x="380" y="188" width="230" height="60" rx="9" class="boxAccent"/>
+<text x="495" y="212" text-anchor="middle" class="label">Validate</text>
+<text x="495" y="227" text-anchor="middle" class="sub">pipeline/validation.py</text>
+<text x="495" y="240" text-anchor="middle" class="sub">cross-dataset referential checks</text>
+
+<rect x="650" y="188" width="230" height="60" rx="9" class="boxAccent"/>
+<text x="765" y="212" text-anchor="middle" class="label">Transform</text>
+<text x="765" y="227" text-anchor="middle" class="sub">per-domain prepare_*() / transform/irb.py</text>
+
+<rect x="920" y="188" width="230" height="60" rx="9" class="boxAccent"/>
+<text x="1035" y="212" text-anchor="middle" class="label">Load</text>
+<text x="1035" y="227" text-anchor="middle" class="sub">upload/postgres.py, bulk_copy.py</text>
+
+<path d="M265,124 L225,188" class="flow" marker-end="url(#arrowAccent)"/>
+<path d="M555,124 C470,150 320,168 225,188" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="410" y="160" text-anchor="middle" class="edge">Parquet read</text>
+<path d="M340,218 L380,218" class="flow" marker-end="url(#arrowAccent)"/>
+<path d="M610,218 L650,218" class="flow" marker-end="url(#arrowAccent)"/>
+<path d="M880,218 L920,218" class="flow" marker-end="url(#arrowAccent)"/>
+
+<!-- Row 3: sinks -->
+<rect x="110" y="306" width="280" height="60" rx="9" class="box"/>
+<text x="250" y="330" text-anchor="middle" class="label">PostgreSQL: archive schema</text>
+<text x="250" y="345" text-anchor="middle" class="sub">one instance, all domains</text>
+
+<rect x="440" y="306" width="280" height="60" rx="9" class="box"/>
+<text x="580" y="330" text-anchor="middle" class="label">load_run / load_rejection</text>
+<text x="580" y="345" text-anchor="middle" class="sub">audit trail, written before risky work</text>
+
+<rect x="770" y="306" width="280" height="60" rx="9" class="box"/>
+<text x="910" y="330" text-anchor="middle" class="label">Migrations</text>
+<text x="910" y="345" text-anchor="middle" class="sub">upload/migrations.py → schema_migration</text>
+
+<path d="M1000,248 C850,280 500,300 390,314" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="700" y="290" text-anchor="middle" class="edge">TRUNCATE + reload, 1 txn</text>
+<path d="M225,248 C300,280 460,296 500,306" class="flowDash" marker-end="url(#arrowMut)"/>
+<text x="340" y="290" text-anchor="middle" class="edge">creates load_run row first</text>
+<path d="M910,306 C1000,275 1060,255 1050,248" class="flowDash" marker-end="url(#arrowMut)"/>
+<text x="1010" y="280" text-anchor="middle" class="edge">applied before load</text>
+
+<!-- Attachments track -->
+<text x="112" y="400" class="grouplabel">DOCUMENT / ATTACHMENT ARCHIVAL — SEPARATE TRACK</text>
+
+<rect x="110" y="414" width="280" height="66" rx="9" class="boxAccent2"/>
+<text x="250" y="438" text-anchor="middle" class="label">Oracle BLOB reader</text>
+<text x="250" y="453" text-anchor="middle" class="sub">archive_attachments.py</text>
+<text x="250" y="465" text-anchor="middle" class="sub">load_award_attachments.py --ecs</text>
+
+<rect x="440" y="414" width="280" height="66" rx="9" class="boxAccent2"/>
+<text x="580" y="438" text-anchor="middle" class="label">ETL batch framework</text>
+<text x="580" y="453" text-anchor="middle" class="sub">etl_batch / etl_batch_item</text>
+<text x="580" y="465" text-anchor="middle" class="sub">deterministic, resumable</text>
+
+<rect x="770" y="414" width="280" height="66" rx="9" class="boxAccent2"/>
+<text x="910" y="438" text-anchor="middle" class="label">S3: documents bucket</text>
+<text x="910" y="453" text-anchor="middle" class="sub">award-files/by-file-id/*</text>
+
+<path d="M265,124 C240,220 250,330 250,414" class="flowDash" marker-end="url(#arrowMut)"/>
+<text x="200" y="230" text-anchor="middle" class="edge" transform="rotate(-90 200 230)">BLOB streaming</text>
+<path d="M390,447 L440,447" class="flow" marker-end="url(#arrowAccent)"/>
+<path d="M720,447 L770,447" class="flow" marker-end="url(#arrowAccent)"/>
+<path d="M280,414 C300,380 290,366 280,366" class="flowDash" marker-end="url(#arrowMut)"/>
+<text x="330" y="395" text-anchor="middle" class="edge">attachment_object / award_attachment rows</text>
+
+<!-- Entry points / tooling -->
+<rect x="110" y="530" width="460" height="66" rx="9" class="boxAccent3"/>
+<text x="340" y="556" text-anchor="middle" class="label">Entry points</text>
+<text x="340" y="572" text-anchor="middle" class="sub">python -m archive_etl &lt;domain&gt;  ·  load_*.py [--limit N]</text>
+<text x="340" y="585" text-anchor="middle" class="sub">also: run_export.py, archive_*_attachments.py</text>
+
+<rect x="630" y="530" width="460" height="66" rx="9" class="boxAccent3"/>
+<text x="860" y="556" text-anchor="middle" class="label">Reconciliation &amp; recovery</text>
+<text x="860" y="572" text-anchor="middle" class="sub">scripts/resume_failed_load.py</text>
+<text x="860" y="585" text-anchor="middle" class="sub">scripts/reconcile_load.py</text>
+
+<path d="M340,530 C280,450 240,320 225,248" class="flowDash" marker-end="url(#arrowMut)"/>
+<text x="270" y="500" text-anchor="middle" class="edge">invokes pipeline</text>
+<path d="M700,366 C780,440 820,490 830,530" class="flowDash" marker-end="url(#arrowMut)"/>
+<text x="780" y="470" text-anchor="middle" class="edge">reads load_run / rejection</text>
+<path d="M630,555 L570,555" class="flowMut" marker-end="url(#arrowMut)"/>
+<text x="600" y="547" text-anchor="middle" class="edge">rerun cmd</text>
+
+<!-- Legend -->
+<rect x="140" y="630" width="18" height="13" rx="3" class="boxAccent"/>
+<text x="164" y="641" class="sub">core Oracle/S3 → Postgres pipeline</text>
+<rect x="420" y="630" width="18" height="13" rx="3" class="boxAccent2"/>
+<text x="444" y="641" class="sub">attachment/document track</text>
+<rect x="660" y="630" width="18" height="13" rx="3" class="boxAccent3"/>
+<text x="684" y="641" class="sub">entry points &amp; tooling</text>
+<line x1="900" y1="637" x2="928" y2="637" class="flowDash"/>
+<text x="936" y="641" class="sub">supporting flow</text>
+
+<text x="590" y="672" text-anchor="middle" class="subtitle">Every active loader is idempotent (truncate-then-reload); recovery is fix-and-rerun, never a destructive rollback command.</text>
+</svg>

@@ -35,6 +35,8 @@ its design.
 
 ## Architecture
 
+![End-to-end process flow](docs/architecture/PROCESS_FLOW_DIAGRAM.svg)
+
 ```text
 Oracle (BU VPN-only, source of truth until retirement)
     │  Python ETL, run from a BU VPN-connected machine
@@ -121,6 +123,7 @@ Run the relevant suite before every commit; see
 
 | Document | Purpose |
 |---|---|
+| [`docs/architecture/END_TO_END_OVERVIEW.md`](docs/architecture/END_TO_END_OVERVIEW.md) | Single-page architecture tour with every diagram — start here |
 | [`CLAUDE.md`](CLAUDE.md) | Architecture, commands, and coding conventions for anyone (human or AI agent) working in this repo |
 | [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) | Long-term memory: status history, validated data-grain numbers, incident lessons |
 | [`docs/architecture/DATABASE_SCHEMA.md`](docs/architecture/DATABASE_SCHEMA.md) | Reference map of every table/view in `database/migrations/`, organized by domain |

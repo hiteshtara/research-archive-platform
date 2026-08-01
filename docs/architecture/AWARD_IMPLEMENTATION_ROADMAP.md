@@ -656,6 +656,84 @@ unevaluated — flagged in `AWARD_COMPLETENESS_REPORT.md`'s "Open item:
 BUDGET_RATE_AND_BASE" as the next piece of work; not scoped into this
 bundle.
 
+2026-08-01: Seventh same-day follow-up: fixed the last remaining piece
+of technical debt on the legacy full-load path -
+`clear_existing_award_data()` still only truncated the original four
+tables (`award_version`/`award_amount_info`/`award_person`/
+`award_funding_proposal`), which had started failing with a foreign-key
+violation now that dozens of later-bundle tables reference those four
+parents. Rewritten to clear all 48 Award-owned tables through V052 via
+one explicit, ordered, combined `TRUNCATE` (not `CASCADE`), built from a
+table list cross-verified against a real Postgres instance with every
+migration applied - confirmed no Proposal, Negotiation, Protocol,
+Subaward, or Attachment table has any FK into the set. Does not change
+`--load-award-id`/`--load-batch` behavior at all - neither path calls
+this function. See `AWARD_FULL_LOAD_RESET.md`.
+
+2026-08-01: Eighth same-day follow-up: completed the Award ECS runtime
+integration on top of the scaffolding from the sixth follow-up above
+(`scripts/run-award-loader.sh`, `etl/scripts/build_award_ecs_overrides.py`),
+reusing the proven Award Attachment ECS pattern without duplicating its
+secret-parsing logic:
+
+- `etl/archive_etl/__main__.py`'s `award` domain now forwards `--ecs`,
+  `--migrate-only`, `--load-award-id`, `--create-batch`, `--load-batch`,
+  `--show-batch`, `--dry-run` (previously only `--limit`) - the same
+  table-driven `_EXTRA_DOMAIN_ARGUMENTS` mechanism `award-attachment`
+  already used, extended rather than special-cased.
+- `load_awards_from_csv.py` gained a `--ecs`/`--migrate-only` mode
+  mirroring `load_award_attachments.py`'s own `_run_ecs_setup` exactly in
+  sequence (structured logging, AWS identity, Secrets Manager
+  credentials, PostgreSQL connectivity, then either migrate+validate+exit
+  for `--migrate-only`, the batch report+exit for `--show-batch`, or
+  Oracle connectivity before falling through to the existing, completely
+  unchanged `_run_load_award_id`/`_run_load_award_batch`/
+  `_run_create_award_batch` - so every existing guarantee (Oracle
+  1,000-value chunking, one Oracle read per source table per batch, one
+  PostgreSQL transaction per batch, idempotent UPSERTs) is preserved by
+  construction, not re-verified from scratch. Reuses
+  `archive_etl.config.ecs.configure_ecs_environment` unchanged (zero
+  secret-parsing duplication); added one new shared, generic
+  `validate_aws_identity()` to `archive_etl.config.startup_validation`
+  (`load_award_attachments.py` itself was not touched - it keeps its own
+  private, pre-existing equivalent) since no shared version existed
+  before this pass.
+- `etl/Dockerfile.loader` now also copies `load_awards_from_csv.py`,
+  `sql/extract/award/` (all 48 files), and reuses the already-copied
+  `database/migrations/` (through V052). `load_awards_from_csv.py` gained
+  its own `_resolve_project_root()` (mirroring
+  `load_award_attachments.py`'s dual local/container-layout detection
+  exactly, adapted to check for `sql/` instead of `oracle/` as the
+  container-mode marker) so its existing Oracle-extraction-SQL/migration
+  path constants resolve correctly in both layouts.
+- Verified for real, not just via mocked tests: built the actual Docker
+  image and ran `python -m archive_etl award --help` and
+  `python -m archive_etl award --ecs --migrate-only` inside a real
+  container (see `tests/test_loader_image_layout.py`'s new `award`
+  coverage) - confirmed the full file layout, module imports, and
+  fail-closed AWS-identity check all work end to end, not merely that
+  argparse accepts the flags.
+- `etl/scripts/build_award_ecs_overrides.py`/`scripts/run-award-loader.sh`
+  updated to match: `--ecs` is now unconditionally baked into the
+  generated command (matching `build_award_attachment_ecs_overrides.py`'s
+  own convention exactly - no `--ecs` CLI flag on the override-builder
+  itself), `--load-award-id` added end to end (builder, shell script
+  flag parsing, validation, Oracle-secret requirement), and the
+  previously-documented "KNOWN GAP" header in both files removed now
+  that the gap is closed.
+
+**Standing technical debt, explicitly not addressed by this pass**:
+`terraform/environments/prod` and `terraform/environments/test` still do
+not pass the ECS module's `documents_bucket_arn`/`documents_bucket_name`/
+`oracle_secret_arn` arguments to `module "loader_ecs"`, so
+`terraform validate` fails for both (confirmed pre-existing on
+`feature/award-attachment-s3-loader`'s own tip before it was ever merged
+into `main` - not something either this pass or the merge introduced).
+This does not block the dev Award ECS runtime documented above, but it
+must be resolved - by deliberate decision, not by copying dev's wiring
+blindly - before the Award (or Award Attachment) loader is promoted to
+`test` or `prod`.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

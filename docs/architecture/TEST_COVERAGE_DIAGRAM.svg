@@ -1,0 +1,120 @@
+<svg viewBox="0 0 1300 780" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Research Archive Platform test suite coverage map</title>
+<desc>58 test files across three layers: 28 pytest files in etl/tests grouped by attachments and batch framework, infra and ECS config, Award loader, Protocol loader, Proposal/Negotiation/Subaward loaders, and CLI/pipeline framework; 28 JUnit files in api/src/test grouped by AI feature, Negotiation, Proposal, Subaward, and Dashboard; and 2 node:test files in the UI covering AI presentation helpers only, with no component-render tests. A callout notes that Award (non-AI), IRB, and Protocol currently have no dedicated Java tests in source.</desc>
+<defs>
+<style>
+  svg { --bg:#ffffff; --panel:#f7f8fa; --border:#d7dce2; --borderStrong:#b7c0ca; --text:#1f2937; --textMut:#6b7280; --accent:#2563eb; --accentSoft:#e0e9fd; --accent2:#0f766e; --accent2Soft:#dcf3f0; --accent3:#7c3aed; --accent3Soft:#efe9fd; --warn:#b45309; --warnSoft:#fdf1de; }
+  .title { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:19px; font-weight:700; }
+  .subtitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:12px; }
+  .colhead { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:13px; font-weight:700; }
+  .label { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:12px; font-weight:600; }
+  .sub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:9.5px; }
+  .count { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:#ffffff; font-size:13px; font-weight:700; }
+  .box { fill:var(--panel); stroke:var(--borderStrong); stroke-width:1.3; }
+  .boxAccent { fill:var(--accentSoft); stroke:var(--accent); stroke-width:1.3; }
+  .boxAccent2 { fill:var(--accent2Soft); stroke:var(--accent2); stroke-width:1.3; }
+  .boxAccent3 { fill:var(--accent3Soft); stroke:var(--accent3); stroke-width:1.3; }
+  .badge { fill:var(--accent); }
+  .badge2 { fill:var(--accent2); }
+  .badge3 { fill:var(--accent3); }
+</style>
+</defs>
+
+<rect x="0" y="0" width="1300" height="780" fill="var(--bg)"/>
+<text x="650" y="27" text-anchor="middle" class="title">Test Suite Coverage Map</text>
+<text x="650" y="45" text-anchor="middle" class="subtitle">58 test files across three layers, grouped by domain / category — file counts as of the current source tree</text>
+
+<text x="230" y="80" text-anchor="middle" class="colhead">ETL — pytest (28 files)</text>
+<text x="630" y="80" text-anchor="middle" class="colhead">API — JUnit (28 files)</text>
+<text x="1030" y="80" text-anchor="middle" class="colhead">UI — node:test (2 files)</text>
+
+<!-- ETL column -->
+<rect x="60" y="96" width="340" height="60" rx="8" class="boxAccent"/>
+<circle cx="372" cy="110" r="14" class="badge"/><text x="372" y="115" text-anchor="middle" class="count">7</text>
+<text x="76" y="118" class="label">Attachments &amp; batch framework</text>
+<text x="76" y="133" class="sub">attachment_archival · batch_framework · oracle_blob_readers</text>
+<text x="76" y="146" class="sub">archived_attachment_destination · batch_workflow · image layout</text>
+
+<rect x="60" y="166" width="340" height="60" rx="8" class="boxAccent"/>
+<circle cx="372" cy="180" r="14" class="badge"/><text x="372" y="185" text-anchor="middle" class="count">7</text>
+<text x="76" y="188" class="label">Infra / config / ECS</text>
+<text x="76" y="203" class="sub">startup_validation · ecs_config · settings · migrations</text>
+<text x="76" y="216" class="sub">structured_logging · redaction · v036 migration</text>
+
+<rect x="60" y="236" width="340" height="52" rx="8" class="boxAccent"/>
+<circle cx="372" cy="250" r="14" class="badge"/><text x="372" y="255" text-anchor="middle" class="count">6</text>
+<text x="76" y="258" class="label">Award loader &amp; attachments</text>
+<text x="76" y="273" class="sub">incremental upsert · loader framework · ECS overrides · file-id</text>
+
+<rect x="60" y="298" width="340" height="52" rx="8" class="boxAccent"/>
+<circle cx="372" cy="312" r="14" class="badge"/><text x="372" y="317" text-anchor="middle" class="count">3</text>
+<text x="76" y="320" class="label">Protocol loader</text>
+<text x="76" y="335" class="sub">loader · loader_framework · parent_resolution</text>
+
+<rect x="60" y="360" width="340" height="52" rx="8" class="boxAccent"/>
+<circle cx="372" cy="374" r="14" class="badge"/><text x="372" y="379" text-anchor="middle" class="count">3</text>
+<text x="76" y="382" class="label">Proposal / Negotiation / Subaward loaders</text>
+<text x="76" y="397" class="sub">one loader_framework test per domain</text>
+
+<rect x="60" y="422" width="340" height="52" rx="8" class="boxAccent"/>
+<circle cx="372" cy="436" r="14" class="badge"/><text x="372" y="441" text-anchor="middle" class="count">2</text>
+<text x="76" y="444" class="label">CLI &amp; pipeline framework</text>
+<text x="76" y="459" class="sub">unified archive_etl CLI · generic extract/validate/load</text>
+
+<!-- API column -->
+<rect x="460" y="96" width="340" height="60" rx="8" class="boxAccent2"/>
+<circle cx="772" cy="110" r="14" class="badge2"/><text x="772" y="115" text-anchor="middle" class="count">18</text>
+<text x="476" y="118" class="label">AI feature (Award Summary / Questions)</text>
+<text x="476" y="133" class="sub">controllers · services · provider (stub/OpenAI) · router</text>
+<text x="476" y="146" class="sub">citation validator · redactor · feature flags</text>
+
+<rect x="460" y="166" width="340" height="52" rx="8" class="boxAccent2"/>
+<circle cx="772" cy="180" r="14" class="badge2"/><text x="772" y="185" text-anchor="middle" class="count">3</text>
+<text x="476" y="188" class="label">Negotiation</text>
+<text x="476" y="203" class="sub">controller · repository · service</text>
+
+<rect x="460" y="228" width="340" height="52" rx="8" class="boxAccent2"/>
+<circle cx="772" cy="242" r="14" class="badge2"/><text x="772" y="247" text-anchor="middle" class="count">3</text>
+<text x="476" y="250" class="label">Proposal</text>
+<text x="476" y="265" class="sub">controller · repository · service</text>
+
+<rect x="460" y="290" width="340" height="52" rx="8" class="boxAccent2"/>
+<circle cx="772" cy="304" r="14" class="badge2"/><text x="772" y="309" text-anchor="middle" class="count">3</text>
+<text x="476" y="312" class="label">Subaward</text>
+<text x="476" y="327" class="sub">controller · repository · service</text>
+
+<rect x="460" y="352" width="340" height="52" rx="8" class="boxAccent2"/>
+<circle cx="772" cy="366" r="14" class="badge2"/><text x="772" y="371" text-anchor="middle" class="count">1</text>
+<text x="476" y="374" class="label">Dashboard</text>
+<text x="476" y="389" class="sub">DashboardControllerTest</text>
+
+<!-- UI column -->
+<rect x="860" y="96" width="340" height="52" rx="8" class="boxAccent3"/>
+<circle cx="1172" cy="110" r="14" class="badge3"/><text x="1172" y="115" text-anchor="middle" class="count">2</text>
+<text x="876" y="118" class="label">AI presentation helpers</text>
+<text x="876" y="133" class="sub">award summary + award Q&amp;A formatting</text>
+
+<rect x="860" y="158" width="340" height="90" rx="8" class="box" stroke-dasharray="4 3"/>
+<text x="1030" y="180" text-anchor="middle" class="sub">No component-render tests exist —</text>
+<text x="1030" y="194" text-anchor="middle" class="sub">no @testing-library/react in this repo.</text>
+<text x="1030" y="208" text-anchor="middle" class="sub">These are plain node:test unit tests</text>
+<text x="1030" y="222" text-anchor="middle" class="sub">of presentation-helper functions only.</text>
+
+<!-- Gap callout -->
+<rect x="60" y="500" width="1180" height="70" rx="8" fill="var(--warnSoft)" stroke="var(--warn)" stroke-width="1.3" stroke-dasharray="5 3"/>
+<text x="650" y="524" text-anchor="middle" class="sub" font-weight="700">Coverage gap, verified against the current source tree:</text>
+<text x="650" y="540" text-anchor="middle" class="sub">Award (non-AI), IRB, and Protocol have no dedicated JUnit tests in api/src/test today. Stale references to a</text>
+<text x="650" y="554" text-anchor="middle" class="sub">ProtocolArchiveControllerTest/ServiceTest/RepositoryTest survive only in api/target/surefire-reports (build output, not source).</text>
+
+<!-- Legend / totals -->
+<rect x="330" y="600" width="16" height="12" rx="3" class="boxAccent"/>
+<text x="352" y="610" class="sub">ETL / pytest</text>
+<rect x="480" y="600" width="16" height="12" rx="3" class="boxAccent2"/>
+<text x="502" y="610" class="sub">API / JUnit</text>
+<rect x="620" y="600" width="16" height="12" rx="3" class="boxAccent3"/>
+<text x="642" y="610" class="sub">UI / node:test</text>
+<rect x="760" y="600" width="16" height="12" rx="3" fill="var(--warnSoft)" stroke="var(--warn)"/>
+<text x="782" y="610" class="sub">gap / no coverage</text>
+
+<text x="650" y="645" text-anchor="middle" class="subtitle">58 total: 28 pytest (etl/tests) + 28 JUnit (api/src/test) + 2 node:test (ui/src/features/ai) — run via `uv run pytest`, `mvn test`, `npm run test`</text>
+</svg>

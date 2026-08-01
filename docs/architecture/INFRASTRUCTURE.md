@@ -1,5 +1,7 @@
 # Infrastructure Reference (Terraform)
 
+![Infrastructure diagram](INFRASTRUCTURE_DIAGRAM.svg)
+
 A map of what each Terraform module actually provisions and how the pieces
 wire together. This is the architecture reference — for the *how to deploy*
 runbook (bootstrap, `init`/`plan`/`apply`, account safety, destroy
@@ -28,6 +30,11 @@ terraform/
 | `api_service` | The **API's** own ECS cluster, ALB + target group + HTTP/HTTPS listeners, security groups (ALB and API, plus an ingress rule opening the database to the API's SG), IAM execution/task roles (Secrets Manager, documents-bucket access), CloudWatch log group, and the ECS service + task definition |
 | `cognito` | User Pool, app client, and optionally a Hosted UI domain — only created when `manage_cognito = true` |
 | `amplify` | Amplify app, branch, and optional custom-domain association — only created when `manage_amplify = true` |
+
+See [ECS_FARGATE_DIAGRAM.svg](ECS_FARGATE_DIAGRAM.svg) for a focused
+side-by-side of these two Fargate workloads — cluster, launch model,
+execution vs. task role, and why their secrets-handling is deliberately
+different.
 
 Note the API and the ETL loader each get their **own ECS cluster** (`api_service.aws_ecs_cluster.api` vs `ecs.aws_ecs_cluster.this`) and their own ECR repo — they are not sub-services of one shared cluster.
 

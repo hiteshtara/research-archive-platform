@@ -21,8 +21,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from archive_etl.utils.redaction import redact_error_message
 
 EXPECTED_UPLOAD_STATUS_VALUES = frozenset(
     {"PENDING", "UPLOADING", "UPLOADED", "FAILED", "MISSING_SOURCE_CONTENT"}
@@ -35,6 +38,26 @@ class StartupValidationError(RuntimeError):
     """Raised when a startup validation check fails - the caller must
     abort immediately rather than proceed with a partially-verified
     environment."""
+
+
+def validate_aws_identity(sts_client: Any) -> dict[str, str]:
+    """Fail closed before any --ecs work if AWS credentials are missing
+    or invalid - never proceed against an unverified identity. Generic
+    across every --ecs loader (no Award/Award-Attachment-specific
+    content) - takes an already-constructed STS client rather than
+    calling boto3.client("sts") itself, so callers can supply a fake in
+    tests without patching boto3 globally."""
+    try:
+        identity = sts_client.get_caller_identity()
+    except (BotoCoreError, ClientError) as error:
+        raise StartupValidationError(
+            "AWS identity validation failed - refusing to proceed: "
+            f"{redact_error_message(str(error))}"
+        ) from error
+    return {
+        "account": str(identity.get("Account", "")),
+        "arn": str(identity.get("Arn", "")),
+    }
 
 
 def validate_postgres_reachable(engine: Engine) -> None:

@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Award Module — Redesign Concept (mapped to archive schema)</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --surface:#ffffff; --surface-2:#fafbfc;
+    --border:#e3e6eb; --border-strong:#c9ced7;
+    --text:#1a1d29; --text-secondary:#5b6070; --text-muted:#9aa0ac;
+    --accent:#a51c30; --accent-light:#fbe9eb; --accent-dark:#7d1524;
+    --success:#1a7f4e; --success-light:#e7f6ee;
+    --danger:#b3261e; --danger-light:#fdeceb;
+    --warn:#8a5a06; --warn-light:#fdf0da;
+    --radius:10px; --shadow:0 1px 2px rgba(20,20,30,0.05), 0 1px 8px rgba(20,20,30,0.04);
+    --shadow-hover:0 2px 4px rgba(20,20,30,0.06), 0 6px 20px rgba(20,20,30,0.08);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  #app{min-height:100vh;display:flex;flex-direction:column;}
+  a, button, input, .tree-node, .result-row, .list-item[style*="cursor"]{transition:background-color .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease, transform .12s ease;}
+  button:focus-visible, input:focus-visible, a:focus-visible, .tree-node:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  header{display:flex;align-items:center;gap:16px;padding:14px 28px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
+  .brand{font-weight:700;font-size:15px;color:var(--accent-dark);white-space:nowrap;letter-spacing:.2px;}
+  .header-search{flex:1;max-width:420px;position:relative;display:flex;align-items:center;gap:10px;}
+  .header-search .field{position:relative;flex:1;display:flex;align-items:center;}
+  .header-search input{width:100%;padding:8px 12px 8px 34px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface-2);}
+  .header-search input:focus{outline:none;border-color:var(--accent);background:var(--surface);}
+  .header-search svg{position:absolute;left:10px;width:15px;height:15px;color:var(--text-muted);}
+  .new-search-link{font-size:12px;color:var(--text-muted);background:none;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;padding:4px 2px;}
+  .new-search-link:hover{color:var(--accent-dark);}
+  .header-spacer{flex:1;}
+  .breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap;}
+  .breadcrumb button{background:none;border:none;color:var(--text-secondary);font-size:13px;cursor:pointer;padding:4px 6px;border-radius:6px;font-family:inherit;}
+  .breadcrumb button:hover{background:var(--surface-2);color:var(--text);}
+  .breadcrumb .current{color:var(--text);font-weight:600;}
+  .breadcrumb .sep{color:var(--text-muted);}
+
+  main{flex:1;padding:32px;display:flex;justify-content:center;}
+  .screen{width:100%;max-width:1140px;}
+
+  .search-hero{max-width:640px;margin:60px auto;text-align:center;}
+  .search-hero h1{font-size:26px;font-weight:700;margin:0 0 8px;}
+  .search-hero p{color:var(--text-secondary);font-size:14px;margin:0 0 32px;}
+  .search-box{position:relative;}
+  .search-box svg{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--text-muted);}
+  .search-box input{width:100%;padding:14px 16px 14px 46px;font-size:16px;border:1.5px solid var(--border-strong);border-radius:10px;background:var(--surface);}
+  .search-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+  .search-hints{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px;}
+  .chip{background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;padding:5px 11px;border-radius:100px;cursor:pointer;font-family:inherit;}
+  .chip:hover{border-color:var(--accent);color:var(--accent-dark);}
+  .search-note{margin-top:22px;font-size:12px;color:var(--text-muted);}
+
+  .results{max-width:680px;margin:0 auto;}
+  .results-count{font-size:12px;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;}
+  .result-row{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;cursor:pointer;transition:border-color .12s;}
+  .result-row:hover{border-color:var(--accent);box-shadow:var(--shadow);}
+  .result-id{font-weight:600;font-size:14px;}
+  .result-meta{font-size:12px;color:var(--text-secondary);margin-top:2px;}
+  .result-badge{font-size:11px;padding:3px 9px;border-radius:100px;background:var(--accent-light);color:var(--accent-dark);font-weight:600;}
+
+  .section-title{font-size:13px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;margin:0 0 4px;}
+  .source-tag{font-size:11px;color:var(--text-muted);font-family:"SF Mono",Consolas,monospace;margin-bottom:18px;}
+
+  .tree-wrap{display:flex;justify-content:center;padding:20px 0 40px;}
+  .tree-col{display:flex;flex-direction:column;align-items:center;}
+  .tree-node{width:210px;background:var(--surface);border:1.5px solid var(--border-strong);border-radius:var(--radius);padding:14px 16px;cursor:pointer;box-shadow:var(--shadow);position:relative;}
+  .tree-node:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-hover);}
+  .tree-node.root{border-color:var(--accent);}
+  .tree-node .tid{font-weight:700;font-size:14px;}
+  .tree-node .ttype{font-size:11px;color:var(--accent-dark);background:var(--accent-light);display:inline-block;padding:2px 8px;border-radius:100px;margin:6px 0;}
+  .tree-node .tamt{font-size:15px;font-weight:700;color:var(--text);}
+  .tree-node .tpi{font-size:11px;color:var(--text-muted);margin-top:4px;}
+  .stub-down{width:1px;height:32px;background:var(--border-strong);}
+  .children-row{display:inline-flex;gap:44px;position:relative;padding-top:32px;}
+  .children-row::before{content:'';position:absolute;top:0;left:105px;right:105px;height:1px;background:var(--border-strong);}
+  .child-col{display:flex;flex-direction:column;align-items:center;position:relative;}
+  .child-col::before{content:'';position:absolute;top:-32px;left:50%;width:1px;height:32px;background:var(--border-strong);}
+
+  .compare-panel{max-width:860px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 22px;}
+  .compare-panel h3{font-size:13px;margin:0 0 12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;}
+  .compare-check{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;}
+  .compare-check input{width:15px;height:15px;}
+  .compare-check label{cursor:pointer;}
+  table.compare-table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px;}
+  table.compare-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);padding:8px 10px;border-bottom:1px solid var(--border);}
+  table.compare-table td{padding:10px;border-bottom:1px solid var(--border);}
+  table.compare-table tr:last-child td{border-bottom:none;}
+
+  .dash{display:flex;gap:24px;align-items:flex-start;}
+  .dash-nav{width:200px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:8px;position:sticky;top:76px;}
+  .dash-nav button{display:block;width:100%;text-align:left;background:none;border:none;padding:9px 12px;border-radius:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;font-family:inherit;margin-bottom:2px;}
+  .dash-nav button:hover{background:var(--surface-2);color:var(--text);}
+  .dash-nav button.active{background:var(--accent-light);color:var(--accent-dark);font-weight:600;}
+  .dash-content{flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px 30px;min-height:440px;}
+  .dash-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;padding-bottom:18px;border-bottom:1px solid var(--border);}
+  .dash-header .aid{font-size:20px;font-weight:700;}
+  .dash-header .atitle{font-size:13px;color:var(--text-secondary);margin-top:4px;max-width:640px;}
+  .dash-header .ameta{font-size:11px;color:var(--text-muted);margin-top:6px;font-family:"SF Mono",Consolas,monospace;}
+  .status-pill{font-size:11px;font-weight:600;padding:4px 11px;border-radius:100px;background:var(--success-light);color:var(--success);white-space:nowrap;}
+  .status-pill.closed{background:var(--surface-2);color:var(--text-muted);}
+  .status-pill.pending{background:var(--warn-light);color:var(--warn);}
+
+  .summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  .stat-card{background:var(--surface-2);border-radius:8px;padding:14px 16px;}
+  .stat-card .label{font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;font-family:"SF Mono",Consolas,monospace;}
+  .stat-card .val{font-size:16px;font-weight:700;margin-top:4px;}
+
+  .list-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  .list-item:last-child{border-bottom:none;}
+  .list-item .li-title{font-weight:600;}
+  .list-item .li-sub{color:var(--text-muted);font-size:12px;margin-top:2px;}
+  .row-tag{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent-dark);background:var(--accent-light);padding:2px 7px;border-radius:100px;}
+
+  .subhead{font-size:12px;font-weight:700;color:var(--text);margin:22px 0 8px;}
+  .subhead:first-child{margin-top:0;}
+
+  table.data-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px;}
+  table.data-table th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);padding:7px 8px;border-bottom:1px solid var(--border);font-family:"SF Mono",Consolas,monospace;}
+  table.data-table td{padding:9px 8px;border-bottom:1px solid var(--border);}
+  table.data-table tr:last-child td{border-bottom:none;}
+
+  .tm-flow{display:flex;flex-direction:column;gap:0;max-width:520px;}
+  .tm-step{display:flex;align-items:center;gap:14px;padding:12px 0;}
+  .tm-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+  .tm-line{width:1px;height:28px;background:var(--border-strong);margin-left:4.5px;}
+  .tm-amt{font-weight:700;font-size:14px;}
+  .tm-label{font-size:12px;color:var(--text-secondary);}
+  .tm-delta{margin-left:auto;font-size:12px;font-weight:600;color:var(--success);}
+
+  .sap-item{border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:10px;}
+  .sap-top{display:flex;justify-content:space-between;align-items:center;}
+  .sap-status{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;}
+  .sap-status.ok{color:var(--success);}
+  .sap-status.fail{color:var(--danger);}
+  .sap-date{font-size:12px;color:var(--text-muted);}
+  .sap-links{display:flex;gap:14px;margin-top:10px;}
+  .sap-links a{font-size:12px;color:var(--accent-dark);cursor:pointer;text-decoration:none;font-weight:600;}
+  .sap-links a:hover{text-decoration:underline;}
+  .sap-xml{margin-top:10px;background:#1a1d29;color:#c9e6ff;font-family:"SF Mono",Consolas,monospace;font-size:11px;padding:12px 14px;border-radius:8px;white-space:pre-wrap;line-height:1.6;}
+
+  .empty-note{color:var(--text-muted);font-size:13px;padding:16px 0;}
+
+  .chip-row{display:flex;flex-wrap:wrap;gap:6px;}
+  .static-chip{background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;padding:4px 10px;border-radius:100px;}
+
+  footer{padding:14px 28px;text-align:center;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/*
+  Mock data shaped to match the real archive schema documented in
+  docs/architecture/DATABASE_SCHEMA.md, so this concept maps 1:1 onto
+  actual API responses later. Covers every archive.award_* child table
+  listed in DATABASE_SCHEMA.md's Award domain table, organized under
+  10 dashboard sections:
+    Summary      — award_version, award_amount_info, award_extension,
+                   award_cgb, award_custom_data
+    Hierarchy    — award_hierarchy (+ Quick Comparison)
+    People       — award_person, award_person_unit, award_person_credit_split,
+                   award_person_unit_credit_split, award_sponsor_contact,
+                   award_unit_contact
+    Budget       — award_budget, award_budget_period, award_budget_line_item,
+                   award_budget_line_item_calculated_amount (rolled into totals),
+                   award_budget_person, award_budget_personnel_detail,
+                   award_budget_personnel_calculated_amount,
+                   award_budget_period_summary_calculated_amount (rolled into
+                   totals), award_budget_limit
+    Time & money — time_and_money_document, award_amount_transaction,
+                   award_funding_proposal, award_direct_fanda_distribution
+    SAP history  — award_transmission, award_transmission_child
+    Comments     — award_comment, award_notepad
+    Terms        — award_sponsor_term, award_report_term,
+                   award_report_term_recipient (rolled into report terms),
+                   award_transferring_sponsor, award_cost_share,
+                   award_closeout, award_payment_schedule,
+                   award_approved_subaward
+    Compliance   — award_cfda, award_fanda_rate, award_science_keyword,
+                   award_special_review, award_special_review_exemption,
+                   award_approved_equipment, award_approved_foreign_travel,
+                   award_subcontracting_budgeted_goals
+    Attachments  — award_attachment, attachment_object
+  Values are invented for this demo, not real BU data. Empty states are
+  intentional where a table legitimately has no rows for a given award —
+  not every award has an extension, closeout, or foreign travel record.
+*/
+
+const AWARDS = {
+  "105698-00001": {
+    award_id:1001, award_number:"105698", sequence_number:1, award_type:"Parent",
+    title:"Longitudinal Study of Adaptive Behavior in Autism Spectrum Disorder",
+    sponsor_code:"NIH", sponsor_name:"National Institutes of Health",
+    prime_sponsor_code:null, prime_sponsor_name:null,
+    lead_unit_number:"3000200", lead_unit_name:"Sargent College — Occupational Therapy",
+    proposal_number:"87421", account_number:"9500239974", sponsor_award_number:"5R01HD074563-02",
+    transaction_type:"Award — New", modification_number:"0",
+    award_effective_date:"2011-09-01", begin_date:"2011-09-01", closeout_date:null,
+    status_code:"A", status_description:"Active", is_current_version:true,
+    total_obligated:699246, anticipated_total:899246,
+    current_fund_effective_date:"2011-09-01", final_expiration_date:"2015-08-31",
+    parent:null, children:["105698-00002","105698-00003"]
+  },
+  "105698-00002": {
+    award_id:1002, award_number:"105698", sequence_number:2, award_type:"Increment",
+    title:"Longitudinal Study of Adaptive Behavior — Year 2 Increment",
+    sponsor_code:"NIH", sponsor_name:"National Institutes of Health",
+    prime_sponsor_code:null, prime_sponsor_name:null,
+    lead_unit_number:"3000200", lead_unit_name:"Sargent College — Occupational Therapy",
+    proposal_number:"87421", account_number:"9500239974", sponsor_award_number:"5R01HD074563-03",
+    transaction_type:"Modification — Increment", modification_number:"1",
+    award_effective_date:"2012-09-01", begin_date:"2012-09-01", closeout_date:null,
+    status_code:"A", status_description:"Active", is_current_version:true,
+    total_obligated:200000, anticipated_total:200000,
+    current_fund_effective_date:"2012-09-01", final_expiration_date:"2015-08-31",
+    parent:"105698-00001", children:["105698-00007"]
+  },
+  "105698-00003": {
+    award_id:1003, award_number:"105698", sequence_number:3, award_type:"Supplement",
+    title:"Diversity Supplement — Longitudinal Study of Adaptive Behavior",
+    sponsor_code:"NIH", sponsor_name:"National Institutes of Health",
+    prime_sponsor_code:null, prime_sponsor_name:null,
+    lead_unit_number:"3000200", lead_unit_name:"Sargent College — Occupational Therapy",
+    proposal_number:"87421", account_number:"9500239974", sponsor_award_number:"5R01HD074563-02-S1",
+    transaction_type:"Modification — Supplement", modification_number:"2",
+    award_effective_date:"2012-11-15", begin_date:"2012-11-15", closeout_date:"2013-08-31",
+    status_code:"C", status_description:"Closed", is_current_version:true,
+    total_obligated:125000, anticipated_total:125000,
+    current_fund_effective_date:"2012-11-15", final_expiration_date:"2013-08-31",
+    parent:"105698-00001", children:[]
+  },
+  "105698-00007": {
+    award_id:1007, award_number:"105698", sequence_number:7, award_type:"Increment",
+    title:"Longitudinal Study of Adaptive Behavior — Year 3 Increment",
+    sponsor_code:"NIH", sponsor_name:"National Institutes of Health",
+    prime_sponsor_code:null, prime_sponsor_name:null,
+    lead_unit_number:"3000200", lead_unit_name:"Sargent College — Occupational Therapy",
+    proposal_number:"87421", account_number:"9500239974", sponsor_award_number:"5R01HD074563-04",
+    transaction_type:"Modification — Increment", modification_number:"3",
+    award_effective_date:"2013-09-01", begin_date:"2013-09-01", closeout_date:null,
+    status_code:"A", status_description:"Active", is_current_version:true,
+    total_obligated:75000, anticipated_total:78000,
+    current_fund_effective_date:"2013-09-01", final_expiration_date:"2015-08-31",
+    parent:"105698-00002", children:["105698-00012"]
+  },
+  "105698-00012": {
+    award_id:1012, award_number:"105698", sequence_number:12, award_type:"Increment",
+    title:"Longitudinal Study of Adaptive Behavior — Year 4 Increment",
+    sponsor_code:"NIH", sponsor_name:"National Institutes of Health",
+    prime_sponsor_code:null, prime_sponsor_name:null,
+    lead_unit_number:"3000200", lead_unit_name:"Sargent College — Occupational Therapy",
+    proposal_number:"87421", account_number:"9500239974", sponsor_award_number:"5R01HD074563-05",
+    transaction_type:"Modification — Increment", modification_number:"4",
+    award_effective_date:"2014-09-01", begin_date:"2014-09-01", closeout_date:null,
+    status_code:"P", status_description:"Pending", is_current_version:true,
+    total_obligated:78000, anticipated_total:78000,
+    current_fund_effective_date:"2014-09-01", final_expiration_date:"2015-08-31",
+    parent:"105698-00007", children:[]
+  }
+};
+
+const PEOPLE = {
+  "105698-00001": [
+    {full_name:"Gael Orsmond", role_code:"PI", role:"Principal investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:100}
+  ],
+  "105698-00002": [
+    {full_name:"Gael Orsmond", role_code:"PI", role:"Principal investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:80},
+    {full_name:"Wendy Coster", role_code:"COI", role:"Co-investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:20}
+  ],
+  "105698-00003": [
+    {full_name:"Gael Orsmond", role_code:"PI", role:"Principal investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:100}
+  ],
+  "105698-00007": [
+    {full_name:"Gael Orsmond", role_code:"PI", role:"Principal investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:75},
+    {full_name:"Wendy Coster", role_code:"COI", role:"Co-investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:25}
+  ],
+  "105698-00012": [
+    {full_name:"Gael Orsmond", role_code:"PI", role:"Principal investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:75},
+    {full_name:"Wendy Coster", role_code:"COI", role:"Co-investigator", unit_name:"Sargent College — Occupational Therapy", credit_split:25}
+  ]
+};
+
+const BUDGET_PERIODS = {
+  "105698-00001": [{period_number:1, start:"2011-09-01", end:"2012-08-31", direct:503457, indirect:195789, status:"Final"}],
+  "105698-00002": [{period_number:2, start:"2012-09-01", end:"2013-08-31", direct:144000, indirect:56000, status:"Final"}],
+  "105698-00003": [{period_number:1, start:"2012-11-15", end:"2013-08-31", direct:92000, indirect:33000, status:"Final"}],
+  "105698-00007": [{period_number:3, start:"2013-09-01", end:"2014-08-31", direct:54000, indirect:21000, status:"To be posted"}],
+  "105698-00012": [{period_number:4, start:"2014-09-01", end:"2015-08-31", direct:56000, indirect:22000, status:"Pending"}]
+};
+
+// archive.award_budget_line_item — keyed by period_number within an award id
+const BUDGET_LINE_ITEMS = {
+  "105698-00001": {1: [
+    {line_item_number:1, category:"Personnel — PI salary", amount:112000},
+    {line_item_number:2, category:"Personnel — Research staff", amount:158457},
+    {line_item_number:3, category:"Fringe benefits", amount:83000},
+    {line_item_number:4, category:"Supplies", amount:41000},
+    {line_item_number:5, category:"Travel", amount:19000},
+    {line_item_number:6, category:"Participant costs", amount:90000}
+  ]},
+  "105698-00007": {3: [
+    {line_item_number:1, category:"Personnel — PI salary", amount:31000},
+    {line_item_number:2, category:"Personnel — Research staff", amount:14000},
+    {line_item_number:3, category:"Fringe benefits", amount:9000}
+  ]}
+};
+
+const TRANSACTIONS = {
+  "105698-00001": [{date:"2011-09-01", type:"AWARD_NEW", amount:699246}],
+  "105698-00002": [{date:"2012-09-01", type:"AWARD_MOD_INCREMENT", amount:200000}],
+  "105698-00003": [{date:"2012-11-15", type:"AWARD_MOD_SUPPLEMENT", amount:125000}],
+  "105698-00007": [{date:"2013-09-01", type:"AWARD_MOD_INCREMENT", amount:75000}],
+  "105698-00012": [{date:"2014-09-01", type:"AWARD_MOD_INCREMENT", amount:78000}]
+};
+
+// archive.award_transferring_sponsor — populated only when the award changed sponsor/institution hands
+const TRANSFERRING_SPONSOR = {
+  "105698-00003": [{from_institution:"University of Washington", transfer_date:"2012-11-01", remaining_balance:18500, reason:"PI relocated institutions mid-project period"}]
+};
+
+// archive.award_cost_share — committed vs. actual, per unit
+const COST_SHARE = {
+  "105698-00001": [{cost_share_type:"Mandatory", unit_name:"Sargent College — Occupational Therapy", committed:69925, actual:69925}],
+  "105698-00002": [{cost_share_type:"Voluntary committed", unit_name:"Sargent College — Occupational Therapy", committed:20000, actual:17400}]
+};
+
+// archive.award_extension — 1:1 with award_id, only present if a no-cost extension was granted
+const EXTENSION = {
+  "105698-00007": {extension_type:"No-cost extension", extended_end_date:"2015-08-31", no_cost_extension_number:1, requested_by:"jsmith", approved_date:"2014-07-22"}
+};
+
+// archive.award_cgb — 1:1 with award_id
+const CGB = {
+  "105698-00001": {cgb_indicator:true, cgb_date:"2011-09-01", cgb_reference_number:"CGB-2011-0847"}
+};
+
+// archive.award_custom_data — free-form institutional key/value fields captured alongside the award
+const CUSTOM_DATA = {
+  "105698-00001": [
+    {field_name:"Data Management Plan on file", field_value:"Yes"},
+    {field_name:"Export Control Review", field_value:"Not required"}
+  ]
+};
+
+// archive.award_funding_proposal — links an award back to the Proposal that funded it
+const FUNDING_PROPOSAL = {
+  "105698-00001": {proposal_number:"87421", funding_amount:699246},
+  "105698-00002": {proposal_number:"87421", funding_amount:200000},
+  "105698-00003": {proposal_number:"87421", funding_amount:125000},
+  "105698-00007": {proposal_number:"87421", funding_amount:75000},
+  "105698-00012": {proposal_number:"87421", funding_amount:78000}
+};
+
+// archive.award_direct_fanda_distribution — how F&A recovery is split across accounts/funds
+const FANDA_DISTRIBUTION = {
+  "105698-00001": [{fund_code:"GF001", distribution_percent:100, amount:195789}]
+};
+
+// archive.award_person_unit_credit_split — same person's effort credit split across multiple units
+const PERSON_UNIT_CREDIT_SPLIT = {
+  "105698-00002": [
+    {full_name:"Wendy Coster", unit_name:"Sargent College — Occupational Therapy", unit_credit_percent:70},
+    {full_name:"Wendy Coster", unit_name:"CGS — Rehabilitation Sciences", unit_credit_percent:30}
+  ]
+};
+
+// archive.award_sponsor_contact — sponsor-side program/grants contacts
+const SPONSOR_CONTACT = {
+  "105698-00001": [{contact_name:"Dr. Linda Park", contact_type:"Program Officer", phone:"301-555-0142", email:"lpark@nih.gov"}]
+};
+
+// archive.award_unit_contact — BU unit-side administrative contacts
+const UNIT_CONTACT = {
+  "105698-00001": [{contact_name:"Maria Gutierrez", contact_type:"Grants Administrator", unit_name:"Sargent College — Occupational Therapy", phone:"617-353-0142"}]
+};
+
+// archive.award_closeout — 1:1 closeout status per award
+const CLOSEOUT = {
+  "105698-00003": {closeout_status:"Complete", final_report_received:true, final_invoice_received:true, closeout_date:"2013-11-15"}
+};
+
+// archive.award_payment_schedule
+const PAYMENT_SCHEDULE = {
+  "105698-00001": [
+    {payment_number:1, due_date:"2011-10-01", amount:174811, status:"Paid"},
+    {payment_number:2, due_date:"2012-01-01", amount:174812, status:"Paid"},
+    {payment_number:3, due_date:"2012-04-01", amount:174812, status:"Paid"},
+    {payment_number:4, due_date:"2012-07-01", amount:174811, status:"Paid"}
+  ]
+};
+
+// archive.award_approved_subaward — subawards pre-approved at the award level (distinct from the Subaward domain's own records)
+const APPROVED_SUBAWARD = {
+  "105698-00001": [{subrecipient_name:"University of Washington", approved_amount:85000}]
+};
+
+// archive.award_notepad — free-text internal notes, distinct from award_comment
+const NOTEPAD = {
+  "105698-00001": [{entered_by:"jsmith", entry_date:"2011-09-10", text:"Subaward agreement with UW fully executed."}]
+};
+
+// archive.award_budget_personnel_detail + award_budget_personnel_calculated_amount + award_budget_person
+const BUDGET_PERSONNEL = {
+  "105698-00001": {1: [
+    {person_name:"Gael Orsmond", role:"PI", effort_percent:20, salary_requested:112000, calculated_fringe:29120, calculated_total:141120},
+    {person_name:"Wendy Coster", role:"Co-I", effort_percent:10, salary_requested:48000, calculated_fringe:12480, calculated_total:60480}
+  ]}
+};
+
+// archive.award_budget_limit
+const BUDGET_LIMIT = {
+  "105698-00001": [{limit_type:"Sponsor total-costs ceiling", limit_amount:900000}]
+};
+
+// archive.award_cfda — Catalog of Federal Domestic Assistance
+const CFDA = {
+  "105698-00001": [{cfda_number:"93.865", program_title:"Child Health and Human Development Extramural Research"}]
+};
+
+// archive.award_fanda_rate
+const FANDA_RATE = {
+  "105698-00001": [{rate_type:"Research", rate_percent:64.5, rate_basis:"MTDC", fiscal_year:2011, off_campus:false}]
+};
+
+// archive.award_science_keyword
+const SCIENCE_KEYWORD = {
+  "105698-00001": ["Autism spectrum disorder", "Adaptive behavior", "Longitudinal study", "Occupational therapy"]
+};
+
+// archive.award_special_review
+const SPECIAL_REVIEW = {
+  "105698-00001": [{review_type:"IRB", protocol_number:"H-31029", approval_date:"2011-08-15", expiration_date:"2012-08-14"}]
+};
+
+// archive.award_special_review_exemption
+const SPECIAL_REVIEW_EXEMPTION = {};
+
+// archive.award_approved_equipment
+const APPROVED_EQUIPMENT = {
+  "105698-00001": [{equipment_description:"Eye-tracking system", amount:24500}]
+};
+
+// archive.award_approved_foreign_travel
+const APPROVED_FOREIGN_TRAVEL = {};
+
+// archive.award_subcontracting_budgeted_goals
+const SUBCONTRACTING_GOALS = {
+  "105698-00001": [{goal_type:"Small business", percent:5}, {goal_type:"Minority-owned business", percent:3}]
+};
+
+const SAP_HISTORY = {
+  "105698-00001": [
+    {transmission_id:5001, success_indicator:true, transmission_date:"2011-11-07", initiator_id:"jsmith",
+     sent:"<ZGMKCRMINTERFACE>\n  <GRANTNBR>105698</GRANTNBR>\n  <SPONSOR>NIH</SPONSOR>\n  <GRANTTOTAL>699246.00</GRANTTOTAL>\n</ZGMKCRMINTERFACE>",
+     returned:"<RETURN>\n  <TYPE>S</TYPE>\n  <MESSAGE>Grant posted successfully</MESSAGE>\n</RETURN>",
+     children:[{child_document_number:"105698-00001", overhead_key:"MTDC", base_code:"MTDC01", off_campus:false}]}
+  ],
+  "105698-00002": [
+    {transmission_id:5002, success_indicator:true, transmission_date:"2012-02-14", initiator_id:"jsmith",
+     sent:"<ZGMKCRMINTERFACE>\n  <GRANTNBR>105698</GRANTNBR>\n  <SPPROGRAMNUMBER>00002</SPPROGRAMNUMBER>\n  <BUDGETTDC>150000.00</BUDGETTDC>\n</ZGMKCRMINTERFACE>",
+     returned:"<RETURN>\n  <TYPE>S</TYPE>\n  <MESSAGE>Sponsored program updated</MESSAGE>\n</RETURN>",
+     children:[{child_document_number:"105698-00002", overhead_key:"MTDC", base_code:"MTDC01", off_campus:false}]},
+    {transmission_id:5003, success_indicator:false, transmission_date:"2012-09-03", initiator_id:"rwhite",
+     sent:"<ZGMKCRMINTERFACE>\n  <GRANTNBR>105698</GRANTNBR>\n  <SPPROGRAMNUMBER>00002</SPPROGRAMNUMBER>\n  <BUDGETTDC>200000.00</BUDGETTDC>\n</ZGMKCRMINTERFACE>",
+     returned:"<RETURN>\n  <TYPE>E</TYPE>\n  <MESSAGE>ORA-01017: business area BUENG locked</MESSAGE>\n</RETURN>",
+     children:[{child_document_number:"105698-00002", overhead_key:"MTDC", base_code:"MTDC01", off_campus:false}]}
+  ]
+};
+
+const COMMENTS = {
+  "105698-00001": [{entered_by:"jsmith", entry_date:"2011-09-05", comment_type:"General", text:"Award fully executed, no special conditions."}],
+  "105698-00002": [
+    {entered_by:"jsmith", entry_date:"2012-01-15", comment_type:"General", text:"Increment approved pending IRB renewal."},
+    {entered_by:"rwhite", entry_date:"2012-09-03", comment_type:"SAP", text:"Flagged for SAP retransmission after business-area lock cleared."}
+  ]
+};
+
+const SPONSOR_TERMS = {
+  "105698-00001": [{term_type:"Cost sharing", description:"None required."}, {term_type:"Prior approval", description:"Change of PI requires sponsor prior approval."}]
+};
+const REPORT_TERMS = {
+  "105698-00001": [{frequency:"Annual", report_code:"RPPR", recipients:["Program Officer — NIH"]}],
+  "105698-00002": [{frequency:"Annual", report_code:"RPPR", recipients:["Program Officer — NIH"]}]
+};
+
+const ATTACHMENTS = {
+  "105698-00001": [
+    {file_name:"Notice_of_Award.pdf", content_type:"application/pdf", type_code:"NOA", upload_status:"UPLOADED"},
+    {file_name:"Budget_Justification.pdf", content_type:"application/pdf", type_code:"BUDGET", upload_status:"UPLOADED"}
+  ],
+  "105698-00003": [
+    {file_name:"Diversity_Supplement_Request.pdf", content_type:"application/pdf", type_code:"OTHER", upload_status:"UPLOADED"}
+  ]
+};
+
+let state = { view:"search", currentId:null, breadcrumb:[], activeSection:"summary", compareSelection:new Set(), xmlOpen:{} };
+
+function fmt(n){ return "$" + n.toLocaleString("en-US"); }
+function pct(n){ return n + "%"; }
+
+function findRootId(id){
+  let curId = id;
+  while(AWARDS[curId].parent){ curId = AWARDS[curId].parent; }
+  return curId;
+}
+
+function searchIndex(q){
+  q = q.trim().toLowerCase().replace(/\*/g,"");
+  if(!q) return [];
+  const hitIds = new Set();
+  Object.keys(AWARDS).forEach(id=>{
+    const a = AWARDS[id];
+    const peopleNames = (PEOPLE[id]||[]).map(p=>p.full_name).join(" ");
+    const hay = [id, a.award_number, a.sponsor_name, a.sponsor_code, a.account_number, a.title, peopleNames]
+      .join(" ").toLowerCase();
+    if(hay.includes(q)) hitIds.add(findRootId(id));
+  });
+  return [...hitIds];
+}
+
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <header>
+      <div class="brand">Research Archive — Award</div>
+      ${state.view !== "search" ? `
+        <div class="header-search">
+          <div class="field">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="header-search-input" placeholder="Search award, PI, sponsor..." onkeydown="if(event.key==='Enter') doSearch(this.value)"/>
+          </div>
+          <button class="new-search-link" onclick="goSearch()">New search</button>
+        </div>` : ""}
+      <div class="header-spacer"></div>
+      ${state.breadcrumb.length ? renderBreadcrumb() : ""}
+    </header>
+    <main><div class="screen">${renderView()}</div></main>
+    <footer>Concept redesign of the Kuali Award Hierarchy, field-mapped to archive.award_* — mock data, not connected to the live archive</footer>
+  `;
+}
+
+function renderBreadcrumb(){
+  return `<div class="breadcrumb">` + state.breadcrumb.map((id,i)=>{
+    const isLast = i === state.breadcrumb.length - 1;
+    if(isLast) return `<span class="current">${id}</span>`;
+    return `<button onclick="jumpBreadcrumb(${i})">${id}</button><span class="sep">&rarr;</span>`;
+  }).join("") + `</div>`;
+}
+
+function renderView(){
+  if(state.view === "search") return renderSearch();
+  if(state.view === "hierarchy") return renderHierarchyStandalone();
+  if(state.view === "dashboard") return renderDashboard();
+  return "";
+}
+
+function renderSearch(){
+  return `
+    <div class="search-hero">
+      <h1>Find an award</h1>
+      <p>Search by award number, PI name, sponsor, or account number — backed by archive.v_global_search. Wildcards work exactly like Kuali.</p>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="hero-search-input" placeholder="105698, *105698*, Orsmond, NIH, 9500239974..." onkeydown="if(event.key==='Enter') doSearch(this.value)" autofocus/>
+      </div>
+      <div class="search-hints">
+        ${["105698","*105698*","Orsmond","NIH","9500239974"].map(t=>`<button class="chip" onclick="doSearch('${t}')">${t}</button>`).join("")}
+      </div>
+      <div class="search-note">You only search once — once a hierarchy is open, click any award card to navigate. No page reloads.</div>
+    </div>
+    <div id="results-slot"></div>
+  `;
+}
+
+function doSearch(q){
+  const input = document.getElementById("hero-search-input") || document.getElementById("header-search-input");
+  if(input) input.value = q;
+  const roots = searchIndex(q);
+  const slot = document.getElementById("results-slot");
+  if(!slot){
+    goHierarchy(roots[0] || "105698-00001");
+    return;
+  }
+  if(roots.length === 0){
+    slot.innerHTML = `<div class="results"><div class="empty-note">No awards match "${q}". Try 105698, Orsmond, or NIH.</div></div>`;
+    return;
+  }
+  slot.innerHTML = `<div class="results"><div class="results-count">${roots.length} award ${roots.length===1?"family":"families"} found</div>` +
+    roots.map(rid=>{
+      const a = AWARDS[rid];
+      const count = countFamily(rid);
+      const pi = (PEOPLE[rid]||[]).find(p=>p.role_code==="PI");
+      return `<div class="result-row" onclick="goHierarchy('${rid}')">
+        <div>
+          <div class="result-id">${a.award_number}-${String(a.sequence_number).padStart(5,"0")}</div>
+          <div class="result-meta">PI: ${pi?pi.full_name:"—"} · ${a.sponsor_name} · ${count} award${count>1?"s":""} in hierarchy</div>
+        </div>
+        <div class="result-badge">${fmt(a.total_obligated)}</div>
+      </div>`;
+    }).join("") + `</div>`;
+}
+
+function countFamily(rootId){
+  let n = 0;
+  const walk = (id) => { n++; AWARDS[id].children.forEach(walk); };
+  walk(rootId);
+  return n;
+}
+
+function goSearch(){
+  state.view = "search";
+  state.currentId = null;
+  state.breadcrumb = [];
+  render();
+}
+
+function goHierarchy(rootId){
+  state.view = "hierarchy";
+  state.currentId = rootId;
+  state.breadcrumb = [];
+  render();
+}
+
+function renderHierarchyStandalone(){
+  return `
+    <div class="section-title">Award hierarchy</div>
+    <div class="source-tag">archive.award_hierarchy · archive.award_version</div>
+    ${renderTree(state.currentId, id => `openDashboard('${id}')`)}
+  `;
+}
+
+function statusPillClass(code){
+  if(code === "C") return "closed";
+  if(code === "P") return "pending";
+  return "";
+}
+
+function nodeLabel(a){
+  return a.award_number + "-" + String(a.sequence_number).padStart(5,"0");
+}
+
+function renderTree(rootId, onClickJs){
+  const root = AWARDS[rootId];
+  const nodeHtml = (id, isRoot) => {
+    const a = AWARDS[id];
+    const pi = (PEOPLE[id]||[]).find(p=>p.role_code==="PI");
+    return `
+    <div class="tree-node ${isRoot?"root":""}" onclick="${onClickJs(id)}">
+      <div class="tid">${id}</div>
+      <div class="ttype">${isRoot?"Parent award":a.award_type}</div>
+      <div class="tamt">${fmt(a.total_obligated)}</div>
+      <div class="tpi">PI: ${pi?pi.full_name:"—"}</div>
+    </div>`;
+  };
+  let childrenHtml = "";
+  if(root.children.length){
+    childrenHtml = `
+      <div class="stub-down"></div>
+      <div class="children-row">
+        ${root.children.map(cid=>{
+          const c = AWARDS[cid];
+          return `<div class="child-col">
+            ${nodeHtml(cid,false)}
+            ${c.children.length ? `<div class="stub-down"></div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">+ ${c.children.length} more below</div>` : ""}
+          </div>`;
+        }).join("")}
+      </div>`;
+  }
+  return `<div class="tree-wrap"><div class="tree-col">
+    ${nodeHtml(rootId, true)}
+    ${childrenHtml}
+  </div></div>`;
+}
+
+function openDashboard(id){
+  state.view = "dashboard";
+  state.currentId = id;
+  state.activeSection = "summary";
+  state.breadcrumb = buildPath(id);
+  render();
+}
+
+function buildPath(id){
+  const path = [];
+  let cur = id;
+  while(cur){ path.unshift(cur); cur = AWARDS[cur].parent; }
+  return path;
+}
+
+function jumpBreadcrumb(i){
+  openDashboard(state.breadcrumb[i]);
+}
+
+function setSection(s){
+  state.activeSection = s;
+  render();
+}
+
+const SECTIONS = [
+  ["summary","Award summary"],
+  ["hierarchy","Hierarchy"],
+  ["people","People"],
+  ["budget","Budget"],
+  ["timemoney","Time & money"],
+  ["sap","SAP history"],
+  ["comments","Comments"],
+  ["terms","Terms"],
+  ["compliance","Compliance"],
+  ["attachments","Attachments"]
+];
+
+function renderDashboard(){
+  const id = state.currentId;
+  const a = AWARDS[id];
+  return `
+    <div class="dash-header">
+      <div>
+        <div class="aid">${nodeLabel(a)}</div>
+        <div class="atitle">${a.title}</div>
+        <div class="ameta">award_id ${a.award_id} · proposal_number ${a.proposal_number} · sponsor_award_number ${a.sponsor_award_number}</div>
+      </div>
+      <span class="status-pill ${statusPillClass(a.status_code)}">${a.status_description}</span>
+    </div>
+    <div class="dash">
+      <div class="dash-nav">
+        ${SECTIONS.map(([key,label])=>`<button class="${state.activeSection===key?"active":""}" onclick="setSection('${key}')">${label}</button>`).join("")}
+      </div>
+      <div class="dash-content">${renderSection(id, a)}</div>
+    </div>
+  `;
+}
+
+function renderSection(id, a){
+  switch(state.activeSection){
+    case "summary": return renderSummary(id, a);
+    case "hierarchy": return renderHierarchySection(id, a);
+    case "people": return renderPeople(id, a);
+    case "budget": return renderBudget(id, a);
+    case "timemoney": return renderTimeMoney(id, a);
+    case "sap": return renderSap(id, a);
+    case "comments": return renderComments(id, a);
+    case "terms": return renderTerms(id, a);
+    case "compliance": return renderCompliance(id, a);
+    case "attachments": return renderAttachments(id, a);
+    default: return "";
+  }
+}
+
+function renderSummary(id, a){
+  const ext = EXTENSION[id];
+  const cgb = CGB[id];
+  const custom = CUSTOM_DATA[id] || [];
+  return `
+    <div class="section-title">Award summary</div>
+    <div class="source-tag">archive.award_version · archive.award_amount_info</div>
+    <div class="summary-grid">
+      <div class="stat-card"><div class="label">sponsor_name</div><div class="val">${a.sponsor_name}</div></div>
+      <div class="stat-card"><div class="label">lead_unit_name</div><div class="val">${a.lead_unit_name}</div></div>
+      <div class="stat-card"><div class="label">total_obligated</div><div class="val">${fmt(a.total_obligated)}</div></div>
+      <div class="stat-card"><div class="label">anticipated_total</div><div class="val">${fmt(a.anticipated_total)}</div></div>
+      <div class="stat-card"><div class="label">transaction_type</div><div class="val">${a.transaction_type}</div></div>
+      <div class="stat-card"><div class="label">award_effective_date</div><div class="val">${a.award_effective_date}</div></div>
+      <div class="stat-card"><div class="label">current_fund_effective_date</div><div class="val">${a.current_fund_effective_date}</div></div>
+      <div class="stat-card"><div class="label">final_expiration_date</div><div class="val">${a.final_expiration_date}</div></div>
+      <div class="stat-card"><div class="label">closeout_date</div><div class="val">${a.closeout_date || "—"}</div></div>
+      <div class="stat-card"><div class="label">account_number</div><div class="val">${a.account_number}</div></div>
+      <div class="stat-card"><div class="label">proposal_number</div><div class="val">${a.proposal_number}</div></div>
+      <div class="stat-card"><div class="label">status_code</div><div class="val">${a.status_code} — ${a.status_description}</div></div>
+    </div>
+
+    <div class="subhead">Extension</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_extension</div>
+    ${ext ? `<div class="list-item"><div><div class="li-title">${ext.extension_type} — extended to ${ext.extended_end_date}</div><div class="li-sub">No-cost extension #${ext.no_cost_extension_number} · requested by ${ext.requested_by} · approved ${ext.approved_date}</div></div></div>` : `<div class="empty-note">No extension archived for this award.</div>`}
+
+    <div class="subhead">CGB</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_cgb</div>
+    ${cgb ? `<div class="list-item"><div><div class="li-title">${cgb.cgb_reference_number}</div><div class="li-sub">cgb_date ${cgb.cgb_date} · cgb_indicator ${cgb.cgb_indicator}</div></div></div>` : `<div class="empty-note">No CGB record archived for this award.</div>`}
+
+    <div class="subhead">Custom data</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_custom_data</div>
+    ${custom.length ? custom.map(c=>`<div class="list-item"><div><div class="li-title">${c.field_name}</div></div><div>${c.field_value}</div></div>`).join("") : `<div class="empty-note">No custom fields archived for this award.</div>`}
+  `;
+}
+
+function renderHierarchySection(id, a){
+  const root = findRootId(id);
+  const parentHtml = a.parent ? `
+    <div class="list-item" style="cursor:pointer" onclick="openDashboard('${a.parent}')">
+      <div><div class="li-title">${a.parent}</div><div class="li-sub">Parent award — ${fmt(AWARDS[a.parent].total_obligated)}</div></div>
+      <span style="color:var(--text-muted)">&larr; up</span>
+    </div>` : `<div class="empty-note">This is the parent award — no award above it.</div>`;
+  const childrenHtml = a.children.length ? a.children.map(cid=>{
+    const c = AWARDS[cid];
+    return `<div class="list-item" style="cursor:pointer" onclick="openDashboard('${cid}')">
+      <div><div class="li-title">${cid}</div><div class="li-sub">${c.award_type} — ${fmt(c.total_obligated)}</div></div>
+      <span style="color:var(--text-muted)">open &rarr;</span>
+    </div>`;
+  }).join("") : `<div class="empty-note">No child awards below this one.</div>`;
+  return `
+    <div class="section-title">Hierarchy</div>
+    <div class="source-tag">archive.award_hierarchy</div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">Click any award below — the whole dashboard switches to it, no reload.</p>
+    <div style="margin:18px 0;"><div class="subhead">Parent</div>${parentHtml}</div>
+    <div><div class="subhead">Children</div>${childrenHtml}</div>
+    <div style="margin-top:28px;">
+      ${renderCompare(root)}
+    </div>
+  `;
+}
+
+function renderCompare(rootId){
+  const ids = [];
+  const walk = (id) => { ids.push(id); AWARDS[id].children.forEach(walk); };
+  walk(rootId);
+  const checks = ids.map(id=>{
+    const a = AWARDS[id];
+    const checked = state.compareSelection.has(id) ? "checked" : "";
+    return `<div class="compare-check">
+      <input type="checkbox" id="cmp-${id}" ${checked} onchange="toggleCompare('${id}')"/>
+      <label for="cmp-${id}">${id} — ${a.award_type}</label>
+    </div>`;
+  }).join("");
+  const selected = ids.filter(id=>state.compareSelection.has(id));
+  const table = selected.length >= 2 ? `
+    <table class="compare-table">
+      <tr><th>Award</th><th>PI</th><th>total_obligated</th><th>status</th><th>sponsor</th></tr>
+      ${selected.map(id=>{
+        const a = AWARDS[id];
+        const pi = (PEOPLE[id]||[]).find(p=>p.role_code==="PI");
+        return `<tr><td>${id}</td><td>${pi?pi.full_name:"—"}</td><td>${fmt(a.total_obligated)}</td><td>${a.status_description}</td><td>${a.sponsor_name}</td></tr>`;
+      }).join("")}
+    </table>` : `<div class="empty-note">Select at least two awards to compare.</div>`;
+  return `
+    <div class="compare-panel">
+      <h3>Quick comparison</h3>
+      ${checks}
+      ${table}
+    </div>
+  `;
+}
+
+function toggleCompare(id){
+  if(state.compareSelection.has(id)) state.compareSelection.delete(id);
+  else state.compareSelection.add(id);
+  render();
+}
+
+function renderPeople(id, a){
+  const people = PEOPLE[id] || [];
+  const unitSplits = PERSON_UNIT_CREDIT_SPLIT[id] || [];
+  const sponsorContacts = SPONSOR_CONTACT[id] || [];
+  const unitContacts = UNIT_CONTACT[id] || [];
+  if(!people.length) return `<div class="section-title">People</div><div class="source-tag">archive.award_person</div><div class="empty-note">No people archived for this award.</div>`;
+  return `
+    <div class="section-title">People</div>
+    <div class="source-tag">archive.award_person · archive.award_person_unit · archive.award_person_credit_split</div>
+    <table class="data-table">
+      <tr><th>full_name</th><th>role_code</th><th>unit_name</th><th>credit_split</th></tr>
+      ${people.map(p=>`<tr><td>${p.full_name}</td><td><span class="row-tag">${p.role_code}</span> ${p.role}</td><td>${p.unit_name}</td><td>${pct(p.credit_split)}</td></tr>`).join("")}
+    </table>
+
+    <div class="subhead">Credit split by unit</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_person_unit_credit_split</div>
+    ${unitSplits.length ? `<table class="data-table">
+      <tr><th>full_name</th><th>unit_name</th><th>unit_credit_percent</th></tr>
+      ${unitSplits.map(u=>`<tr><td>${u.full_name}</td><td>${u.unit_name}</td><td>${pct(u.unit_credit_percent)}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">No multi-unit credit split archived — each person's credit belongs entirely to their listed unit.</div>`}
+
+    <div class="subhead">Sponsor contacts</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_sponsor_contact</div>
+    ${sponsorContacts.length ? sponsorContacts.map(c=>`<div class="list-item"><div><div class="li-title">${c.contact_name} <span class="row-tag">${c.contact_type}</span></div><div class="li-sub">${c.phone} · ${c.email}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Unit contacts</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_unit_contact</div>
+    ${unitContacts.length ? unitContacts.map(c=>`<div class="list-item"><div><div class="li-title">${c.contact_name} <span class="row-tag">${c.contact_type}</span></div><div class="li-sub">${c.unit_name} · ${c.phone}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+  `;
+}
+
+function renderBudget(id, a){
+  const periods = BUDGET_PERIODS[id] || [];
+  if(!periods.length) return `<div class="section-title">Budget</div><div class="source-tag">archive.award_budget · archive.award_budget_period</div><div class="empty-note">No budget archived for this award.</div>`;
+  const totalDirect = periods.reduce((s,p)=>s+p.direct,0);
+  const totalIndirect = periods.reduce((s,p)=>s+p.indirect,0);
+  return `
+    <div class="section-title">Budget</div>
+    <div class="source-tag">archive.award_budget · archive.award_budget_period · archive.award_budget_line_item</div>
+    <div class="summary-grid" style="margin-bottom:20px;">
+      <div class="stat-card"><div class="label">total direct</div><div class="val">${fmt(totalDirect)}</div></div>
+      <div class="stat-card"><div class="label">total indirect (F&A)</div><div class="val">${fmt(totalIndirect)}</div></div>
+      <div class="stat-card"><div class="label">total</div><div class="val">${fmt(totalDirect+totalIndirect)}</div></div>
+    </div>
+    <div class="subhead">Budget periods</div>
+    <table class="data-table">
+      <tr><th>period_number</th><th>start / end</th><th>direct</th><th>indirect</th><th>status</th></tr>
+      ${periods.map(p=>`<tr><td>${p.period_number}</td><td>${p.start} — ${p.end}</td><td>${fmt(p.direct)}</td><td>${fmt(p.indirect)}</td><td>${p.status}</td></tr>`).join("")}
+    </table>
+    ${periods.map(p=>{
+      const items = (BUDGET_LINE_ITEMS[id] && BUDGET_LINE_ITEMS[id][p.period_number]) || [];
+      if(!items.length) return "";
+      return `
+        <div class="subhead">Line items — period ${p.period_number}</div>
+        <table class="data-table">
+          <tr><th>category</th><th>amount</th></tr>
+          ${items.map(li=>`<tr><td>${li.category}</td><td>${fmt(li.amount)}</td></tr>`).join("")}
+        </table>
+      `;
+    }).join("")}
+    ${periods.map(p=>{
+      const personnel = (BUDGET_PERSONNEL[id] && BUDGET_PERSONNEL[id][p.period_number]) || [];
+      if(!personnel.length) return "";
+      return `
+        <div class="subhead">Personnel — period ${p.period_number}</div>
+        <div class="source-tag" style="margin-bottom:8px;">archive.award_budget_person · archive.award_budget_personnel_detail · archive.award_budget_personnel_calculated_amount</div>
+        <table class="data-table">
+          <tr><th>person_name</th><th>role</th><th>effort_percent</th><th>salary_requested</th><th>calculated_fringe</th><th>calculated_total</th></tr>
+          ${personnel.map(pp=>`<tr><td>${pp.person_name}</td><td>${pp.role}</td><td>${pct(pp.effort_percent)}</td><td>${fmt(pp.salary_requested)}</td><td>${fmt(pp.calculated_fringe)}</td><td>${fmt(pp.calculated_total)}</td></tr>`).join("")}
+        </table>
+      `;
+    }).join("")}
+    <div class="subhead">Budget limits</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_budget_limit</div>
+    ${(BUDGET_LIMIT[id]||[]).length ? `<table class="data-table">
+      <tr><th>limit_type</th><th>limit_amount</th></tr>
+      ${BUDGET_LIMIT[id].map(l=>`<tr><td>${l.limit_type}</td><td>${fmt(l.limit_amount)}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">No budget limit archived.</div>`}
+  `;
+}
+
+function renderTimeMoney(id, a){
+  let cur = id;
+  const before = [];
+  while(AWARDS[cur].parent){ before.unshift(AWARDS[cur].parent); cur = AWARDS[cur].parent; }
+  const path = [...before, id];
+  return `
+    <div class="section-title">Time &amp; money</div>
+    <div class="source-tag">archive.time_and_money_document · archive.award_amount_transaction</div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">How the obligated amount moved down this branch of the hierarchy.</p>
+    <div class="tm-flow">
+      ${path.map((pid,i)=>{
+        const p = AWARDS[pid];
+        const delta = i===0 ? null : p.total_obligated;
+        return `
+          <div class="tm-step">
+            <div class="tm-dot"></div>
+            <div>
+              <div class="tm-amt">${pid} · ${fmt(p.total_obligated)}</div>
+              <div class="tm-label">${i===0?"Parent award":p.award_type}</div>
+            </div>
+            ${delta!==null ? `<div class="tm-delta">+ ${fmt(delta)}</div>` : ""}
+          </div>
+          ${i < path.length-1 ? `<div class="tm-line"></div>` : ""}
+        `;
+      }).join("")}
+    </div>
+    <div class="subhead">Transaction log</div>
+    <table class="data-table">
+      <tr><th>date</th><th>transaction_type</th><th>amount</th></tr>
+      ${(TRANSACTIONS[id]||[]).map(t=>`<tr><td>${t.date}</td><td>${t.type}</td><td>${fmt(t.amount)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty-note">No transactions archived.</td></tr>`}
+    </table>
+
+    <div class="subhead">Funding proposal</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_funding_proposal</div>
+    ${FUNDING_PROPOSAL[id] ? `<div class="list-item"><div><div class="li-title">Proposal ${FUNDING_PROPOSAL[id].proposal_number}</div><div class="li-sub">Funded this award at ${fmt(FUNDING_PROPOSAL[id].funding_amount)}</div></div></div>` : `<div class="empty-note">No funding proposal link archived.</div>`}
+
+    <div class="subhead">F&amp;A distribution</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_direct_fanda_distribution</div>
+    ${(FANDA_DISTRIBUTION[id]||[]).length ? `<table class="data-table">
+      <tr><th>fund_code</th><th>distribution_percent</th><th>amount</th></tr>
+      ${FANDA_DISTRIBUTION[id].map(f=>`<tr><td>${f.fund_code}</td><td>${pct(f.distribution_percent)}</td><td>${fmt(f.amount)}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">No F&amp;A distribution archived.</div>`}
+  `;
+}
+
+function renderSap(id, a){
+  const hist = SAP_HISTORY[id] || [];
+  if(!hist.length) return `<div class="section-title">SAP history</div><div class="source-tag">archive.award_transmission</div><div class="empty-note">No SAP transmissions recorded for this award.</div>`;
+  return `
+    <div class="section-title">SAP transmission history</div>
+    <div class="source-tag">archive.award_transmission · archive.award_transmission_child</div>
+    ${hist.map((h)=>{
+      const key = "t"+h.transmission_id;
+      const sentOpen = state.xmlOpen[key+"-sent"];
+      const retOpen = state.xmlOpen[key+"-returned"];
+      return `
+        <div class="sap-item">
+          <div class="sap-top">
+            <div class="sap-status ${h.success_indicator?"ok":"fail"}">${h.success_indicator?"&check; Success":"&times; Failed"}</div>
+            <div class="sap-date">${h.transmission_date} · initiated by ${h.initiator_id}</div>
+          </div>
+          <table class="data-table" style="margin-top:10px;">
+            <tr><th>child_document_number</th><th>overhead_key</th><th>base_code</th><th>off_campus</th></tr>
+            ${h.children.map(c=>`<tr><td>${c.child_document_number}</td><td>${c.overhead_key}</td><td>${c.base_code}</td><td>${c.off_campus}</td></tr>`).join("")}
+          </table>
+          <div class="sap-links">
+            <a onclick="toggleXml('${key}-sent')">${sentOpen?"Hide":"View"} sent XML</a>
+            <a onclick="toggleXml('${key}-returned')">${retOpen?"Hide":"View"} returned XML</a>
+          </div>
+          ${sentOpen ? `<div class="sap-xml">${h.sent}</div>` : ""}
+          ${retOpen ? `<div class="sap-xml">${h.returned}</div>` : ""}
+        </div>
+      `;
+    }).join("")}
+  `;
+}
+
+function toggleXml(key){
+  state.xmlOpen[key] = !state.xmlOpen[key];
+  render();
+}
+
+function renderComments(id, a){
+  const comments = COMMENTS[id] || [];
+  const notes = NOTEPAD[id] || [];
+  return `
+    <div class="section-title">Comments</div>
+    <div class="source-tag">archive.award_comment</div>
+    ${comments.length ? comments.map(c=>`
+      <div class="list-item"><div><div class="li-title">${c.entered_by} — ${c.entry_date} <span class="row-tag">${c.comment_type}</span></div><div class="li-sub">${c.text}</div></div></div>
+    `).join("") : `<div class="empty-note">No comments archived for this award.</div>`}
+
+    <div class="subhead">Notepad</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_notepad</div>
+    ${notes.length ? notes.map(n=>`
+      <div class="list-item"><div><div class="li-title">${n.entered_by} — ${n.entry_date}</div><div class="li-sub">${n.text}</div></div></div>
+    `).join("") : `<div class="empty-note">No notepad entries archived for this award.</div>`}
+  `;
+}
+
+function renderTerms(id, a){
+  const sponsorTerms = SPONSOR_TERMS[id] || [];
+  const reportTerms = REPORT_TERMS[id] || [];
+  const transfers = TRANSFERRING_SPONSOR[id] || [];
+  const costShare = COST_SHARE[id] || [];
+  return `
+    <div class="section-title">Terms</div>
+    <div class="source-tag">archive.award_sponsor_term · archive.award_report_term · archive.award_transferring_sponsor · archive.award_cost_share</div>
+    <div class="subhead">Sponsor terms</div>
+    ${sponsorTerms.length ? sponsorTerms.map(t=>`<div class="list-item"><div><div class="li-title">${t.term_type}</div><div class="li-sub">${t.description}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+    <div class="subhead">Report terms</div>
+    ${reportTerms.length ? reportTerms.map(t=>`<div class="list-item"><div><div class="li-title">${t.report_code} — ${t.frequency}</div><div class="li-sub">Recipients: ${t.recipients.join(", ")}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+    <div class="subhead">Transferring sponsor</div>
+    ${transfers.length ? transfers.map(t=>`<div class="list-item"><div><div class="li-title">From ${t.from_institution} — ${t.transfer_date}</div><div class="li-sub">Remaining balance ${fmt(t.remaining_balance)} · ${t.reason}</div></div></div>`).join("") : `<div class="empty-note">Not a transferred award — no origin institution archived.</div>`}
+    <div class="subhead">Cost share</div>
+    ${costShare.length ? `<table class="data-table">
+      <tr><th>cost_share_type</th><th>unit_name</th><th>committed</th><th>actual</th></tr>
+      ${costShare.map(c=>`<tr><td>${c.cost_share_type}</td><td>${c.unit_name}</td><td>${fmt(c.committed)}</td><td>${fmt(c.actual)}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Closeout</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_closeout</div>
+    ${CLOSEOUT[id] ? `<div class="list-item"><div><div class="li-title">${CLOSEOUT[id].closeout_status} — ${CLOSEOUT[id].closeout_date}</div><div class="li-sub">Final report received: ${CLOSEOUT[id].final_report_received} · Final invoice received: ${CLOSEOUT[id].final_invoice_received}</div></div></div>` : `<div class="empty-note">Not closed out.</div>`}
+
+    <div class="subhead">Payment schedule</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_payment_schedule</div>
+    ${(PAYMENT_SCHEDULE[id]||[]).length ? `<table class="data-table">
+      <tr><th>payment_number</th><th>due_date</th><th>amount</th><th>status</th></tr>
+      ${PAYMENT_SCHEDULE[id].map(p=>`<tr><td>${p.payment_number}</td><td>${p.due_date}</td><td>${fmt(p.amount)}</td><td>${p.status}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Approved subawards</div>
+    <div class="source-tag" style="margin-bottom:8px;">archive.award_approved_subaward</div>
+    ${(APPROVED_SUBAWARD[id]||[]).length ? APPROVED_SUBAWARD[id].map(s=>`<div class="list-item"><div><div class="li-title">${s.subrecipient_name}</div><div class="li-sub">Approved amount: ${fmt(s.approved_amount)}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+  `;
+}
+
+function renderCompliance(id, a){
+  const cfda = CFDA[id] || [];
+  const fandaRate = FANDA_RATE[id] || [];
+  const keywords = SCIENCE_KEYWORD[id] || [];
+  const specialReview = SPECIAL_REVIEW[id] || [];
+  const specialReviewExemption = SPECIAL_REVIEW_EXEMPTION[id] || [];
+  const equipment = APPROVED_EQUIPMENT[id] || [];
+  const foreignTravel = APPROVED_FOREIGN_TRAVEL[id] || [];
+  const subcontracting = SUBCONTRACTING_GOALS[id] || [];
+  return `
+    <div class="section-title">Compliance</div>
+    <div class="source-tag">archive.award_cfda · archive.award_fanda_rate · archive.award_science_keyword · archive.award_special_review · archive.award_special_review_exemption · archive.award_approved_equipment · archive.award_approved_foreign_travel · archive.award_subcontracting_budgeted_goals</div>
+
+    <div class="subhead">CFDA</div>
+    ${cfda.length ? cfda.map(c=>`<div class="list-item"><div><div class="li-title">${c.cfda_number}</div><div class="li-sub">${c.program_title}</div></div></div>`).join("") : `<div class="empty-note">No CFDA number archived.</div>`}
+
+    <div class="subhead">F&amp;A rate</div>
+    ${fandaRate.length ? `<table class="data-table">
+      <tr><th>rate_type</th><th>rate_percent</th><th>rate_basis</th><th>fiscal_year</th><th>off_campus</th></tr>
+      ${fandaRate.map(r=>`<tr><td>${r.rate_type}</td><td>${pct(r.rate_percent)}</td><td>${r.rate_basis}</td><td>${r.fiscal_year}</td><td>${r.off_campus}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">No F&amp;A rate archived.</div>`}
+
+    <div class="subhead">Science keywords</div>
+    ${keywords.length ? `<div class="chip-row">${keywords.map(k=>`<span class="static-chip">${k}</span>`).join("")}</div>` : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Special review</div>
+    ${specialReview.length ? specialReview.map(r=>`<div class="list-item"><div><div class="li-title">${r.review_type} — protocol ${r.protocol_number}</div><div class="li-sub">Approved ${r.approval_date} · expires ${r.expiration_date}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Special review exemptions</div>
+    ${specialReviewExemption.length ? specialReviewExemption.map(e=>`<div class="list-item"><div><div class="li-title">${e.exemption_type}</div><div class="li-sub">${e.description}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Approved equipment</div>
+    ${equipment.length ? `<table class="data-table"><tr><th>equipment_description</th><th>amount</th></tr>${equipment.map(e=>`<tr><td>${e.equipment_description}</td><td>${fmt(e.amount)}</td></tr>`).join("")}</table>` : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Approved foreign travel</div>
+    ${foreignTravel.length ? foreignTravel.map(t=>`<div class="list-item"><div><div class="li-title">${t.traveler_name} — ${t.destination}</div><div class="li-sub">${t.purpose} · ${t.travel_dates}</div></div></div>`).join("") : `<div class="empty-note">None archived.</div>`}
+
+    <div class="subhead">Subcontracting goals</div>
+    ${subcontracting.length ? `<table class="data-table"><tr><th>goal_type</th><th>percent</th></tr>${subcontracting.map(g=>`<tr><td>${g.goal_type}</td><td>${pct(g.percent)}</td></tr>`).join("")}</table>` : `<div class="empty-note">None archived.</div>`}
+  `;
+}
+
+function renderAttachments(id, a){
+  const files = ATTACHMENTS[id] || [];
+  return `
+    <div class="section-title">Attachments</div>
+    <div class="source-tag">archive.award_attachment · archive.attachment_object</div>
+    ${files.length ? `<table class="data-table">
+      <tr><th>file_name</th><th>type_code</th><th>content_type</th><th>upload_status</th></tr>
+      ${files.map(f=>`<tr><td>${f.file_name}</td><td>${f.type_code}</td><td>${f.content_type}</td><td>${f.upload_status}</td></tr>`).join("")}
+    </table>` : `<div class="empty-note">No attachments archived for this award.</div>`}
+  `;
+}
+
+render();
+</script>
+</body>
+</html>
