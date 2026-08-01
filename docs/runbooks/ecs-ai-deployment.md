@@ -76,21 +76,43 @@ Start tunnel:
 # Deploy API
 
 ```bash
+export AWS_PROFILE=bu-nprd
+aws sts get-caller-identity   # confirm account 770203350335 before proceeding
 ./ops/deploy-api.sh
 ```
 
-The script:
+The script resolves and prints the AWS account/region/ECR/ECS context
+first, aborting before any mutating step if it doesn't match the
+expected BU account - see its own header comment. It then:
 
 - Builds Spring Boot
-- Builds Docker image
-- Pushes to ECR
-- Forces ECS deployment
-- Waits for service stability
+- Builds a Docker image tagged with a timestamp + Git SHA (immutable,
+  not just `:latest`)
+- Pushes to ECR and verifies the tag landed
+- Registers a new ECS task definition revision using that tag
+- Updates the service and waits for stability
+
+Use `./ops/deploy-api.sh --check-only` to run every safety check with no
+build/push/deploy.
 
 ## Manual deploy (for debugging the script above)
 
+Never hardcode the account ID - resolve it from the active credentials
+every time, and confirm it's the BU dev account (`770203350335`) before
+doing anything else. An earlier version of this runbook hardcoded a
+personal AWS account ID (`589744711110`) that happens to have
+identically-named ECS/ECR resources to BU's account - every command
+below would have silently targeted the wrong account under the wrong
+profile with no error. See `ops/deploy-api.sh`'s header comment and
+`docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md`'s "Eleventh
+same-day follow-up" for the incident this was caught in.
+
 ```bash
-AWS_ACCOUNT_ID=589744711110
+export AWS_PROFILE=bu-nprd   # or whatever profile targets the BU account
+aws sts get-caller-identity --query Account --output text
+# must print 770203350335 - stop here if it doesn't
+
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
 REPOSITORY=research-archive-platform-dev-api
 IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPOSITORY}:latest"

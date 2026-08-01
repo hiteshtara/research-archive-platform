@@ -146,6 +146,19 @@ research records.
 
 This document captures the complete troubleshooting process for enabling Subaward Attachment downloads from S3.
 
+**Caution (added 2026-08-01):** the AWS account ID appearing throughout
+this historical guide (`589744711110`) is not BU's dev account
+(`770203350335`) — it belongs to a personal AWS account that happens to
+have identically-named ECS/ECR/S3 resources, discovered while
+investigating an unrelated deployment incident (see
+`docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md`'s "Eleventh
+same-day follow-up"). The commands and ARNs below are preserved as a
+historical record of how this specific issue was diagnosed and are not
+being rewritten — but if you're using this guide to troubleshoot a
+*live* issue today, verify `aws sts get-caller-identity` shows
+`770203350335` first, and do not assume the ARNs/bucket names below are
+still current or correct for that account.
+
 ---
 
 # 1. Verify ECS Service
