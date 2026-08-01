@@ -14,13 +14,20 @@ resource "terraform_data" "config_guard" {
       error_message = "manage_cognito is false and manage_amplify is true, so cognito_hosted_ui_domain must be set to the existing user pool's Hosted UI domain (https://<domain>.auth.<region>.amazoncognito.com) so the UI build can configure Amplify's OAuth login."
     }
 
-    precondition {
-      condition = !var.manage_amplify || (
-        (var.amplify_repository_url != null && var.amplify_github_access_token != null) ||
-        (var.amplify_repository_url == null && var.amplify_github_access_token == null)
-      )
-      error_message = "manage_amplify is true: either set both amplify_repository_url and amplify_github_access_token (legacy PAT-based connection), or leave both unset and connect the repository manually via the AWS Console after the first apply (recommended - see README, avoids storing a GitHub token in Terraform state)."
-    }
+    # A precondition requiring amplify_github_access_token whenever
+    # amplify_repository_url is set once lived here, guarding against a
+    # half-configured initial attach. Removed once the repository was
+    # actually attached (see AWARD_IMPLEMENTATION_ROADMAP.md's
+    # "Fourteenth same-day follow-up") - access_token/oauth_token are
+    # in modules/amplify's own ignore_changes (AWS never returns them,
+    # so Terraform never manages them on an ongoing basis regardless),
+    # meaning this precondition had no further purpose after the first
+    # successful attach and only added friction to every later plan for
+    # anything else in this file (e.g. Cognito callback URL changes).
+    # If repository_url is ever changed to a *different* repo, attach
+    # it the same way documented in modules/amplify/variables.tf's
+    # github_access_token doc - a one-off `aws amplify update-app
+    # --access-token ...` CLI call, not a stored Terraform variable.
 
     precondition {
       condition     = !var.manage_amplify || var.amplify_custom_domain != null || (var.ui_redirect_url != null && var.ui_logout_url != null)
