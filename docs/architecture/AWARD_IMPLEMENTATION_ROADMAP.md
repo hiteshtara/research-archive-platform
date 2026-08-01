@@ -927,6 +927,41 @@ guarantee the last one). State was backed up
 (`terraform state pull`) before any branch removal, per an explicit
 requirement to do so.
 
+2026-08-01: Fifteenth same-day follow-up: added HTTPS to the dev API ALB,
+fixing a browser mixed-content block (the Amplify UI is served over
+HTTPS; browsers refuse to let an HTTPS page call an HTTP API - not a
+CORS issue, no CORS header can fix it). `modules/api_service` already
+had a complete HTTPS listener/redirect implementation sitting unwired
+behind `var.certificate_arn`, so no module changes were needed. Found
+`app-nprd.aws-cloud.bu.edu` as the approved BU nonprod Route53 zone
+(already owned by this account, already shared by several unrelated
+apps) and provisioned `api-dev.app-nprd.aws-cloud.bu.edu` via a new
+`aws_acm_certificate`/`aws_route53_record`/`aws_acm_certificate_validation`
+trio in `environments/dev/main.tf` - fully Terraform-automatable with no
+manual step, since the validating Route53 zone is owned by this same
+account. Required a genuine two-stage apply, not a preference: the
+HTTPS listener's `count` depends on the certificate ARN, which isn't a
+real value until DNS validation completes, and Terraform cannot resolve
+a `count` depending on a not-yet-known value in one plan
+(`Error: Invalid count argument`). Stage A provisioned and validated the
+certificate alone (`-target='aws_acm_certificate_validation.api[0]'`,
+confirmed `Status: ISSUED`/`Validation: SUCCESS`); Stage B (a plain
+`terraform plan`/`apply` once the ARN was known) created the HTTPS
+listener, flipped the HTTP listener to a 301 redirect, opened port 443
+on the ALB security group, added the Route53 alias record, and updated
+`VITE_API_BASE_URL` - matching the plan exactly (2 to add, 3 to change,
+0 to destroy; ECS/RDS/Cognito untouched, confirmed absent from the
+plan). `VITE_API_BASE_URL`/CORS needed no manual edits at all - both
+were already derived automatically from `local.api_url`/the Amplify
+app's own domain respectively. Triggered a manual Amplify build
+afterward (`VITE_*` values are baked in at build time, not runtime -
+confirmed by diffing the live bundle before/after) and verified the
+new bundle has the HTTPS API URL baked in with the old HTTP ALB
+hostname completely absent. See
+`docs/architecture/HTTPS_DEPLOYMENT.md` for the durable pattern write-up
+and `docs/architecture/LESSONS_LEARNED.md` for this and the prior four
+follow-ups' operational lessons in one place.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

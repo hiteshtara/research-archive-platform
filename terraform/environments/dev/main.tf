@@ -305,6 +305,61 @@ module "amplify" {
   }
 }
 
+#
+# API HTTPS certificate - provisioned here (DNS validation against
+# api_route53_zone_id, fully automatable with no manual step since we
+# own that zone in this same account) unless an existing certificate
+# ARN is supplied via api_certificate_arn instead. Fixes the browser's
+# mixed-content block (HTTPS Amplify UI calling an HTTP-only ALB) - see
+# docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md's "Fifteenth
+# same-day follow-up".
+#
+resource "aws_acm_certificate" "api" {
+  count = (var.api_domain_name != null && var.api_certificate_arn == null) ? 1 : 0
+
+  domain_name       = var.api_domain_name
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "api_certificate_validation" {
+  for_each = (var.api_domain_name != null && var.api_certificate_arn == null) ? {
+    for dvo in aws_acm_certificate.api[0].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  } : {}
+
+  zone_id = var.api_route53_zone_id
+  name    = each.value.name
+  type    = each.value.type
+  records = [each.value.record]
+  ttl     = 60
+
+  allow_overwrite = true
+}
+
+resource "aws_acm_certificate_validation" "api" {
+  count = (var.api_domain_name != null && var.api_certificate_arn == null) ? 1 : 0
+
+  certificate_arn = aws_acm_certificate.api[0].arn
+  validation_record_fqdns = [
+    for record in aws_route53_record.api_certificate_validation : record.fqdn
+  ]
+}
+
+locals {
+  api_certificate_arn_effective = (
+    var.api_certificate_arn != null
+    ? var.api_certificate_arn
+    : (var.api_domain_name != null ? aws_acm_certificate_validation.api[0].certificate_arn : null)
+  )
+}
+
 module "api_service" {
   source = "../../modules/api_service"
 
@@ -329,7 +384,7 @@ module "api_service" {
   cognito_issuer_uri = local.cognito_issuer_uri
   cognito_client_id  = local.cognito_client_id
 
-  certificate_arn         = var.api_certificate_arn
+  certificate_arn         = local.api_certificate_arn_effective
   alb_deletion_protection = var.alb_deletion_protection
   log_retention_days      = var.api_log_retention_days
 
