@@ -1,0 +1,41 @@
+SET PAGESIZE 50000
+SET LINESIZE 32767
+SET FEEDBACK ON
+
+-- AWD_BGT_DET_CAL_AMTS_EXT is Award's real 1:1 extension of the
+-- generic BUDGET_DETAILS_CAL_AMTS table, also shared with Proposal
+-- Development. BUDGET_DETAILS_CAL_AMTS.BUDGET_ID is a direct column,
+-- so AWARD_BUDGET_EXT is joined straight off it to resolve AWARD_ID
+-- for filtering. BUDGET_PERIOD_NUMBER here is a real physical column
+-- whose own OJB field-descriptor is commented out upstream - kept
+-- anyway, harmless. RATE_TYPE_DESCRIPTION is denormalized by Oracle
+-- itself already, not computed here. See
+-- docs/architecture/AWARD_BUDGET_DESIGN.md.
+
+SELECT
+    ext.BUDGET_DETAILS_CAL_AMTS_ID AS BUDGET_LINE_ITEM_CALCULATED_AMOUNT_ID,
+    cal.BUDGET_DETAILS_ID AS BUDGET_LINE_ITEM_ID,
+    cal.BUDGET_PERIOD_NUMBER AS BUDGET_PERIOD_ID,
+    cal.BUDGET_ID,
+    abe.AWARD_ID,
+    cal.BUDGET_PERIOD,
+    cal.LINE_ITEM_NUMBER,
+
+    cal.RATE_CLASS_CODE,
+    cal.RATE_TYPE_CODE,
+    cal.RATE_TYPE_DESCRIPTION,
+
+    cal.APPLY_RATE_FLAG,
+    cal.CALCULATED_COST,
+    cal.CALCULATED_COST_SHARING,
+    ext.OBLIGATED_AMOUNT,
+
+    ext.UPDATE_TIMESTAMP,
+    ext.UPDATE_USER,
+    ext.VER_NBR
+
+FROM AWD_BGT_DET_CAL_AMTS_EXT ext
+JOIN BUDGET_DETAILS_CAL_AMTS cal ON cal.BUDGET_DETAILS_CAL_AMTS_ID = ext.BUDGET_DETAILS_CAL_AMTS_ID
+JOIN AWARD_BUDGET_EXT abe ON abe.BUDGET_ID = cal.BUDGET_ID
+
+ORDER BY abe.AWARD_ID, cal.BUDGET_DETAILS_ID, ext.BUDGET_DETAILS_CAL_AMTS_ID;

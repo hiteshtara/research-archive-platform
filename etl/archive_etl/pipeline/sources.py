@@ -302,3 +302,119 @@ class OracleDataSource:
         if not collected:
             return pd.DataFrame()
         return pd.concat(collected, ignore_index=True)
+
+    def read_filtered_any_column(
+        self,
+        *,
+        columns: Sequence[str],
+        values: Sequence[Any],
+        chunk_size: int = MAX_ORACLE_IN_LIST_SIZE,
+    ) -> pd.DataFrame:
+        """Like read_filtered, but for a table with no single column that
+        identifies "does this row belong to the requested set" -
+        PENDING_TRANSACTIONS has SOURCE_AWARD_NUMBER/
+        DESTINATION_AWARD_NUMBER instead of a bare AWARD_NUMBER, and a
+        transaction belongs to a loaded Award if it appears on EITHER
+        side. Builds `WHERE col1 IN (...) OR col2 IN (...) OR ...`, the
+        same `values` chunk bound under a distinct bind-variable prefix
+        per column so chunk_size still bounds each individual IN-list to
+        Oracle's 1000-element ceiling - one Oracle round trip per chunk,
+        matching read_filtered's cost profile exactly (just evaluated
+        against more than one column per round trip)."""
+        for column in columns:
+            if not _SAFE_IDENTIFIER.match(column):
+                raise ValueError(
+                    f"unsafe column name for read_filtered_any_column: {column!r}"
+                )
+        if not columns:
+            raise ValueError("read_filtered_any_column requires at least one column")
+        if chunk_size <= 0 or chunk_size > MAX_ORACLE_IN_LIST_SIZE:
+            raise ValueError(
+                f"chunk_size must be in 1..{MAX_ORACLE_IN_LIST_SIZE}, "
+                f"got {chunk_size}"
+            )
+
+        unique_values = list(dict.fromkeys(values))
+        if not unique_values:
+            return pd.DataFrame()
+
+        credentials = require_oracle_environment(self.environ)
+
+        sql_text = _strip_sqlplus_directives(
+            self.sql_path.read_text(encoding="utf-8")
+        ).strip()
+        if sql_text.endswith(";"):
+            sql_text = sql_text[:-1].rstrip()
+
+        chunks = [
+            unique_values[start : start + chunk_size]
+            for start in range(0, len(unique_values), chunk_size)
+        ]
+
+        collected: list[pd.DataFrame] = []
+        with self.connect(
+            user=credentials["ORACLE_USER"],
+            password=credentials["ORACLE_PASSWORD"],
+            dsn=credentials["ORACLE_DSN"],
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.arraysize = self.fetch_size
+                for chunk_index, chunk in enumerate(chunks):
+                    params: dict[str, Any] = {}
+                    clauses = []
+                    for column_index, column in enumerate(columns):
+                        bind_names = [
+                            f"c{column_index}_{position}"
+                            for position in range(len(chunk))
+                        ]
+                        clauses.append(
+                            f"{column} IN ("
+                            + ", ".join(":" + name for name in bind_names)
+                            + ")"
+                        )
+                        params.update(zip(bind_names, chunk, strict=True))
+
+                    filtered_sql = (
+                        "SELECT * FROM (\n"
+                        f"{sql_text}\n"
+                        ") filtered_source WHERE "
+                        + " OR ".join(clauses)
+                    )
+
+                    started = time.perf_counter()
+                    cursor.execute(filtered_sql, params)
+                    result_columns = [
+                        str(item[0]) for item in cursor.description
+                    ]
+
+                    rows: list[tuple[Any, ...]] = []
+                    while batch := cursor.fetchmany(self.fetch_size):
+                        rows.extend(
+                            tuple(
+                                _materialize_oracle_value(value)
+                                for value in row
+                            )
+                            for row in batch
+                        )
+                    elapsed_ms = (time.perf_counter() - started) * 1000
+
+                    logger.info(
+                        "Filtered Oracle read {} chunk {}/{} "
+                        "({}={} value(s)): {} row(s) in {:.1f}ms",
+                        self.name,
+                        chunk_index + 1,
+                        len(chunks),
+                        "/".join(columns),
+                        len(chunk),
+                        len(rows),
+                        elapsed_ms,
+                    )
+
+                    if rows:
+                        frame = pd.DataFrame(rows, columns=result_columns)
+                        normalize_columns(frame)
+                        collected.append(frame)
+
+        if not collected:
+            return pd.DataFrame()
+        return pd.concat(collected, ignore_index=True)

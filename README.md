@@ -123,6 +123,9 @@ Run the relevant suite before every commit; see
 |---|---|
 | [`CLAUDE.md`](CLAUDE.md) | Architecture, commands, and coding conventions for anyone (human or AI agent) working in this repo |
 | [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) | Long-term memory: status history, validated data-grain numbers, incident lessons |
+| [`docs/architecture/DATABASE_SCHEMA.md`](docs/architecture/DATABASE_SCHEMA.md) | Reference map of every table/view in `database/migrations/`, organized by domain |
+| [`docs/architecture/INFRASTRUCTURE.md`](docs/architecture/INFRASTRUCTURE.md) | What each Terraform module provisions and how environments wire them together |
+| [`terraform/README.md`](terraform/README.md) | Terraform deployment runbook: bootstrap, `init`/`plan`/`apply`, account safety, destroy procedure |
 | [`docs/development/MASTER_ROADMAP.md`](docs/development/MASTER_ROADMAP.md) | Current status and planned phases |
 | [`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md), [`docs/AI_OPENAI_PROVIDER.md`](docs/AI_OPENAI_PROVIDER.md) | AI feature design and provider integration |
 | [`docs/AI_TROUBLESHOOTING.md`](docs/AI_TROUBLESHOOTING.md), [`docs/runbooks/ecs-ai-deployment.md`](docs/runbooks/ecs-ai-deployment.md) | AI feature deployment and incident postmortems |
