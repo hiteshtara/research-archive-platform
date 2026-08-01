@@ -101,6 +101,22 @@ source tree: **Award (non-AI), IRB, and Protocol have no dedicated JUnit
 tests today** — stale references to a `ProtocolArchiveControllerTest`
 survive only in `api/target/surefire-reports` build output, not in source.
 
+## 7. Award runtime — how the redesigned UI navigates
+
+![Award runtime architecture](AWARD_RUNTIME_ARCHITECTURE_DIAGRAM.svg)
+
+Zooming into the "React UI" and "Spring Boot API" boxes from §1, specifically
+for the Award module's redesign concept
+([`docs/design/award-ui-redesign-mockup.html`](../design/award-ui-redesign-mockup.html)):
+three states — Search, a standalone Award Hierarchy tree, and an Award
+Dashboard with a breadcrumb and ten section tabs (Summary, Hierarchy,
+People, Budget, Time & Money, SAP History, Comments, Terms, Compliance,
+Attachments). Clicking any card in the hierarchy or any parent/child/
+breadcrumb entry inside the dashboard swaps the whole dashboard to that
+award in place, with no page reload — the hierarchy *is* the navigation.
+Every section still only reads from PostgreSQL, so this diagram doesn't
+relax the read-only guarantee in §1, it just zooms into one corner of it.
+
 ## Where to go next
 
 | Question | Doc |
@@ -111,3 +127,4 @@ survive only in `api/target/surefire-reports` build output, not in source.
 | How do I run/debug a loader locally? | [`etl/README.md`](../../etl/README.md) |
 | How does the AI feature avoid fabricating facts? | [`AI_ARCHITECTURE.md`](../AI_ARCHITECTURE.md) |
 | What decisions got reversed, and why? | [`DECISIONS.md`](../DECISIONS.md) |
+| What does the redesigned Award UI look like/do? | [`award-ui-redesign-mockup.html`](../design/award-ui-redesign-mockup.html) |

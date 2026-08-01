@@ -1,0 +1,126 @@
+<svg viewBox="0 0 1400 600" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Award Runtime Architecture — how the redesigned Award UI navigates</title>
+<desc>The Award module has three states: Search, then a standalone Award Hierarchy tree, then an Award Dashboard with a breadcrumb and ten section tabs. Clicking any card in the hierarchy, or any parent/child/breadcrumb entry inside the dashboard, swaps the whole dashboard to that award in place with no page reload — the hierarchy is the navigation, so the user never has to search again. The ten dashboard sections — Summary, Hierarchy, People, Budget, Time and Money, SAP History, Comments, Terms, Compliance, and Attachments — each render from specific archive.award_* tables.</desc>
+<defs>
+<style>
+  svg { --bg:#ffffff; --panel:#f7f8fa; --border:#d7dce2; --borderStrong:#b7c0ca; --text:#1f2937; --textMut:#6b7280; --accent:#2563eb; --accentSoft:#e0e9fd; --accentDark:#1d4ed8; }
+  .title { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:19px; font-weight:700; }
+  .subtitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:12px; }
+  .grouplabel { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10.5px; font-weight:700; letter-spacing:.05em; }
+  .label { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:13px; font-weight:700; }
+  .labelHub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--accentDark); font-size:15px; font-weight:800; }
+  .sub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10.5px; }
+  .edge { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:9.5px; }
+  .cardTitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:12px; font-weight:700; }
+  .cardSub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:9px; }
+  .tagline { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--accentDark); font-size:12.5px; font-weight:700; font-style:italic; }
+  .box { fill:var(--panel); stroke:var(--borderStrong); stroke-width:1.3; }
+  .boxAccent { fill:var(--accentSoft); stroke:var(--accent); stroke-width:1.4; }
+  .boxHub { fill:var(--accentSoft); stroke:var(--accentDark); stroke-width:2.2; }
+  .flow { stroke:var(--accent); stroke-width:1.8; fill:none; }
+  .chip { fill:var(--accentSoft); stroke:var(--accent); stroke-width:1.1; }
+</style>
+<marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+</defs>
+
+<rect x="0" y="0" width="1400" height="600" fill="var(--bg)"/>
+<text x="700" y="24" text-anchor="middle" class="title">Award Runtime Architecture</text>
+<text x="700" y="42" text-anchor="middle" class="subtitle">How the redesigned Award UI navigates — complements PROCESS_FLOW_DIAGRAM.svg, which covers the platform's data pipeline instead</text>
+
+<rect x="40" y="60" width="220" height="130" rx="9" class="boxAccent"/>
+<text x="150" y="88" text-anchor="middle" class="label">1 · Search</text>
+<text x="150" y="106" text-anchor="middle" class="sub">award #, PI, sponsor, account</text>
+<text x="150" y="120" text-anchor="middle" class="sub">wildcards: *105698*</text>
+<text x="150" y="142" text-anchor="middle" class="sub" font-style="italic">archive.v_global_search</text>
+
+<path d="M260,120 L350,120" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="305" y="112" text-anchor="middle" class="edge">select</text>
+
+<rect x="350" y="60" width="250" height="130" rx="9" class="boxAccent"/>
+<text x="475" y="88" text-anchor="middle" class="label">2 · Award Hierarchy</text>
+<text x="475" y="106" text-anchor="middle" class="sub">org-chart card tree</text>
+<text x="475" y="120" text-anchor="middle" class="sub">parent ↔ children, connected</text>
+<text x="475" y="142" text-anchor="middle" class="sub" font-style="italic">archive.award_hierarchy</text>
+
+<path d="M600,120 L690,120" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="645" y="112" text-anchor="middle" class="edge">click</text>
+
+<rect x="690" y="48" width="300" height="154" rx="10" class="boxHub"/>
+<text x="840" y="78" text-anchor="middle" class="labelHub">3 · Award Dashboard</text>
+<text x="840" y="98" text-anchor="middle" class="sub">breadcrumb + 10 section tabs</text>
+<text x="840" y="112" text-anchor="middle" class="sub">click a tab to switch section</text>
+<text x="840" y="130" text-anchor="middle" class="sub">click parent / child / breadcrumb</text>
+<text x="840" y="144" text-anchor="middle" class="sub">to swap the whole award — same page</text>
+<rect x="775" y="154" width="130" height="20" rx="10" fill="var(--accentDark)"/>
+<text x="840" y="168" text-anchor="middle" class="sub" fill="#ffffff" font-weight="700">NO PAGE RELOAD</text>
+
+<path d="M970,202 C1010,270 850,300 710,202" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="840" y="316" text-anchor="middle" class="edge">parent / child / breadcrumb click swaps in place</text>
+<text x="840" y="336" text-anchor="middle" class="tagline">"You never search again."</text>
+
+<text x="52" y="228" class="grouplabel">BREADCRUMB EXAMPLE</text>
+<rect x="50" y="238" width="130" height="26" rx="13" class="chip"/>
+<text x="115" y="255" text-anchor="middle" class="edge" font-weight="700">105698-00001</text>
+<path d="M180,251 L200,251" class="flow" marker-end="url(#arrowAccent)"/>
+<rect x="204" y="238" width="130" height="26" rx="13" class="chip"/>
+<text x="269" y="255" text-anchor="middle" class="edge" font-weight="700">105698-00002</text>
+<path d="M334,251 L354,251" class="flow" marker-end="url(#arrowAccent)"/>
+<rect x="358" y="238" width="130" height="26" rx="13" class="chip"/>
+<text x="423" y="255" text-anchor="middle" class="edge" font-weight="700">105698-00007</text>
+<text x="50" y="282" class="sub">— always shows where you are in the hierarchy</text>
+
+<text x="52" y="340" class="grouplabel">10 DASHBOARD SECTIONS — same shell, different content, no navigation away from the award</text>
+
+<rect x="50" y="356" width="254" height="78" rx="8" class="box"/>
+<text x="177" y="380" text-anchor="middle" class="cardTitle">Summary</text>
+<text x="177" y="398" text-anchor="middle" class="cardSub">award_version</text>
+<text x="177" y="411" text-anchor="middle" class="cardSub">+ extension, cgb, custom_data</text>
+
+<rect x="319" y="356" width="254" height="78" rx="8" class="box"/>
+<text x="446" y="380" text-anchor="middle" class="cardTitle">Hierarchy</text>
+<text x="446" y="398" text-anchor="middle" class="cardSub">award_hierarchy</text>
+<text x="446" y="411" text-anchor="middle" class="cardSub">+ Quick Comparison</text>
+
+<rect x="588" y="356" width="254" height="78" rx="8" class="box"/>
+<text x="715" y="380" text-anchor="middle" class="cardTitle">People</text>
+<text x="715" y="398" text-anchor="middle" class="cardSub">award_person, credit_split</text>
+<text x="715" y="411" text-anchor="middle" class="cardSub">+ sponsor/unit contacts</text>
+
+<rect x="857" y="356" width="254" height="78" rx="8" class="box"/>
+<text x="984" y="380" text-anchor="middle" class="cardTitle">Budget</text>
+<text x="984" y="398" text-anchor="middle" class="cardSub">award_budget, budget_period</text>
+<text x="984" y="411" text-anchor="middle" class="cardSub">+ line items, personnel, limits</text>
+
+<rect x="1126" y="356" width="224" height="78" rx="8" class="box"/>
+<text x="1238" y="380" text-anchor="middle" class="cardTitle">Time &amp; Money</text>
+<text x="1238" y="398" text-anchor="middle" class="cardSub">time_and_money_document</text>
+<text x="1238" y="411" text-anchor="middle" class="cardSub">+ funding proposal, F&amp;A dist.</text>
+
+<rect x="50" y="450" width="254" height="78" rx="8" class="box"/>
+<text x="177" y="474" text-anchor="middle" class="cardTitle">SAP History</text>
+<text x="177" y="492" text-anchor="middle" class="cardSub">award_transmission</text>
+<text x="177" y="505" text-anchor="middle" class="cardSub">+ transmission_child (F&amp;A basis)</text>
+
+<rect x="319" y="450" width="254" height="78" rx="8" class="box"/>
+<text x="446" y="474" text-anchor="middle" class="cardTitle">Comments</text>
+<text x="446" y="492" text-anchor="middle" class="cardSub">award_comment</text>
+<text x="446" y="505" text-anchor="middle" class="cardSub">+ award_notepad</text>
+
+<rect x="588" y="450" width="254" height="78" rx="8" class="box"/>
+<text x="715" y="474" text-anchor="middle" class="cardTitle">Terms</text>
+<text x="715" y="492" text-anchor="middle" class="cardSub">sponsor_term, report_term</text>
+<text x="715" y="505" text-anchor="middle" class="cardSub">+ closeout, payment schedule</text>
+
+<rect x="857" y="450" width="254" height="78" rx="8" class="box"/>
+<text x="984" y="474" text-anchor="middle" class="cardTitle">Compliance</text>
+<text x="984" y="492" text-anchor="middle" class="cardSub">cfda, fanda_rate</text>
+<text x="984" y="505" text-anchor="middle" class="cardSub">+ special review, equipment</text>
+
+<rect x="1126" y="450" width="224" height="78" rx="8" class="box"/>
+<text x="1238" y="474" text-anchor="middle" class="cardTitle">Attachments</text>
+<text x="1238" y="492" text-anchor="middle" class="cardSub">award_attachment</text>
+<text x="1238" y="505" text-anchor="middle" class="cardSub">+ attachment_object (S3)</text>
+
+<text x="700" y="552" text-anchor="middle" class="subtitle">Full table-by-table mapping: docs/design/award-ui-redesign-mockup.html and DATABASE_SCHEMA.md</text>
+<text x="700" y="570" text-anchor="middle" class="subtitle">Every dashboard section reads from PostgreSQL only — same read-only guarantee as PROCESS_FLOW_DIAGRAM.svg</text>
+</svg>

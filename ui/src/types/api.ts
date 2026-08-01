@@ -354,6 +354,84 @@ export interface SafeApiErrorResponse {
   correlationId?: string;
 }
 
+// --- Award API v1 (search / hierarchy / summary / versions) ---------------
+
+export interface AwardSearchHit {
+  awardId: number;
+  awardNumber: string;
+  latestSequenceNumber: number | null;
+  title: string | null;
+  status: string | null;
+  principalInvestigator: string | null;
+  sponsor: string | null;
+  leadUnit: string | null;
+  currentObligatedAmount: number | null;
+  rootAwardNumber: string | null;
+  parentAwardNumber: string | null;
+}
+
+export interface AwardSearchPageResponse extends PageResponse<AwardSearchHit> {}
+
+export interface AwardHierarchyNode {
+  awardNumber: string;
+  awardId: number | null;
+  latestSequenceNumber: number | null;
+  parentAwardNumber: string | null;
+  active: boolean | null;
+  title: string | null;
+  status: string | null;
+  principalInvestigator: string | null;
+  sponsor: string | null;
+  leadUnit: string | null;
+  currentObligatedAmount: number | null;
+  children: AwardHierarchyNode[];
+}
+
+export interface AwardHierarchy {
+  rootAwardNumber: string;
+  requestedAwardNumber: string;
+  root: AwardHierarchyNode;
+  selectedAwardPath: string[];
+}
+
+export interface AwardSummaryV1 {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  title: string | null;
+  status: string | null;
+  sponsor: string | null;
+  primeSponsor: string | null;
+  principalInvestigator: string | null;
+  leadUnit: string | null;
+  awardEffectiveDate: string | null;
+  awardExecutionDate: string | null;
+  beginDate: string | null;
+  closeoutDate: string | null;
+  obligatedTotalAmount: number | null;
+  anticipatedTotalAmount: number | null;
+  basisOfPaymentCode: string | null;
+  basisOfPaymentDescription: string | null;
+  methodOfPaymentCode: string | null;
+  methodOfPaymentDescription: string | null;
+  rootAwardNumber: string | null;
+  parentAwardNumber: string | null;
+}
+
+export interface AwardVersionV1 {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  status: string | null;
+  transactionTypeCode: string | null;
+  transactionType: string | null;
+  awardEffectiveDate: string | null;
+  updateTimestamp: string | null;
+  documentNumber: string | null;
+}
+
+export interface AwardVersionPageResponse extends PageResponse<AwardVersionV1> {}
+
 export interface ProposalFamily {
   proposalNumber: string;
   title: string | null;

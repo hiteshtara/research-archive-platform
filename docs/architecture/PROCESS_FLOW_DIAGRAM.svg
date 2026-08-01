@@ -1,117 +1,177 @@
-<svg viewBox="0 0 1320 620" xmlns="http://www.w3.org/2000/svg" role="img">
-<title>Research Archive Platform end-to-end process flow</title>
-<desc>Data flows one way, read-only: Kuali Oracle to a Python ETL pipeline to PostgreSQL's archive schema to a Spring Boot API to a React UI to the browser. A parallel attachments path streams document BLOBs from Oracle into an S3 documents bucket, served by the API as signed downloads. An optional, flag-gated AI layer sits on the API, building a redacted context and validating model citations before any answer reaches the UI. No arrow ever points back toward Oracle.</desc>
+<svg viewBox="0 0 1450 620" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Research Archive Platform end-to-end process flow, v2</title>
+<desc>Oracle branches read-only into two ECS loaders: the Award Loader writes metadata into PostgreSQL's archive schema, and the Attachment Loader streams document BLOBs into S3. PostgreSQL and S3 both feed a Spring Boot API (search, hierarchy, award details, signed URLs, authentication), which serves a React UI (search, hierarchy, drill-down, lazy sections) rendered in the browser. An optional AI layer — Award Context Builder then AI Provider — hangs off the API only and never talks to Oracle. A banner across the top states the core guarantee: one way only, Oracle to Archive to Browser, never writes back.</desc>
 <defs>
 <style>
-  svg { --bg:#ffffff; --panel:#f7f8fa; --border:#d7dce2; --borderStrong:#b7c0ca; --text:#1f2937; --textMut:#6b7280; --accent:#2563eb; --accentSoft:#e0e9fd; --accent2:#0f766e; --accent2Soft:#dcf3f0; --accent3:#7c3aed; --accent3Soft:#efe9fd; }
+  svg { --bg:#ffffff; --panel:#f7f8fa; --border:#d7dce2; --borderStrong:#b7c0ca; --text:#1f2937; --textMut:#6b7280; --accent:#2563eb; --accentSoft:#e0e9fd; --accent2:#0f766e; --accent2Soft:#dcf3f0; --accent3:#7c3aed; --accent3Soft:#efe9fd; --banner:#111827; --bannerText:#f9fafb; }
   .title { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:19px; font-weight:700; }
   .subtitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:12px; }
   .grouplabel { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10.5px; font-weight:700; letter-spacing:.05em; }
-  .label { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:13px; font-weight:600; }
+  .label { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:13px; font-weight:700; }
   .sub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:10px; }
+  .bullet { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--text); font-size:11px; }
   .edge { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--textMut); font-size:9.5px; }
   .box { fill:var(--panel); stroke:var(--borderStrong); stroke-width:1.4; }
   .boxAccent { fill:var(--accentSoft); stroke:var(--accent); stroke-width:1.4; }
   .boxAccent2 { fill:var(--accent2Soft); stroke:var(--accent2); stroke-width:1.4; }
   .boxAccent3 { fill:var(--accent3Soft); stroke:var(--accent3); stroke-width:1.4; }
   .flow { stroke:var(--accent); stroke-width:1.8; fill:none; }
-  .flowMut { stroke:var(--borderStrong); stroke-width:1.3; fill:none; }
-  .flowDash { stroke:var(--textMut); stroke-width:1.2; fill:none; stroke-dasharray:4 3; }
+  .flow2 { stroke:var(--accent2); stroke-width:1.8; fill:none; }
+  .flowDash { stroke:var(--accent3); stroke-width:1.2; fill:none; stroke-dasharray:4 3; }
+  .flowDashMut { stroke:var(--textMut); stroke-width:1.2; fill:none; stroke-dasharray:4 3; }
+  .bannerTitle { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:var(--bannerText); font-size:15px; font-weight:800; letter-spacing:.06em; }
+  .bannerSub { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:#cbd5e1; font-size:10.5px; }
+  .ecsTag { fill:var(--accent); }
+  .ecsTagText { font-family:-apple-system,Helvetica,Arial,sans-serif; fill:#ffffff; font-size:9px; font-weight:700; }
 </style>
 <marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+<marker id="arrowAccent2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent2)"/></marker>
+<marker id="arrowAccent3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent3)"/></marker>
 <marker id="arrowMut" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--textMut)"/></marker>
 </defs>
 
-<rect x="0" y="0" width="1320" height="620" fill="var(--bg)"/>
-<text x="660" y="27" text-anchor="middle" class="title">Research Archive Platform — End-to-End Process Flow</text>
-<text x="660" y="45" text-anchor="middle" class="subtitle">Kuali Oracle to the browser, read-only and one-way — see INFRASTRUCTURE, ETL_PIPELINE and DATABASE_LOADERS diagrams for detail on each stage</text>
+<rect x="0" y="0" width="1450" height="620" fill="var(--bg)"/>
+<text x="725" y="24" text-anchor="middle" class="title">Research Archive Platform — End-to-End Process Flow</text>
+<text x="725" y="41" text-anchor="middle" class="subtitle">Kuali Oracle to the browser — see INFRASTRUCTURE, ETL_PIPELINE, DATABASE_LOADERS and AWARD_RUNTIME_ARCHITECTURE diagrams for detail on each stage</text>
 
-<!-- Main spine -->
-<rect x="60" y="90" width="175" height="90" rx="9" class="boxAccent"/>
-<text x="147" y="118" text-anchor="middle" class="label">Oracle (Kuali)</text>
-<text x="147" y="134" text-anchor="middle" class="sub">BU VPN · source of</text>
-<text x="147" y="147" text-anchor="middle" class="sub">truth until retirement</text>
+<!-- ONE WAY ONLY banner -->
+<rect x="40" y="54" width="1370" height="46" rx="8" fill="var(--banner)"/>
+<text x="725" y="72" text-anchor="middle" class="bannerTitle">ONE WAY ONLY</text>
+<text x="725" y="88" text-anchor="middle" class="bannerSub">Oracle → Archive → Browser — never writes back. No arrow on this page ever points right-to-left.</text>
 
-<rect x="260" y="90" width="175" height="90" rx="9" class="boxAccent"/>
-<text x="347" y="118" text-anchor="middle" class="label">ETL (Python)</text>
-<text x="347" y="134" text-anchor="middle" class="sub">extract → validate →</text>
-<text x="347" y="147" text-anchor="middle" class="sub">transform → load</text>
+<!-- Lane labels -->
+<text x="42" y="128" class="grouplabel">ARCHIVE PATH — METADATA</text>
+<text x="42" y="292" class="grouplabel">ATTACHMENTS PATH — BLOBS</text>
 
-<rect x="460" y="90" width="175" height="90" rx="9" class="boxAccent"/>
-<text x="547" y="118" text-anchor="middle" class="label">PostgreSQL</text>
-<text x="547" y="134" text-anchor="middle" class="sub">archive schema</text>
-<text x="547" y="147" text-anchor="middle" class="sub">7 domains, RDS</text>
+<!-- Oracle -->
+<rect x="40" y="136" width="160" height="100" rx="9" class="boxAccent"/>
+<text x="120" y="164" text-anchor="middle" class="label">Oracle (Kuali)</text>
+<text x="120" y="180" text-anchor="middle" class="sub">BU VPN only</text>
+<text x="120" y="193" text-anchor="middle" class="sub">source of truth</text>
+<rect x="85" y="203" width="70" height="16" rx="8" fill="var(--text)"/>
+<text x="120" y="214" text-anchor="middle" class="ecsTagText">READ ONLY</text>
 
-<rect x="660" y="90" width="175" height="90" rx="9" class="boxAccent"/>
-<text x="747" y="118" text-anchor="middle" class="label">Spring Boot API</text>
-<text x="747" y="134" text-anchor="middle" class="sub">JdbcClient · REST</text>
-<text x="747" y="147" text-anchor="middle" class="sub">Cognito-authenticated</text>
+<!-- Award Loader -->
+<rect x="250" y="136" width="200" height="100" rx="9" class="boxAccent"/>
+<text x="350" y="160" text-anchor="middle" class="label">Award Loader (Python)</text>
+<rect x="302" y="170" width="96" height="17" rx="8.5" class="ecsTag"/>
+<text x="350" y="182" text-anchor="middle" class="ecsTagText">RUNNING IN ECS</text>
+<text x="350" y="204" text-anchor="middle" class="sub">Award · Proposal · Negotiation</text>
+<text x="350" y="217" text-anchor="middle" class="sub">Subaward · Protocol · IRB</text>
 
-<rect x="860" y="90" width="175" height="90" rx="9" class="boxAccent"/>
-<text x="947" y="118" text-anchor="middle" class="label">React UI</text>
-<text x="947" y="134" text-anchor="middle" class="sub">Amplify-hosted</text>
-<text x="947" y="147" text-anchor="middle" class="sub">(bring-your-own OK)</text>
+<!-- Attachment Loader -->
+<rect x="250" y="300" width="200" height="94" rx="9" class="boxAccent2"/>
+<text x="350" y="324" text-anchor="middle" class="label">Attachment Loader (Python)</text>
+<rect x="302" y="334" width="96" height="17" rx="8.5" fill="var(--accent2)"/>
+<text x="350" y="346" text-anchor="middle" class="ecsTagText">RUNNING IN ECS</text>
+<text x="350" y="368" text-anchor="middle" class="sub">streams Oracle BLOBs</text>
+<text x="350" y="381" text-anchor="middle" class="sub">resumable batch manifest</text>
 
-<rect x="1060" y="90" width="175" height="90" rx="9" class="box"/>
-<text x="1147" y="118" text-anchor="middle" class="label">Browser</text>
-<text x="1147" y="134" text-anchor="middle" class="sub">End user</text>
-<text x="1147" y="147" text-anchor="middle" class="sub">BU researcher / staff</text>
+<!-- PostgreSQL -->
+<rect x="490" y="136" width="220" height="110" rx="9" class="boxAccent"/>
+<text x="600" y="160" text-anchor="middle" class="label">PostgreSQL</text>
+<text x="600" y="175" text-anchor="middle" class="sub">archive schema · RDS</text>
+<text x="600" y="196" text-anchor="middle" class="sub">Award · Proposal · Negotiation</text>
+<text x="600" y="209" text-anchor="middle" class="sub">Subaward · Protocol · IRB · Attachments</text>
+<text x="600" y="228" text-anchor="middle" class="sub" font-style="italic">business grain ≠ historical grain</text>
 
-<path d="M235,135 L260,135" class="flow" marker-end="url(#arrowAccent)"/>
-<text x="247" y="126" text-anchor="middle" class="edge">reads</text>
-<path d="M435,135 L460,135" class="flow" marker-end="url(#arrowAccent)"/>
-<text x="447" y="126" text-anchor="middle" class="edge">loads</text>
-<path d="M635,135 L660,135" class="flow" marker-end="url(#arrowAccent)"/>
-<text x="647" y="126" text-anchor="middle" class="edge">SQL</text>
-<path d="M835,135 L860,135" class="flow" marker-end="url(#arrowAccent)"/>
-<text x="847" y="126" text-anchor="middle" class="edge">JSON</text>
-<path d="M1035,135 L1060,135" class="flow" marker-end="url(#arrowAccent)"/>
-<text x="1047" y="126" text-anchor="middle" class="edge">renders</text>
+<!-- S3 -->
+<rect x="490" y="300" width="220" height="94" rx="9" class="boxAccent2"/>
+<text x="600" y="324" text-anchor="middle" class="label">S3 — documents bucket</text>
+<text x="600" y="342" text-anchor="middle" class="sub">binary storage only</text>
+<text x="600" y="356" text-anchor="middle" class="sub">per-domain prefixes</text>
+<text x="600" y="372" text-anchor="middle" class="sub">versioned · SSE · private</text>
 
-<!-- Attachments side path -->
-<text x="62" y="225" class="grouplabel">ATTACHMENTS / DOCUMENTS</text>
-<rect x="60" y="238" width="280" height="60" rx="8" class="boxAccent2"/>
-<text x="200" y="262" text-anchor="middle" class="label">Oracle BLOB reader</text>
-<text x="200" y="277" text-anchor="middle" class="sub">archive_attachments.py · ECS loader</text>
+<!-- Spring Boot API -->
+<rect x="760" y="146" width="230" height="150" rx="9" class="boxAccent"/>
+<text x="875" y="170" text-anchor="middle" class="label">Spring Boot API</text>
+<circle cx="792" cy="185" r="3.6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+<line x1="794.5" y1="187.5" x2="798" y2="191" stroke="var(--accent)" stroke-width="1.4"/>
+<text x="806" y="189" class="bullet">Search</text>
+<text x="806" y="205" class="bullet">Hierarchy</text>
+<text x="806" y="221" class="bullet">Award Details</text>
+<text x="806" y="237" class="bullet">Signed URLs</text>
+<text x="806" y="253" class="bullet">Authentication</text>
+<text x="875" y="278" text-anchor="middle" class="sub">JdbcClient · Cognito JWT</text>
 
-<rect x="460" y="238" width="280" height="60" rx="8" class="boxAccent2"/>
-<text x="600" y="262" text-anchor="middle" class="label">S3: documents bucket</text>
-<text x="600" y="277" text-anchor="middle" class="sub">binary storage, per-domain prefixes</text>
+<!-- React UI -->
+<rect x="1030" y="160" width="200" height="136" rx="9" class="boxAccent"/>
+<text x="1130" y="184" text-anchor="middle" class="label">React UI</text>
+<circle cx="1062" cy="199" r="3.6" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+<line x1="1064.5" y1="201.5" x2="1068" y2="205" stroke="var(--accent)" stroke-width="1.4"/>
+<text x="1076" y="203" class="bullet">Search</text>
+<text x="1076" y="219" class="bullet">Hierarchy</text>
+<text x="1076" y="235" class="bullet">Drill-down</text>
+<text x="1076" y="251" class="bullet">Lazy Sections</text>
+<text x="1130" y="278" text-anchor="middle" class="sub">Amplify-hosted</text>
 
-<path d="M340,268 L460,268" class="flow" marker-end="url(#arrowAccent)"/>
-<path d="M600,238 C650,200 700,160 730,180" class="flowDash" marker-end="url(#arrowMut)"/>
-<text x="705" y="200" text-anchor="middle" class="edge">signed download URL</text>
+<!-- Browser -->
+<rect x="1270" y="176" width="150" height="110" rx="9" class="box"/>
+<text x="1345" y="208" text-anchor="middle" class="label">Browser</text>
+<text x="1345" y="226" text-anchor="middle" class="sub">End user</text>
+<text x="1345" y="240" text-anchor="middle" class="sub">BU staff / researcher</text>
 
-<!-- AI side path -->
-<text x="462" y="345" class="grouplabel">AI FEATURES — OPTIONAL, FLAG-GATED (app.ai.*)</text>
-<rect x="460" y="358" width="280" height="64" rx="8" class="boxAccent3"/>
-<text x="600" y="382" text-anchor="middle" class="label">AwardContextBuilder</text>
-<text x="600" y="397" text-anchor="middle" class="sub">redacts + truncates before any model call</text>
+<!-- Main lane arrows -->
+<path d="M200,186 L250,186" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="225" y="177" text-anchor="middle" class="edge">reads</text>
+<path d="M450,186 L490,191" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="470" y="177" text-anchor="middle" class="edge">loads</text>
+<path d="M710,191 L760,205" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="735" y="182" text-anchor="middle" class="edge">SQL</text>
+<path d="M990,221 L1030,221" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="1010" y="212" text-anchor="middle" class="edge">JSON</text>
+<path d="M1230,228 L1270,228" class="flow" marker-end="url(#arrowAccent)"/>
+<text x="1250" y="219" text-anchor="middle" class="edge">renders</text>
 
-<rect x="860" y="358" width="280" height="64" rx="8" class="boxAccent3"/>
-<text x="1000" y="382" text-anchor="middle" class="label">AI Provider</text>
-<text x="1000" y="397" text-anchor="middle" class="sub">Stub (default) or OpenAI · citation-checked</text>
+<!-- Attachment lane arrows -->
+<path d="M200,222 C225,260 225,290 250,315" class="flow2" marker-end="url(#arrowAccent2)"/>
+<text x="176" y="270" class="edge">reads</text>
+<path d="M450,347 L490,347" class="flow2" marker-end="url(#arrowAccent2)"/>
+<text x="470" y="338" text-anchor="middle" class="edge">streams</text>
+<path d="M710,320 L760,275" class="flowDashMut" marker-end="url(#arrowMut)"/>
+<text x="745" y="300" text-anchor="middle" class="edge">signed URL</text>
 
-<path d="M747,180 C700,260 650,330 600,358" class="flowDash" marker-end="url(#arrowMut)"/>
-<text x="695" y="290" text-anchor="middle" class="edge">build context</text>
-<path d="M740,390 L860,390" class="flowDash" marker-end="url(#arrowMut)"/>
-<path d="M1000,358 C980,300 850,220 780,182" class="flowDash" marker-end="url(#arrowMut)"/>
-<text x="960" y="270" text-anchor="middle" class="edge">validated answer only</text>
+<!-- AI aside -->
+<rect x="760" y="410" width="230" height="64" rx="8" class="boxAccent3"/>
+<text x="875" y="434" text-anchor="middle" class="label">Award Context Builder</text>
+<text x="875" y="452" text-anchor="middle" class="sub">redacts &amp; truncates before any model call</text>
 
-<!-- Read-only note -->
-<rect x="60" y="450" width="1175" height="50" rx="8" class="box" stroke-dasharray="4 3"/>
-<text x="647" y="472" text-anchor="middle" class="sub">Read-only, one-way, end to end: only the ETL ever touches Oracle, and only to read. Nothing in this diagram — ETL, API, or AI provider —</text>
-<text x="647" y="487" text-anchor="middle" class="sub">ever writes back to Oracle. No arrow above points right-to-left.</text>
+<rect x="1030" y="410" width="180" height="64" rx="8" class="boxAccent3"/>
+<text x="1120" y="434" text-anchor="middle" class="label">AI Provider</text>
+<text x="1120" y="452" text-anchor="middle" class="sub">Stub (default) or OpenAI</text>
+
+<path d="M865,296 L865,410" class="flowDash" marker-end="url(#arrowAccent3)"/>
+<text x="880" y="360" class="edge">build context</text>
+<path d="M990,442 L1030,442" class="flowDash" marker-end="url(#arrowAccent3)"/>
+<path d="M1120,410 C1110,350 1000,300 940,285" class="flowDash" marker-end="url(#arrowAccent3)"/>
+<text x="1060" y="330" text-anchor="middle" class="edge">validated answer only</text>
+
+<rect x="815" y="480" width="240" height="24" rx="12" class="boxAccent3"/>
+<text x="935" y="496" text-anchor="middle" class="bullet" font-weight="700">AI never talks to Oracle</text>
+
+<!-- Core workflow strip -->
+<text x="1215" y="315" class="grouplabel">THE CORE WORKFLOW</text>
+<rect x="1215" y="324" width="195" height="32" rx="16" class="boxAccent"/>
+<circle cx="1234" cy="340" r="4.2" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+<line x1="1237" y1="343" x2="1241" y2="347" stroke="var(--accent)" stroke-width="1.5"/>
+<text x="1250" y="344" class="bullet" font-weight="700">Search</text>
+<path d="M1312,356 L1312,370" class="flow" marker-end="url(#arrowAccent)"/>
+<rect x="1215" y="370" width="195" height="32" rx="16" class="boxAccent"/>
+<text x="1312" y="390" text-anchor="middle" class="bullet" font-weight="700">Award Hierarchy</text>
+<path d="M1312,402 L1312,416" class="flow" marker-end="url(#arrowAccent)"/>
+<rect x="1215" y="416" width="195" height="32" rx="16" class="boxAccent"/>
+<text x="1312" y="436" text-anchor="middle" class="bullet" font-weight="700">Award Details</text>
+<text x="1312" y="465" text-anchor="middle" class="sub">the defining user experience</text>
 
 <!-- Legend -->
-<rect x="230" y="525" width="18" height="13" rx="3" class="boxAccent"/>
-<text x="254" y="536" class="sub">core read path</text>
-<rect x="420" y="525" width="18" height="13" rx="3" class="boxAccent2"/>
-<text x="444" y="536" class="sub">attachments / documents</text>
-<rect x="640" y="525" width="18" height="13" rx="3" class="boxAccent3"/>
-<text x="664" y="536" class="sub">AI layer (optional)</text>
-<line x1="860" y1="532" x2="888" y2="532" class="flowDash"/>
-<text x="896" y="536" class="sub">supporting / async flow</text>
+<rect x="90" y="540" width="18" height="13" rx="3" class="boxAccent"/>
+<text x="114" y="551" class="sub">archive / metadata path</text>
+<rect x="320" y="540" width="18" height="13" rx="3" class="boxAccent2"/>
+<text x="344" y="551" class="sub">attachments / BLOB path</text>
+<rect x="560" y="540" width="18" height="13" rx="3" class="boxAccent3"/>
+<text x="584" y="551" class="sub">AI layer (optional, flag-gated)</text>
+<line x1="820" y1="547" x2="850" y2="547" class="flowDashMut"/>
+<text x="858" y="551" class="sub">supporting / async flow</text>
 
-<text x="660" y="570" text-anchor="middle" class="subtitle">Terraform provisions every box above except the browser — see docs/architecture/INFRASTRUCTURE_DIAGRAM.svg</text>
+<text x="725" y="590" text-anchor="middle" class="subtitle">Terraform provisions every box above except the browser — see INFRASTRUCTURE_DIAGRAM.svg. For how the Award dashboard itself is organized, see AWARD_RUNTIME_ARCHITECTURE_DIAGRAM.svg.</text>
 </svg>

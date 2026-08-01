@@ -4,6 +4,9 @@ import { AppLayout } from "./layout/AppLayout";
 
 import { AwardFamiliesPage } from "./pages/AwardFamiliesPage";
 import { AwardHistoryPage } from "./pages/AwardHistoryPage";
+import { AwardDashboardPage } from "./pages/award/AwardDashboardPage";
+import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
+import { AwardSearchPage } from "./pages/award/AwardSearchPage";
 
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -61,6 +64,21 @@ export default function App() {
         <Route
           path="awards/history/:awardNumber"
           element={<AwardHistoryPage />}
+        />
+
+        <Route
+          path="awards/search"
+          element={<AwardSearchPage />}
+        />
+
+        <Route
+          path="awards/hierarchy/:awardNumber"
+          element={<AwardHierarchyPage />}
+        />
+
+        <Route
+          path="awards/:awardId"
+          element={<AwardDashboardPage />}
         />
 
         <Route

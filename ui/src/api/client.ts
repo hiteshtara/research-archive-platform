@@ -323,6 +323,66 @@ export function getAwardFunding(
   return request(`/api/awards/${encodeURIComponent(awardNumber)}/funding`);
 }
 
+// --- Award API v1 (search / hierarchy / summary / versions) ---------------
+
+export function searchAwardsV1(
+  parameters: {
+    q?: string;
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardSearchPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
+  if (parameters.q?.trim()) {
+    searchParameters.set("q", parameters.q.trim());
+  }
+
+  return request(`/api/v1/awards/search?${searchParameters.toString()}`, signal);
+}
+
+export function getAwardHierarchyV1(
+  awardNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardHierarchy> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardNumber)}/hierarchy`,
+    signal,
+  );
+}
+
+export function getAwardSummaryV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardSummaryV1> {
+  return request(`/api/v1/awards/${encodeURIComponent(awardId)}/summary`, signal);
+}
+
+export function getAwardVersionsV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardVersionPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/versions?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
 export function generateAwardAiSummary(
   awardNumber: string,
   signal?: AbortSignal,

@@ -39,7 +39,7 @@ const navigation = [
   {
     label: "Awards",
     icon: <ArchiveOutlined />,
-    path: "/awards",
+    path: "/awards/search",
   },
   {
     label: "Proposals",
