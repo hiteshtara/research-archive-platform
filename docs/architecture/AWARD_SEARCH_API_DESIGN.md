@@ -2,23 +2,29 @@
 
 ## Status
 
-Implemented and manually verified end-to-end against the real archive
-schema, running locally against the production-loaded batch-7 dataset
-(282,214 `archive.award_version` rows). 38 new unit tests added; full API
-suite (163 tests) passes. Not yet deployed to ECS.
+Implemented, manually verified end-to-end against the real archive
+schema (production-loaded batch-7 dataset, 282,214 `archive.award_version`
+rows), and revised for long-term multi-client extensibility per a
+dedicated review — see "Extensibility review" below. Routes now live
+under `/api/v1/awards`. 46 unit/contract tests added across the two
+passes; full API suite (170 tests) passes. Image build/ECS deploy is
+blocked by a pre-existing, unrelated infrastructure incident — see
+`AWARD_IMPLEMENTATION_ROADMAP.md`'s corresponding same-day entry.
 
 ## Scope
 
 Phase 1 of the Award API build, per explicit instruction: only these four
 endpoints, nothing else.
 
-- `GET /api/awards/search?q=&page=&size=`
-- `GET /api/awards/{awardNumber}/hierarchy`
-- `GET /api/awards/{awardId}/summary`
-- `GET /api/awards/{awardId}/versions`
+- `GET /api/v1/awards/search?q=&page=&size=`
+- `GET /api/v1/awards/{awardNumber}/hierarchy`
+- `GET /api/v1/awards/{awardId}/summary`
+- `GET /api/v1/awards/{awardId}/versions?page=&size=`
 
 Budget, Time and Money, Terms, Comments, SAP transmission history, and
-Attachments endpoints are explicitly deferred to a later phase. No ETL,
+Attachments endpoints are explicitly deferred to a later phase — planned
+as further composable resources under the same `/api/v1/awards/{awardId}/…`
+family (see "Composability" below), not folded into `summary`. No ETL,
 Terraform, or AWS infrastructure changes. No React UI changes — the
 `docs/design/award-ui-redesign-mockup.html` mockup was read only to
 determine what fields the frontend will eventually need.
@@ -27,12 +33,18 @@ determine what fields the frontend will eventually need.
 
 Mirrors the existing Award concrete-service pattern (no ports/use-case
 layer — see `CLAUDE.md`'s "Hexagonal layout is only fully implemented for
-IRB" note): `AwardArchiveController` → `AwardArchiveService` →
+IRB" note): `AwardV1Controller` → `AwardArchiveService` →
 `AwardArchiveRepository` (`JdbcClient`, no Spring Data JPA). Not-found
 propagates as plain `java.util.NoSuchElementException`, mapped to 404 by
 the existing unscoped `GlobalExceptionHandler`. New DTOs live in
 `adapter/in/web/dto/award/`; no JPA entity is ever returned directly from
 a controller.
+
+The four endpoints live on a new `AwardV1Controller` (`/api/v1/awards`),
+separate from the pre-existing `AwardArchiveController` (`/api/awards`,
+unversioned) that the current React UI already calls directly
+(`ui/src/api/client.ts`) — see "API versioning" below for why these were
+deliberately not merged into one controller/prefix.
 
 Two internal-only DTOs (`AwardHierarchyEdgeRow`, `AwardSummaryCardRow`)
 exist purely to move data between the repository and the service's
@@ -40,7 +52,7 @@ tree-building code — they are never serialized to a client.
 
 ## Endpoints
 
-### `GET /api/awards/search?q=&page=&size=`
+### `GET /api/v1/awards/search?q=&page=&size=`
 
 Supports exact/partial/wildcard (`*text*`) award number, PI/person name,
 title, sponsor code/name, lead unit number/name, and document number
@@ -48,7 +60,7 @@ title, sponsor code/name, lead unit number/name, and document number
 to 25 (`@Min(1)`, `@Max(100)`).
 
 ```
-GET /api/awards/search?q=Cancer&size=2
+GET /api/v1/awards/search?q=Cancer&size=2
 ```
 
 ```json
@@ -82,7 +94,7 @@ archive.award_hierarchy` and are `null` whenever the award has no
 hierarchy row at all — the common case (0 rows in the local dev dataset
 at the time of writing; see "Hierarchy data availability" below).
 
-### `GET /api/awards/{awardNumber}/hierarchy`
+### `GET /api/v1/awards/{awardNumber}/hierarchy`
 
 Returns the full recursive family tree rooted at
 `archive.award_hierarchy.root_award_number`, resolved from whatever
@@ -91,7 +103,7 @@ same tree). 404 if the award_number doesn't exist in `award_version` at
 all.
 
 ```
-GET /api/awards/100004-00003/hierarchy
+GET /api/v1/awards/100004-00003/hierarchy
 ```
 
 ```json
@@ -187,7 +199,7 @@ different starting points, then deleting the synthetic rows — see
 production dataset that actually has populated hierarchy rows before
 the React hierarchy UI ships.
 
-### `GET /api/awards/{awardId}/summary`
+### `GET /api/v1/awards/{awardId}/summary`
 
 Keyed by the surrogate `award_id` (one specific version), not
 `award_number` — deliberately different from every other endpoint here.
@@ -195,7 +207,7 @@ Compact only: no comments, Budget, Time and Money, SAP transmission
 history, or attachments.
 
 ```
-GET /api/awards/3/summary
+GET /api/v1/awards/3/summary
 ```
 
 ```json
@@ -226,34 +238,57 @@ GET /api/awards/3/summary
 
 404 if `awardId` doesn't exist.
 
-### `GET /api/awards/{awardId}/versions`
+### `GET /api/v1/awards/{awardId}/versions?page=&size=`
 
 Resolves `awardId` to its `award_number` family, then returns every
 version row for that exact `award_number` (not sibling award_numbers —
 see "Award number vs. sequence number" below), newest sequence first.
+Wrapped in the same `PageResponse` envelope as `search` (`page` defaults
+to 0, `size` defaults to 50, max 100) — added during the extensibility
+review for pagination-metadata consistency across every list-shaped
+endpoint; the original Phase 1 pass returned a bare JSON array here.
 
 ```
-GET /api/awards/1207589/versions
+GET /api/v1/awards/1207589/versions?size=2
 ```
 
 ```json
-[
-  {
-    "awardId": 1207589,
-    "awardNumber": "100004-00001",
-    "sequenceNumber": 9,
-    "status": "Closed",
-    "transactionTypeCode": "13",
-    "transactionType": "Other -- See Comments",
-    "awardEffectiveDate": "2007-09-15",
-    "updateTimestamp": "2015-02-11T14:48:29",
-    "documentNumber": null
-  }
-]
+{
+  "content": [
+    {
+      "awardId": 1207589,
+      "awardNumber": "100004-00001",
+      "sequenceNumber": 9,
+      "status": "Closed",
+      "transactionTypeCode": "13",
+      "transactionType": "Other -- See Comments",
+      "awardEffectiveDate": "2007-09-15",
+      "updateTimestamp": "2015-02-11T14:48:29",
+      "documentNumber": null
+    },
+    {
+      "awardId": 1207482,
+      "awardNumber": "100004-00001",
+      "sequenceNumber": 8,
+      "status": "PAFO/OSP (Closing)",
+      "transactionTypeCode": "13",
+      "transactionType": "Other -- See Comments",
+      "awardEffectiveDate": "2007-09-15",
+      "updateTimestamp": "2015-02-11T13:53:01",
+      "documentNumber": null
+    }
+  ],
+  "page": 0,
+  "size": 2,
+  "totalElements": 9,
+  "totalPages": 5,
+  "first": true,
+  "last": false
+}
 ```
 
-(Real response for this award_number has 9 entries, sequence 9 down to
-1; abbreviated here.) 404 if `awardId` doesn't exist.
+(Real response for this award_number has `totalElements: 9`; abbreviated
+to `size=2` above.) 404 if `awardId` doesn't exist.
 
 #### Award number vs. sequence number
 
@@ -381,25 +416,38 @@ Confirmed:
 
 ## Tests
 
-38 new tests, all passing; full API suite (163 tests) passes.
+46 tests across both passes (38 Phase 1 + 8 extensibility-review
+additions/replacements), all passing; full API suite (170 tests) passes.
 
 - `AwardSearchPatternTest` (8): substring default, application wildcard
   (leading/trailing/both), literal `%`/`_`/`\` escaping, SQL-injection
   inertness, empty query.
-- `AwardArchiveRepositoryTest` (10): search/count SQL shape and bound
+- `AwardArchiveRepositoryTest` (11): search/count SQL shape and bound
   parameters (never concatenated), hierarchy root/edges queries,
   summary-cards empty-collection short-circuit (no query issued) and
   `IN (:awardNumbers)` binding, summary-by-id column mapping (asserting
   absence of any `fain`/`account_type` reference), award-number
-  resolution, version ordering.
-- `AwardArchiveServiceTest` (12): pagination clamping, wildcard/empty
-  query normalization, single-node hierarchy fallback, 404s, full
-  recursive tree construction with a self-referencing root, root-row
-  promotion when the nominal root is missing from the edge set, 2-cycle
-  termination guard, summary/versions delegation and 404s.
-- `AwardArchiveControllerTest` (8): routing/parameter delegation for all
-  four endpoints, default paging, and 404 propagation via
-  `GlobalExceptionHandler`.
+  resolution, version ordering and pagination, version count.
+- `AwardArchiveServiceTest` (13): pagination clamping (search and
+  versions), wildcard/empty query normalization, single-node hierarchy
+  fallback, 404s, full recursive tree construction with a
+  self-referencing root, root-row promotion when the nominal root is
+  missing from the edge set, 2-cycle termination guard, summary/versions
+  delegation and 404s.
+- `AwardV1ControllerTest` (8): routing/parameter delegation for all four
+  `/api/v1/awards` endpoints, default paging, versions pagination, and
+  404 propagation with the consistent error shape.
+- `AwardV1ContractTest` (5, new): golden-shape serialization tests for
+  all four response DTOs (including the `PageResponse` envelope and the
+  nested hierarchy node) — asserts the exact field-name set for each,
+  and that dates/timestamps serialize as ISO strings, not numeric
+  timestamp arrays. Guards against an accidental field rename/removal/
+  retype going unnoticed, since nothing else in the type system
+  surfaces a DTO's JSON shape.
+
+(`AwardArchiveControllerTest`, the Phase 1 controller test file, was
+deleted and its cases moved into `AwardV1ControllerTest` when the four
+endpoints moved controllers — see "API versioning" below.)
 
 ## Open questions
 
@@ -415,6 +463,344 @@ Confirmed:
   behavior and was exercised directly in manual verification, but is
   worth calling out as the first use of this specific binding pattern
   here.
+- See "Open questions" at the end of the extensibility review below for
+  additional items raised by that pass specifically.
+
+---
+
+# Extensibility review (2026-08-01 addendum)
+
+Prompted by an explicit request to check the Phase 1 design against
+multi-client-extensibility principles before deployment — the API must
+serve more than the one React UI that happens to exist today. Each
+principle below states what was checked, what (if anything) was
+corrected, and why.
+
+## API versioning
+
+**Correction made.** All four new endpoints moved to `/api/v1/awards/...`
+on a new `AwardV1Controller`. The pre-existing, unversioned
+`AwardArchiveController` (`/api/awards/...`) was left completely
+unchanged and unversioned.
+
+This was a deliberate, scoped choice, not an oversight:
+
+- `ui/src/api/client.ts` already calls `AwardArchiveController`'s
+  existing endpoints directly (`/api/awards/families`, `/{awardNumber}`,
+  `/history`, `/people`, `/amounts`, `/proposals`, `/funding`) from the
+  live React UI. Moving those under `/api/v1` in the same pass would
+  silently break the currently-working frontend with no corresponding
+  UI change — out of scope for "do not build the UI."
+- The four *new* endpoints have zero existing consumers (the React
+  hierarchy UI is explicitly paused pending this API), so giving them a
+  versioned home from day one costs nothing and avoids ever having to
+  version them later under load.
+- Versioning the entire app in one pass (every other domain controller —
+  Subaward, Proposal, Negotiation, IRB — is also unversioned) is a much
+  larger, cross-cutting migration than "Award API extensibility," and
+  was not requested.
+
+**Recommendation, not yet actioned:** migrate `AwardArchiveController`'s
+existing endpoints to `/api/v1/awards/...` (with the UI's `client.ts`
+updated in lockstep) in a dedicated, explicitly-scoped pass, then
+formalize `/api/v1` as the whole app's convention going forward. Until
+then, the app has one versioned and one unversioned Award surface
+side by side — documented here so it isn't mistaken for an accident.
+
+## DTOs stay domain-oriented
+
+**Confirmed, no correction needed.** Every new DTO (`AwardSearchResultResponse`,
+`AwardHierarchyResponse`/`AwardHierarchyNodeResponse`, `AwardSummaryResponse`,
+`AwardVersionSummaryResponse`) is a plain Java record with domain-shaped
+field names (`principalInvestigator`, `sponsor`, `obligatedTotalAmount`,
+...) — none reference a JPA entity, an archive table/column name
+verbatim (`sponsor_name` → `sponsor`, not left as-is), or a React
+component/prop name. `AwardHierarchyEdgeRow`/`AwardSummaryCardRow` are
+internal-only (never serialized) precisely so the repository↔service
+data-shuttling doesn't leak into the public contract.
+
+## No presentation fields
+
+**Confirmed, no correction needed.** Grepped every new DTO for anything
+resembling a UI concern (color, icon, expansion/collapse state, tab
+name, display label, sort-arrow direction, CSS class) — none exist. The
+mockup's own invented display-only fields (`cgb_indicator` styling,
+etc.) were never carried into any DTO in the first place.
+
+## Consistent pagination metadata
+
+**Correction made.** `/versions` previously returned a bare JSON array;
+now wrapped in the same generic `PageResponse<T>` envelope as `/search`
+(see "Endpoints" above). `/hierarchy` and `/summary` remain unwrapped —
+a recursive tree and a single object are not "list" endpoints, and
+forcing a `PageResponse` around either would be actively misleading (a
+tree has no single flat page of results; a summary has no plurality at
+all). Every endpoint in this API that returns a flat list of records now
+uses the identical envelope shape.
+
+## Stable sort, documented default
+
+**Confirmed, documented, no code change needed** — both existing sorts
+were already deterministic, now called out explicitly:
+
+- `search`: `ORDER BY award_number` — stable on its own, since
+  `ux_award_one_primary_current` guarantees at most one
+  `is_primary_current` row per `award_number` (no ties possible).
+- `versions`: `ORDER BY sequence_number DESC, source_update_timestamp DESC
+  NULLS LAST, award_id DESC` — the `award_id` tiebreaker guarantees a
+  total order even if `sequence_number`/timestamp collide.
+
+Neither endpoint accepts a client-supplied sort parameter yet; if one is
+added later, the default must remain exactly these orders for backward
+compatibility (see "Backward compatibility rules" below).
+
+## Consistent error responses
+
+**Correction made.** `GlobalExceptionHandler` (the single, app-wide
+`@RestControllerAdvice` — this fix benefits every controller, not just
+Award) previously returned `{timestamp, status, error, message}`. Now
+additionally returns `code` (a short machine-readable string —
+`NOT_FOUND`, `BAD_REQUEST`, `VALIDATION_ERROR` — so a client can branch
+without parsing `message` text) and `path` (the request URI, from
+`HttpServletRequest`), matching this shape:
+
+```json
+{
+  "timestamp": "2026-08-01T19:02:20.662234Z",
+  "status": 404,
+  "error": "Not Found",
+  "code": "NOT_FOUND",
+  "message": "Award not found: 999999999",
+  "path": "/api/v1/awards/999999999/summary",
+  "correlationId": "38874465-7f5e-4586-839c-750e69b04f6f"
+}
+```
+
+All additive — no existing field was renamed or removed, so this cannot
+break an existing consumer that reads `message`/`status` today (confirmed
+no test in the suite asserts a *closed* error-body shape that a new field
+would break).
+
+**Known simplification, flagged rather than built out further:**
+`correlationId` is generated fresh, inline, per error response — there is
+no app-wide request-entry filter yet that reads an inbound
+`X-Correlation-Id`-style header or establishes one in MDC for the whole
+request lifecycle (the only pre-existing `correlationId` convention in
+this codebase is the AI subsystem's own, generated inside
+`AwardAiSummaryService`/`AwardAiQuestionService` for AI-call tracing
+specifically — unrelated to generic HTTP request tracing). A real
+distributed-tracing correlation ID — accepted from the caller if
+present, otherwise generated at request entry and attached to every log
+line for that request, not just error responses — is a larger,
+app-wide observability change and was intentionally not built here
+without a separate, explicit ask.
+
+## OpenAPI documentation
+
+**Correction made and validated.** `springdoc-openapi` was already on the
+classpath and enabled (`/v3/api-docs`, `/swagger-ui.html`) but unused by
+any controller in this codebase — no existing precedent for
+`@Operation`/`@Parameter` annotations anywhere. Added `@Tag`/`@Operation`/
+`@Parameter`/`@ApiResponse` annotations to `AwardV1Controller` only (the
+legacy `AwardArchiveController` and every other domain controller remain
+undocumented — a pre-existing condition, not something this pass
+introduced or was asked to fix app-wide).
+
+Validated by starting the app locally and inspecting the live
+`/v3/api-docs` output:
+
+- All four `/api/v1/awards/...` paths appear, each with its intended
+  `summary`, `description`, parameter descriptions, and declared
+  response codes (confirmed for `search`: `summary: "Search Awards"`,
+  parameter descriptions for `q`/`page`/`size`, responses `200`/`400`).
+- `AwardSummaryResponse`'s generated schema lists exactly its 20 real
+  fields — no `fain`, no `accountType` — confirming the DTO-level
+  omissions survive into the generated contract, not just the Java type.
+
+## Backward-compatibility rules
+
+No breaking change has shipped yet, but for every future change to this
+API:
+
+- **Adding a field** to any response DTO is backward compatible — do it
+  freely, at the end of the record's component list is not required
+  (JSON is keyed by name, not position) but keeps diffs readable.
+- **Deprecating a field**: keep serializing it (do not remove), document
+  it as deprecated in the field's Javadoc-style comment and in this
+  design doc, and only actually remove it in a new API version
+  (`/api/v2/awards/...`) — never silently drop or repurpose a field's
+  meaning within `/api/v1`.
+- **Removing/renaming a field, or changing a field's JSON type** (e.g.
+  `String` → object, `LocalDate` → epoch number) is a breaking change.
+  It requires a new version prefix (`/api/v2`), not an in-place edit to
+  `/api/v1` — this is exactly what `AwardV1ContractTest` exists to catch
+  before it happens by accident.
+- **Adding a new endpoint** (a new composable resource, e.g.
+  `/api/v1/awards/{awardId}/budget` in a later phase) is always
+  backward compatible and needs no version bump.
+- **Changing default sort order or default page size** is a breaking
+  change for any consumer relying on the current default and must be
+  called out explicitly in this doc's changelog, even though it doesn't
+  change the JSON shape.
+- **Structured filters** (see below) must be additive query parameters
+  alongside `q`, never a replacement for it — an existing `?q=...` caller
+  must keep working exactly as before.
+
+## Composable resources, not a dashboard endpoint
+
+**Confirmed, no correction needed.** `search`, `hierarchy`, `summary`,
+and `versions` are four independent resources today; Phase 2's Budget,
+Time and Money, Terms, Comments, SAP transmission history, and
+Attachments are already planned (per `CLAUDE.md`) as further independent
+`/api/v1/awards/{awardId}/...` resources, not as fields folded into
+`summary`. A client that only needs the summary never pays for fetching
+Budget or SAP history, and vice versa.
+
+## Authorization can extend to per-resource scopes later
+
+**Confirmed, no code change needed.** Today's security posture is a
+single blanket rule (`SecurityConfiguration`: `.requestMatchers("/api/**").authenticated()`)
+with no per-resource distinction. Because every resource already has its
+own distinct route (`/search`, `/{awardNumber}/hierarchy`,
+`/{awardId}/summary`, `/{awardId}/versions`) rather than being multiplexed
+through one endpoint with a `?resource=` parameter, a future move to
+per-resource scopes/roles (e.g. `@PreAuthorize("hasAuthority('SCOPE_award:summary')")`
+on `summary` specifically) is a purely additive method-level annotation
+change — it does not require redesigning any route.
+
+## Internal identifiers
+
+`awardId` (`archive.award_version`'s surrogate primary key) is exposed
+directly in two URLs (`/{awardId}/summary`, `/{awardId}/versions`) and in
+every `search`/hierarchy-node response. This is a normal internal
+database primary key, not a business identifier (`award_number` is the
+business identifier - see `CLAUDE.md`'s "Research object model and
+business grain" section) — but exposing it is deliberate and safe here,
+specifically because:
+
+- A single `award_number` can have multiple `award_id` rows (one per
+  historical version), and the original spec requires addressing one
+  *specific version*, not just the family - award_id is the only column
+  that does that.
+- This archive is **read-only and never rewrites history** (per
+  `CLAUDE.md`'s core premise) - `award_id` values are never renumbered,
+  recycled, or merged once loaded, so a URL containing one remains valid
+  indefinitely, unlike a surrogate key in a live transactional system
+  that might be regenerated after a data migration.
+
+Documented here explicitly per the review's own instruction to "document
+them clearly" rather than silently rely on it being obvious.
+
+## Contract tests
+
+**Added.** `AwardV1ContractTest` (5 tests) serializes a representative
+instance of each response DTO with an `ObjectMapper` configured to match
+Spring Boot's own Jackson defaults (`JavaTimeModule` registered,
+`WRITE_DATES_AS_TIMESTAMPS` disabled) and asserts the exact field-name
+set, plus that date/timestamp fields render as ISO strings. This is
+deliberately narrow — a shape/regression guard, not a re-test of business
+logic (that's `AwardArchiveServiceTest`/`AwardV1ControllerTest`) — so it
+stays cheap to run and fails loudly the moment a field is accidentally
+renamed, removed, or retyped.
+
+## Client examples
+
+**curl**
+
+```bash
+curl -s "https://api.example.edu/api/v1/awards/search?q=Cancer&size=25" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**JavaScript (fetch)**
+
+```javascript
+async function searchAwards(query, { page = 0, size = 25 } = {}) {
+  const url = new URL("https://api.example.edu/api/v1/awards/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("size", String(size));
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const problem = await response.json();
+    throw new Error(`${problem.code}: ${problem.message}`);
+  }
+
+  return response.json(); // PageResponse<AwardSearchResultResponse>
+}
+```
+
+**Python (requests)**
+
+```python
+import requests
+
+def search_awards(query, page=0, size=25, token=None):
+    response = requests.get(
+        "https://api.example.edu/api/v1/awards/search",
+        params={"q": query, "page": page, "size": size},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if not response.ok:
+        problem = response.json()
+        raise RuntimeError(f"{problem['code']}: {problem['message']}")
+    return response.json()  # dict matching PageResponse<AwardSearchResultResponse>
+```
+
+## Planned: structured search filters (not implemented this pass)
+
+Explicitly deferred — "worth planning," not building now. Free-text `q`
+serves human search well; independent programmatic clients (dashboards,
+data pulls, other BU systems) will want to filter on named fields
+without constructing a text query:
+
+```
+GET /api/v1/awards?pi=Orsmond&sponsor=NIH&status=ACTIVE&page=0&size=25
+```
+
+Design intent for when this is built:
+
+- **Additive, not a replacement.** `?q=` keeps working exactly as today;
+  structured parameters are a second, independent way to query the same
+  underlying `search` resource (likely the same `/search` route gaining
+  optional `pi=`/`sponsor=`/`status=`/`leadUnit=` parameters alongside
+  `q=`, rather than a new route — avoids forcing clients to pick one
+  endpoint or the other up front).
+  - Open question at implementation time: should `q` and structured
+    filters be mutually exclusive per request, or combinable (AND)? The
+    example above with a bare `/api/v1/awards?...` (no `/search`) also
+    raises whether structured-only queries deserve their own path
+    entirely - worth deciding deliberately rather than defaulting to
+    whichever is easiest to wire up first.
+- **Each filter parameter needs its own verified column mapping** before
+  implementation - `sponsor` likely maps to `sponsor_code` (exact) with
+  `sponsor_name` as a secondary substring match, `status` to
+  `status_description` (an exact-match enum-like field, not a wildcard
+  pattern), `pi` to the same `archive.award_person` substring match
+  `search` already uses. Per `CLAUDE.md`, none of these should be
+  assumed without checking `information_schema` first.
+- **Pagination/sort/error-shape conventions above apply unchanged** - a
+  structured-filter response is still a `PageResponse<AwardSearchResultResponse>`
+  wrapping the exact same DTO `search` already returns, not a new shape.
+
+## Open questions (extensibility review)
+
+- Should `AwardArchiveController`'s legacy endpoints be migrated to
+  `/api/v1` now, later, or never (kept permanently as a deprecated
+  unversioned surface)? Needs a decision paired with a `client.ts`
+  update - not made unilaterally here.
+- Should error responses eventually carry a real, request-entry-level
+  correlation ID (propagated via a servlet filter + MDC, accepting an
+  inbound `X-Correlation-Id` header) instead of the current per-error
+  generated UUID? Would also let every log line for a request share one
+  ID, not just its final error.
+- Structured search filters: exact query-parameter names, whether they
+  combine with `q` or replace it, and verified column mappings for each
+  (see above) all still need deciding before implementation.
 
 ## Date last updated
 

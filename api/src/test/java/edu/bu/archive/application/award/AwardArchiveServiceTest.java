@@ -266,7 +266,7 @@ class AwardArchiveServiceTest {
         when(repository.findAwardNumberForId(999L))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.findVersions(999L))
+        assertThatThrownBy(() -> service.findVersions(999L, 0, 50))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("Award not found: 999");
     }
@@ -280,10 +280,31 @@ class AwardArchiveServiceTest {
                 );
         when(repository.findAwardNumberForId(3L))
                 .thenReturn(Optional.of("100004-00003"));
-        when(repository.findVersionSummaries("100004-00003"))
+        when(repository.countVersions("100004-00003")).thenReturn(1L);
+        when(repository.findVersionSummaries("100004-00003", 50, 0))
                 .thenReturn(List.of(version));
 
-        assertThat(service.findVersions(3L)).containsExactly(version);
+        PageResponse<AwardVersionSummaryResponse> page =
+                service.findVersions(3L, 0, 50);
+
+        assertThat(page.content()).containsExactly(version);
+        assertThat(page.totalElements()).isEqualTo(1L);
+    }
+
+    @Test
+    void findVersionsAppliesTheSamePaginationClampingAsSearch() {
+        when(repository.findAwardNumberForId(3L))
+                .thenReturn(Optional.of("100004-00003"));
+        when(repository.countVersions("100004-00003")).thenReturn(0L);
+        when(repository.findVersionSummaries("100004-00003", 100, 0))
+                .thenReturn(List.of());
+
+        PageResponse<AwardVersionSummaryResponse> page =
+                service.findVersions(3L, -1, 500);
+
+        assertThat(page.page()).isZero();
+        assertThat(page.size()).isEqualTo(100);
+        verify(repository).findVersionSummaries("100004-00003", 100, 0);
     }
 
     private AwardSummaryCardRow summaryCard(String awardNumber) {

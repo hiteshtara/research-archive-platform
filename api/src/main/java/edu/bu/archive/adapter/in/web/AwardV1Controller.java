@@ -1,0 +1,177 @@
+package edu.bu.archive.adapter.in.web;
+
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.application.award.AwardArchiveService;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/*
+ * Versioned Award API - stable, independent of JPA entities, archive
+ * table layout, and any single frontend's presentation needs. This is
+ * the intended long-term home for every new Award endpoint; the older
+ * unversioned AwardArchiveController (/api/awards/...) exists only
+ * because the current React UI already calls it directly - see
+ * docs/architecture/AWARD_SEARCH_API_DESIGN.md's "API versioning"
+ * section.
+ *
+ * awardId (the archive.award_version surrogate primary key) is exposed
+ * in /{awardId}/summary and /{awardId}/versions because a specific
+ * Award *version* - not just the award_number family - must be
+ * addressable; it is safe to expose as a stable public identifier only
+ * because this archive is read-only and never renumbers or reuses
+ * surrogate keys. See the design doc's "Internal identifiers" section.
+ */
+@RestController
+@RequestMapping("/api/v1/awards")
+@Validated
+@Tag(
+        name = "Awards",
+        description = "Read-only search, hierarchy, summary, and "
+                + "version history for archived Kuali Awards."
+)
+public class AwardV1Controller {
+
+    private final AwardArchiveService service;
+
+    public AwardV1Controller(AwardArchiveService service) {
+        this.service = service;
+    }
+
+    @Operation(
+            summary = "Search Awards",
+            description = "Free-text search across Award number, PI/"
+                    + "person name, title, sponsor, lead unit, and "
+                    + "document number. Supports exact match, "
+                    + "substring match (the default), and the "
+                    + "application's own *text* wildcard syntax. "
+                    + "Results are always ordered by award_number "
+                    + "ascending (unique per is_primary_current row - "
+                    + "a stable, deterministic sort with no explicit "
+                    + "sort parameter needed yet)."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of matching Awards.")
+    @ApiResponse(responseCode = "400", description = "page/size out of range.")
+    @GetMapping("/search")
+    public ResponseEntity<PageResponse<AwardSearchResultResponse>> search(
+            @Parameter(description = "Free-text query. Supports "
+                    + "*wildcard* syntax. Omit or leave blank to list "
+                    + "all current Awards, paginated.")
+            @RequestParam(name = "q", required = false)
+            String q,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "25")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(
+                service.search(q, page, size)
+        );
+    }
+
+    @Operation(
+            summary = "Get an Award's hierarchy",
+            description = "Returns the full recursive Award family "
+                    + "tree rooted at archive.award_hierarchy's "
+                    + "root_award_number, resolved from any award "
+                    + "number in the family (root, mid-tree, or "
+                    + "leaf). An Award with no recorded hierarchy "
+                    + "relationship returns a single-node tree, not "
+                    + "a 404 - only a nonexistent award_number 404s."
+    )
+    @ApiResponse(responseCode = "200", description = "The resolved hierarchy tree.")
+    @ApiResponse(responseCode = "404", description = "No such award_number.")
+    @GetMapping("/{awardNumber}/hierarchy")
+    public ResponseEntity<AwardHierarchyResponse> hierarchy(
+            @Parameter(description = "Any award_number in the family.")
+            @PathVariable
+            String awardNumber
+    ) {
+        return ResponseEntity.ok(
+                service.findHierarchy(awardNumber)
+        );
+    }
+
+    @Operation(
+            summary = "Get a compact Award summary",
+            description = "Keyed by the surrogate award_id (one "
+                    + "specific version), not award_number. Excludes "
+                    + "comments, Budget, Time and Money, SAP "
+                    + "transmission history, and attachments - those "
+                    + "are separate composable resources planned for "
+                    + "a later phase, not folded into this endpoint."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award summary.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/summary")
+    public ResponseEntity<AwardSummaryResponse> summary(
+            @Parameter(description = "The archive.award_version "
+                    + "surrogate primary key for one specific "
+                    + "version.")
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(
+                service.findSummary(awardId)
+        );
+    }
+
+    @Operation(
+            summary = "List an Award's versions",
+            description = "Resolves awardId to its award_number "
+                    + "family, then returns every version row for "
+                    + "that exact award_number (not sibling "
+                    + "award_numbers), ordered by sequence_number "
+                    + "descending (newest first), with "
+                    + "source_update_timestamp then award_id as "
+                    + "deterministic tiebreakers."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of the Award's versions.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/versions")
+    public ResponseEntity<PageResponse<AwardVersionSummaryResponse>> versions(
+            @Parameter(description = "Any award_id belonging to the "
+                    + "family whose versions should be listed.")
+            @PathVariable
+            long awardId,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "50")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(
+                service.findVersions(awardId, page, size)
+        );
+    }
+}

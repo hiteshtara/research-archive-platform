@@ -549,7 +549,11 @@ public class AwardArchiveService {
                 );
     }
 
-    public List<AwardVersionSummaryResponse> findVersions(long awardId) {
+    public PageResponse<AwardVersionSummaryResponse> findVersions(
+            long awardId,
+            int page,
+            int size
+    ) {
         String awardNumber = repository.findAwardNumberForId(awardId)
                 .orElseThrow(() ->
                         new NoSuchElementException(
@@ -557,7 +561,36 @@ public class AwardArchiveService {
                         )
                 );
 
-        return repository.findVersionSummaries(awardNumber);
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countVersions(awardNumber);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
+
+        int offset = safePage * safeSize;
+
+        List<AwardVersionSummaryResponse> content =
+                repository.findVersionSummaries(
+                        awardNumber,
+                        safeSize,
+                        offset
+                );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
     }
 
     private AwardHierarchyNodeResponse buildHierarchyNode(

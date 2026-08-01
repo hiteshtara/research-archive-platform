@@ -785,6 +785,36 @@ Award-level "account type" remain confirmed absent from the schema and
 are omitted from every new response DTO. 38 new tests added (163 total,
 all passing). See `AWARD_SEARCH_API_DESIGN.md`.
 
+2026-08-01: Eleventh same-day follow-up: two things happened in the same
+pass. First, attempting to build/deploy the Award API image to the dev
+ECS service (`ops/deploy-api.sh`) surfaced a pre-existing infrastructure
+incident unrelated to any Award work this session: the dev API's
+container repeatedly fails to start with
+`java.net.UnknownHostException` for `research-archive-platform-dev-postgres...
+.rds.amazonaws.com` - the RDS instance that hostname (from the
+`research-archive-platform/dev/postgres` Secrets Manager secret) refers
+to no longer exists in this AWS account/region at all
+(`aws rds describe-db-instances` returns empty). The dev ECS service
+currently has 0 running tasks as a result. Not something this session's
+Award API changes caused (they never touch RDS/Terraform/Secrets
+Manager) and not something fixed here - recreating/repointing RDS
+infrastructure is out of scope without explicit direction; flagged to
+the user rather than acted on unilaterally. Second, independent of that
+incident, the Award API Phase 1 design was reviewed against multi-client
+extensibility principles (the API must serve more than the one React UI)
+and corrected: the four new endpoints moved to a versioned
+`/api/v1/awards/...` on a new `AwardV1Controller`, `/versions` gained the
+same `PageResponse` pagination envelope `/search` already had,
+`GlobalExceptionHandler`'s error shape gained `code`/`path`/`correlationId`
+(additive, app-wide), OpenAPI annotations were added to the new
+controller and validated live against `/v3/api-docs`, and a new
+`AwardV1ContractTest` golden-serialization suite guards all four response
+shapes against accidental breaking changes. The pre-existing, React-UI-
+consumed `AwardArchiveController` (`/api/awards/...`) was deliberately
+left unversioned and untouched - migrating it is flagged as a follow-up
+decision, not made unilaterally. See
+`AWARD_SEARCH_API_DESIGN.md`'s "Extensibility review" addendum.
+
 **Real-data validation record.** This session's own environment has no
 BU Oracle/VPN credentials configured (confirmed via
 `scripts/test_oracle_connection.py`, which fails with a configuration

@@ -268,21 +268,49 @@ class AwardArchiveRepositoryTest {
                 mock(JdbcClient.MappedQuerySpec.class);
 
         when(jdbc.sql(anyString())).thenReturn(statement);
-        when(statement.param("awardNumber", "100004-00001"))
-                .thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
         when(statement.query(AwardVersionSummaryResponse.class))
                 .thenReturn(query);
         when(query.list()).thenReturn(List.of());
 
         new AwardArchiveRepository(jdbc)
-                .findVersionSummaries("100004-00001");
+                .findVersionSummaries("100004-00001", 50, 0);
 
         assertThat(firstSql(jdbc))
                 .contains("FROM archive.award_version")
                 .contains("award_number = :awardNumber")
                 .contains("ORDER BY")
                 .contains("sequence_number DESC")
-                .contains("modification_number AS document_number");
+                .contains("modification_number AS document_number")
+                .contains("LIMIT :limit OFFSET :offset");
+        verify(statement).param("awardNumber", "100004-00001");
+        verify(statement).param("limit", 50);
+        verify(statement).param("offset", 0);
+    }
+
+    @Test
+    void countVersionsCountsAllRowsForTheAwardNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("awardNumber", "100004-00001"))
+                .thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(9L);
+
+        long total = new AwardArchiveRepository(jdbc)
+                .countVersions("100004-00001");
+
+        assertThat(total).isEqualTo(9L);
+        assertThat(firstSql(jdbc))
+                .contains("SELECT COUNT(*)")
+                .contains("FROM archive.award_version")
+                .contains("award_number = :awardNumber");
     }
 
     private String firstSql(JdbcClient jdbc) {

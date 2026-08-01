@@ -676,7 +676,9 @@ public class AwardArchiveRepository {
     }
 
     public List<AwardVersionSummaryResponse> findVersionSummaries(
-            String awardNumber
+            String awardNumber,
+            int limit,
+            int offset
     ) {
         return jdbc.sql("""
                 SELECT
@@ -695,10 +697,26 @@ public class AwardArchiveRepository {
                     sequence_number DESC,
                     source_update_timestamp DESC NULLS LAST,
                     award_id DESC
+                LIMIT :limit OFFSET :offset
                 """)
                 .param("awardNumber", awardNumber)
+                .param("limit", limit)
+                .param("offset", offset)
                 .query(AwardVersionSummaryResponse.class)
                 .list();
+    }
+
+    public long countVersions(String awardNumber) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_version
+                WHERE award_number = :awardNumber
+                """)
+                .param("awardNumber", awardNumber)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
     }
 
 }

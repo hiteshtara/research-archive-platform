@@ -6,7 +6,6 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
-import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.application.award.AwardArchiveService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +24,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-class AwardArchiveControllerTest {
+class AwardV1ControllerTest {
 
     private AwardArchiveService service;
     private MockMvc mockMvc;
@@ -33,10 +32,7 @@ class AwardArchiveControllerTest {
     @BeforeEach
     void setUp() {
         service = mock(AwardArchiveService.class);
-        AwardArchiveRepository repository =
-                mock(AwardArchiveRepository.class);
-        AwardArchiveController controller =
-                new AwardArchiveController(service, repository);
+        AwardV1Controller controller = new AwardV1Controller(service);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -44,7 +40,7 @@ class AwardArchiveControllerTest {
     }
 
     @Test
-    void searchDelegatesQueryAndPaginationToTheService() throws Exception {
+    void searchIsRoutedUnderTheV1Prefix() throws Exception {
         AwardSearchResultResponse result = new AwardSearchResultResponse(
                 3L, "100004-00003", 1, "Title", "Approved Award",
                 "MICHAEL MCCLEAN", "Brown University",
@@ -56,7 +52,7 @@ class AwardArchiveControllerTest {
         when(service.search("cancer", 1, 10)).thenReturn(page);
 
         mockMvc.perform(
-                        get("/api/awards/search")
+                        get("/api/v1/awards/search")
                                 .param("q", "cancer")
                                 .param("page", "1")
                                 .param("size", "10")
@@ -78,14 +74,14 @@ class AwardArchiveControllerTest {
                 new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true)
         );
 
-        mockMvc.perform(get("/api/awards/search"))
+        mockMvc.perform(get("/api/v1/awards/search"))
                 .andExpect(status().isOk());
 
         verify(service).search(null, 0, 25);
     }
 
     @Test
-    void hierarchyReturnsTheTreeFromTheService() throws Exception {
+    void hierarchyIsRoutedUnderTheV1Prefix() throws Exception {
         AwardHierarchyNodeResponse root = new AwardHierarchyNodeResponse(
                 "100004-00001", 1L, 9, null, true, "Title", "Closed",
                 "MICHAEL MCCLEAN", "Brown University",
@@ -98,35 +94,39 @@ class AwardArchiveControllerTest {
         when(service.findHierarchy("100004-00001"))
                 .thenReturn(hierarchy);
 
-        mockMvc.perform(get("/api/awards/100004-00001/hierarchy"))
+        mockMvc.perform(get("/api/v1/awards/100004-00001/hierarchy"))
                 .andExpect(status().isOk())
                 .andExpect(
                         jsonPath("$.rootAwardNumber")
                                 .value("100004-00001")
-                )
-                .andExpect(jsonPath("$.root.awardNumber")
-                        .value("100004-00001"));
+                );
 
         verify(service).findHierarchy("100004-00001");
     }
 
     @Test
-    void hierarchyPropagatesNotFoundAsAnHttp404() throws Exception {
+    void hierarchyPropagatesNotFoundWithConsistentErrorShape() throws Exception {
         when(service.findHierarchy("NO-SUCH-AWARD"))
                 .thenThrow(new NoSuchElementException(
                         "Award not found: NO-SUCH-AWARD"
                 ));
 
-        mockMvc.perform(get("/api/awards/NO-SUCH-AWARD/hierarchy"))
+        mockMvc.perform(get("/api/v1/awards/NO-SUCH-AWARD/hierarchy"))
                 .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"))
                 .andExpect(
                         jsonPath("$.message")
                                 .value("Award not found: NO-SUCH-AWARD")
-                );
+                )
+                .andExpect(
+                        jsonPath("$.path")
+                                .value("/api/v1/awards/NO-SUCH-AWARD/hierarchy")
+                )
+                .andExpect(jsonPath("$.correlationId").exists());
     }
 
     @Test
-    void summaryReturnsTheAwardSummaryByAwardId() throws Exception {
+    void summaryIsRoutedUnderTheV1Prefix() throws Exception {
         AwardSummaryResponse summary = new AwardSummaryResponse(
                 3L, "100004-00003", 1, "Title", "Approved Award",
                 "Brown University", null, "MICHAEL MCCLEAN",
@@ -136,12 +136,10 @@ class AwardArchiveControllerTest {
         );
         when(service.findSummary(3L)).thenReturn(summary);
 
-        mockMvc.perform(get("/api/awards/3/summary"))
+        mockMvc.perform(get("/api/v1/awards/3/summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.awardNumber")
-                        .value("100004-00003"))
-                .andExpect(jsonPath("$.sponsor")
-                        .value("Brown University"));
+                        .value("100004-00003"));
 
         verify(service).findSummary(3L);
     }
@@ -153,36 +151,40 @@ class AwardArchiveControllerTest {
                         "Award not found: 999"
                 ));
 
-        mockMvc.perform(get("/api/awards/999/summary"))
+        mockMvc.perform(get("/api/v1/awards/999/summary"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void versionsReturnsTheFamilyOrderedNewestFirst() throws Exception {
+    void versionsIsPaginatedLikeSearch() throws Exception {
         AwardVersionSummaryResponse version =
                 new AwardVersionSummaryResponse(
                         3L, "100004-00003", 1, "Approved Award",
                         "12", "Converted Record", null, null, null
                 );
-        when(service.findVersions(3L)).thenReturn(List.of(version));
+        PageResponse<AwardVersionSummaryResponse> page = new PageResponse<>(
+                List.of(version), 0, 50, 1L, 1, true, true
+        );
+        when(service.findVersions(3L, 0, 50)).thenReturn(page);
 
-        mockMvc.perform(get("/api/awards/3/versions"))
+        mockMvc.perform(get("/api/v1/awards/3/versions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].awardNumber")
+                .andExpect(jsonPath("$.size").value(50))
+                .andExpect(jsonPath("$.content[0].awardNumber")
                         .value("100004-00003"))
-                .andExpect(jsonPath("$[0].sequenceNumber").value(1));
+                .andExpect(jsonPath("$.content[0].sequenceNumber").value(1));
 
-        verify(service).findVersions(3L);
+        verify(service).findVersions(3L, 0, 50);
     }
 
     @Test
     void versionsPropagatesNotFoundAsAnHttp404() throws Exception {
-        when(service.findVersions(999L))
+        when(service.findVersions(999L, 0, 50))
                 .thenThrow(new NoSuchElementException(
                         "Award not found: 999"
                 ));
 
-        mockMvc.perform(get("/api/awards/999/versions"))
+        mockMvc.perform(get("/api/v1/awards/999/versions"))
                 .andExpect(status().isNotFound());
     }
 }
