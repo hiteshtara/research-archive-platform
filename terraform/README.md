@@ -8,7 +8,7 @@ balancer, S3 document/data storage, and (optionally) Cognito and Amplify.
 terraform/
   bootstrap/                One-time: creates the S3 state bucket (local state)
   environments/
-    dev/                    Existing BU dev account (589744711110)
+    dev/                    Existing BU dev account (770203350335)
     test/                   Template for a test environment
     prod/                   Template for BU's production account
   modules/                  Reusable building blocks used by every environment

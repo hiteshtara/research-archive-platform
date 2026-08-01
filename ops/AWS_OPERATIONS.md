@@ -6,7 +6,19 @@ AWS ACCOUNT
 
 Account ID
 
-589744711110
+770203350335
+
+Do not assume this value - always confirm before running any command in
+this document:
+
+aws sts get-caller-identity --query Account --output text
+
+(This document previously listed 589744711110, a personal AWS account
+that happens to have identically-named ECS/ECR/RDS-secret resources to
+this BU account - every command below was written assuming the correct
+BU account and will silently target the wrong account if run under the
+wrong credentials. See docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md's
+"Eleventh same-day follow-up" for the incident this was caught in.)
 
 Region
 
@@ -81,7 +93,7 @@ aws ecr get-login-password \
 docker login \
   --username AWS \
   --password-stdin \
-589744711110.dkr.ecr.us-east-1.amazonaws.com
+770203350335.dkr.ecr.us-east-1.amazonaws.com
 
 ===============================================================================
 ECS
@@ -190,43 +202,31 @@ healthy
 API DEPLOYMENT
 ===============================================================================
 
-Build
+Use ops/deploy-api.sh instead of typing the build/tag/push/deploy steps
+by hand - it resolves the AWS account from the active credentials,
+aborts before any mutating step if the account/region/resources aren't
+what's expected, and registers an immutable (timestamp + Git SHA)
+tagged image rather than only ever moving :latest. See the script's own
+header comment for the one documented override (EXPECTED_ACCOUNT_ID).
 
-cd api
+Validate only, no deploy:
 
-mvn clean package -DskipTests
+export AWS_PROFILE=bu-nprd
+ops/deploy-api.sh --check-only
 
-Docker
+Deploy:
 
-docker build \
-  --platform linux/amd64 \
-  -t research-archive-platform-dev-api:latest \
-  .
-
-Tag
-
-docker tag \
-research-archive-platform-dev-api:latest \
-589744711110.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api:latest
-
-Push
-
-docker push \
-589744711110.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api:latest
-
-Deploy
-
-aws ecs update-service \
-  --region us-east-1 \
-  --cluster research-archive-platform-dev-api \
-  --service research-archive-platform-dev-api \
-  --force-new-deployment
+export AWS_PROFILE=bu-nprd
+ops/deploy-api.sh
 
 ===============================================================================
 API URL
 ===============================================================================
 
-http://rap-dev-api-alb-551917956.us-east-1.elb.amazonaws.com
+Do not hardcode this - the ALB DNS name is only correct for the account
+it was provisioned in. Get it fresh:
+
+cd terraform/environments/dev && terraform output -raw api_url
 
 NOTE
 
