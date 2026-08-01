@@ -1,0 +1,398 @@
+from __future__ import annotations
+
+import unittest
+
+from scripts.build_award_attachment_ecs_overrides import (
+    build_container_command,
+    build_environment_overrides,
+    build_run_task_overrides,
+    parse_args,
+)
+
+# Every generated command must start with this exact prefix: a real
+# executable (`python`) already on the container's PATH, never a bare
+# script filename - see build_container_command's docstring for why.
+MODULE_CLI_PREFIX = ["python", "-m", "archive_etl", "award-attachment", "--ecs"]
+
+
+class BuildContainerCommandTest(unittest.TestCase):
+    def test_always_uses_the_module_cli_prefix(self) -> None:
+        command = build_container_command()
+
+        self.assertEqual(command, MODULE_CLI_PREFIX)
+
+    def test_never_uses_the_bare_script_filename(self) -> None:
+        command = build_container_command(
+            migrate_only=True, upload=True, file_id=1, dry_run=True
+        )
+
+        self.assertNotIn("load_award_attachments.py", command)
+        self.assertEqual(command[0], "python")
+
+    def test_migrate_only_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(migrate_only=True)
+
+        self.assertEqual(
+            command,
+            [
+                "python",
+                "-m",
+                "archive_etl",
+                "award-attachment",
+                "--ecs",
+                "--migrate-only",
+            ],
+        )
+
+    def test_show_upload_status_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(show_upload_status=True, file_id=1)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--show-upload-status", "--file-id", "1"],
+        )
+
+    def test_load_file_id_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(load_file_id=1)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--load-file-id", "1"])
+
+    def test_load_file_id_combines_with_dry_run(self) -> None:
+        command = build_container_command(load_file_id=1, dry_run=True)
+
+        self.assertEqual(
+            command, [*MODULE_CLI_PREFIX, "--dry-run", "--load-file-id", "1"]
+        )
+
+    def test_file_id_dry_run_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(file_id=9001, dry_run=True)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--dry-run", "--file-id", "9001"],
+        )
+
+    def test_limit_dry_run_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(limit=10, dry_run=True)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--dry-run", "--limit", "10"],
+        )
+
+    def test_upload_file_id_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(upload=True, file_id=9001)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--upload", "--file-id", "9001"],
+        )
+
+    def test_retry_failed_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(upload=True, retry_failed=True)
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--upload", "--retry-failed"],
+        )
+
+    def test_upload_with_limit_and_retry_failed(self) -> None:
+        command = build_container_command(
+            upload=True, limit=100, retry_failed=True
+        )
+
+        self.assertEqual(
+            command,
+            [
+                *MODULE_CLI_PREFIX,
+                "--upload",
+                "--limit",
+                "100",
+                "--retry-failed",
+            ],
+        )
+
+    def test_bucket_and_prefix_are_passed_through(self) -> None:
+        command = build_container_command(
+            upload=True, bucket="my-bucket", prefix="custom/prefix"
+        )
+
+        self.assertIn("--bucket", command)
+        self.assertIn("my-bucket", command)
+        self.assertIn("--prefix", command)
+        self.assertIn("custom/prefix", command)
+
+    def test_omits_flags_that_were_not_requested(self) -> None:
+        command = build_container_command(limit=5)
+
+        self.assertNotIn("--upload", command)
+        self.assertNotIn("--dry-run", command)
+        self.assertNotIn("--file-id", command)
+        self.assertNotIn("--retry-failed", command)
+        self.assertNotIn("--migrate-only", command)
+        self.assertNotIn("--create-batch", command)
+        self.assertNotIn("--load-batch", command)
+        self.assertNotIn("--show-batch", command)
+        self.assertNotIn("--batch-id", command)
+
+    def test_create_batch_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(create_batch=10)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--create-batch", "10"])
+
+    def test_create_batch_with_include_already_uploaded(self) -> None:
+        command = build_container_command(
+            create_batch=10, include_already_uploaded=True
+        )
+
+        self.assertEqual(
+            command,
+            [
+                *MODULE_CLI_PREFIX,
+                "--create-batch",
+                "10",
+                "--include-already-uploaded",
+            ],
+        )
+
+    def test_include_already_uploaded_omitted_when_not_requested(self) -> None:
+        command = build_container_command(create_batch=10)
+
+        self.assertNotIn("--include-already-uploaded", command)
+
+    def test_show_batch_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(show_batch=42)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--show-batch", "42"])
+
+    def test_load_batch_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(load_batch=42)
+
+        self.assertEqual(command, [*MODULE_CLI_PREFIX, "--load-batch", "42"])
+
+    def test_upload_batch_id_produces_the_exact_required_command(self) -> None:
+        command = build_container_command(upload=True, batch_id=42)
+
+        self.assertEqual(
+            command, [*MODULE_CLI_PREFIX, "--upload", "--batch-id", "42"]
+        )
+
+
+class BuildEnvironmentOverridesTest(unittest.TestCase):
+    def test_includes_only_the_fields_that_were_given(self) -> None:
+        environment = build_environment_overrides(
+            postgres_secret_id="arn:...:postgres",
+            oracle_secret_id="arn:...:oracle",
+        )
+
+        names = {entry["name"] for entry in environment}
+        self.assertEqual(names, {"POSTGRES_SECRET_ID", "ORACLE_SECRET_ID"})
+
+    def test_supports_all_seven_non_secret_variables(self) -> None:
+        environment = build_environment_overrides(
+            postgres_secret_id="arn:...:postgres",
+            oracle_secret_id="arn:...:oracle",
+            postgres_host="db.internal",
+            postgres_port="5432",
+            postgres_db="research_archive",
+            award_attachment_bucket_name="research-archive-platform-dev-documents-770203350335",
+            aws_region="us-east-1",
+        )
+
+        names = {entry["name"] for entry in environment}
+        self.assertEqual(
+            names,
+            {
+                "POSTGRES_SECRET_ID",
+                "ORACLE_SECRET_ID",
+                "POSTGRES_HOST",
+                "POSTGRES_PORT",
+                "POSTGRES_DB",
+                "AWARD_ATTACHMENT_BUCKET_NAME",
+                "AWS_REGION",
+            },
+        )
+
+    def test_empty_when_nothing_given(self) -> None:
+        self.assertEqual(build_environment_overrides(), [])
+
+    def test_only_ever_accepts_identifiers_never_credentials(self) -> None:
+        # This function has no parameter that could carry a password, a
+        # DSN, or a secret's JSON content - a purely structural guarantee,
+        # verified here by checking the exact accepted parameter names.
+        import inspect
+
+        signature = inspect.signature(build_environment_overrides)
+        parameter_names = set(signature.parameters.keys())
+
+        self.assertEqual(
+            parameter_names,
+            {
+                "postgres_secret_id",
+                "oracle_secret_id",
+                "postgres_host",
+                "postgres_port",
+                "postgres_db",
+                "award_attachment_bucket_name",
+                "aws_region",
+            },
+        )
+        for forbidden in ("password", "dsn", "secret_value", "secret_json"):
+            self.assertNotIn(forbidden, parameter_names)
+
+
+class BuildRunTaskOverridesTest(unittest.TestCase):
+    def test_shape_matches_ecs_container_overrides(self) -> None:
+        overrides = build_run_task_overrides(file_id=9001, dry_run=True)
+
+        self.assertEqual(len(overrides["containerOverrides"]), 1)
+        container = overrides["containerOverrides"][0]
+        self.assertEqual(container["name"], "loader")
+        self.assertEqual(
+            container["command"],
+            [*MODULE_CLI_PREFIX, "--dry-run", "--file-id", "9001"],
+        )
+
+    def test_includes_environment_override_when_secret_ids_given(self) -> None:
+        overrides = build_run_task_overrides(
+            migrate_only=True,
+            postgres_secret_id="arn:...:postgres",
+        )
+
+        container = overrides["containerOverrides"][0]
+        self.assertIn("environment", container)
+        names = {entry["name"] for entry in container["environment"]}
+        self.assertIn("POSTGRES_SECRET_ID", names)
+
+    def test_omits_environment_key_entirely_when_nothing_to_pass(self) -> None:
+        overrides = build_run_task_overrides(dry_run=True)
+
+        container = overrides["containerOverrides"][0]
+        self.assertNotIn("environment", container)
+
+    def test_never_includes_a_secret_value_anywhere_in_the_json(self) -> None:
+        import json
+
+        overrides = build_run_task_overrides(
+            migrate_only=True,
+            postgres_secret_id="arn:...:postgres",
+            oracle_secret_id="arn:...:oracle",
+            postgres_host="db.internal",
+        )
+
+        serialized = json.dumps(overrides)
+        for forbidden in ("password", "hunter2", "dsn", "secret_string", "SecretString"):
+            self.assertNotIn(forbidden, serialized)
+
+
+class ParseArgsTest(unittest.TestCase):
+    def test_parses_all_supported_flags(self) -> None:
+        args = parse_args(
+            [
+                "--file-id",
+                "9001",
+                "--limit",
+                "10",
+                "--retry-failed",
+                "--dry-run",
+                "--upload",
+                "--bucket",
+                "my-bucket",
+                "--prefix",
+                "custom/prefix",
+                "--postgres-secret-id",
+                "arn:...:postgres",
+                "--oracle-secret-id",
+                "arn:...:oracle",
+                "--postgres-host",
+                "db.internal",
+                "--postgres-port",
+                "5432",
+                "--postgres-db",
+                "research_archive",
+                "--award-attachment-bucket-name",
+                "my-bucket",
+                "--aws-region",
+                "us-east-1",
+            ]
+        )
+
+        self.assertEqual(args.file_id, 9001)
+        self.assertEqual(args.limit, 10)
+        self.assertTrue(args.retry_failed)
+        self.assertTrue(args.dry_run)
+        self.assertTrue(args.upload)
+        self.assertEqual(args.bucket, "my-bucket")
+        self.assertEqual(args.prefix, "custom/prefix")
+        self.assertEqual(args.postgres_secret_id, "arn:...:postgres")
+        self.assertEqual(args.oracle_secret_id, "arn:...:oracle")
+        self.assertEqual(args.postgres_host, "db.internal")
+        self.assertEqual(args.postgres_port, "5432")
+        self.assertEqual(args.postgres_db, "research_archive")
+        self.assertEqual(args.award_attachment_bucket_name, "my-bucket")
+        self.assertEqual(args.aws_region, "us-east-1")
+
+    def test_parses_migrate_only(self) -> None:
+        args = parse_args(["--migrate-only"])
+
+        self.assertTrue(args.migrate_only)
+
+    def test_parses_show_upload_status(self) -> None:
+        args = parse_args(["--show-upload-status", "--file-id", "1"])
+
+        self.assertTrue(args.show_upload_status)
+        self.assertEqual(args.file_id, 1)
+
+    def test_parses_load_file_id(self) -> None:
+        args = parse_args(["--load-file-id", "1"])
+
+        self.assertEqual(args.load_file_id, 1)
+
+    def test_defaults_when_nothing_given(self) -> None:
+        args = parse_args([])
+
+        self.assertIsNone(args.file_id)
+        self.assertIsNone(args.load_file_id)
+        self.assertIsNone(args.limit)
+        self.assertFalse(args.retry_failed)
+        self.assertFalse(args.dry_run)
+        self.assertFalse(args.upload)
+        self.assertFalse(args.migrate_only)
+        self.assertFalse(args.show_upload_status)
+        self.assertIsNone(args.create_batch)
+        self.assertFalse(args.include_already_uploaded)
+        self.assertIsNone(args.load_batch)
+        self.assertIsNone(args.show_batch)
+        self.assertIsNone(args.batch_id)
+        self.assertIsNone(args.bucket)
+        self.assertIsNone(args.prefix)
+        self.assertIsNone(args.postgres_secret_id)
+        self.assertIsNone(args.oracle_secret_id)
+
+    def test_parses_batch_flags(self) -> None:
+        args = parse_args(
+            [
+                "--create-batch",
+                "10",
+                "--include-already-uploaded",
+            ]
+        )
+
+        self.assertEqual(args.create_batch, 10)
+        self.assertTrue(args.include_already_uploaded)
+
+    def test_parses_show_batch_and_load_batch(self) -> None:
+        args = parse_args(["--show-batch", "5"])
+        self.assertEqual(args.show_batch, 5)
+
+        args = parse_args(["--load-batch", "5"])
+        self.assertEqual(args.load_batch, 5)
+
+    def test_parses_batch_id(self) -> None:
+        args = parse_args(["--upload", "--batch-id", "5"])
+
+        self.assertEqual(args.batch_id, 5)
+
+
+if __name__ == "__main__":
+    unittest.main()

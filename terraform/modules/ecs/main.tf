@@ -54,6 +54,23 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_loader" {
   description = "PostgreSQL access from ECS loader"
 }
 
+# BU Oracle staging RDS - see docs/ORACLE_STAGING_CONNECTIVITY.md. The
+# description matches the rule BU's central IT already created manually
+# on the Oracle security group exactly, for a clean terraform import
+# with no plan diff.
+resource "aws_vpc_security_group_ingress_rule" "oracle_from_loader" {
+  count = var.oracle_security_group_id != null ? 1 : 0
+
+  security_group_id            = var.oracle_security_group_id
+  referenced_security_group_id = aws_security_group.loader.id
+
+  from_port   = 1521
+  to_port     = 1521
+  ip_protocol = "tcp"
+
+  description = "Research Archive Platform ECS loader"
+}
+
 resource "aws_iam_role" "execution" {
   name               = "${var.project_name}-${var.environment}-loader-execution-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
@@ -62,26 +79,6 @@ resource "aws_iam_role" "execution" {
 resource "aws_iam_role_policy_attachment" "execution" {
   role       = aws_iam_role.execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-data "aws_iam_policy_document" "execution_secrets" {
-  statement {
-    effect = "Allow"
-
-    actions = [
-      "secretsmanager:GetSecretValue"
-    ]
-
-    resources = [
-      var.database_secret_arn
-    ]
-  }
-}
-
-resource "aws_iam_role_policy" "execution_secrets" {
-  name   = "${var.project_name}-${var.environment}-loader-secrets"
-  role   = aws_iam_role.execution.id
-  policy = data.aws_iam_policy_document.execution_secrets.json
 }
 
 resource "aws_iam_role" "task" {
@@ -122,6 +119,104 @@ resource "aws_iam_role_policy" "task_s3" {
   policy = data.aws_iam_policy_document.task_s3.json
 }
 
+# Award Attachment loader (etl/load_award_attachments.py --ecs): the
+# application code runs as this task role, not the execution role - every
+# Secrets Manager/S3/STS call it makes is authorized here. Granted on
+# exactly the two named secrets, never secretsmanager:*.
+data "aws_iam_policy_document" "task_secrets" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue"
+    ]
+
+    resources = [
+      var.database_secret_arn,
+      var.oracle_secret_arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_secrets" {
+  name   = "${var.project_name}-${var.environment}-loader-task-secrets"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_secrets.json
+}
+
+# Award Attachment loader's documents-bucket access - entirely separate
+# from task_s3 above, which covers the unrelated, IRB-only data bucket.
+data "aws_iam_policy_document" "task_documents_s3" {
+  # s3:ListBucket/s3:HeadBucket (this loader's bucket-exists check,
+  # validate_bucket_exists -> boto3 head_bucket) and s3:GetBucketLocation
+  # are unrestricted at the bucket level - all three were previously
+  # conditioned on an s3:prefix matching award-files/by-file-id/*, but
+  # head_bucket (and the region lookup GetBucketLocation performs) never
+  # sends an s3:prefix in its request at all, so that condition silently
+  # denied the loader's own startup bucket-existence check. Sid matches
+  # the name this fix already shipped under, live. Neither action can
+  # return object content or list arbitrary keys outside what
+  # ListBucketMultipartUploads/UploadAwardAttachmentObjects below already
+  # scope - only ListBucket's object-listing form takes a prefix, and
+  # this loader never calls that form (it never lists the bucket's
+  # contents, only checks it exists and streams multipart uploads to a
+  # fixed key).
+  statement {
+    sid    = "ValidateDocumentsBucket"
+    effect = "Allow"
+
+    actions = [
+      "s3:ListBucket",
+      "s3:GetBucketLocation",
+      "s3:HeadBucket"
+    ]
+
+    resources = [
+      var.documents_bucket_arn
+    ]
+  }
+
+  statement {
+    sid    = "ListDocumentsBucketMultipartUploads"
+    effect = "Allow"
+
+    actions = [
+      "s3:ListBucketMultipartUploads"
+    ]
+
+    resources = [
+      var.documents_bucket_arn
+    ]
+  }
+
+  # s3:GetObject is granted alongside the write actions below because
+  # the loader's own end-to-end validation needed it in practice
+  # (verifying a multipart upload's result) - despite this module's
+  # earlier assumption that this loader would never read back an
+  # uploaded object.
+  statement {
+    sid    = "UploadAwardAttachmentObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts"
+    ]
+
+    resources = [
+      "${var.documents_bucket_arn}/award-files/by-file-id/*"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_documents_s3" {
+  name   = "${var.project_name}-${var.environment}-loader-documents-s3"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_documents_s3.json
+}
+
 resource "aws_ecs_task_definition" "loader" {
   family                   = "${var.project_name}-${var.environment}-loader"
   requires_compatibilities = ["FARGATE"]
@@ -154,29 +249,31 @@ resource "aws_ecs_task_definition" "loader" {
         {
           name  = "IRB_S3_PREFIX"
           value = "landing/irb/"
-        }
-      ]
-
-      secrets = [
+        },
+        # Award Attachment loader (--ecs). Deliberately a distinct
+        # variable from DATA_BUCKET_NAME above - that one is the
+        # unrelated, IRB-only data bucket; this one is the documents
+        # bucket load_award_attachments.py uploads to. Secret
+        # identifiers only (ARNs, not credentials) - the loader resolves
+        # username/password/host/port/dbname itself, at runtime, from
+        # Secrets Manager via POSTGRES_SECRET_ID/ORACLE_SECRET_ID.
+        # Deliberately no `secrets` block on this container: ECS-native
+        # secret injection would put POSTGRES_USER/PASSWORD/HOST/PORT/DB
+        # into the container's plain environment before the loader's own
+        # startup validation ever runs, which is exactly what the
+        # hardened PostgreSQL secret resolution (etl/load_award_attachments.py)
+        # rejects in --ecs mode.
         {
-          name      = "POSTGRES_HOST"
-          valueFrom = "${var.database_secret_arn}:host::"
+          name  = "AWARD_ATTACHMENT_BUCKET_NAME"
+          value = var.documents_bucket_name
         },
         {
-          name      = "POSTGRES_PORT"
-          valueFrom = "${var.database_secret_arn}:port::"
+          name  = "POSTGRES_SECRET_ID"
+          value = var.database_secret_arn
         },
         {
-          name      = "POSTGRES_DB"
-          valueFrom = "${var.database_secret_arn}:dbname::"
-        },
-        {
-          name      = "POSTGRES_USER"
-          valueFrom = "${var.database_secret_arn}:username::"
-        },
-        {
-          name      = "POSTGRES_PASSWORD"
-          valueFrom = "${var.database_secret_arn}:password::"
+          name  = "ORACLE_SECRET_ID"
+          value = var.oracle_secret_arn
         }
       ]
 

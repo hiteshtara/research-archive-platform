@@ -29,12 +29,22 @@ variable "loader_image" {
 }
 
 variable "data_bucket_arn" {
-  description = "ARN of the S3 bucket the loader reads/writes ETL exports from."
+  description = "ARN of the S3 bucket the loader reads/writes ETL exports from. IRB's Excel/Parquet-via-S3 pipeline only - see terraform/modules/s3/main.tf's 'DATA BUCKET' comment. Not used by the Award Attachment loader."
   type        = string
 }
 
 variable "data_bucket_name" {
-  description = "Name of the S3 bucket the loader reads/writes ETL exports from."
+  description = "Name of the S3 bucket the loader reads/writes ETL exports from (IRB only - see data_bucket_arn)."
+  type        = string
+}
+
+variable "documents_bucket_arn" {
+  description = "ARN of the documents bucket the Award Attachment loader uploads to. A different bucket from data_bucket_arn - see terraform/modules/s3/main.tf's 'DOCUMENTS BUCKET' comment."
+  type        = string
+}
+
+variable "documents_bucket_name" {
+  description = "Name of the documents bucket the Award Attachment loader uploads to (see documents_bucket_arn)."
   type        = string
 }
 
@@ -48,8 +58,19 @@ variable "database_security_group_id" {
   type        = string
 }
 
+variable "oracle_secret_arn" {
+  description = "Secrets Manager ARN containing Oracle (KCOEUS) credentials for the Award Attachment loader (--ecs mode). The secret container is created by terraform/environments/dev/main.tf; its value is populated out-of-band by an authorized operator, never by Terraform."
+  type        = string
+}
+
 variable "log_retention_days" {
   description = "CloudWatch Logs retention for the loader log group."
   type        = number
   default     = 14
+}
+
+variable "oracle_security_group_id" {
+  description = "BU-owned security group ID fronting the Oracle staging RDS instance. When set, grants that security group's TCP 1521 ingress from this loader's own security group (mirroring database_security_group_id's database_from_loader rule below). Leave null to skip - e.g. an environment with no Oracle connectivity configured. See docs/ORACLE_STAGING_CONNECTIVITY.md - the security group itself carries many unrelated rules from other BU systems and is never managed by this project, only this one rule."
+  type        = string
+  default     = null
 }

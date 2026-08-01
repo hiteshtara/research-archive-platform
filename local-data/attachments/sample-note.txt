@@ -1,0 +1,3 @@
+This is a synthetic sample attachment used only for local UI/API development.
+
+It does not contain any real Boston University data, Kuali data, or content extracted from Oracle or AWS. See scripts/seed-local-subaward-attachments.sql for how this file is wired up.

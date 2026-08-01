@@ -14,13 +14,67 @@ def test_build_parser_requires_a_command() -> None:
 
 
 @pytest.mark.parametrize(
-    "domain", ["award", "negotiation", "subaward", "proposal", "protocol"]
+    "domain",
+    [
+        "award",
+        "negotiation",
+        "subaward",
+        "proposal",
+        "award-attachment",
+        "protocol",
+    ],
 )
 def test_build_parser_accepts_each_domain_with_defaults(domain: str) -> None:
     args = build_parser().parse_args([domain])
 
     assert args.command == domain
     assert args.limit is None
+
+
+def test_build_parser_accepts_award_attachment_dry_run() -> None:
+    args = build_parser().parse_args(["award-attachment", "--dry-run"])
+
+    assert args.command == "award-attachment"
+    assert args.dry_run is True
+
+
+def test_build_parser_rejects_dry_run_for_other_domains() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["award", "--dry-run"])
+
+
+def test_build_parser_accepts_award_attachment_ecs_migrate_only() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--migrate-only"]
+    )
+
+    assert args.command == "award-attachment"
+    assert args.ecs is True
+    assert args.migrate_only is True
+
+
+def test_build_parser_rejects_ecs_for_other_domains() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["award", "--ecs"])
+
+
+def test_build_parser_accepts_award_attachment_show_upload_status() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--show-upload-status", "--file-id", "1"]
+    )
+
+    assert args.command == "award-attachment"
+    assert args.show_upload_status is True
+    assert args.file_id == 1
+
+
+def test_build_parser_accepts_award_attachment_load_file_id() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--load-file-id", "1"]
+    )
+
+    assert args.command == "award-attachment"
+    assert args.load_file_id == 1
 
 
 def test_build_parser_accepts_check_with_no_extra_arguments() -> None:
@@ -75,6 +129,232 @@ def test_run_domain_forwards_limit() -> None:
         "load_subawards_from_csv.py",
         "--limit",
         "10",
+    ]
+
+
+def test_run_domain_forwards_dry_run() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award-attachment", "--dry-run"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == ["load_award_attachments.py", "--dry-run"]
+
+
+def test_run_domain_forwards_limit_and_dry_run_together() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--limit", "10", "--dry-run"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ):
+        _run_domain("award-attachment", args)
+
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--limit",
+        "10",
+        "--dry-run",
+    ]
+
+
+def test_run_domain_forwards_ecs_and_migrate_only() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--migrate-only"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--ecs",
+        "--migrate-only",
+    ]
+
+
+def test_run_domain_forwards_show_upload_status_and_file_id() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--show-upload-status", "--file-id", "1"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--file-id",
+        "1",
+        "--ecs",
+        "--show-upload-status",
+    ]
+
+
+def test_build_parser_accepts_award_attachment_create_batch() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--ecs", "--create-batch", "10"]
+    )
+
+    assert args.create_batch == 10
+
+
+def test_build_parser_accepts_award_attachment_show_batch() -> None:
+    args = build_parser().parse_args(["award-attachment", "--show-batch", "5"])
+
+    assert args.show_batch == 5
+
+
+def test_build_parser_accepts_award_attachment_load_batch() -> None:
+    args = build_parser().parse_args(["award-attachment", "--load-batch", "5"])
+
+    assert args.load_batch == 5
+
+
+def test_build_parser_accepts_award_attachment_upload_batch_id() -> None:
+    args = build_parser().parse_args(
+        ["award-attachment", "--upload", "--batch-id", "5"]
+    )
+
+    assert args.upload is True
+    assert args.batch_id == 5
+
+
+def test_run_domain_forwards_create_batch_and_include_already_uploaded() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        [
+            "award-attachment",
+            "--ecs",
+            "--create-batch",
+            "10",
+            "--include-already-uploaded",
+        ]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--ecs",
+        "--create-batch",
+        "10",
+        "--include-already-uploaded",
+    ]
+
+
+def test_run_domain_forwards_show_batch() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award-attachment", "--show-batch", "5"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ):
+        _run_domain("award-attachment", args)
+
+    assert captured_argv == ["load_award_attachments.py", "--show-batch", "5"]
+
+
+def test_run_domain_forwards_load_batch() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(["award-attachment", "--load-batch", "5"])
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ):
+        _run_domain("award-attachment", args)
+
+    assert captured_argv == ["load_award_attachments.py", "--load-batch", "5"]
+
+
+def test_run_domain_forwards_upload_and_batch_id() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--upload", "--batch-id", "5"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ):
+        _run_domain("award-attachment", args)
+
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--upload",
+        "--batch-id",
+        "5",
+    ]
+
+
+def test_run_domain_forwards_load_file_id() -> None:
+    fake_module = MagicMock()
+    captured_argv: list[str] = []
+    fake_module.main.side_effect = lambda: captured_argv.extend(sys.argv)
+
+    args = build_parser().parse_args(
+        ["award-attachment", "--load-file-id", "1"]
+    )
+
+    with patch(
+        "archive_etl.__main__.importlib.import_module",
+        return_value=fake_module,
+    ) as import_module:
+        _run_domain("award-attachment", args)
+
+    import_module.assert_called_once_with("load_award_attachments")
+    assert captured_argv == [
+        "load_award_attachments.py",
+        "--load-file-id",
+        "1",
     ]
 
 

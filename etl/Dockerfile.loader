@@ -10,9 +10,20 @@ COPY etl/pyproject.toml etl/uv.lock ./
 RUN pip install --no-cache-dir uv \
     && uv sync --frozen --no-dev
 
+# Makes the bare `python` on PATH resolve to this project's venv (with
+# boto3/loguru/sqlalchemy/etc. installed), not the base image's system
+# interpreter. Required so an ECS containerOverrides `command` - which
+# replaces CMD entirely, with no shell and no `uv run` wrapper to fall
+# back on - can safely be `["python", "-m", "archive_etl", ...]` and
+# actually have every dependency archive_etl's loaders import at module
+# load time (see etl/scripts/build_award_attachment_ecs_overrides.py).
+ENV PATH="/app/.venv/bin:$PATH"
+
 COPY etl/archive_etl archive_etl
 COPY etl/load_from_s3.py .
 COPY etl/load_composite_from_s3.py .
+COPY etl/load_award_attachments.py .
+COPY oracle oracle
 COPY database/migrations database/migrations
 
 CMD ["uv", "run", "python", "load_from_s3.py"]

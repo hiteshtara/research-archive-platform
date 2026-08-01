@@ -191,6 +191,19 @@ resource "aws_vpc_endpoint" "secretsmanager" {
   }
 }
 
+resource "aws_vpc_endpoint" "sts" {
+  vpc_id              = aws_vpc.this.id
+  service_name        = "com.amazonaws.${var.aws_region}.sts"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-sts-vpce"
+  }
+}
+
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.this.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
@@ -203,4 +216,51 @@ resource "aws_vpc_endpoint" "s3" {
   tags = {
     Name = "${var.project_name}-${var.environment}-s3-vpce"
   }
+}
+
+# BU Oracle staging connectivity - see docs/ORACLE_STAGING_CONNECTIVITY.md.
+# Same-account, same-region peering (this VPC and the Oracle staging
+# VPC are both in the same AWS account, just network-isolated from each
+# other by default - same account never implies network reachability),
+# so auto_accept = true lets one Terraform run manage both the request
+# and its acceptance side.
+data "aws_vpc" "oracle_staging" {
+  count = var.enable_oracle_peering ? 1 : 0
+
+  id = var.oracle_vpc_id
+}
+
+resource "aws_vpc_peering_connection" "oracle_staging" {
+  count = var.enable_oracle_peering ? 1 : 0
+
+  vpc_id      = aws_vpc.this.id
+  peer_vpc_id = var.oracle_vpc_id
+  auto_accept = true
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-oracle-staging-pcx"
+  }
+}
+
+# Forward routes: this VPC's own private route table, which this
+# project already owns and manages (aws_route_table.private above) -
+# one route per Oracle subnet CIDR, via the peering connection.
+resource "aws_route" "private_to_oracle" {
+  count = var.enable_oracle_peering ? length(var.oracle_subnet_cidrs) : 0
+
+  route_table_id            = aws_route_table.private.id
+  destination_cidr_block    = var.oracle_subnet_cidrs[count.index]
+  vpc_peering_connection_id = aws_vpc_peering_connection.oracle_staging[0].id
+}
+
+# Return routes: BU-owned route tables on the Oracle staging VPC side.
+# Only this one route per table is managed here - the route tables
+# themselves carry many unrelated BU routes (transit gateway, NAT,
+# other VPC endpoints) that this project must never touch.
+resource "aws_route" "oracle_return_to_private" {
+  count = var.enable_oracle_peering ? length(var.oracle_route_table_ids) : 0
+
+  route_table_id            = var.oracle_route_table_ids[count.index]
+  destination_cidr_block    = aws_vpc.this.cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.oracle_staging[0].id
 }

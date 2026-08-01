@@ -46,6 +46,19 @@ resource "terraform_data" "config_guard" {
       condition     = var.api_domain_name == null || var.api_route53_zone_id != null
       error_message = "api_domain_name is set but api_route53_zone_id is not - provide the Route53 hosted zone ID that api_domain_name belongs to, so Terraform can create the DNS record pointing it at the ALB."
     }
+
+    precondition {
+      condition = (
+        !var.enable_oracle_peering ||
+        (
+          var.oracle_vpc_id != null &&
+          length(var.oracle_subnet_cidrs) > 0 &&
+          length(var.oracle_route_table_ids) > 0 &&
+          var.oracle_security_group_id != null
+        )
+      )
+      error_message = "enable_oracle_peering is true, so oracle_vpc_id, oracle_subnet_cidrs, oracle_route_table_ids, and oracle_security_group_id must all be set - see docs/ORACLE_STAGING_CONNECTIVITY.md."
+    }
   }
 }
 
@@ -63,6 +76,11 @@ module "vpc" {
   availability_zones   = var.availability_zones
 
   enable_nat_gateway = var.enable_nat_gateway
+
+  enable_oracle_peering  = var.enable_oracle_peering
+  oracle_vpc_id          = var.oracle_vpc_id
+  oracle_subnet_cidrs    = var.oracle_subnet_cidrs
+  oracle_route_table_ids = var.oracle_route_table_ids
 }
 
 module "rds" {
@@ -110,6 +128,28 @@ module "openai_secret" {
   recovery_window_in_days = var.openai_secret_recovery_window_days
 }
 
+# Oracle (KCOEUS) credentials for the Award Attachment loader
+# (etl/load_award_attachments.py --ecs). Mirrors module.openai_secret's
+# pattern exactly: Terraform creates only the empty secret container -
+# no aws_secretsmanager_secret_version here, so the actual
+# username/password/dsn value is never in Terraform state or source
+# code, and must be populated out-of-band by an authorized operator
+# (see docs/AWARD_ATTACHMENT_ECS_EXECUTION.md for the exact, safe
+# `aws secretsmanager put-secret-value` command). Because Terraform
+# never touches the version, re-applying never drifts or overwrites the
+# value an operator sets by hand. Not wrapped in module.secrets to avoid
+# reusing that module's OpenAI-specific output names
+# (openai_secret_arn/openai_secret_name) for an unrelated secret.
+resource "aws_secretsmanager_secret" "oracle" {
+  name                    = "${var.project_name}/${var.environment}/oracle"
+  description             = "Oracle (KCOEUS) credentials for the Award Attachment loader. Value is set out-of-band; see docs/AWARD_ATTACHMENT_ECS_EXECUTION.md."
+  recovery_window_in_days = var.oracle_secret_recovery_window_days
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-oracle-secret"
+  }
+}
+
 module "loader_ecr" {
   source = "../../modules/ecr"
 
@@ -134,8 +174,14 @@ module "loader_ecs" {
   data_bucket_arn  = module.archive_s3.data_bucket_arn
   data_bucket_name = module.archive_s3.data_bucket_name
 
+  documents_bucket_arn  = module.archive_s3.documents_bucket_arn
+  documents_bucket_name = module.archive_s3.documents_bucket_name
+
   database_secret_arn        = module.rds.database_secret_arn
   database_security_group_id = module.rds.database_security_group_id
+
+  oracle_secret_arn        = aws_secretsmanager_secret.oracle.arn
+  oracle_security_group_id = var.oracle_security_group_id
 
   log_retention_days = var.loader_log_retention_days
 }

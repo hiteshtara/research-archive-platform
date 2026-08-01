@@ -29,7 +29,156 @@ DOMAIN_MODULES: dict[str, str] = {
     "negotiation": "load_negotiations_from_csv",
     "subaward": "load_subawards_from_csv",
     "proposal": "load_proposals_from_csv",
+    "award-attachment": "load_award_attachments",
     "protocol": "load_protocols",
+}
+
+# Domain-specific extra CLI flags forwarded verbatim to the underlying
+# loader, beyond the universal --limit every domain already gets. Only
+# award-attachment needs any of this today - --limit alone already implies
+# "no database write" for every other domain (see each domain's --limit
+# help text). `default=None` on a non-store_true entry means "don't
+# forward it at all unless explicitly given" - the underlying loader's own
+# default then applies.
+_EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
+    "award-attachment": [
+        (
+            "--dry-run",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --dry-run.",
+            },
+        ),
+        (
+            "--upload",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --upload.",
+            },
+        ),
+        (
+            "--bucket",
+            {
+                "type": str,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --bucket.",
+            },
+        ),
+        (
+            "--prefix",
+            {
+                "type": str,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --prefix.",
+            },
+        ),
+        (
+            "--file-id",
+            {
+                "type": int,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --file-id.",
+            },
+        ),
+        (
+            "--load-file-id",
+            {
+                "type": int,
+                "default": None,
+                "help": "Forwarded to the underlying loader's --load-file-id.",
+            },
+        ),
+        (
+            "--retry-failed",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's --retry-failed."
+                ),
+            },
+        ),
+        (
+            "--multipart-threshold-bytes",
+            {
+                "type": int,
+                "default": None,
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--multipart-threshold-bytes."
+                ),
+            },
+        ),
+        (
+            "--ecs",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --ecs.",
+            },
+        ),
+        (
+            "--migrate-only",
+            {
+                "action": "store_true",
+                "help": "Forwarded to the underlying loader's --migrate-only.",
+            },
+        ),
+        (
+            "--show-upload-status",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--show-upload-status."
+                ),
+            },
+        ),
+        (
+            "--create-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "N",
+                "help": "Forwarded to the underlying loader's --create-batch.",
+            },
+        ),
+        (
+            "--include-already-uploaded",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--include-already-uploaded."
+                ),
+            },
+        ),
+        (
+            "--load-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --load-batch.",
+            },
+        ),
+        (
+            "--show-batch",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --show-batch.",
+            },
+        ),
+        (
+            "--batch-id",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "BATCH_ID",
+                "help": "Forwarded to the underlying loader's --batch-id.",
+            },
+        ),
+    ],
 }
 
 _CHECK_DOMAIN_LIMIT = 5
@@ -71,7 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     for domain in DOMAIN_MODULES:
         domain_parser = subparsers.add_parser(
             domain,
-            help=f"Load {domain.capitalize()} data from Oracle.",
+            help=f"Load {domain.replace('-', ' ').capitalize()} data from Oracle.",
         )
         domain_parser.add_argument(
             "--limit",
@@ -79,6 +228,8 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Forwarded to the underlying loader's --limit.",
         )
+        for flag, kwargs in _EXTRA_DOMAIN_ARGUMENTS.get(domain, []):
+            domain_parser.add_argument(flag, **kwargs)
 
     return parser
 
@@ -89,6 +240,15 @@ def _run_domain(domain: str, args: argparse.Namespace) -> int:
     forwarded: list[str] = []
     if args.limit is not None:
         forwarded.extend(["--limit", str(args.limit)])
+
+    for flag, kwargs in _EXTRA_DOMAIN_ARGUMENTS.get(domain, []):
+        dest = flag.lstrip("-").replace("-", "_")
+        value = getattr(args, dest, None)
+        if kwargs.get("action") == "store_true":
+            if value:
+                forwarded.append(flag)
+        elif value is not None:
+            forwarded.extend([flag, str(value)])
 
     # Rewrite sys.argv rather than changing each loader's main()/parse_args()
     # signature, so every domain script stays exactly as it is today (and

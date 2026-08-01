@@ -1,0 +1,15 @@
+{
+  "source_file": "protocol_composite.xlsx",
+  "source_rows": 24283,
+  "source_columns": 74,
+  "dropped_all_null_columns": [
+    "fda_ide_num",
+    "funding_src14",
+    "funding_src15"
+  ],
+  "protocol_rows": 6038,
+  "submission_rows": 24283,
+  "funding_rows": 27397,
+  "timeline_rows": 119252,
+  "duplicate_protocol_bases": 0
+}

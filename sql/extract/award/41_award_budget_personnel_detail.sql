@@ -1,0 +1,55 @@
+SET PAGESIZE 50000
+SET LINESIZE 32767
+SET FEEDBACK ON
+
+-- AWD_BUDGET_PER_DET_EXT is Award's real 1:1 extension of the generic
+-- BUDGET_PERSONNEL_DETAILS table, also shared with Proposal
+-- Development. BUDGET_PERSONNEL_DETAILS.BUDGET_ID is a direct column,
+-- so AWARD_BUDGET_EXT is joined straight off it to resolve AWARD_ID
+-- for filtering. person_sequence_number is a bare, unenforced
+-- reference to BUDGET_PERSONS (the budget-level personnel roster) -
+-- not archived in this bundle, see the design doc's Open Questions.
+-- See docs/architecture/AWARD_BUDGET_DESIGN.md.
+
+SELECT
+    ext.BUDGET_PERSONNEL_DETAILS_ID AS BUDGET_PERSONNEL_LINE_ITEM_ID,
+    pd.BUDGET_DETAILS_ID AS BUDGET_LINE_ITEM_ID,
+    pd.BUDGET_PERIOD_NUMBER AS BUDGET_PERIOD_ID,
+    pd.BUDGET_ID,
+    abe.AWARD_ID,
+    pd.BUDGET_PERIOD,
+    pd.LINE_ITEM_NUMBER,
+    pd.PERSON_NUMBER,
+    pd.PERSON_SEQUENCE_NUMBER,
+
+    pd.PERSON_ID,
+    pd.JOB_CODE,
+    pd.PERIOD_TYPE AS PERIOD_TYPE_CODE,
+    pd.LINE_ITEM_DESCRIPTION,
+    pd.SEQUENCE_NUMBER,
+
+    pd.START_DATE,
+    pd.END_DATE,
+
+    pd.SALARY_REQUESTED,
+    pd.PERCENT_CHARGED,
+    pd.PERCENT_EFFORT,
+    pd.COST_SHARING_PERCENT,
+    pd.COST_SHARING_AMOUNT,
+    pd.UNDERRECOVERY_AMOUNT,
+    ext.OBLIGATED_AMOUNT,
+
+    pd.ON_OFF_CAMPUS_FLAG,
+    pd.APPLY_IN_RATE_FLAG,
+
+    pd.BUDGET_JUSTIFICATION,
+
+    ext.UPDATE_TIMESTAMP,
+    ext.UPDATE_USER,
+    ext.VER_NBR
+
+FROM AWD_BUDGET_PER_DET_EXT ext
+JOIN BUDGET_PERSONNEL_DETAILS pd ON pd.BUDGET_PERSONNEL_DETAILS_ID = ext.BUDGET_PERSONNEL_DETAILS_ID
+JOIN AWARD_BUDGET_EXT abe ON abe.BUDGET_ID = pd.BUDGET_ID
+
+ORDER BY abe.AWARD_ID, pd.BUDGET_DETAILS_ID, ext.BUDGET_PERSONNEL_DETAILS_ID;
