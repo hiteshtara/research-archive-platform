@@ -531,6 +531,62 @@ commands — needs no `ORACLE_SECRET_ID` at all, so it's safe to run
 repeatedly at any point in the workflow, including while an upload is
 still in progress from another invocation.
 
+### Long-running bulk backfills: `--bulk-load`
+
+Running the 10-file sequence above by hand doesn't scale to backfilling
+tens or hundreds of thousands of files - `scripts/run-award-attachment-loader.sh
+--bulk-load TOTAL_FILES` automates repeated
+`--create-batch`/`--load-batch`/`--show-batch` (and `--upload --batch-id`,
+with `--upload`) cycles of `--bulk-batch-size` files each (default 5,000)
+until `TOTAL_FILES` have been processed or Oracle's candidate pool (file_ids
+not already excluded as already-UPLOADED) runs out first, whichever comes
+first:
+
+```bash
+# Bulk-backfill up to 200,000 files, 5,000 per batch, metadata-load only:
+scripts/run-award-attachment-loader.sh --bulk-load 200000
+
+# Add --upload to also upload each batch to S3 immediately after loading it:
+scripts/run-award-attachment-loader.sh --bulk-load 200000 --upload \
+  --bucket research-archive-platform-dev-documents-770203350335
+```
+
+**The image is built and the task definition registered exactly once per
+invocation** - never once per batch. This fixes a real failure mode: an
+earlier ad-hoc way of doing this (calling the script once per batch in a
+shell loop) rebuilt and re-pushed the Docker image on every single batch,
+which is both wasteful and a real point of failure (a transient
+`docker build`/registry network error aborts the whole run instead of
+just one batch). `--bulk-load` builds/pushes/registers once, then every
+batch's `--create-batch`/`--load-batch`/`--show-batch`/`--upload` task
+reuses that same task-definition revision.
+
+**Progress is persisted after every batch** to `--state-file` (default
+`/tmp/${PROJECT_NAME}-${ENVIRONMENT}-bulk-load-state.json`) - `files
+processed so far`, each batch's `batch_id`/`load_status`/`upload_status`,
+and the already-registered `image_uri`/`task_definition_arn`. **Stops
+immediately on the first failed batch** (exit 1), after saving state.
+Re-running the identical `--bulk-load TOTAL_FILES --state-file PATH`
+command resumes from that point: it reuses the recorded task definition
+(skipping the build/push/register step entirely, unless `--image-uri` is
+also given) and retries only the specific batch that failed - the
+in-progress step (create/load/upload), never a whole-run restart, and
+never a brand new batch that would lose the original selection. A state
+file only resumes a run for the exact `TOTAL_FILES` it was created with;
+mismatches are rejected rather than silently reinterpreted.
+
+**Never reloads already-uploaded files**, for the same reason the 10-file
+sequence above doesn't: every batch is created via plain `--create-batch`
+(no `--include-already-uploaded`), which excludes already-`UPLOADED`
+file_ids from selection by default.
+
+`--bulk-load` cannot be combined with `--create-batch`/`--load-batch`/
+`--show-batch`/`--file-id`/`--load-file-id`/`--load-file-ids`/`--batch-id`/
+`--diff-award-attachments`/`--migrate-only`/`--show-upload-status`/
+`--list-awards-with-attachments` - it owns the whole create/load/(upload)
+cycle itself. Like `--create-batch`/`--load-batch`, it requires
+`ORACLE_SECRET_ID`.
+
 **How to abandon or clean up a test batch:** there is no CLI flag for
 this, deliberately — batch membership is meant to be immutable once
 created. If a test batch needs to be discarded, do it directly in
