@@ -257,6 +257,30 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 ),
             },
         ),
+        (
+            "--diff-award-attachments",
+            {
+                "type": int,
+                "default": None,
+                "metavar": "AWARD_ID",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--diff-award-attachments."
+                ),
+            },
+        ),
+        (
+            "--load-file-ids",
+            {
+                "type": str,
+                "default": None,
+                "metavar": "FILE_ID,FILE_ID,...",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--load-file-ids."
+                ),
+            },
+        ),
     ],
 }
 

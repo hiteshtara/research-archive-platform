@@ -347,6 +347,8 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -379,6 +381,8 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -414,6 +418,8 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -460,6 +466,8 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 ecs=False,
             )
             create_engine.return_value = MagicMock()
@@ -1370,6 +1378,8 @@ class UploadGatingTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -1388,6 +1398,8 @@ class UploadGatingTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 ecs=False,
             )
             attachment_loader.main()
@@ -1527,6 +1539,8 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 limit=None,
                 dry_run=True,
                 ecs=False,
@@ -1555,6 +1569,8 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 limit=10,
                 dry_run=True,
                 ecs=False,
@@ -1686,6 +1702,8 @@ class RunEcsSetupTest(unittest.TestCase):
             show_upload_status=show_upload_status,
             show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             bucket=None,
             file_id=9001,
         )
@@ -1894,6 +1912,8 @@ class RunEcsSetupTest(unittest.TestCase):
             show_upload_status=False,
             show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             bucket="my-bucket",
         )
         calls: list[str] = []
@@ -1961,6 +1981,8 @@ class RunEcsSetupTest(unittest.TestCase):
             show_upload_status=False,
             show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             bucket=None,
         )
 
@@ -2006,6 +2028,8 @@ class RunEcsSetupTest(unittest.TestCase):
             show_upload_status=False,
             show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             bucket=None,
         )
 
@@ -2125,6 +2149,8 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 file_id=9001,
                 limit=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             )
             attachment_loader.main()
 
@@ -2175,6 +2201,8 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
                 limit=None,
                 dry_run=False,
             )
@@ -2208,6 +2236,8 @@ class ShowUploadStatusMainIntegrationTest(unittest.TestCase):
                 file_id=1,
                 limit=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             )
             attachment_loader.main()
 
@@ -2244,6 +2274,8 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             )
             attachment_loader.main()
 
@@ -2277,6 +2309,8 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             )
             attachment_loader.main()
 
@@ -2308,6 +2342,8 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             )
             attachment_loader.main()
 
@@ -2342,11 +2378,242 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 list_awards_with_attachments=False,
+                diff_award_attachments=None,
+                load_file_ids=None,
             )
             attachment_loader.main()
 
         apply_migrations.assert_not_called()
         run_load_file_id.assert_called_once()
+
+
+class ParseArgsLoadFileIdsTest(unittest.TestCase):
+    def test_parses_comma_separated_file_ids(self) -> None:
+        args = attachment_loader.parse_args(
+            ["--load-file-ids", "5994,5997,5995,5996,5993,6075,13261,13282,20751,32590"]
+        )
+
+        self.assertEqual(
+            args.load_file_ids,
+            {5994, 5997, 5995, 5996, 5993, 6075, 13261, 13282, 20751, 32590},
+        )
+
+    def test_defaults_to_none(self) -> None:
+        args = attachment_loader.parse_args([])
+
+        self.assertIsNone(args.load_file_ids)
+
+    def test_does_not_require_ecs(self) -> None:
+        args = attachment_loader.parse_args(["--load-file-ids", "1,2"])
+
+        self.assertFalse(args.ecs)
+
+    def test_combines_with_dry_run(self) -> None:
+        args = attachment_loader.parse_args(
+            ["--load-file-ids", "1,2", "--dry-run"]
+        )
+
+        self.assertEqual(args.load_file_ids, {1, 2})
+        self.assertTrue(args.dry_run)
+
+    def test_tolerates_whitespace_around_entries(self) -> None:
+        args = attachment_loader.parse_args(["--load-file-ids", " 1, 2 ,3 "])
+
+        self.assertEqual(args.load_file_ids, {1, 2, 3})
+
+    def test_rejects_non_integer_entry(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(["--load-file-ids", "1,abc"])
+
+    def test_rejects_empty_list(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(["--load-file-ids", " , ,"])
+
+    def test_rejects_non_positive_file_id(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(["--load-file-ids", "1,0"])
+
+    def test_cannot_combine_with_load_file_id(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(
+                ["--load-file-ids", "1,2", "--load-file-id", "3"]
+            )
+
+    def test_cannot_combine_with_file_id(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(
+                ["--load-file-ids", "1,2", "--file-id", "3"]
+            )
+
+    def test_cannot_combine_with_batch_id(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(
+                ["--load-file-ids", "1,2", "--upload", "--batch-id", "3"]
+            )
+
+    def test_cannot_combine_with_create_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(
+                ["--load-file-ids", "1,2", "--create-batch", "5"]
+            )
+
+
+class LoadFileIdsMainIntegrationTest(unittest.TestCase):
+    # The real 10 file_ids a --diff-award-attachments 1833767 run against
+    # the live archive proved were missing - see
+    # DiffAwardAttachmentsTest and tests/test_load_file_ids.py for the
+    # rest of this same investigation.
+    REAL_MISSING_FILE_IDS = {
+        5994,
+        5997,
+        5995,
+        5996,
+        5993,
+        6075,
+        13261,
+        13282,
+        20751,
+        32590,
+    }
+
+    def test_local_mode_applies_migrations_then_loads(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine"
+            ) as create_engine,
+            patch.object(attachment_loader, "apply_migrations") as apply_migrations,
+            patch.object(
+                attachment_loader, "_run_load_file_ids"
+            ) as run_load_file_ids,
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_file_id_lookup,
+        ):
+            engine = MagicMock()
+            create_engine.return_value = engine
+            parse_args.return_value = MagicMock(
+                ecs=False,
+                load_file_id=None,
+                load_file_ids=self.REAL_MISSING_FILE_IDS,
+                dry_run=False,
+                upload=False,
+                file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                list_awards_with_attachments=False,
+                diff_award_attachments=None,
+            )
+            attachment_loader.main()
+
+        apply_migrations.assert_called_once()
+        self.assertEqual(apply_migrations.call_args.args[0], engine)
+        run_load_file_ids.assert_called_once()
+        self.assertEqual(run_load_file_ids.call_args.args[0], engine)
+        self.assertEqual(
+            run_load_file_ids.call_args.args[1], self.REAL_MISSING_FILE_IDS
+        )
+        self.assertFalse(run_load_file_ids.call_args.kwargs["dry_run"])
+        run_upload.assert_not_called()
+        run_file_id_lookup.assert_not_called()
+
+    def test_dry_run_is_forwarded(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "apply_migrations"),
+            patch.object(
+                attachment_loader, "_run_load_file_ids"
+            ) as run_load_file_ids,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=False,
+                load_file_id=None,
+                load_file_ids=self.REAL_MISSING_FILE_IDS,
+                dry_run=True,
+                upload=False,
+                file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                list_awards_with_attachments=False,
+                diff_award_attachments=None,
+            )
+            attachment_loader.main()
+
+        self.assertTrue(run_load_file_ids.call_args.kwargs["dry_run"])
+
+    def test_takes_priority_over_upload_and_file_id(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "apply_migrations"),
+            patch.object(
+                attachment_loader, "_run_load_file_ids"
+            ) as run_load_file_ids,
+            patch.object(attachment_loader, "_run_upload") as run_upload,
+            patch.object(
+                attachment_loader, "_run_file_id_lookup"
+            ) as run_file_id_lookup,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=False,
+                load_file_id=None,
+                load_file_ids=self.REAL_MISSING_FILE_IDS,
+                dry_run=False,
+                upload=True,
+                file_id=9001,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                list_awards_with_attachments=False,
+                diff_award_attachments=None,
+            )
+            attachment_loader.main()
+
+        run_load_file_ids.assert_called_once()
+        run_upload.assert_not_called()
+        run_file_id_lookup.assert_not_called()
+
+    def test_ecs_mode_never_applies_migrations(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "_run_ecs_setup", return_value=False
+            ),
+            patch.object(
+                attachment_loader, "create_postgres_engine", return_value=MagicMock()
+            ),
+            patch.object(attachment_loader, "apply_migrations") as apply_migrations,
+            patch.object(
+                attachment_loader, "_run_load_file_ids"
+            ) as run_load_file_ids,
+        ):
+            parse_args.return_value = MagicMock(
+                ecs=True,
+                migrate_only=False,
+                show_upload_status=False,
+                load_file_id=None,
+                load_file_ids=self.REAL_MISSING_FILE_IDS,
+                dry_run=False,
+                upload=False,
+                file_id=None,
+                create_batch=None,
+                load_batch=None,
+                show_batch=None,
+                list_awards_with_attachments=False,
+                diff_award_attachments=None,
+            )
+            attachment_loader.main()
+
+        apply_migrations.assert_not_called()
+        run_load_file_ids.assert_called_once()
 
 
 class FakeRow:
@@ -2749,6 +3016,287 @@ class OracleExtractionSqlFilesExistTest(unittest.TestCase):
                 sql_path.is_file(),
                 f"expected Oracle extraction SQL at {sql_path}",
             )
+
+
+class DiffAwardAttachmentsTest(unittest.TestCase):
+    """Regression coverage for the real award_id=1833767 investigation:
+    Oracle showed 34 KCOEUS.AWARD_ATTACHMENT rows for this Award, but
+    archive.award_attachment only had 24. This anchors the diff tool's
+    behavior to that exact, previously-broken Award rather than an
+    arbitrary placeholder id."""
+
+    AWARD_ID = 1833767
+
+    def _oracle_rows(self, rows: list[dict]) -> pd.DataFrame:
+        return pd.DataFrame(rows)
+
+    def _mock_result(self, rows: list[FakeRow]):
+        result = MagicMock()
+        result.all.return_value = rows
+        return result
+
+    def test_classifies_each_missing_reason_correctly(self) -> None:
+        oracle_rows = self._oracle_rows(
+            [
+                {
+                    "award_attachment_id": 901,
+                    "award_id": self.AWARD_ID,
+                    "award_number": "100068-00001",
+                    "sequence_number": 38,
+                    "document_id": "D1",
+                    "file_id": 501,
+                    "type_code": "BUD",
+                    "description": "Present already",
+                    "document_status_code": "COMPLETE",
+                    "oracle_update_timestamp": None,
+                    "oracle_update_user": "jsmith",
+                },
+                {
+                    "award_attachment_id": 902,
+                    "award_id": self.AWARD_ID,
+                    "award_number": "100068-00001",
+                    "sequence_number": 38,
+                    "document_id": "D2",
+                    "file_id": 502,
+                    "type_code": "BUD",
+                    "description": "File loaded, reference missing",
+                    "document_status_code": "COMPLETE",
+                    "oracle_update_timestamp": None,
+                    "oracle_update_user": "jsmith",
+                },
+                {
+                    "award_attachment_id": 903,
+                    "award_id": self.AWARD_ID,
+                    "award_number": "100068-00001",
+                    "sequence_number": 38,
+                    "document_id": "D3",
+                    "file_id": 503,
+                    "type_code": "BUD",
+                    "description": "Batch pending",
+                    "document_status_code": "COMPLETE",
+                    "oracle_update_timestamp": None,
+                    "oracle_update_user": "jsmith",
+                },
+                {
+                    "award_attachment_id": 904,
+                    "award_id": self.AWARD_ID,
+                    "award_number": "100068-00001",
+                    "sequence_number": 38,
+                    "document_id": "D4",
+                    "file_id": 504,
+                    "type_code": "BUD",
+                    "description": "Never targeted",
+                    "document_status_code": "COMPLETE",
+                    "oracle_update_timestamp": None,
+                    "oracle_update_user": "jsmith",
+                },
+            ]
+        )
+
+        engine = MagicMock()
+        connection = MagicMock()
+        connection.execute.side_effect = [
+            self._mock_result([FakeRow(award_attachment_id=901, file_id=501)]),
+            self._mock_result([FakeRow(file_id=502, upload_status="UPLOADED")]),
+            self._mock_result(
+                [FakeRow(file_id=503, item_status="PENDING", batch_id=7)]
+            ),
+        ]
+        engine.connect.return_value.__enter__.return_value = connection
+
+        with patch.object(
+            attachment_loader, "OracleDataSource"
+        ) as oracle_data_source:
+            oracle_data_source.return_value.read_filtered.return_value = (
+                oracle_rows
+            )
+
+            result = attachment_loader._run_diff_award_attachments(
+                engine, self.AWARD_ID
+            )
+
+        oracle_data_source.return_value.read_filtered.assert_called_once_with(
+            column="AWARD_ID", values=[self.AWARD_ID]
+        )
+        self.assertEqual(result["oracle_count"], 4)
+        self.assertEqual(result["archive_count"], 1)
+        self.assertEqual(result["missing_count"], 3)
+
+        by_id = {row["attachment_id"]: row for row in result["rows"]}
+        self.assertTrue(by_id[901]["archive_present"])
+        self.assertEqual(by_id[901]["reason"], "present")
+
+        self.assertFalse(by_id[902]["archive_present"])
+        self.assertIn("UPSERT logic gap", by_id[902]["reason"])
+
+        self.assertFalse(by_id[903]["archive_present"])
+        self.assertIn("batch filtering", by_id[903]["reason"])
+        self.assertIn("batch 7", by_id[903]["reason"])
+        self.assertIn("PENDING", by_id[903]["reason"])
+
+        self.assertFalse(by_id[904]["archive_present"])
+        self.assertIn("not yet loaded", by_id[904]["reason"])
+
+    def test_returns_zero_counts_without_querying_postgres_when_oracle_is_empty(
+        self,
+    ) -> None:
+        engine = MagicMock()
+
+        with patch.object(
+            attachment_loader, "OracleDataSource"
+        ) as oracle_data_source:
+            oracle_data_source.return_value.read_filtered.return_value = (
+                pd.DataFrame()
+            )
+
+            result = attachment_loader._run_diff_award_attachments(
+                engine, self.AWARD_ID
+            )
+
+        self.assertEqual(result, {
+            "award_id": self.AWARD_ID,
+            "oracle_count": 0,
+            "archive_count": 0,
+            "missing_count": 0,
+            "rows": [],
+        })
+        engine.connect.assert_not_called()
+
+    def test_uses_read_filtered_not_a_full_table_scan(self) -> None:
+        # Regression guard: a full read()/read_batches() scan of
+        # KCOEUS.AWARD_ATTACHMENT for a single-Award diagnostic would be
+        # needlessly expensive against a large, shared production table -
+        # this must always push the AWARD_ID filter down to Oracle.
+        engine = MagicMock()
+        connection = MagicMock()
+        connection.execute.side_effect = [
+            self._mock_result([]),
+            self._mock_result([]),
+            self._mock_result([]),
+        ]
+        engine.connect.return_value.__enter__.return_value = connection
+
+        with patch.object(
+            attachment_loader, "OracleDataSource"
+        ) as oracle_data_source:
+            oracle_data_source.return_value.read_filtered.return_value = (
+                self._oracle_rows(
+                    [
+                        {
+                            "award_attachment_id": 1,
+                            "award_id": self.AWARD_ID,
+                            "award_number": "100068-00001",
+                            "sequence_number": 38,
+                            "document_id": None,
+                            "file_id": 1,
+                            "type_code": None,
+                            "description": None,
+                            "document_status_code": None,
+                            "oracle_update_timestamp": None,
+                            "oracle_update_user": None,
+                        }
+                    ]
+                )
+            )
+
+            attachment_loader._run_diff_award_attachments(engine, self.AWARD_ID)
+
+        oracle_data_source.return_value.read.assert_not_called()
+        oracle_data_source.return_value.read_batches.assert_not_called()
+
+    def test_ecs_diff_award_attachments_requires_oracle_unlike_list_awards(
+        self,
+    ) -> None:
+        calls: list[str] = []
+
+        def _track(name, retval=None):
+            def _fn(*args, **kwargs):
+                calls.append(name)
+                return retval
+
+            return _fn
+
+        arguments = MagicMock(
+            migrate_only=False,
+            show_upload_status=False,
+            show_batch=None,
+            list_awards_with_attachments=False,
+            diff_award_attachments=self.AWARD_ID,
+            file_id=None,
+            bucket=None,
+        )
+
+        with (
+            patch.object(
+                attachment_loader,
+                "configure_structured_logging",
+                side_effect=_track("configure_structured_logging"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                side_effect=_track(
+                    "validate_aws_identity", {"account": "770203350335"}
+                ),
+            ),
+            patch.object(attachment_loader, "boto3") as boto3_module,
+            patch.object(
+                attachment_loader, "configure_ecs_environment"
+            ) as configure_env,
+            patch.object(
+                attachment_loader,
+                "create_postgres_engine",
+                side_effect=_track("create_postgres_engine", MagicMock()),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_postgres_reachable",
+                side_effect=_track("validate_postgres_reachable"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_oracle_reachable",
+                side_effect=_track("validate_oracle_reachable"),
+            ) as validate_oracle,
+            patch.object(
+                attachment_loader, "_run_diff_award_attachments"
+            ) as run_diff,
+        ):
+            boto3_module.client.side_effect = _track(
+                "boto3.client(secretsmanager)", MagicMock()
+            )
+            result = attachment_loader._run_ecs_setup(arguments, run_id="test-run")
+
+        # Unlike --list-awards-with-attachments, this DOES reach Oracle.
+        self.assertIn("validate_oracle_reachable", calls)
+        validate_oracle.assert_called_once()
+        configure_env.assert_called_once()
+        self.assertTrue(configure_env.call_args.kwargs["include_oracle"])
+        self.assertTrue(result)
+        run_diff.assert_called_once()
+        self.assertEqual(run_diff.call_args.args[1], self.AWARD_ID)
+
+    def test_main_routes_local_diff_award_attachments_without_ecs(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine"
+            ) as create_engine,
+            patch.object(
+                attachment_loader, "_run_diff_award_attachments"
+            ) as run_diff,
+        ):
+            parse_args.return_value = MagicMock(
+                diff_award_attachments=self.AWARD_ID,
+                list_awards_with_attachments=False,
+                ecs=False,
+            )
+            attachment_loader.main()
+
+        create_engine.assert_called_once()
+        run_diff.assert_called_once_with(
+            create_engine.return_value, self.AWARD_ID
+        )
 
 
 if __name__ == "__main__":

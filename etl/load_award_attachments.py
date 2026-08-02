@@ -44,7 +44,7 @@ import oracledb
 import pandas as pd
 from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection, Engine
 
 from archive_etl.attachments.models import sanitize_file_name
@@ -1073,6 +1073,140 @@ def _run_load_file_id(
     return report
 
 
+def _run_load_file_ids(
+    engine: Engine,
+    target_file_ids: set[int],
+    *,
+    dry_run: bool = False,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """--load-file-ids: bounded, idempotent metadata load for exactly the
+    given physical file_ids (and their reference rows only) - the
+    plural generalization of --load-file-id, for backfilling a known,
+    specific set of file_ids in one pass (e.g. "these are the exact 10
+    file_ids a --diff-award-attachments run proved were never loaded")
+    rather than one file_id, one task invocation, at a time. Same
+    guarantees as --load-file-id: never truncates or replaces the full
+    attachment tables, never reads a BLOB, never uploads to S3, and
+    everything happens in one transaction (rolled back on any failure,
+    or on dry_run=True instead of committed). A deliberately independent
+    implementation, not a shared refactor of --load-file-id, so the
+    single-file_id path's existing behavior and report shape (including
+    its early-return-without-opening-Postgres case for a file_id not
+    found in Oracle at all) are left completely unchanged."""
+    load_logger = logger.bind(
+        stage="load_file_ids", file_ids=sorted(target_file_ids), run_id=run_id
+    )
+
+    files_raw = read_files_matching_ids(
+        OracleDataSource(FILES_ORACLE_SQL), target_file_ids
+    )
+    files = prepare_files(files_raw) if not files_raw.empty else files_raw
+    found_file_ids = (
+        set(files["file_id"].astype("int64").tolist()) if not files.empty else set()
+    )
+    missing_file_ids = target_file_ids - found_file_ids
+
+    references_raw = read_references_matching_file_ids(
+        OracleDataSource(REFERENCES_ORACLE_SQL), found_file_ids
+    )
+    references = (
+        prepare_references(references_raw)
+        if not references_raw.empty
+        else references_raw
+    )
+
+    report: dict[str, Any] = {
+        "file_ids": sorted(target_file_ids),
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "missing": len(missing_file_ids),
+        "per_file": [],
+    }
+
+    if not target_file_ids or (files.empty and references.empty):
+        for missing_file_id in sorted(missing_file_ids):
+            load_logger.info(
+                "file_id={} not found in Oracle - nothing to load",
+                missing_file_id,
+            )
+        load_logger.info(
+            "Bounded metadata load for {} file_id(s): nothing found in "
+            "Oracle - inserted=0 updated=0 unchanged=0 missing={}",
+            len(target_file_ids),
+            report["missing"],
+        )
+        return report
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = create_load_run(connection, len(files) + len(references))
+
+            for _, file_row in files.iterrows():
+                file_result = upsert_attachment_object(connection, file_row, load_id)
+                report[file_result] += 1
+                report["per_file"].append(
+                    {
+                        "file_id": int(file_row["file_id"]),
+                        "file_name": file_row.get("file_name"),
+                        "result": file_result,
+                    }
+                )
+                load_logger.info(
+                    "file_id={} file_name={} -> {}",
+                    file_row["file_id"],
+                    file_row.get("file_name"),
+                    file_result,
+                )
+
+            for missing_file_id in sorted(missing_file_ids):
+                load_logger.info(
+                    "file_id={} not found in Oracle - nothing to load",
+                    missing_file_id,
+                )
+
+            for _, reference_row in references.iterrows():
+                reference_result = upsert_award_attachment(
+                    connection, reference_row, load_id
+                )
+                report[reference_result] += 1
+
+            mark_load_complete(
+                connection,
+                load_id,
+                len(files) + len(references),
+                {
+                    "inserted": report["inserted"],
+                    "updated": report["updated"],
+                    "unchanged": report["unchanged"],
+                },
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    load_logger.info(
+        "Bounded metadata load for {} file_id(s) ({} reference row(s)){}: "
+        "inserted={} updated={} unchanged={} missing={}",
+        len(target_file_ids),
+        len(references),
+        " [DRY RUN - not persisted]" if dry_run else "",
+        report["inserted"],
+        report["updated"],
+        report["unchanged"],
+        report["missing"],
+    )
+
+    return report
+
+
 # --- Sprint 3: deterministic batch workflow --------------------------------
 #
 # Neither --limit (metadata load, bounded Oracle sampling) nor --limit
@@ -1355,6 +1489,204 @@ def _run_list_awards_with_attachments(
         "Listed {} Award version(s) with attachments", len(results)
     )
     return results
+
+
+def _run_diff_award_attachments(
+    engine: Engine, award_id: int
+) -> dict[str, Any]:
+    """--diff-award-attachments: developer-only, read-only side-by-side
+    comparison of KCOEUS.AWARD_ATTACHMENT (Oracle) against
+    archive.award_attachment (Postgres) for exactly one award_id -
+    explains, per Oracle-side row, exactly why it either is or isn't
+    archived yet. Never writes to either database.
+
+    Reads Oracle via OracleDataSource.read_filtered (a targeted
+    bind-variable WHERE AWARD_ID = :award_id push-down against
+    export_award_attachments.sql - the same production extraction SQL
+    the real loader uses, unmodified - not a full-table scan, and not a
+    new/duplicate Oracle query). Classifies each Oracle-only row using
+    only what the archive can prove about that row's file_id:
+      - present in archive.attachment_object -> file metadata was
+        loaded but this specific reference wasn't (a genuine gap, since
+        --load-batch/--load-file-id always load both together in one
+        transaction - see upsert_award_attachment/upsert_attachment_object
+        call sites in _run_load_batch)
+      - a member of an archive.etl_batch_item row for the
+        AWARD_ATTACHMENT/PHYSICAL_FILE domain -> batch filtering: this
+        file_id was selected into a batch whose processing hasn't
+        completed for it yet
+      - neither -> not yet loaded: this file_id has never been reached
+        by the batch-based loading strategy at all (--create-batch
+        selects file_ids in ascending order across every Award, not per
+        Award, so a single Award's references can legitimately still be
+        partially loaded)
+    """
+    oracle_rows = OracleDataSource(REFERENCES_ORACLE_SQL).read_filtered(
+        column="AWARD_ID", values=[award_id]
+    )
+
+    if oracle_rows.empty:
+        logger.bind(
+            stage="diff_award_attachments", award_id=award_id
+        ).info(
+            "No AWARD_ATTACHMENT rows found in Oracle for award_id={}",
+            award_id,
+        )
+        return {
+            "award_id": award_id,
+            "oracle_count": 0,
+            "archive_count": 0,
+            "missing_count": 0,
+            "rows": [],
+        }
+
+    oracle_rows = prepare_references(oracle_rows)
+    oracle_file_ids = [
+        int(value)
+        for value in oracle_rows["file_id"].dropna().astype("int64").tolist()
+    ]
+
+    with engine.connect() as connection:
+        archive_rows = connection.execute(
+            text(
+                """
+                SELECT award_attachment_id, file_id
+                FROM archive.award_attachment
+                WHERE award_id = :award_id
+                """
+            ),
+            {"award_id": award_id},
+        ).all()
+
+        file_object_rows = []
+        batch_rows = []
+        if oracle_file_ids:
+            file_object_rows = connection.execute(
+                text(
+                    """
+                    SELECT file_id, upload_status
+                    FROM archive.attachment_object
+                    WHERE file_id IN :file_ids
+                    """
+                ).bindparams(bindparam("file_ids", expanding=True)),
+                {"file_ids": oracle_file_ids},
+            ).all()
+
+            batch_rows = connection.execute(
+                text(
+                    """
+                    SELECT
+                        ebi.entity_key AS file_id,
+                        ebi.status AS item_status,
+                        ebi.batch_id
+                    FROM archive.etl_batch_item ebi
+                    JOIN archive.etl_batch eb
+                        ON eb.batch_id = ebi.batch_id
+                    WHERE eb.domain = :domain
+                      AND eb.entity_type = :entity_type
+                      AND ebi.entity_key IN :file_ids
+                    """
+                ).bindparams(bindparam("file_ids", expanding=True)),
+                {
+                    "domain": AWARD_ATTACHMENT_BATCH_DOMAIN,
+                    "entity_type": AWARD_ATTACHMENT_BATCH_ENTITY_TYPE,
+                    "file_ids": oracle_file_ids,
+                },
+            ).all()
+
+    archive_attachment_ids = {row.award_attachment_id for row in archive_rows}
+    file_ids_with_object = {row.file_id for row in file_object_rows}
+    batch_status_by_file_id = {
+        row.file_id: (row.batch_id, row.item_status) for row in batch_rows
+    }
+
+    report_rows = []
+    for _, oracle_row in oracle_rows.iterrows():
+        attachment_id = int(oracle_row["award_attachment_id"])
+        file_id = (
+            int(oracle_row["file_id"])
+            if pd.notna(oracle_row["file_id"])
+            else None
+        )
+        archive_present = attachment_id in archive_attachment_ids
+
+        if archive_present:
+            reason = "present"
+        elif file_id is None:
+            reason = "Oracle row has no FILE_ID at all - nothing to load"
+        elif file_id in file_ids_with_object:
+            reason = (
+                "UPSERT logic gap: attachment_object metadata for this "
+                "file_id IS loaded, but this specific reference row is "
+                "not - needs manual investigation, since --load-batch/"
+                "--load-file-id normally load both together in one "
+                "transaction"
+            )
+        elif file_id in batch_status_by_file_id:
+            batch_id, item_status = batch_status_by_file_id[file_id]
+            reason = (
+                f"batch filtering: file_id {file_id} is a member of "
+                f"batch {batch_id}, item status={item_status} (not yet "
+                "loaded for this file_id)"
+            )
+        else:
+            reason = (
+                "not yet loaded: this file_id has never been selected "
+                "into any --create-batch batch or loaded via "
+                "--load-file-id - the global, ascending-file_id batch "
+                "progression has not reached it yet"
+            )
+
+        report_rows.append(
+            {
+                "attachment_id": attachment_id,
+                "file_id": file_id,
+                "oracle_present": True,
+                "archive_present": archive_present,
+                "reason": reason,
+            }
+        )
+
+    missing_rows = [row for row in report_rows if not row["archive_present"]]
+
+    header = (
+        f"{'ATTACHMENT_ID':>14} {'FILE_ID':>10} "
+        f"{'ORACLE':>7} {'ARCHIVE':>8}  REASON"
+    )
+    print(header)
+    print("-" * len(header))
+    for row in report_rows:
+        file_id_display = (
+            row["file_id"] if row["file_id"] is not None else "(null)"
+        )
+        print(
+            f"{row['attachment_id']:>14} {file_id_display:>10} "
+            f"{'yes':>7} {'yes' if row['archive_present'] else 'no':>8}  "
+            f"{row['reason']}"
+        )
+
+    logger.bind(
+        stage="diff_award_attachments",
+        award_id=award_id,
+        oracle_count=len(report_rows),
+        archive_count=len(report_rows) - len(missing_rows),
+        missing_count=len(missing_rows),
+    ).info(
+        "Award {}: Oracle has {} attachment row(s), archive has {}, "
+        "{} missing",
+        award_id,
+        len(report_rows),
+        len(report_rows) - len(missing_rows),
+        len(missing_rows),
+    )
+
+    return {
+        "award_id": award_id,
+        "oracle_count": len(report_rows),
+        "archive_count": len(report_rows) - len(missing_rows),
+        "missing_count": len(missing_rows),
+        "rows": report_rows,
+    }
 
 
 def _run_show_batch(engine: Engine, batch_id: int) -> dict[str, Any]:
@@ -1783,6 +2115,34 @@ def _run_upload(
     return report
 
 
+def _parse_file_id_list(
+    raw: str, parser: argparse.ArgumentParser
+) -> set[int]:
+    """Parse --load-file-ids's comma-separated FILE_ID list into a set of
+    positive ints, failing via parser.error (not a raw exception) on any
+    malformed or empty entry - consistent with every other --load-file-ids
+    validation error."""
+    file_ids: set[int] = set()
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            file_id = int(piece)
+        except ValueError:
+            parser.error(
+                f"--load-file-ids: {piece!r} is not a valid integer file_id"
+            )
+        if file_id <= 0:
+            parser.error(
+                f"--load-file-ids: file_id must be positive, got {file_id}"
+            )
+        file_ids.add(file_id)
+    if not file_ids:
+        parser.error("--load-file-ids requires at least one file_id")
+    return file_ids
+
+
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -2023,6 +2383,46 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "form (no bastion host required)."
         ),
     )
+    parser.add_argument(
+        "--diff-award-attachments",
+        type=int,
+        default=None,
+        metavar="AWARD_ID",
+        help=(
+            "Developer/investigation aid, not a production feature: "
+            "read-only side-by-side comparison of Oracle's "
+            "KCOEUS.AWARD_ATTACHMENT rows for exactly this award_id "
+            "against archive.award_attachment, explaining per-row "
+            "exactly why any Oracle-only row hasn't been archived yet "
+            "(never yet targeted by a batch, targeted but not "
+            "completed, or a genuine upsert gap). Reads both Oracle "
+            "(a targeted bind-variable filter, not a full-table scan) "
+            "and PostgreSQL - unlike --list-awards-with-attachments, "
+            "this is NOT exempt from --ecs's usual ORACLE_SECRET_ID "
+            "requirement. Never writes anything."
+        ),
+    )
+    parser.add_argument(
+        "--load-file-ids",
+        type=str,
+        default=None,
+        metavar="FILE_ID,FILE_ID,...",
+        help=(
+            "Bounded, idempotent metadata load for exactly these physical "
+            "FILE_IDs (and their reference rows only, all in one "
+            "transaction) - the plural form of --load-file-id, for "
+            "backfilling a known, specific set of file_ids (e.g. the "
+            "exact set --diff-award-attachments proved were never "
+            "loaded) in one pass instead of one task invocation per "
+            "file_id. Comma-separated list of positive integers, e.g. "
+            "'5993,5994,5995'. Same guarantees as --load-file-id: UPSERTs "
+            "only, never truncates or replaces the full tables, never "
+            "reads a BLOB, never uploads to S3, and an existing row's "
+            "upload_status/upload_attempts/last_error/S3 fields are "
+            "always preserved. Cannot be combined with --load-file-id, "
+            "--file-id, --batch-id, or any batch verb."
+        ),
+    )
     parsed = parser.parse_args(arguments)
     if parsed.migrate_only and not parsed.ecs:
         parser.error("--migrate-only is only valid together with --ecs")
@@ -2081,6 +2481,26 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             parser.error("--batch-id cannot be combined with --load-file-id")
     if parsed.file_id is not None and parsed.batch_id is not None:
         parser.error("--file-id and --batch-id cannot be combined")
+
+    if parsed.load_file_ids is not None:
+        if parsed.load_file_id is not None:
+            parser.error(
+                "--load-file-id and --load-file-ids cannot be combined"
+            )
+        if parsed.file_id is not None:
+            parser.error("--file-id cannot be combined with --load-file-ids")
+        if parsed.batch_id is not None:
+            parser.error(
+                "--batch-id cannot be combined with --load-file-ids"
+            )
+        if active_batch_verbs:
+            parser.error(
+                f"{active_batch_verbs[0]} cannot be combined with "
+                "--load-file-ids"
+            )
+        parsed.load_file_ids = _parse_file_id_list(
+            parsed.load_file_ids, parser
+        )
 
     return parsed
 
@@ -2368,6 +2788,13 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     validate_oracle_reachable(_connect_oracle)
     logger.bind(stage="startup").info("Oracle reachable")
 
+    if arguments.diff_award_attachments is not None:
+        _run_diff_award_attachments(engine, arguments.diff_award_attachments)
+        logger.bind(
+            stage="startup", status="diff_award_attachments_complete"
+        ).info("Award/Oracle attachment diff complete")
+        return True
+
     if not arguments.bucket:
         arguments.bucket = (
             os.environ.get(AWARD_ATTACHMENT_BUCKET_NAME_VARIABLE) or None
@@ -2404,6 +2831,11 @@ def main() -> None:
     if arguments.list_awards_with_attachments and not arguments.ecs:
         engine = create_postgres_engine()
         _run_list_awards_with_attachments(engine, arguments.limit)
+        return
+
+    if arguments.diff_award_attachments is not None and not arguments.ecs:
+        engine = create_postgres_engine()
+        _run_diff_award_attachments(engine, arguments.diff_award_attachments)
         return
 
     if arguments.ecs:
@@ -2447,6 +2879,18 @@ def main() -> None:
         _run_load_file_id(
             engine,
             arguments.load_file_id,
+            dry_run=arguments.dry_run,
+            run_id=run_id,
+        )
+        return
+
+    if arguments.load_file_ids is not None:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        _run_load_file_ids(
+            engine,
+            arguments.load_file_ids,
             dry_run=arguments.dry_run,
             run_id=run_id,
         )

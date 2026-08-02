@@ -92,6 +92,14 @@ set -euo pipefail
 #   Combine with --dry-run to see inserted/updated/unchanged/missing
 #   counts without persisting anything.
 #
+# --load-file-ids FILE_ID,FILE_ID,...: the plural form of --load-file-id -
+#   bounded, idempotent metadata load for exactly the given comma-separated
+#   set of physical FILE_IDs (and their reference rows only), all in one
+#   transaction. For backfilling a known, specific set of file_ids in one
+#   pass - e.g. the exact set a --diff-award-attachments run proved were
+#   never loaded - instead of one task invocation per file_id. Same
+#   guarantees and ORACLE_SECRET_ID requirement as --load-file-id.
+#
 # --create-batch N (optionally with --include-already-uploaded): select
 #   exactly N distinct physical file_ids from Oracle, in stable ascending
 #   file_id order, and persist that exact membership as a new batch
@@ -116,6 +124,16 @@ set -euo pipefail
 #   ORACLE_SECRET_ID. Runs on the existing loader task definition, so no
 #   dedicated bastion host is needed just to find a real award_id worth
 #   opening in the UI's Attachments tab.
+#
+# --diff-award-attachments AWARD_ID: investigation aid, not a production
+#   feature - read-only side-by-side comparison of Oracle's
+#   KCOEUS.AWARD_ATTACHMENT rows for exactly this award_id against
+#   archive.award_attachment, explaining per-row why any Oracle-only row
+#   hasn't been archived yet (never targeted by a batch, targeted but
+#   not completed, or a genuine upsert gap). Unlike --list-awards-with-
+#   attachments/--show-batch, this DOES require ORACLE_SECRET_ID (it
+#   reads Oracle, via a targeted bind-variable filter - not a
+#   full-table scan). Never writes anything.
 #
 # --batch-id BATCH_ID (only valid with --upload): restrict the upload run
 #   to exactly this batch's membership, instead of every PENDING/
@@ -162,6 +180,16 @@ set -euo pipefail
 #   # bastion host (PostgreSQL-only, no ORACLE_SECRET_ID needed):
 #   POSTGRES_SECRET_ID=arn:...:postgres \
 #     scripts/run-award-attachment-loader.sh --list-awards-with-attachments --limit 25
+#
+#   # Explain why one Award has fewer archived attachments than Oracle
+#   # shows (reads Oracle, so ORACLE_SECRET_ID is required here):
+#   POSTGRES_SECRET_ID=arn:...:postgres ORACLE_SECRET_ID=arn:...:oracle \
+#     scripts/run-award-attachment-loader.sh --diff-award-attachments 1833767
+#
+#   # Backfill a known, specific set of file_ids in one pass (e.g. the
+#   # exact file_ids --diff-award-attachments proved were never loaded):
+#   POSTGRES_SECRET_ID=arn:...:postgres ORACLE_SECRET_ID=arn:...:oracle \
+#     scripts/run-award-attachment-loader.sh --load-file-ids 5993,5994,5995
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -179,6 +207,7 @@ CONTAINER_NAME="loader"
 
 FILE_ID=""
 LOAD_FILE_ID=""
+LOAD_FILE_IDS=""
 LIMIT=""
 RETRY_FAILED=false
 DRY_RUN=false
@@ -194,11 +223,13 @@ LOAD_BATCH=""
 SHOW_BATCH=""
 BATCH_ID=""
 LIST_AWARDS_WITH_ATTACHMENTS=false
+DIFF_AWARD_ATTACHMENTS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --file-id) FILE_ID="$2"; shift 2 ;;
     --load-file-id) LOAD_FILE_ID="$2"; shift 2 ;;
+    --load-file-ids) LOAD_FILE_IDS="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --retry-failed) RETRY_FAILED=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -214,6 +245,7 @@ while [[ $# -gt 0 ]]; do
     --show-batch) SHOW_BATCH="$2"; shift 2 ;;
     --batch-id) BATCH_ID="$2"; shift 2 ;;
     --list-awards-with-attachments) LIST_AWARDS_WITH_ATTACHMENTS=true; shift ;;
+    --diff-award-attachments) DIFF_AWARD_ATTACHMENTS="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -279,6 +311,25 @@ fi
 if [[ -n "$FILE_ID" && -n "$BATCH_ID" ]]; then
   echo "ERROR: --file-id and --batch-id cannot be combined" >&2
   exit 1
+fi
+
+if [[ -n "$LOAD_FILE_IDS" ]]; then
+  if [[ -n "$LOAD_FILE_ID" ]]; then
+    echo "ERROR: --load-file-id and --load-file-ids cannot be combined" >&2
+    exit 1
+  fi
+  if [[ -n "$FILE_ID" ]]; then
+    echo "ERROR: --file-id cannot be combined with --load-file-ids" >&2
+    exit 1
+  fi
+  if [[ -n "$BATCH_ID" ]]; then
+    echo "ERROR: --batch-id cannot be combined with --load-file-ids" >&2
+    exit 1
+  fi
+  if [[ "${#ACTIVE_BATCH_VERBS[@]}" -gt 0 ]]; then
+    echo "ERROR: ${ACTIVE_BATCH_VERBS[0]} cannot be combined with --load-file-ids" >&2
+    exit 1
+  fi
 fi
 
 # --show-batch and --list-awards-with-attachments are both PostgreSQL-only
@@ -387,6 +438,7 @@ echo "=== Building command + environment override ==="
 OVERRIDE_ARGS=()
 [[ -n "$FILE_ID" ]] && OVERRIDE_ARGS+=(--file-id "$FILE_ID")
 [[ -n "$LOAD_FILE_ID" ]] && OVERRIDE_ARGS+=(--load-file-id "$LOAD_FILE_ID")
+[[ -n "$LOAD_FILE_IDS" ]] && OVERRIDE_ARGS+=(--load-file-ids "$LOAD_FILE_IDS")
 [[ -n "$LIMIT" ]] && OVERRIDE_ARGS+=(--limit "$LIMIT")
 [[ "$RETRY_FAILED" == true ]] && OVERRIDE_ARGS+=(--retry-failed)
 [[ "$DRY_RUN" == true ]] && OVERRIDE_ARGS+=(--dry-run)
@@ -398,6 +450,7 @@ OVERRIDE_ARGS=()
 [[ -n "$LOAD_BATCH" ]] && OVERRIDE_ARGS+=(--load-batch "$LOAD_BATCH")
 [[ -n "$SHOW_BATCH" ]] && OVERRIDE_ARGS+=(--show-batch "$SHOW_BATCH")
 [[ "$LIST_AWARDS_WITH_ATTACHMENTS" == true ]] && OVERRIDE_ARGS+=(--list-awards-with-attachments)
+[[ -n "$DIFF_AWARD_ATTACHMENTS" ]] && OVERRIDE_ARGS+=(--diff-award-attachments "$DIFF_AWARD_ATTACHMENTS")
 [[ -n "$BATCH_ID" ]] && OVERRIDE_ARGS+=(--batch-id "$BATCH_ID")
 [[ -n "$BUCKET" ]] && OVERRIDE_ARGS+=(--bucket "$BUCKET")
 [[ -n "$PREFIX" ]] && OVERRIDE_ARGS+=(--prefix "$PREFIX")

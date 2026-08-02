@@ -1,11 +1,12 @@
 """Build the `aws ecs run-task --overrides` JSON for a one-off Award
 Attachment loader task run.
 
-Translates CLI pass-through flags (--file-id, --load-file-id, --limit,
---retry-failed, --dry-run, --upload, --migrate-only,
---show-upload-status, --create-batch, --include-already-uploaded,
---load-batch, --show-batch, --batch-id,
---list-awards-with-attachments) into the container command override
+Translates CLI pass-through flags (--file-id, --load-file-id,
+--load-file-ids, --limit, --retry-failed, --dry-run, --upload,
+--migrate-only, --show-upload-status, --create-batch,
+--include-already-uploaded, --load-batch, --show-batch, --batch-id,
+--list-awards-with-attachments, --diff-award-attachments) into the
+container command override
 for the "loader" container in the research-archive-platform-dev-loader
 task family (see terraform/modules/ecs/main.tf - not modified here), and
 translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
@@ -48,6 +49,7 @@ def build_container_command(
     *,
     file_id: int | None = None,
     load_file_id: int | None = None,
+    load_file_ids: str | None = None,
     limit: int | None = None,
     retry_failed: bool = False,
     dry_run: bool = False,
@@ -62,6 +64,7 @@ def build_container_command(
     bucket: str | None = None,
     prefix: str | None = None,
     list_awards_with_attachments: bool = False,
+    diff_award_attachments: int | None = None,
 ) -> list[str]:
     """--ecs is always included: this command is only ever used for the
     ECS loader task, never local development.
@@ -91,6 +94,10 @@ def build_container_command(
         command.extend(["--show-batch", str(show_batch)])
     if list_awards_with_attachments:
         command.append("--list-awards-with-attachments")
+    if diff_award_attachments is not None:
+        command.extend(
+            ["--diff-award-attachments", str(diff_award_attachments)]
+        )
     if upload:
         command.append("--upload")
     if dry_run:
@@ -101,6 +108,8 @@ def build_container_command(
         command.extend(["--file-id", str(file_id)])
     if load_file_id is not None:
         command.extend(["--load-file-id", str(load_file_id)])
+    if load_file_ids:
+        command.extend(["--load-file-ids", load_file_ids])
     if batch_id is not None:
         command.extend(["--batch-id", str(batch_id)])
     if retry_failed:
@@ -148,6 +157,7 @@ def build_run_task_overrides(
     *,
     file_id: int | None = None,
     load_file_id: int | None = None,
+    load_file_ids: str | None = None,
     limit: int | None = None,
     retry_failed: bool = False,
     dry_run: bool = False,
@@ -169,12 +179,14 @@ def build_run_task_overrides(
     award_attachment_bucket_name: str | None = None,
     aws_region: str | None = None,
     list_awards_with_attachments: bool = False,
+    diff_award_attachments: int | None = None,
 ) -> dict:
     container_override: dict[str, object] = {
         "name": CONTAINER_NAME,
         "command": build_container_command(
             file_id=file_id,
             load_file_id=load_file_id,
+            load_file_ids=load_file_ids,
             limit=limit,
             retry_failed=retry_failed,
             dry_run=dry_run,
@@ -189,6 +201,7 @@ def build_run_task_overrides(
             bucket=bucket,
             prefix=prefix,
             list_awards_with_attachments=list_awards_with_attachments,
+            diff_award_attachments=diff_award_attachments,
         ),
     }
 
@@ -211,6 +224,7 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file-id", type=int, default=None)
     parser.add_argument("--load-file-id", type=int, default=None)
+    parser.add_argument("--load-file-ids", type=str, default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -224,6 +238,9 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-id", type=int, default=None)
     parser.add_argument(
         "--list-awards-with-attachments", action="store_true"
+    )
+    parser.add_argument(
+        "--diff-award-attachments", type=int, default=None
     )
     parser.add_argument("--bucket", type=str, default=None)
     parser.add_argument("--prefix", type=str, default=None)
@@ -242,6 +259,7 @@ def main() -> None:
     overrides = build_run_task_overrides(
         file_id=args.file_id,
         load_file_id=args.load_file_id,
+        load_file_ids=args.load_file_ids,
         limit=args.limit,
         retry_failed=args.retry_failed,
         dry_run=args.dry_run,
@@ -254,6 +272,7 @@ def main() -> None:
         show_batch=args.show_batch,
         batch_id=args.batch_id,
         list_awards_with_attachments=args.list_awards_with_attachments,
+        diff_award_attachments=args.diff_award_attachments,
         bucket=args.bucket,
         prefix=args.prefix,
         postgres_secret_id=args.postgres_secret_id,
