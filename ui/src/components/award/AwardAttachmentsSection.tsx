@@ -10,6 +10,7 @@ import {
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -22,7 +23,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { downloadAwardAttachmentV1, getAwardAttachmentsV1 } from "../../api/client";
 import {
@@ -33,6 +34,7 @@ import {
   hasAnyAttachments,
 } from "../../features/award/awardSectionsPresentation.mjs";
 import type { AttachmentTypeCategory } from "../../features/award/awardSectionsPresentation.mjs";
+import type { AwardAttachmentV1 } from "../../types/api";
 
 const TYPE_ICONS: Record<AttachmentTypeCategory, typeof InsertDriveFileOutlined> = {
   pdf: PictureAsPdfOutlined,
@@ -45,18 +47,52 @@ const TYPE_ICONS: Record<AttachmentTypeCategory, typeof InsertDriveFileOutlined>
   file: InsertDriveFileOutlined,
 };
 
+const PAGE_SIZE = 25;
+
 // Attachments - lazy-loads metadata from GET
-// /api/v1/awards/{awardId}/attachments. Downloads stream through the
-// existing authenticated proxy endpoint - the underlying S3 bucket/key
-// is never exposed to this component or the network tab.
+// /api/v1/awards/{awardId}/attachments (paginated - totalElements is
+// the authoritative count, never the length of whatever page happens
+// to be loaded). Downloads stream through the existing authenticated
+// proxy endpoint - the underlying S3 bucket/key is never exposed to
+// this component or the network tab.
 export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  const [page, setPage] = useState(0);
+  const [items, setItems] = useState<AwardAttachmentV1[]>([]);
+  const [totalElements, setTotalElements] = useState<number | null>(null);
+  const mergedThroughPage = useRef(-1);
+
+  // A new Award may be opened without this component unmounting (tab
+  // switches don't remount it), so accumulated pages must reset
+  // whenever the Award itself changes.
+  useEffect(() => {
+    setPage(0);
+    setItems([]);
+    setTotalElements(null);
+    mergedThroughPage.current = -1;
+  }, [awardId]);
+
   const attachmentsQuery = useQuery({
-    queryKey: ["award-attachments-v1", awardId],
-    queryFn: ({ signal }) => getAwardAttachmentsV1(awardId, signal),
+    queryKey: ["award-attachments-v1", awardId, page],
+    queryFn: ({ signal }) =>
+      getAwardAttachmentsV1(awardId, { page, size: PAGE_SIZE }, signal),
   });
+
+  useEffect(() => {
+    if (!attachmentsQuery.data) {
+      return;
+    }
+    setTotalElements(attachmentsQuery.data.totalElements);
+    if (page === 0) {
+      setItems(attachmentsQuery.data.content);
+      mergedThroughPage.current = 0;
+    } else if (page > mergedThroughPage.current) {
+      setItems((previous) => [...previous, ...attachmentsQuery.data!.content]);
+      mergedThroughPage.current = page;
+    }
+  }, [attachmentsQuery.data, page]);
 
   async function handleDownload(attachmentId: number, fileName: string) {
     setDownloadError(null);
@@ -85,15 +121,16 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
     return <Alert severity="error">Unable to load Attachments.</Alert>;
   }
 
-  const attachments = attachmentsQuery.data ?? [];
-
-  if (!hasAnyAttachments(attachments)) {
+  if (!hasAnyAttachments(items)) {
     return (
       <Typography color="text.secondary">
         No attachments are recorded for this Award.
       </Typography>
     );
   }
+
+  const isLastPage = attachmentsQuery.data?.last ?? true;
+  const isLoadingMore = attachmentsQuery.isFetching && page > 0;
 
   return (
     <Stack spacing={1.5}>
@@ -102,13 +139,13 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
           size="small"
           color="primary"
           variant="outlined"
-          label={formatAttachmentCountLabel(attachments.length)}
+          label={formatAttachmentCountLabel(totalElements ?? items.length)}
         />
       </Box>
 
       {downloadError && <Alert severity="error">{downloadError}</Alert>}
 
-      {attachments.map((attachment) => {
+      {items.map((attachment) => {
         const fileName = attachment.fileName ?? "attachment";
         const isDownloading = downloadingId === attachment.awardAttachmentId;
         const { category, label: typeLabel } = classifyAttachmentType(
@@ -222,6 +259,22 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
           </Card>
         );
       })}
+
+      {!isLastPage && (
+        <Box sx={{ display: "flex", justifyContent: "center", pt: 0.5 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={isLoadingMore}
+            startIcon={isLoadingMore ? <CircularProgress size={16} /> : null}
+            onClick={() => setPage((current) => current + 1)}
+          >
+            {isLoadingMore
+              ? "Loading more..."
+              : `Load more (${items.length} of ${totalElements ?? items.length})`}
+          </Button>
+        </Box>
+      )}
     </Stack>
   );
 }

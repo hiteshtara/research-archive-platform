@@ -586,6 +586,9 @@ export interface AwardAttachmentV1 {
   oracleUpdateTimestamp: string | null;
 }
 
+export interface AwardAttachmentPageResponse
+  extends PageResponse<AwardAttachmentV1> {}
+
 export interface ProposalFamily {
   proposalNumber: string;
   title: string | null;

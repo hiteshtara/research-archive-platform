@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /*
@@ -306,15 +307,36 @@ class AwardArchiveServiceCompositeSectionsTest {
     // --- Attachments -----------------------------------------------------
 
     @Test
-    void findAttachmentsDelegatesDirectlyToTheRepository() {
+    void findAttachmentsBuildsAPaginatedResponse() {
         AwardAttachmentResponse attachment = new AwardAttachmentResponse(
                 500L, "100004-00003", 1, "budget.pdf", "application/pdf",
                 "Budget justification", "BUD", "COMPLETE", 1024L,
                 "UPLOADED", true, LocalDateTime.of(2021, 1, 1, 0, 0)
         );
-        when(repository.findAttachments(3L)).thenReturn(List.of(attachment));
+        when(repository.countAttachments(3L)).thenReturn(1L);
+        when(repository.findAttachments(3L, 25, 0))
+                .thenReturn(List.of(attachment));
 
-        assertThat(service.findAttachments(3L)).containsExactly(attachment);
+        PageResponse<AwardAttachmentResponse> page =
+                service.findAttachments(3L, 0, 25);
+
+        assertThat(page.content()).containsExactly(attachment);
+        assertThat(page.totalElements()).isEqualTo(1L);
+        assertThat(page.first()).isTrue();
+        assertThat(page.last()).isTrue();
+    }
+
+    @Test
+    void findAttachmentsAppliesTheSamePaginationClampingAsOtherLists() {
+        when(repository.countAttachments(3L)).thenReturn(0L);
+        when(repository.findAttachments(3L, 100, 0)).thenReturn(List.of());
+
+        PageResponse<AwardAttachmentResponse> page =
+                service.findAttachments(3L, -1, 500);
+
+        assertThat(page.page()).isZero();
+        assertThat(page.size()).isEqualTo(100);
+        verify(repository).findAttachments(3L, 100, 0);
     }
 
     @Test

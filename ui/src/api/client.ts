@@ -451,10 +451,21 @@ export function getAwardSapTransmissionsV1(
 
 export function getAwardAttachmentsV1(
   awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
   signal?: AbortSignal,
-): Promise<import("../types/api").AwardAttachmentV1[]> {
+): Promise<import("../types/api").AwardAttachmentPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
   return request(
-    `/api/v1/awards/${encodeURIComponent(awardId)}/attachments`,
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/attachments?${searchParameters.toString()}`,
     signal,
   );
 }

@@ -1099,7 +1099,11 @@ public class AwardArchiveRepository {
      * client can decide whether to show a download control without ever
      * seeing s3Bucket/s3Key themselves.
      */
-    public List<AwardAttachmentResponse> findAttachments(long awardId) {
+    public List<AwardAttachmentResponse> findAttachments(
+            long awardId,
+            int limit,
+            int offset
+    ) {
         return jdbc.sql("""
                 SELECT
                     aa.award_attachment_id,
@@ -1125,10 +1129,26 @@ public class AwardArchiveRepository {
                 ORDER BY
                     aa.oracle_update_timestamp DESC NULLS LAST,
                     aa.award_attachment_id DESC
+                LIMIT :limit OFFSET :offset
                 """)
                 .param("awardId", awardId)
+                .param("limit", limit)
+                .param("offset", offset)
                 .query(AwardAttachmentResponse.class)
                 .list();
+    }
+
+    public long countAttachments(long awardId) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_attachment
+                WHERE award_id = :awardId
+                """)
+                .param("awardId", awardId)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
     }
 
     public Optional<Long> findAttachmentAwardId(long attachmentId) {

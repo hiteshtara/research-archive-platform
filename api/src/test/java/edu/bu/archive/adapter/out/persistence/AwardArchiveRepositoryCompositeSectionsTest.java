@@ -174,13 +174,40 @@ class AwardArchiveRepositoryCompositeSectionsTest {
                 .thenReturn(query);
         when(query.list()).thenReturn(List.of());
 
-        new AwardArchiveRepository(jdbc).findAttachments(3L);
+        new AwardArchiveRepository(jdbc).findAttachments(3L, 25, 0);
 
         assertThat(firstSql(jdbc))
                 .contains("FROM archive.award_attachment aa")
                 .contains("LEFT JOIN archive.attachment_object ao")
                 .contains("ao.upload_status = 'UPLOADED'")
-                .contains("AS downloadable");
+                .contains("AS downloadable")
+                .contains("LIMIT :limit OFFSET :offset");
+        verify(statement).param("awardId", 3L);
+        verify(statement).param("limit", 25);
+        verify(statement).param("offset", 0);
+    }
+
+    @Test
+    void countAttachmentsTreatsANullCountAsZero() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(null);
+
+        long total = new AwardArchiveRepository(jdbc).countAttachments(3L);
+
+        assertThat(total).isZero();
+        assertThat(firstSql(jdbc))
+                .contains("SELECT COUNT(*)")
+                .contains("FROM archive.award_attachment")
+                .contains("WHERE award_id = :awardId");
     }
 
     private String firstSql(JdbcClient jdbc) {

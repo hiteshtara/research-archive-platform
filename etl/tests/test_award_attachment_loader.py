@@ -2365,6 +2365,32 @@ class ListAwardsWithAttachmentsTest(unittest.TestCase):
         engine.connect.return_value.__enter__.return_value = connection
         return engine
 
+    def test_left_joins_award_version_instead_of_requiring_a_match(
+        self,
+    ) -> None:
+        # Regression test: award_attachment.award_id has no enforced FK
+        # to award_version (see V035). An earlier version of this query
+        # used a plain JOIN, which silently under-counted (or entirely
+        # dropped) any award_id present in award_attachment with no
+        # matching award_version row - exactly the "join behavior"
+        # failure mode this diagnostic exists to rule out, not
+        # reproduce. Confirmed against real data: award_id 1833767 has
+        # 34 attachment rows in Oracle; the plain-JOIN version of this
+        # query under-reported it as 24 in a live one-off ECS run.
+        engine = self._fake_engine([])
+        connection = engine.connect.return_value.__enter__.return_value
+
+        attachment_loader._run_list_awards_with_attachments(engine, limit=25)
+
+        sql_text = str(connection.execute.call_args.args[0])
+        self.assertIn("LEFT JOIN archive.award_version av", sql_text)
+        self.assertNotRegex(sql_text, r"(?<!LEFT )JOIN archive\.award_version")
+        # Grouping/ordering must key off award_attachment's own columns
+        # (always present) rather than the joined table's, so a row
+        # with no matching award_version still gets counted correctly.
+        self.assertIn("aa.award_number", sql_text)
+        self.assertIn("GROUP BY aa.award_number, aa.award_id, av.title", sql_text)
+
     def test_returns_rows_sorted_and_shaped_as_documented(self) -> None:
         rows = [
             FakeRow(

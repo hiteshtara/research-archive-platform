@@ -885,9 +885,39 @@ public class AwardArchiveService {
         );
     }
 
-    public List<AwardAttachmentResponse> findAttachments(long awardId) {
+    public PageResponse<AwardAttachmentResponse> findAttachments(
+            long awardId,
+            int page,
+            int size
+    ) {
         requireAwardNumberForId(awardId);
-        return repository.findAttachments(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countAttachments(awardId);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
+
+        int offset = safePage * safeSize;
+
+        List<AwardAttachmentResponse> content =
+                repository.findAttachments(awardId, safeSize, offset);
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
     }
 
     public AwardAttachmentDownload downloadAttachment(

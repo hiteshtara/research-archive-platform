@@ -312,16 +312,31 @@ public class AwardV1Controller {
             description = "Keyed by the surrogate award_id. Never "
                     + "exposes the underlying S3 bucket/key - "
                     + "downloadable indicates whether the download "
-                    + "endpoint below will succeed."
+                    + "endpoint below will succeed. Paginated like "
+                    + "every other list endpoint in this domain - "
+                    + "totalElements is the authoritative count; a "
+                    + "client must never treat this page's content "
+                    + "length as the total."
     )
-    @ApiResponse(responseCode = "200", description = "The Award's attachment metadata.")
+    @ApiResponse(responseCode = "200", description = "A page of the Award's attachment metadata.")
     @ApiResponse(responseCode = "404", description = "No such award_id.")
     @GetMapping("/{awardId}/attachments")
-    public ResponseEntity<List<AwardAttachmentResponse>> attachments(
+    public ResponseEntity<PageResponse<AwardAttachmentResponse>> attachments(
             @PathVariable
-            long awardId
+            long awardId,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "25")
+            @Min(1)
+            @Max(100)
+            int size
     ) {
-        return ResponseEntity.ok(service.findAttachments(awardId));
+        return ResponseEntity.ok(service.findAttachments(awardId, page, size));
     }
 
     @Operation(

@@ -332,25 +332,29 @@ class AwardV1ControllerTest {
     }
 
     @Test
-    void attachmentsIsRoutedUnderTheV1Prefix() throws Exception {
+    void attachmentsIsPaginatedLikeVersions() throws Exception {
         AwardAttachmentResponse attachment = new AwardAttachmentResponse(
                 500L, "100004-00003", 1, "budget.pdf", "application/pdf",
                 "Budget justification", "BUD", "COMPLETE", 1024L,
                 "UPLOADED", true, LocalDateTime.of(2021, 1, 1, 0, 0)
         );
-        when(service.findAttachments(3L)).thenReturn(List.of(attachment));
+        PageResponse<AwardAttachmentResponse> page = new PageResponse<>(
+                List.of(attachment), 0, 25, 1L, 1, true, true
+        );
+        when(service.findAttachments(3L, 0, 25)).thenReturn(page);
 
         mockMvc.perform(get("/api/v1/awards/3/attachments"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].fileName").value("budget.pdf"))
-                .andExpect(jsonPath("$[0].downloadable").value(true));
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].fileName").value("budget.pdf"))
+                .andExpect(jsonPath("$.content[0].downloadable").value(true));
 
-        verify(service).findAttachments(3L);
+        verify(service).findAttachments(3L, 0, 25);
     }
 
     @Test
     void attachmentsPropagatesNotFoundAsAnHttp404() throws Exception {
-        when(service.findAttachments(999L))
+        when(service.findAttachments(999L, 0, 25))
                 .thenThrow(new NoSuchElementException("Award not found: 999"));
 
         mockMvc.perform(get("/api/v1/awards/999/attachments"))

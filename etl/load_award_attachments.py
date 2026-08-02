@@ -1287,17 +1287,30 @@ def _run_list_awards_with_attachments(
     of every Award *version* (award_id) that has at least one
     archive.award_attachment row, newest-highest-count first - a quick
     way to find a real award_id to open in the UI's Attachments tab.
-    Never writes anything, never touches Oracle or S3."""
+    Never writes anything, never touches Oracle or S3.
+
+    LEFT JOINs archive.award_version rather than requiring a match:
+    award_attachment.award_id is NOT NULL but has no enforced FK to
+    award_version (see V035's migration), so an award_id present in
+    award_attachment with no matching award_version row is possible.
+    An INNER JOIN would silently under-count (or drop entirely) any
+    award_id like that - exactly the "join behavior" failure mode this
+    tool exists to rule out, not reproduce. award_number is read from
+    award_attachment itself (award_attachment.award_number, always
+    present) rather than the joined award_version row, so grouping
+    never depends on the join succeeding; title falls back to NULL
+    (rendered as "(untitled)") when there is no matching award_version
+    row."""
     query = """
         SELECT
-            av.award_number,
-            av.award_id,
+            aa.award_number,
+            aa.award_id,
             av.title,
             COUNT(aa.award_attachment_id) AS attachment_count
         FROM archive.award_attachment aa
-        JOIN archive.award_version av ON av.award_id = aa.award_id
-        GROUP BY av.award_number, av.award_id, av.title
-        ORDER BY attachment_count DESC, av.award_number
+        LEFT JOIN archive.award_version av ON av.award_id = aa.award_id
+        GROUP BY aa.award_number, aa.award_id, av.title
+        ORDER BY attachment_count DESC, aa.award_number
     """
     if limit is not None:
         query += " LIMIT :limit"
