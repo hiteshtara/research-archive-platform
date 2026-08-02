@@ -10,13 +10,23 @@ Never connect AWS directly to Oracle.
 
 ## 2. Start AWS SSM Tunnel
 
-aws ssm start-session \
-  --region us-east-1 \
-  --target i-02be522658e0f9676 \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters '{"host":["research-archive-platform-dev-postgres.cs3i6a24sthk.us-east-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["15432"]}'
+export AWS_PROFILE=bu-nprd
+scripts/start-db-tunnel.sh
 
-Leave this terminal running.
+This resolves the RDS endpoint from Terraform/Secrets Manager and
+discovers an SSM-managed bastion host in the project's own VPC itself -
+it requires account 770203350335 and refuses to run against anything
+else. Use `--check-only` first to validate everything without opening a
+tunnel: `scripts/start-db-tunnel.sh --check-only`. See the script's own
+`--help` for details and env var overrides.
+
+As of this writing, this project's ECS service runs on Fargate (no EC2
+instances) and there is no dedicated bastion host yet - the script will
+say so clearly rather than connect to anything else. Do not substitute
+a personal EC2 instance ID or a personal RDS endpoint here; if you see
+either of those, the tunnel is not targeting BU's environment.
+
+Leave this terminal running once the tunnel is up.
 
 -------------------------------------------------------------------------------
 

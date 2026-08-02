@@ -325,13 +325,9 @@ finding; the real path is local + BU VPN + SSM tunnel, per
 1. Connect to the BU VPN; run `buaws` if AWS credentials need
    refreshing.
 2. Start the approved tunnel to dev RDS (leave running in its own
-   terminal — exact target per `docs/runbooks/LOCAL_SETUP.md`):
+   terminal — see `docs/runbooks/LOCAL_SETUP.md`):
    ```bash
-   aws ssm start-session \
-     --region us-east-1 \
-     --target i-02be522658e0f9676 \
-     --document-name AWS-StartPortForwardingSessionToRemoteHost \
-     --parameters '{"host":["research-archive-platform-dev-postgres.cs3i6a24sthk.us-east-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["15432"]}'
+   AWS_PROFILE=bu-nprd scripts/start-db-tunnel.sh
    ```
 3. In a second terminal, export Postgres and Oracle connection
    variables:

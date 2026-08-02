@@ -432,11 +432,7 @@ scales, with timing and an idempotent-rerun check at each scale.
 # --- one-time setup ---
 # 1. Connect to the BU VPN; run `buaws` if AWS credentials need refreshing.
 # 2. Start the approved tunnel to dev RDS (leave running in its own terminal):
-aws ssm start-session \
-  --region us-east-1 \
-  --target i-02be522658e0f9676 \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters '{"host":["research-archive-platform-dev-postgres.cs3i6a24sthk.us-east-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["15432"]}'
+AWS_PROFILE=bu-nprd scripts/start-db-tunnel.sh
 
 # 3. In a second terminal:
 export POSTGRES_HOST=localhost
