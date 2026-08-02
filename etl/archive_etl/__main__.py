@@ -247,6 +247,16 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 "help": "Forwarded to the underlying loader's --batch-id.",
             },
         ),
+        (
+            "--list-awards-with-attachments",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--list-awards-with-attachments."
+                ),
+            },
+        ),
     ],
 }
 
