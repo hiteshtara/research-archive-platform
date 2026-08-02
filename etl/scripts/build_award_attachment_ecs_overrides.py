@@ -4,7 +4,8 @@ Attachment loader task run.
 Translates CLI pass-through flags (--file-id, --load-file-id, --limit,
 --retry-failed, --dry-run, --upload, --migrate-only,
 --show-upload-status, --create-batch, --include-already-uploaded,
---load-batch, --show-batch, --batch-id) into the container command override
+--load-batch, --show-batch, --batch-id,
+--list-awards-with-attachments) into the container command override
 for the "loader" container in the research-archive-platform-dev-loader
 task family (see terraform/modules/ecs/main.tf - not modified here), and
 translates non-secret configuration (POSTGRES_SECRET_ID, ORACLE_SECRET_ID,
@@ -60,6 +61,7 @@ def build_container_command(
     batch_id: int | None = None,
     bucket: str | None = None,
     prefix: str | None = None,
+    list_awards_with_attachments: bool = False,
 ) -> list[str]:
     """--ecs is always included: this command is only ever used for the
     ECS loader task, never local development.
@@ -87,6 +89,8 @@ def build_container_command(
         command.extend(["--load-batch", str(load_batch)])
     if show_batch is not None:
         command.extend(["--show-batch", str(show_batch)])
+    if list_awards_with_attachments:
+        command.append("--list-awards-with-attachments")
     if upload:
         command.append("--upload")
     if dry_run:
@@ -164,6 +168,7 @@ def build_run_task_overrides(
     postgres_db: str | None = None,
     award_attachment_bucket_name: str | None = None,
     aws_region: str | None = None,
+    list_awards_with_attachments: bool = False,
 ) -> dict:
     container_override: dict[str, object] = {
         "name": CONTAINER_NAME,
@@ -183,6 +188,7 @@ def build_run_task_overrides(
             batch_id=batch_id,
             bucket=bucket,
             prefix=prefix,
+            list_awards_with_attachments=list_awards_with_attachments,
         ),
     }
 
@@ -216,6 +222,9 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--load-batch", type=int, default=None)
     parser.add_argument("--show-batch", type=int, default=None)
     parser.add_argument("--batch-id", type=int, default=None)
+    parser.add_argument(
+        "--list-awards-with-attachments", action="store_true"
+    )
     parser.add_argument("--bucket", type=str, default=None)
     parser.add_argument("--prefix", type=str, default=None)
     parser.add_argument("--postgres-secret-id", type=str, default=None)
@@ -244,6 +253,7 @@ def main() -> None:
         load_batch=args.load_batch,
         show_batch=args.show_batch,
         batch_id=args.batch_id,
+        list_awards_with_attachments=args.list_awards_with_attachments,
         bucket=args.bucket,
         prefix=args.prefix,
         postgres_secret_id=args.postgres_secret_id,

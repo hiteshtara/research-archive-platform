@@ -165,6 +165,25 @@ class BuildContainerCommandTest(unittest.TestCase):
 
         self.assertEqual(command, [*MODULE_CLI_PREFIX, "--show-batch", "42"])
 
+    def test_list_awards_with_attachments_produces_the_exact_required_command(
+        self,
+    ) -> None:
+        command = build_container_command(
+            list_awards_with_attachments=True, limit=25
+        )
+
+        self.assertEqual(
+            command,
+            [*MODULE_CLI_PREFIX, "--list-awards-with-attachments", "--limit", "25"],
+        )
+
+    def test_list_awards_with_attachments_omitted_when_not_requested(
+        self,
+    ) -> None:
+        command = build_container_command(limit=25)
+
+        self.assertNotIn("--list-awards-with-attachments", command)
+
     def test_load_batch_produces_the_exact_required_command(self) -> None:
         command = build_container_command(load_batch=42)
 
@@ -364,10 +383,17 @@ class ParseArgsTest(unittest.TestCase):
         self.assertIsNone(args.load_batch)
         self.assertIsNone(args.show_batch)
         self.assertIsNone(args.batch_id)
+        self.assertFalse(args.list_awards_with_attachments)
         self.assertIsNone(args.bucket)
         self.assertIsNone(args.prefix)
         self.assertIsNone(args.postgres_secret_id)
         self.assertIsNone(args.oracle_secret_id)
+
+    def test_parses_list_awards_with_attachments(self) -> None:
+        args = parse_args(["--list-awards-with-attachments", "--limit", "25"])
+
+        self.assertTrue(args.list_awards_with_attachments)
+        self.assertEqual(args.limit, 25)
 
     def test_parses_batch_flags(self) -> None:
         args = parse_args(

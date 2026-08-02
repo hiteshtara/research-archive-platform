@@ -173,6 +173,32 @@ lives only in Oracle), never writes to PostgreSQL, never touches S3.
 `--show-upload-status` is rejected at the argument-parsing level if
 `--ecs` isn't also given, or if `--file-id` isn't given.
 
+### Finding Awards with attachments: `--list-awards-with-attachments`
+
+Same motivation as `--show-upload-status` above — no bastion host exists
+for the private RDS instance, so this is how you find a real `award_id`
+worth opening in the UI's Attachments tab without one. Developer aid,
+not a production feature:
+
+```bash
+uv run python load_award_attachments.py --ecs --list-awards-with-attachments --limit 25
+```
+
+or, as a one-off ECS task using the existing loader task definition:
+
+```bash
+POSTGRES_SECRET_ID=arn:...:postgres \
+  scripts/run-award-attachment-loader.sh --list-awards-with-attachments --limit 25
+```
+
+Resolves AWS identity and the PostgreSQL secret only (skipping the
+Oracle secret entirely, exactly like `--show-upload-status`/
+`--show-batch`), verifies PostgreSQL connectivity, prints every Award
+version (`award_number`, `award_id`, `title`) with at least one
+`archive.award_attachment` row and its attachment count, sorted
+highest-count first, then **exits successfully (0)**. Never reads a
+BLOB, never writes to PostgreSQL, never touches S3.
+
 ### Bounded single-file metadata load: `--load-file-id`
 
 **The bug this fixes**: Oracle can contain `FILE_ID=1` while

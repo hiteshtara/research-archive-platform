@@ -108,6 +108,15 @@ set -euo pipefail
 #   every other --ecs mode except --migrate-only/--show-upload-status,
 #   this does NOT require ORACLE_SECRET_ID - it's PostgreSQL-only.
 #
+# --list-awards-with-attachments: developer aid, not a production
+#   feature - read-only report of every Award version (award_number,
+#   award_id, title) that has at least one archive.award_attachment
+#   row, with its attachment count, sorted highest-count first. Same as
+#   --show-batch, this is PostgreSQL-only and does NOT require
+#   ORACLE_SECRET_ID. Runs on the existing loader task definition, so no
+#   dedicated bastion host is needed just to find a real award_id worth
+#   opening in the UI's Attachments tab.
+#
 # --batch-id BATCH_ID (only valid with --upload): restrict the upload run
 #   to exactly this batch's membership, instead of every PENDING/
 #   UPLOADING (+FAILED with --retry-failed) row. Mutually exclusive with
@@ -148,6 +157,11 @@ set -euo pipefail
 #   scripts/run-award-attachment-loader.sh --show-batch 1
 #   scripts/run-award-attachment-loader.sh --upload --batch-id 1 --bucket my-bucket
 #   scripts/run-award-attachment-loader.sh --show-batch 1
+#
+#   # Find a real award_id to open in the UI's Attachments tab, without a
+#   # bastion host (PostgreSQL-only, no ORACLE_SECRET_ID needed):
+#   POSTGRES_SECRET_ID=arn:...:postgres \
+#     scripts/run-award-attachment-loader.sh --list-awards-with-attachments --limit 25
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -179,6 +193,7 @@ INCLUDE_ALREADY_UPLOADED=false
 LOAD_BATCH=""
 SHOW_BATCH=""
 BATCH_ID=""
+LIST_AWARDS_WITH_ATTACHMENTS=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -198,6 +213,7 @@ while [[ $# -gt 0 ]]; do
     --load-batch) LOAD_BATCH="$2"; shift 2 ;;
     --show-batch) SHOW_BATCH="$2"; shift 2 ;;
     --batch-id) BATCH_ID="$2"; shift 2 ;;
+    --list-awards-with-attachments) LIST_AWARDS_WITH_ATTACHMENTS=true; shift ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -265,11 +281,12 @@ if [[ -n "$FILE_ID" && -n "$BATCH_ID" ]]; then
   exit 1
 fi
 
-# --show-batch is PostgreSQL-only (like --migrate-only/--show-upload-status),
-# so it's exempt from the Oracle secret requirement below; --create-batch
-# and --load-batch both read Oracle and so are NOT exempt.
-if [[ "$MIGRATE_ONLY" == false && "$SHOW_UPLOAD_STATUS" == false && -z "$SHOW_BATCH" ]]; then
-  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only/--show-upload-status/--show-batch)}"
+# --show-batch and --list-awards-with-attachments are both PostgreSQL-only
+# (like --migrate-only/--show-upload-status), so they're exempt from the
+# Oracle secret requirement below; --create-batch and --load-batch both
+# read Oracle and so are NOT exempt.
+if [[ "$MIGRATE_ONLY" == false && "$SHOW_UPLOAD_STATUS" == false && -z "$SHOW_BATCH" && "$LIST_AWARDS_WITH_ATTACHMENTS" == false ]]; then
+  : "${ORACLE_SECRET_ID:?ORACLE_SECRET_ID is not set - Secrets Manager ARN/name for the Oracle secret (required for every --ecs invocation except --migrate-only/--show-upload-status/--show-batch/--list-awards-with-attachments)}"
 fi
 
 if [[ -z "$IMAGE_URI_OVERRIDE" ]]; then
@@ -380,6 +397,7 @@ OVERRIDE_ARGS=()
 [[ "$INCLUDE_ALREADY_UPLOADED" == true ]] && OVERRIDE_ARGS+=(--include-already-uploaded)
 [[ -n "$LOAD_BATCH" ]] && OVERRIDE_ARGS+=(--load-batch "$LOAD_BATCH")
 [[ -n "$SHOW_BATCH" ]] && OVERRIDE_ARGS+=(--show-batch "$SHOW_BATCH")
+[[ "$LIST_AWARDS_WITH_ATTACHMENTS" == true ]] && OVERRIDE_ARGS+=(--list-awards-with-attachments)
 [[ -n "$BATCH_ID" ]] && OVERRIDE_ARGS+=(--batch-id "$BATCH_ID")
 [[ -n "$BUCKET" ]] && OVERRIDE_ARGS+=(--bucket "$BUCKET")
 [[ -n "$PREFIX" ]] && OVERRIDE_ARGS+=(--prefix "$PREFIX")

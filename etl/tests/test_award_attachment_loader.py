@@ -2456,13 +2456,153 @@ class ListAwardsWithAttachmentsTest(unittest.TestCase):
         run_report.assert_called_once_with(create_engine.return_value, 25)
         oracle_ds.assert_not_called()
 
-    def test_parser_rejects_list_awards_with_attachments_combined_with_ecs(
+    def test_parser_accepts_list_awards_with_attachments_combined_with_ecs(
         self,
     ) -> None:
-        with self.assertRaises(SystemExit):
-            attachment_loader.parse_args(
-                ["--list-awards-with-attachments", "--ecs"]
+        # Runnable as a one-off ECS task using the existing loader task
+        # definition (PostgreSQL-only, same as --show-batch) instead of
+        # requiring a dedicated bastion host - see
+        # scripts/run-award-attachment-loader.sh.
+        parsed = attachment_loader.parse_args(
+            ["--list-awards-with-attachments", "--ecs"]
+        )
+        self.assertTrue(parsed.list_awards_with_attachments)
+        self.assertTrue(parsed.ecs)
+
+    def _run_ecs_setup(self, **arguments_kwargs) -> dict:
+        calls: list[str] = []
+
+        def _track(name, retval=None):
+            def _fn(*args, **kwargs):
+                calls.append(name)
+                return retval
+
+            return _fn
+
+        base_kwargs = {
+            "migrate_only": False,
+            "show_upload_status": False,
+            "show_batch": None,
+            "list_awards_with_attachments": False,
+            "file_id": None,
+            "bucket": None,
+        }
+        base_kwargs.update(arguments_kwargs)
+        arguments = MagicMock(**base_kwargs)
+
+        with (
+            patch.object(
+                attachment_loader,
+                "configure_structured_logging",
+                side_effect=_track("configure_structured_logging"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_aws_identity",
+                side_effect=_track(
+                    "validate_aws_identity", {"account": "770203350335"}
+                ),
+            ),
+            patch.object(attachment_loader, "boto3") as boto3_module,
+            patch.object(
+                attachment_loader,
+                "configure_ecs_environment",
+            ) as configure_env,
+            patch.object(
+                attachment_loader,
+                "create_postgres_engine",
+                side_effect=_track("create_postgres_engine", MagicMock()),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_postgres_reachable",
+                side_effect=_track("validate_postgres_reachable"),
+            ),
+            patch.object(
+                attachment_loader,
+                "validate_oracle_reachable",
+                side_effect=_track("validate_oracle_reachable"),
+            ) as validate_oracle,
+            patch.object(
+                attachment_loader, "create_s3_client"
+            ) as create_s3,
+            patch.object(
+                attachment_loader, "validate_bucket_exists"
+            ) as validate_bucket,
+            patch.object(
+                attachment_loader,
+                "_run_list_awards_with_attachments",
+                side_effect=_track("_run_list_awards_with_attachments"),
+            ) as run_report,
+        ):
+            boto3_module.client.side_effect = _track(
+                "boto3.client(secretsmanager)", MagicMock()
             )
+            result = attachment_loader._run_ecs_setup(arguments, run_id="test-run")
+
+        return {
+            "result": result,
+            "calls": calls,
+            "configure_env": configure_env,
+            "validate_oracle": validate_oracle,
+            "create_s3": create_s3,
+            "validate_bucket": validate_bucket,
+            "run_report": run_report,
+        }
+
+    def test_ecs_list_awards_with_attachments_reaches_the_report(self) -> None:
+        result = self._run_ecs_setup(
+            list_awards_with_attachments=True, limit=25
+        )
+
+        self.assertIn("_run_list_awards_with_attachments", result["calls"])
+        self.assertTrue(result["result"])
+        result["run_report"].assert_called_once()
+        self.assertEqual(result["run_report"].call_args.args[1], 25)
+
+    def test_ecs_list_awards_with_attachments_never_contacts_oracle(
+        self,
+    ) -> None:
+        result = self._run_ecs_setup(
+            list_awards_with_attachments=True, limit=25
+        )
+
+        self.assertNotIn("validate_oracle_reachable", result["calls"])
+        result["validate_oracle"].assert_not_called()
+        result["configure_env"].assert_called_once()
+        self.assertFalse(result["configure_env"].call_args.kwargs["include_oracle"])
+
+    def test_ecs_list_awards_with_attachments_never_contacts_s3(self) -> None:
+        result = self._run_ecs_setup(
+            list_awards_with_attachments=True, limit=25
+        )
+
+        result["create_s3"].assert_not_called()
+        result["validate_bucket"].assert_not_called()
+
+    def test_main_routes_ecs_list_awards_with_attachments_through_ecs_setup(
+        self,
+    ) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "_run_ecs_setup", return_value=True
+            ) as run_ecs_setup,
+            patch.object(
+                attachment_loader, "create_postgres_engine"
+            ) as create_engine,
+        ):
+            parse_args.return_value = MagicMock(
+                list_awards_with_attachments=True,
+                ecs=True,
+                limit=25,
+            )
+            attachment_loader.main()
+
+        run_ecs_setup.assert_called_once()
+        # main()'s own local (non-ecs) shortcut must not also fire -
+        # _run_ecs_setup owns the PostgreSQL connection for --ecs runs.
+        create_engine.assert_not_called()
 
 
 class ContentTypeOverflowRegressionTest(unittest.TestCase):

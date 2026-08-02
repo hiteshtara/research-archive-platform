@@ -1999,10 +1999,15 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "has at least one archive.award_attachment row, with its "
             "attachment count, sorted highest-count first - use this to "
             "find a real award_id worth opening in the UI's Attachments "
-            "tab. Connects to PostgreSQL only (via the same POSTGRES_* "
-            "environment as the rest of this loader, e.g. a local "
-            "scripts/start-db-tunnel.sh tunnel) - never touches Oracle "
-            "or S3, and is incompatible with --ecs."
+            "tab. PostgreSQL-only, never touches Oracle or S3. Runs "
+            "either locally (via the same POSTGRES_* environment as the "
+            "rest of this loader, e.g. a scripts/start-db-tunnel.sh "
+            "tunnel) or as a one-off --ecs task - like --show-batch, it "
+            "is exempt from --ecs's usual ORACLE_SECRET_ID requirement "
+            "since it never reads Oracle. See "
+            "scripts/run-award-attachment-loader.sh "
+            "--list-awards-with-attachments for the one-off-ECS-task "
+            "form (no bastion host required)."
         ),
     )
     parsed = parser.parse_args(arguments)
@@ -2012,11 +2017,6 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         parser.error("--show-upload-status is only valid together with --ecs")
     if parsed.show_upload_status and parsed.file_id is None:
         parser.error("--show-upload-status requires --file-id")
-    if parsed.list_awards_with_attachments and parsed.ecs:
-        parser.error(
-            "--list-awards-with-attachments cannot be combined with --ecs "
-            "- it is a local, developer-only diagnostic"
-        )
     if parsed.list_awards_with_attachments and parsed.limit is not None and parsed.limit <= 0:
         parser.error("--limit must be a positive integer")
 
@@ -2263,8 +2263,8 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     3. one Secrets Manager client for the whole startup
     4. load the PostgreSQL secret (always required)
     5. load the Oracle secret (skipped entirely for --migrate-only,
-       --show-upload-status, and --show-batch - none of them touch
-       Oracle)
+       --show-upload-status, --show-batch, and
+       --list-awards-with-attachments - none of them touch Oracle)
     6. verify PostgreSQL connectivity
     7. if --migrate-only: apply migrations, validate the resulting
        schema, and return True so main() exits without ever reaching
@@ -2274,6 +2274,12 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
         never reaches Oracle, S3, or upload code either
     7b. if --show-batch: run the read-only batch status report and
         return True, same as --migrate-only - PostgreSQL only
+    7c. if --list-awards-with-attachments: run the read-only Awards-
+        with-attachments report and return True, same as --migrate-only
+        - PostgreSQL only. This is what lets the report run as a one-off
+        ECS task using the existing loader task definition instead of
+        requiring a dedicated bastion host (see
+        scripts/run-award-attachment-loader.sh).
     8. verify Oracle connectivity
     9. verify S3 bucket access (skipped, not failed, if no bucket is
        configured at all)
@@ -2283,8 +2289,9 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     Aborts immediately (lets the raised exception propagate) if any step
     fails - no upload or BLOB read may begin before every required check
     for the requested mode passes. Returns True when --migrate-only,
-    --show-upload-status, or --show-batch completed successfully (the
-    caller must not proceed further), False otherwise."""
+    --show-upload-status, --show-batch, or
+    --list-awards-with-attachments completed successfully (the caller
+    must not proceed further), False otherwise."""
     configure_structured_logging(run_id)
     logger.bind(stage="startup").info(
         "Starting in --ecs mode: run_id={}", run_id
@@ -2304,6 +2311,7 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
             arguments.migrate_only
             or arguments.show_upload_status
             or arguments.show_batch is not None
+            or arguments.list_awards_with_attachments
         ),
     )
 
@@ -2335,6 +2343,13 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
         logger.bind(stage="startup", status="show_batch_complete").info(
             "Batch status report complete"
         )
+        return True
+
+    if arguments.list_awards_with_attachments:
+        _run_list_awards_with_attachments(engine, arguments.limit)
+        logger.bind(
+            stage="startup", status="list_awards_with_attachments_complete"
+        ).info("Awards-with-attachments report complete")
         return True
 
     validate_oracle_reachable(_connect_oracle)
@@ -2373,7 +2388,7 @@ def main() -> None:
     arguments = parse_args()
     run_id = str(uuid.uuid4())
 
-    if arguments.list_awards_with_attachments:
+    if arguments.list_awards_with_attachments and not arguments.ecs:
         engine = create_postgres_engine()
         _run_list_awards_with_attachments(engine, arguments.limit)
         return
