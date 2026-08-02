@@ -1,0 +1,39 @@
+-- Widens archive.attachment_object.content_type from VARCHAR(200) to TEXT.
+--
+-- Root cause (see the batch-10 attachment-loader failure investigation):
+-- KCOEUS.ATTACHMENT_FILE.CONTENT_TYPE is extracted with a straight,
+-- untransformed passthrough - export_award_attachment_files.sql selects
+-- `af.CONTENT_TYPE AS content_type` with no concatenation, and
+-- load_award_attachments.py's upsert_attachment_object() binds
+-- file_row["content_type"] as a parameterized value with no client-side
+-- length limiting or JSON-encoding. Both the extraction SQL and the
+-- Python mapping are confirmed correct, straight 1:1 column mappings -
+-- neither is the bug.
+--
+-- KCOEUS.ATTACHMENT_FILE.CONTENT_TYPE's true Oracle-side declared width
+-- is NOT confirmed anywhere in this repo (no DESCRIBE output or OJB
+-- mapping on file for this column, unlike some other Award tables) - the
+-- same "real Oracle width unconfirmed" situation already documented for
+-- V052's award_transmission.sent_data/returned_data, which were made TEXT
+-- for exactly this reason rather than guessing a specific VARCHAR size.
+-- At least one real row (the batch-10 failure) has a CONTENT_TYPE value
+-- far longer than a normal MIME type (e.g. "application/pdf") and
+-- resembling escaped JSON/string content rather than a MIME type - this
+-- is upstream Kuali/Oracle data-entry irregularity, not something this
+-- archive should reject or silently truncate. VARCHAR(200) was sized
+-- assuming CONTENT_TYPE always holds a short MIME-type string; that
+-- assumption doesn't hold for every real row, so the archive's own
+-- column - not the source data - was too small.
+--
+-- TEXT is chosen over a larger VARCHAR(N) for the same reason V052 chose
+-- TEXT: with no confirmed upper bound from Oracle, picking any specific N
+-- just relocates the same silent-truncation risk to a different, still
+-- arbitrary threshold. Postgres does not pad or reserve extra storage
+-- for TEXT vs VARCHAR(N), so this has no storage-size cost.
+--
+-- Forward-only, per this schema's convention: existing rows (all
+-- currently <= 200 chars, since none could have been inserted otherwise)
+-- are preserved as-is; only the column's declared width changes.
+
+ALTER TABLE archive.attachment_object
+    ALTER COLUMN content_type TYPE TEXT;

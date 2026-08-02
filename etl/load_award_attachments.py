@@ -1280,6 +1280,70 @@ def _run_load_batch(
     return report
 
 
+def _run_list_awards_with_attachments(
+    engine: Engine, limit: int | None
+) -> list[dict[str, Any]]:
+    """--list-awards-with-attachments: developer-only, read-only report
+    of every Award *version* (award_id) that has at least one
+    archive.award_attachment row, newest-highest-count first - a quick
+    way to find a real award_id to open in the UI's Attachments tab.
+    Never writes anything, never touches Oracle or S3."""
+    query = """
+        SELECT
+            av.award_number,
+            av.award_id,
+            av.title,
+            COUNT(aa.award_attachment_id) AS attachment_count
+        FROM archive.award_attachment aa
+        JOIN archive.award_version av ON av.award_id = aa.award_id
+        GROUP BY av.award_number, av.award_id, av.title
+        ORDER BY attachment_count DESC, av.award_number
+    """
+    if limit is not None:
+        query += " LIMIT :limit"
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(query), {"limit": limit} if limit is not None else {}
+        ).all()
+
+    results = [
+        {
+            "award_number": row.award_number,
+            "award_id": row.award_id,
+            "title": row.title,
+            "attachment_count": row.attachment_count,
+        }
+        for row in rows
+    ]
+
+    if not results:
+        logger.bind(stage="list_awards_with_attachments").info(
+            "No Award attachments are loaded yet - "
+            "archive.award_attachment is empty."
+        )
+        return results
+
+    header = f"{'AWARD NUMBER':<20} {'AWARD ID':>10} {'ATTACHMENTS':>11}  TITLE"
+    print(header)
+    print("-" * len(header))
+    for result in results:
+        title = result["title"] or "(untitled)"
+        if len(title) > 60:
+            title = title[:57] + "..."
+        print(
+            f"{result['award_number']:<20} {result['award_id']:>10} "
+            f"{result['attachment_count']:>11}  {title}"
+        )
+
+    logger.bind(
+        stage="list_awards_with_attachments", award_count=len(results)
+    ).info(
+        "Listed {} Award version(s) with attachments", len(results)
+    )
+    return results
+
+
 def _run_show_batch(engine: Engine, batch_id: int) -> dict[str, Any]:
     """--show-batch: read-only status report for one batch. Never writes
     anything. Uses the generic batch_framework.show_batch for the
@@ -1926,6 +1990,21 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
             "FAILED row. Only valid together with --upload."
         ),
     )
+    parser.add_argument(
+        "--list-awards-with-attachments",
+        action="store_true",
+        help=(
+            "Developer aid, not a production feature: read-only report "
+            "of every Award version (award_number, award_id, title) that "
+            "has at least one archive.award_attachment row, with its "
+            "attachment count, sorted highest-count first - use this to "
+            "find a real award_id worth opening in the UI's Attachments "
+            "tab. Connects to PostgreSQL only (via the same POSTGRES_* "
+            "environment as the rest of this loader, e.g. a local "
+            "scripts/start-db-tunnel.sh tunnel) - never touches Oracle "
+            "or S3, and is incompatible with --ecs."
+        ),
+    )
     parsed = parser.parse_args(arguments)
     if parsed.migrate_only and not parsed.ecs:
         parser.error("--migrate-only is only valid together with --ecs")
@@ -1933,6 +2012,13 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
         parser.error("--show-upload-status is only valid together with --ecs")
     if parsed.show_upload_status and parsed.file_id is None:
         parser.error("--show-upload-status requires --file-id")
+    if parsed.list_awards_with_attachments and parsed.ecs:
+        parser.error(
+            "--list-awards-with-attachments cannot be combined with --ecs "
+            "- it is a local, developer-only diagnostic"
+        )
+    if parsed.list_awards_with_attachments and parsed.limit is not None and parsed.limit <= 0:
+        parser.error("--limit must be a positive integer")
 
     batch_verbs = [
         ("--create-batch", parsed.create_batch),
@@ -2286,6 +2372,11 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
 def main() -> None:
     arguments = parse_args()
     run_id = str(uuid.uuid4())
+
+    if arguments.list_awards_with_attachments:
+        engine = create_postgres_engine()
+        _run_list_awards_with_attachments(engine, arguments.limit)
+        return
 
     if arguments.ecs:
         ecs_setup_short_circuited = _run_ecs_setup(arguments, run_id)

@@ -346,6 +346,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 ecs=False,
             )
             attachment_loader.main()
@@ -377,6 +378,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 ecs=False,
             )
             attachment_loader.main()
@@ -411,6 +413,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 ecs=False,
             )
             attachment_loader.main()
@@ -456,6 +459,7 @@ class DryRunIsReadOnlyTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 ecs=False,
             )
             create_engine.return_value = MagicMock()
@@ -1365,6 +1369,7 @@ class UploadGatingTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 ecs=False,
             )
             attachment_loader.main()
@@ -1382,6 +1387,7 @@ class UploadGatingTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 ecs=False,
             )
             attachment_loader.main()
@@ -1520,6 +1526,7 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 limit=None,
                 dry_run=True,
                 ecs=False,
@@ -1547,6 +1554,7 @@ class FileIdModeIsReadOnlyAndTakesPriorityTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 limit=10,
                 dry_run=True,
                 ecs=False,
@@ -1677,6 +1685,7 @@ class RunEcsSetupTest(unittest.TestCase):
             migrate_only=migrate_only,
             show_upload_status=show_upload_status,
             show_batch=None,
+                list_awards_with_attachments=False,
             bucket=None,
             file_id=9001,
         )
@@ -1884,6 +1893,7 @@ class RunEcsSetupTest(unittest.TestCase):
             migrate_only=False,
             show_upload_status=False,
             show_batch=None,
+                list_awards_with_attachments=False,
             bucket="my-bucket",
         )
         calls: list[str] = []
@@ -1950,6 +1960,7 @@ class RunEcsSetupTest(unittest.TestCase):
             migrate_only=False,
             show_upload_status=False,
             show_batch=None,
+                list_awards_with_attachments=False,
             bucket=None,
         )
 
@@ -1994,6 +2005,7 @@ class RunEcsSetupTest(unittest.TestCase):
             migrate_only=False,
             show_upload_status=False,
             show_batch=None,
+                list_awards_with_attachments=False,
             bucket=None,
         )
 
@@ -2112,6 +2124,7 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 upload=True,
                 file_id=9001,
                 limit=None,
+                list_awards_with_attachments=False,
             )
             attachment_loader.main()
 
@@ -2161,6 +2174,7 @@ class MigrateOnlyMainIntegrationTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
                 limit=None,
                 dry_run=False,
             )
@@ -2193,6 +2207,7 @@ class ShowUploadStatusMainIntegrationTest(unittest.TestCase):
                 upload=True,
                 file_id=1,
                 limit=None,
+                list_awards_with_attachments=False,
             )
             attachment_loader.main()
 
@@ -2228,6 +2243,7 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
             )
             attachment_loader.main()
 
@@ -2260,6 +2276,7 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
             )
             attachment_loader.main()
 
@@ -2290,6 +2307,7 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
             )
             attachment_loader.main()
 
@@ -2323,11 +2341,236 @@ class LoadFileIdMainIntegrationTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                list_awards_with_attachments=False,
             )
             attachment_loader.main()
 
         apply_migrations.assert_not_called()
         run_load_file_id.assert_called_once()
+
+
+class FakeRow:
+    """A minimal stand-in for a SQLAlchemy Row - attribute access only,
+    matching how _run_list_awards_with_attachments reads its columns."""
+
+    def __init__(self, **fields) -> None:
+        self.__dict__.update(fields)
+
+
+class ListAwardsWithAttachmentsTest(unittest.TestCase):
+    def _fake_engine(self, rows: list[FakeRow]) -> MagicMock:
+        engine = MagicMock()
+        connection = MagicMock()
+        connection.execute.return_value.all.return_value = rows
+        engine.connect.return_value.__enter__.return_value = connection
+        return engine
+
+    def test_returns_rows_sorted_and_shaped_as_documented(self) -> None:
+        rows = [
+            FakeRow(
+                award_number="100004-00003",
+                award_id=3,
+                title="Cancer study",
+                attachment_count=7,
+            ),
+            FakeRow(
+                award_number="100004-00001",
+                award_id=1,
+                title=None,
+                attachment_count=2,
+            ),
+        ]
+        engine = self._fake_engine(rows)
+
+        result = attachment_loader._run_list_awards_with_attachments(
+            engine, limit=25
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "award_number": "100004-00003",
+                    "award_id": 3,
+                    "title": "Cancer study",
+                    "attachment_count": 7,
+                },
+                {
+                    "award_number": "100004-00001",
+                    "award_id": 1,
+                    "title": None,
+                    "attachment_count": 2,
+                },
+            ],
+        )
+
+    def test_binds_limit_only_when_given(self) -> None:
+        engine = self._fake_engine([])
+        connection = engine.connect.return_value.__enter__.return_value
+
+        attachment_loader._run_list_awards_with_attachments(engine, limit=25)
+
+        sql_text = str(connection.execute.call_args.args[0])
+        self.assertIn("LIMIT :limit", sql_text)
+        self.assertEqual(connection.execute.call_args.args[1], {"limit": 25})
+
+    def test_omits_limit_clause_when_no_limit_given(self) -> None:
+        engine = self._fake_engine([])
+        connection = engine.connect.return_value.__enter__.return_value
+
+        attachment_loader._run_list_awards_with_attachments(engine, limit=None)
+
+        sql_text = str(connection.execute.call_args.args[0])
+        self.assertNotIn("LIMIT", sql_text)
+
+    def test_returns_an_empty_list_without_error_when_nothing_is_loaded(
+        self,
+    ) -> None:
+        engine = self._fake_engine([])
+
+        result = attachment_loader._run_list_awards_with_attachments(
+            engine, limit=25
+        )
+
+        self.assertEqual(result, [])
+
+    def test_main_dispatches_to_the_report_and_returns_immediately(self) -> None:
+        with (
+            patch.object(attachment_loader, "parse_args") as parse_args,
+            patch.object(
+                attachment_loader, "create_postgres_engine"
+            ) as create_engine,
+            patch.object(
+                attachment_loader, "_run_list_awards_with_attachments"
+            ) as run_report,
+            patch.object(attachment_loader, "OracleDataSource") as oracle_ds,
+        ):
+            parse_args.return_value = MagicMock(
+                list_awards_with_attachments=True,
+                limit=25,
+                ecs=False,
+            )
+            attachment_loader.main()
+
+        create_engine.assert_called_once()
+        run_report.assert_called_once_with(create_engine.return_value, 25)
+        oracle_ds.assert_not_called()
+
+    def test_parser_rejects_list_awards_with_attachments_combined_with_ecs(
+        self,
+    ) -> None:
+        with self.assertRaises(SystemExit):
+            attachment_loader.parse_args(
+                ["--list-awards-with-attachments", "--ecs"]
+            )
+
+
+class ContentTypeOverflowRegressionTest(unittest.TestCase):
+    """Regression coverage for the batch-10 attachment-loader failure:
+    PostgreSQL rejected archive.attachment_object.content_type because a
+    real KCOEUS.ATTACHMENT_FILE.CONTENT_TYPE value exceeded VARCHAR(200)
+    and looked like escaped JSON/string content rather than a MIME type.
+    Root cause: the archive column was narrower than what Oracle's source
+    data actually contains - not the extraction SQL or the Python
+    mapping, both confirmed to be straight, untransformed passthroughs.
+    See database/migrations/V054__widen_attachment_object_content_type.sql.
+
+    This is a synthetic reproduction of the observed failure shape (long,
+    JSON-like, not a MIME type) - the real Oracle FILE_ID=2812 value was
+    not available in this environment (no Oracle/VPN connectivity here;
+    see this investigation's findings for how to pull it via --file-id
+    2812 on a VPN-connected machine). Swap in the real value here if it's
+    later obtained, without changing what the test asserts.
+    """
+
+    # Representative of "escaped JSON/string content" rather than a MIME
+    # type - deliberately > 200 characters, the exact failure mode
+    # reported for batch 10.
+    OVERSIZED_CONTENT_TYPE = (
+        '{"contentType":"application/octet-stream",'
+        '"originalRequest":"multipart/form-data; '
+        'boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW",'
+        '"errorDetail":"escaped \\"nested\\" string content that a real '
+        'MIME type value should never contain, well past two hundred '
+        'characters in length to reproduce the VARCHAR(200) overflow"}'
+    )
+
+    def setUp(self) -> None:
+        self.assertGreater(
+            len(self.OVERSIZED_CONTENT_TYPE),
+            200,
+            "fixture must actually exceed the old VARCHAR(200) bound",
+        )
+
+    def test_extraction_sql_maps_content_type_as_a_straight_passthrough(
+        self,
+    ) -> None:
+        sql = attachment_loader.FILES_ORACLE_SQL.read_text(encoding="utf-8")
+
+        self.assertIn("af.CONTENT_TYPE", sql)
+        self.assertIn("AS content_type", sql)
+        # Guard against a future regression where something gets
+        # concatenated onto CONTENT_TYPE instead of selecting it as-is.
+        content_type_line = next(
+            line for line in sql.splitlines() if "content_type" in line.lower()
+        )
+        self.assertIn("af.CONTENT_TYPE", content_type_line)
+        self.assertNotIn("||", content_type_line)
+
+    def test_migration_widens_content_type_to_text_not_a_larger_varchar(
+        self,
+    ) -> None:
+        migration_path = (
+            attachment_loader.PROJECT_ROOT
+            / "database"
+            / "migrations"
+            / "V054__widen_attachment_object_content_type.sql"
+        )
+        self.assertTrue(
+            migration_path.is_file(),
+            f"expected migration at {migration_path}",
+        )
+
+        migration_sql = migration_path.read_text(encoding="utf-8")
+        # Only the executable statement matters here - the file's own
+        # explanatory comments mention VARCHAR(200)/VARCHAR(N) by name,
+        # which would otherwise false-positive a naive whole-file check.
+        executable_lines = "\n".join(
+            line
+            for line in migration_sql.splitlines()
+            if line.strip() and not line.strip().startswith("--")
+        )
+        self.assertIn("ALTER COLUMN content_type TYPE TEXT", executable_lines)
+        # Never re-narrow to some other arbitrary VARCHAR(N) - the whole
+        # point is not guessing a new, still-arbitrary upper bound.
+        self.assertNotIn("VARCHAR", executable_lines)
+
+    def test_upsert_never_truncates_an_oversized_content_type(self) -> None:
+        connection = MagicMock()
+        connection.execute.return_value.mappings.return_value.one_or_none.return_value = {
+            "inserted": True
+        }
+        file_row = pd.Series(
+            {
+                "file_id": 2812,
+                "file_data_id": None,
+                "file_name": "attachment.bin",
+                "content_type": self.OVERSIZED_CONTENT_TYPE,
+                "blob_source": "INLINE",
+                "upload_status": "PENDING",
+                "upload_attempts": 0,
+            }
+        )
+
+        attachment_loader.upsert_attachment_object(connection, file_row, load_id=1)
+
+        bound_params = connection.execute.call_args.args[1]
+        self.assertEqual(
+            bound_params["content_type"], self.OVERSIZED_CONTENT_TYPE
+        )
+        self.assertEqual(
+            len(bound_params["content_type"]), len(self.OVERSIZED_CONTENT_TYPE)
+        )
 
 
 class OracleExtractionSqlFilesExistTest(unittest.TestCase):
