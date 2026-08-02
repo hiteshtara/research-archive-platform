@@ -1,13 +1,24 @@
-import { DownloadOutlined, InsertDriveFileOutlined } from "@mui/icons-material";
+import {
+  DownloadOutlined,
+  FolderZipOutlined,
+  ImageOutlined,
+  InsertDriveFileOutlined,
+  PictureAsPdfOutlined,
+  TableChartOutlined,
+  TextSnippetOutlined,
+} from "@mui/icons-material";
 import {
   Alert,
-  Button,
+  Box,
   Card,
   CardContent,
   Chip,
   CircularProgress,
+  IconButton,
+  Link,
   Skeleton,
   Stack,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
@@ -15,9 +26,24 @@ import { useState } from "react";
 
 import { downloadAwardAttachmentV1, getAwardAttachmentsV1 } from "../../api/client";
 import {
+  classifyAttachmentType,
+  downloadUnavailableReason,
+  formatAttachmentCountLabel,
   formatByteSize as formatSize,
   hasAnyAttachments,
 } from "../../features/award/awardSectionsPresentation.mjs";
+import type { AttachmentTypeCategory } from "../../features/award/awardSectionsPresentation.mjs";
+
+const TYPE_ICONS: Record<AttachmentTypeCategory, typeof InsertDriveFileOutlined> = {
+  pdf: PictureAsPdfOutlined,
+  word: TextSnippetOutlined,
+  excel: TableChartOutlined,
+  powerpoint: TextSnippetOutlined,
+  archive: FolderZipOutlined,
+  image: ImageOutlined,
+  text: TextSnippetOutlined,
+  file: InsertDriveFileOutlined,
+};
 
 // Attachments - lazy-loads metadata from GET
 // /api/v1/awards/{awardId}/attachments. Downloads stream through the
@@ -71,11 +97,51 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
 
   return (
     <Stack spacing={1.5}>
+      <Box>
+        <Chip
+          size="small"
+          color="primary"
+          variant="outlined"
+          label={formatAttachmentCountLabel(attachments.length)}
+        />
+      </Box>
+
       {downloadError && <Alert severity="error">{downloadError}</Alert>}
 
       {attachments.map((attachment) => {
         const fileName = attachment.fileName ?? "attachment";
         const isDownloading = downloadingId === attachment.awardAttachmentId;
+        const { category, label: typeLabel } = classifyAttachmentType(
+          attachment.contentType,
+          attachment.fileName,
+        );
+        const TypeIcon = TYPE_ICONS[category];
+        const canDownload =
+          attachment.downloadable && attachment.awardAttachmentId !== null;
+
+        function triggerDownload() {
+          if (attachment.awardAttachmentId !== null) {
+            handleDownload(attachment.awardAttachmentId, fileName);
+          }
+        }
+
+        const downloadButton = (
+          <span>
+            <IconButton
+              size="small"
+              color="primary"
+              disabled={!canDownload || isDownloading}
+              onClick={triggerDownload}
+              aria-label={canDownload ? `Download ${fileName}` : "Download unavailable"}
+            >
+              {isDownloading ? (
+                <CircularProgress size={18} />
+              ) : (
+                <DownloadOutlined fontSize="small" />
+              )}
+            </IconButton>
+          </span>
+        );
 
         return (
           <Card key={attachment.awardAttachmentId} variant="outlined">
@@ -89,12 +155,33 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
               }}
             >
               <Stack direction="row" spacing={1.5} sx={{ minWidth: 0, alignItems: "flex-start" }}>
-                <InsertDriveFileOutlined color="action" sx={{ mt: 0.25 }} />
+                <Tooltip title={typeLabel}>
+                  <TypeIcon color="action" sx={{ mt: 0.25 }} />
+                </Tooltip>
 
                 <Stack sx={{ minWidth: 0 }}>
-                  <Typography sx={{ fontWeight: 700 }} noWrap>
-                    {fileName}
-                  </Typography>
+                  {canDownload ? (
+                    <Link
+                      component="button"
+                      type="button"
+                      onClick={triggerDownload}
+                      underline="hover"
+                      sx={{
+                        fontWeight: 700,
+                        textAlign: "left",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: "100%",
+                      }}
+                    >
+                      {fileName}
+                    </Link>
+                  ) : (
+                    <Typography sx={{ fontWeight: 700 }} noWrap>
+                      {fileName}
+                    </Typography>
+                  )}
 
                   <Typography variant="body2" color="text.secondary">
                     {attachment.description ?? "No description"}
@@ -105,6 +192,7 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
                     spacing={1}
                     sx={{ mt: 0.5, flexWrap: "wrap", alignItems: "center" }}
                   >
+                    <Chip size="small" variant="outlined" label={typeLabel} />
                     {attachment.typeCode && (
                       <Chip size="small" variant="outlined" label={attachment.typeCode} />
                     )}
@@ -121,24 +209,15 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
                 </Stack>
               </Stack>
 
-              <Button
-                variant="outlined"
-                size="small"
-                disabled={!attachment.downloadable || isDownloading}
-                startIcon={
-                  isDownloading ? (
-                    <CircularProgress size={16} />
-                  ) : (
-                    <DownloadOutlined />
-                  )
-                }
-                onClick={() =>
-                  attachment.awardAttachmentId !== null &&
-                  handleDownload(attachment.awardAttachmentId, fileName)
-                }
-              >
-                {attachment.downloadable ? "Download" : "Unavailable"}
-              </Button>
+              {canDownload ? (
+                <Tooltip title="Download">{downloadButton}</Tooltip>
+              ) : (
+                <Tooltip
+                  title={downloadUnavailableReason(attachment.uploadStatus)}
+                >
+                  {downloadButton}
+                </Tooltip>
+              )}
             </CardContent>
           </Card>
         );

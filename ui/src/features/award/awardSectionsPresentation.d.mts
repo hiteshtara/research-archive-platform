@@ -33,3 +33,24 @@ export function hasAnyComments(
 export function hasAnyTransmissions(transmissions: unknown[]): boolean;
 
 export function hasAnyAttachments(attachments: unknown[]): boolean;
+
+export type AttachmentTypeCategory =
+  | "pdf"
+  | "word"
+  | "excel"
+  | "powerpoint"
+  | "archive"
+  | "image"
+  | "text"
+  | "file";
+
+export function classifyAttachmentType(
+  contentType: string | null,
+  fileName: string | null,
+): { category: AttachmentTypeCategory; label: string };
+
+export function downloadUnavailableReason(
+  uploadStatus: string | null,
+): string;
+
+export function formatAttachmentCountLabel(count: number): string;

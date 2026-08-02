@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  classifyAttachmentType,
+  downloadUnavailableReason,
+  formatAttachmentCountLabel,
   formatByteSize,
   formatCreditSplitLabel,
   formatCurrencyAmount,
@@ -112,4 +115,76 @@ test("empty-state helpers report non-empty when any one list has rows", () => {
   assert.equal(hasAnyComments([], [{}]), true);
   assert.equal(hasAnyTransmissions([{}]), true);
   assert.equal(hasAnyAttachments([{}]), true);
+});
+
+test("classifies attachment type from MIME content type first", () => {
+  assert.deepEqual(classifyAttachmentType("application/pdf", "x.bin"), {
+    category: "pdf",
+    label: "PDF",
+  });
+  assert.deepEqual(
+    classifyAttachmentType(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      null,
+    ),
+    { category: "word", label: "DOCX" },
+  );
+  assert.deepEqual(
+    classifyAttachmentType(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      null,
+    ),
+    { category: "excel", label: "XLSX" },
+  );
+  assert.deepEqual(classifyAttachmentType("image/png", null), {
+    category: "image",
+    label: "Image",
+  });
+});
+
+test("classifies attachment type from the filename extension when content type is missing", () => {
+  assert.deepEqual(classifyAttachmentType(null, "budget.xlsx"), {
+    category: "excel",
+    label: "XLSX",
+  });
+  assert.deepEqual(classifyAttachmentType("", "report.PDF"), {
+    category: "pdf",
+    label: "PDF",
+  });
+});
+
+test("classifies an unrecognized type as a generic File rather than guessing", () => {
+  assert.deepEqual(
+    classifyAttachmentType("application/octet-stream", "data.xyz"),
+    { category: "file", label: "File" },
+  );
+  assert.deepEqual(classifyAttachmentType(null, null), {
+    category: "file",
+    label: "File",
+  });
+});
+
+test("explains why download is unavailable, matching the server's upload_status", () => {
+  assert.equal(
+    downloadUnavailableReason("PENDING"),
+    "This file hasn't been uploaded to storage yet.",
+  );
+  assert.equal(
+    downloadUnavailableReason("FAILED"),
+    "The upload for this file failed and hasn't been retried yet.",
+  );
+  assert.equal(
+    downloadUnavailableReason("MISSING_SOURCE_CONTENT"),
+    "No source content exists for this file in the archive.",
+  );
+  assert.equal(
+    downloadUnavailableReason(null),
+    "This file isn't available for download yet.",
+  );
+});
+
+test("formats the attachment count badge with correct pluralization", () => {
+  assert.equal(formatAttachmentCountLabel(0), "0 Attachments");
+  assert.equal(formatAttachmentCountLabel(1), "1 Attachment");
+  assert.equal(formatAttachmentCountLabel(24), "24 Attachments");
 });

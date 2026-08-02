@@ -86,3 +86,99 @@ export function hasAnyTransmissions(transmissions) {
 export function hasAnyAttachments(attachments) {
   return attachments.length > 0;
 }
+
+// Classifies an attachment's type from its MIME content type (preferred)
+// or filename extension (fallback), returning a short display label and
+// a stable category key the UI maps to an icon. Never fabricates a type
+// - "File" covers anything unrecognized rather than guessing.
+const CONTENT_TYPE_CATEGORIES = [
+  { category: "pdf", label: "PDF", test: (type) => type === "application/pdf" },
+  {
+    category: "word",
+    label: "DOCX",
+    test: (type) =>
+      type === "application/msword" ||
+      type.includes("wordprocessingml"),
+  },
+  {
+    category: "excel",
+    label: "XLSX",
+    test: (type) =>
+      type === "application/vnd.ms-excel" || type.includes("spreadsheetml"),
+  },
+  {
+    category: "powerpoint",
+    label: "PPTX",
+    test: (type) =>
+      type === "application/vnd.ms-powerpoint" ||
+      type.includes("presentationml"),
+  },
+  {
+    category: "archive",
+    label: "ZIP",
+    test: (type) =>
+      type.includes("zip") || type.includes("compressed"),
+  },
+  { category: "image", label: "Image", test: (type) => type.startsWith("image/") },
+  { category: "text", label: "Text", test: (type) => type.startsWith("text/") },
+];
+
+const EXTENSION_LABELS = {
+  pdf: { category: "pdf", label: "PDF" },
+  doc: { category: "word", label: "DOC" },
+  docx: { category: "word", label: "DOCX" },
+  xls: { category: "excel", label: "XLS" },
+  xlsx: { category: "excel", label: "XLSX" },
+  ppt: { category: "powerpoint", label: "PPT" },
+  pptx: { category: "powerpoint", label: "PPTX" },
+  zip: { category: "archive", label: "ZIP" },
+  png: { category: "image", label: "PNG" },
+  jpg: { category: "image", label: "JPG" },
+  jpeg: { category: "image", label: "JPEG" },
+  gif: { category: "image", label: "GIF" },
+  txt: { category: "text", label: "Text" },
+};
+
+export function classifyAttachmentType(contentType, fileName) {
+  const normalizedType = (contentType ?? "").toLowerCase().trim();
+
+  if (normalizedType) {
+    const match = CONTENT_TYPE_CATEGORIES.find((entry) =>
+      entry.test(normalizedType),
+    );
+    if (match) {
+      return { category: match.category, label: match.label };
+    }
+  }
+
+  const extension = (fileName ?? "").split(".").pop()?.toLowerCase();
+  if (extension && EXTENSION_LABELS[extension]) {
+    return EXTENSION_LABELS[extension];
+  }
+
+  return { category: "file", label: "File" };
+}
+
+// Human explanation for why the download control is disabled, keyed off
+// archive.attachment_object.upload_status - matches the server-side
+// downloadable computation in AwardArchiveRepository.findAttachments so
+// the UI never claims a more specific reason than the backend actually
+// enforces.
+export function downloadUnavailableReason(uploadStatus) {
+  switch (uploadStatus) {
+    case "PENDING":
+      return "This file hasn't been uploaded to storage yet.";
+    case "UPLOADING":
+      return "This file is currently being uploaded.";
+    case "FAILED":
+      return "The upload for this file failed and hasn't been retried yet.";
+    case "MISSING_SOURCE_CONTENT":
+      return "No source content exists for this file in the archive.";
+    default:
+      return "This file isn't available for download yet.";
+  }
+}
+
+export function formatAttachmentCountLabel(count) {
+  return `${count} Attachment${count === 1 ? "" : "s"}`;
+}
