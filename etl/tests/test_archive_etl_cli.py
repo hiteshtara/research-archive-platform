@@ -72,6 +72,13 @@ def test_build_parser_accepts_award_load_award_id() -> None:
     assert args.load_award_id == 42
 
 
+def test_build_parser_accepts_award_load_unit_reference_data() -> None:
+    args = build_parser().parse_args(["award", "--load-unit-reference-data"])
+
+    assert args.command == "award"
+    assert args.load_unit_reference_data is True
+
+
 def test_build_parser_accepts_award_create_batch() -> None:
     args = build_parser().parse_args(["award", "--create-batch", "10"])
 
