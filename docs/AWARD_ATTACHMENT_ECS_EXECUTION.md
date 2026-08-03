@@ -575,6 +575,42 @@ never a brand new batch that would lose the original selection. A state
 file only resumes a run for the exact `TOTAL_FILES` it was created with;
 mismatches are rejected rather than silently reinterpreted.
 
+**Resume reconciliation against live state:** a resumed run never trusts
+the local state file alone before deciding whether to create the next
+batch - `reconcile_incomplete_batches` first checks every batch the
+local state still considers incomplete against a live `--show-batch`,
+and corrects the local file to match reality. This exists because a
+local crash (a SAML/credential expiry mid-call is the real incident that
+prompted it) can leave the state file behind reality: an ECS task can
+genuinely finish in AWS after the local script has already died trying
+to wait for or describe it. A batch's metadata load is considered
+genuinely complete once its live `etl_batch.status` has moved past
+`CREATED` (the status `--load-batch` sets, atomically, only once every
+member is resolved) - the report's own `metadata_loaded`/
+`missing_metadata` fields cannot be used for this, since
+`missing_metadata` is defined as `total_files - metadata_loaded` and so
+always sums back to `total_files` whether or not loading ever ran. A
+batch's upload is considered genuinely complete once its live status is
+`COMPLETED` **and** `pending=0` **and** `failed=0` - `status=COMPLETED`
+alone is not enough, since the upload step marks a batch `COMPLETED`
+even when some individual files failed; files marked
+`missing_source_content` count as resolved, not blocking, since there is
+nothing that could ever be uploaded for them. A batch found to be
+genuinely complete on every axis it was missing has its files credited
+to `processed_files` exactly once (a batch already fully complete
+locally is never re-examined by this check on a later run, so this
+can't double-count). See
+`scripts/tests/test-bulk-load-reconciliation.sh` for a regression test
+reproducing the exact incident - batch 18 completed its upload in AWS,
+but a crash before the local state was updated left it recorded as
+`upload_status=NOT_REQUESTED` (indistinguishable, without this
+reconciliation, from "this batch's upload phase never applied" -
+`state_append_batch` initializes a fresh batch's `upload_status` to
+`PENDING`, never `NOT_REQUESTED`, whenever the run has `--upload`, so
+`NOT_REQUESTED` surviving to this point can only mean the crash
+described above) - and confirms the fix credits its files exactly once
+rather than creating a new batch without reconciling it first.
+
 **Never reloads already-uploaded files**, for the same reason the 10-file
 sequence above doesn't: every batch is created via plain `--create-batch`
 (no `--include-already-uploaded`), which excludes already-`UPLOADED`

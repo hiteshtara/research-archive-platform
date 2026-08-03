@@ -242,6 +242,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Parses argv and validates it into the global variables every other
+# function reads, then creates TMP_DIR. Split out (rather than left as
+# top-level script code) so this file can be `source`d - e.g. by a test
+# script that overrides run_ecs_task/build_and_register_task_definition
+# and calls run_bulk_load/reconcile_incomplete_batches directly - without
+# argv parsing or any of these env-var requirements firing. See the
+# bottom of this file for the guard that calls this (and dispatch) only
+# when the script is executed directly, never when sourced.
+parse_and_validate_args() {
 AWS_REGION="${AWS_REGION:-us-east-1}"
 PROJECT_NAME="${PROJECT_NAME:-research-archive-platform}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
@@ -433,6 +442,7 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+}
 
 # --- Reused by both the single-shot path and --bulk-load: run exactly one
 # ECS task with the current $NEW_REVISION_ARN, using whatever the caller
@@ -535,9 +545,22 @@ state_set_image() {
 
 state_append_batch() {
   # $1=batch_id $2=requested_size $3=selected_count
+  # upload_status starts PENDING (not NOT_REQUESTED) whenever this run
+  # has --upload - NOT_REQUESTED is reserved for runs that never upload
+  # at all, so it unambiguously means "this batch's upload phase does
+  # not apply", never "upload requested but not yet attempted". Getting
+  # this wrong is exactly what caused a real incident: a batch whose
+  # upload step crashed (SAML expiry) before ever updating upload_status
+  # was indistinguishable from a batch that never needed uploading, so
+  # resume treated it as nothing-to-do and created a new batch instead of
+  # retrying it - see reconcile_incomplete_batches for the defense-in-depth
+  # fix on top of this one.
+  local initial_upload_status="NOT_REQUESTED"
+  [[ "$UPLOAD" == true ]] && initial_upload_status="PENDING"
   jq --argjson batch_id "$1" --argjson requested_size "$2" --argjson selected_count "$3" \
+    --arg upload_status "$initial_upload_status" \
     '.batches += [{batch_id: $batch_id, requested_size: $requested_size,
-      selected_count: $selected_count, load_status: "PENDING", upload_status: "NOT_REQUESTED"}]' \
+      selected_count: $selected_count, load_status: "PENDING", upload_status: $upload_status}]' \
     "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 }
 
@@ -545,6 +568,13 @@ state_set_last_batch_field() {
   # $1=field name $2=value (string)
   jq --arg field "$1" --arg value "$2" \
     '.batches[-1][$field] = $value' \
+    "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+}
+
+state_set_batch_field_by_index() {
+  # $1=zero-based index into .batches $2=field name $3=value (string)
+  jq --argjson index "$1" --arg field "$2" --arg value "$3" \
+    '.batches[$index][$field] = $value' \
     "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 }
 
@@ -556,6 +586,120 @@ state_add_processed() {
 state_set_status() {
   jq --arg status "$1" '.status = $status' \
     "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+}
+
+# --- Resume reconciliation: before a resumed run decides whether to
+# retry the last batch or create a new one, verify every batch the local
+# state considers incomplete against live --show-batch, and correct the
+# local state to match reality. Needed because a local crash (e.g. a
+# SAML/credential expiry mid-call) can leave the state file behind
+# reality: an ECS task can genuinely finish in AWS after the local
+# script has already died trying to wait for/describe it, so trusting
+# the local file alone risks creating a brand new batch instead of
+# recognizing the previous one actually succeeded (and double-counting
+# or under-counting processed_files as a result). Only ever touches
+# batches this run's own local state already has an entry for - it does
+# not discover or adopt batches it doesn't know about.
+reconcile_incomplete_batches() {
+  local total_batches i
+  total_batches="$(jq -r '.batches | length' "$STATE_FILE")"
+
+  for (( i=0; i<total_batches; i++ )); do
+    local batch_id load_status upload_status selected_count
+    batch_id="$(jq -r ".batches[$i].batch_id" "$STATE_FILE")"
+    load_status="$(jq -r ".batches[$i].load_status" "$STATE_FILE")"
+    upload_status="$(jq -r ".batches[$i].upload_status" "$STATE_FILE")"
+    selected_count="$(jq -r ".batches[$i].selected_count" "$STATE_FILE")"
+
+    local needs_load_check=false needs_upload_check=false
+    [[ "$load_status" != "COMPLETED" ]] && needs_load_check=true
+    # Deliberately no "&& upload_status != NOT_REQUESTED" exclusion here:
+    # when $UPLOAD is true, a batch legitimately has NOT_REQUESTED only
+    # for the instant between state_append_batch and its first real
+    # upload attempt - state_append_batch always initializes it to
+    # PENDING in that case (see its own comment), so NOT_REQUESTED
+    # surviving to this point while $UPLOAD is true can only be the
+    # exact corruption this function exists to catch (a crash before the
+    # first real status update) - excluding it here would silently skip
+    # reconciling precisely the batch that needs it, which is the bug
+    # this function was written to fix in the first place.
+    if [[ "$UPLOAD" == true && "$upload_status" != "COMPLETED" ]]; then
+      needs_upload_check=true
+    fi
+
+    if [[ "$needs_load_check" == false && "$needs_upload_check" == false ]]; then
+      continue
+    fi
+
+    echo "=== Reconciling batch $batch_id against live state (local: load_status=$load_status upload_status=$upload_status) ==="
+    OVERRIDE_ARGS=(--show-batch "$batch_id")
+    OVERRIDE_ARGS+=("${COMMON_OVERRIDE_ARGS[@]}")
+    run_ecs_task
+    if [[ "$TASK_EXIT_CODE" -ne 0 ]]; then
+      echo "WARNING: could not verify batch $batch_id's live status (--show-batch failed, exit $TASK_EXIT_CODE) - leaving local state as-is; it will be re-checked on the next run." >&2
+      continue
+    fi
+
+    local live_line
+    live_line="$(grep -oE 'batch_id=[0-9]+ status=[A-Z_]+ total_files=[0-9]+ metadata_loaded=[0-9]+ pending=[0-9]+ uploading=[0-9]+ uploaded=[0-9]+ failed=[0-9]+ missing_source_content=[0-9]+ missing_metadata=[0-9]+' "$TASK_LOG_FILE" | tail -1 || true)"
+    if [[ -z "$live_line" ]]; then
+      echo "WARNING: could not parse batch $batch_id's --show-batch report from $TASK_LOG_FILE - leaving local state as-is." >&2
+      continue
+    fi
+
+    local live_status live_pending live_failed
+    live_status="$(echo "$live_line" | grep -oE 'status=[A-Z_]+' | cut -d= -f2)"
+    live_pending="$(echo "$live_line" | grep -oE ' pending=[0-9]+' | cut -d= -f2)"
+    live_failed="$(echo "$live_line" | grep -oE 'failed=[0-9]+' | cut -d= -f2)"
+
+    echo "Batch $batch_id live: status=$live_status pending=$live_pending failed=$live_failed"
+
+    # etl_batch.status starts CREATED and moves to READY only inside the
+    # same, single transaction --load-batch commits once every member is
+    # resolved (see load_award_attachments._run_load_batch) - so "status
+    # is anything other than CREATED" is the correct, atomically-true
+    # signal that the load step genuinely finished. The report's own
+    # metadata_loaded/missing_metadata fields do NOT work for this:
+    # missing_metadata is defined as total_files - metadata_loaded, so
+    # their sum always equals total_files whether or not loading ever
+    # ran - it is not an independent completion signal.
+    if [[ "$needs_load_check" == true && "$live_status" != "CREATED" ]]; then
+      echo "Batch $batch_id: live batch status ($live_status) shows loading has completed - correcting local load_status PENDING -> COMPLETED"
+      state_set_batch_field_by_index "$i" "load_status" "COMPLETED"
+      load_status="COMPLETED"
+    fi
+
+    # Per the incident this fixes: status=COMPLETED alone is not enough
+    # (the upload step marks a batch COMPLETED even when some files
+    # failed) - pending=0 and failed=0 must also hold. Files marked
+    # MISSING_SOURCE_CONTENT count as resolved, not blocking completion -
+    # there is nothing that could ever be uploaded for them.
+    if [[ "$needs_upload_check" == true && "$live_status" == "COMPLETED" && "$live_pending" -eq 0 && "$live_failed" -eq 0 ]]; then
+      echo "Batch $batch_id: live upload is complete (status=COMPLETED pending=0 failed=0) - correcting local upload_status -> COMPLETED"
+      state_set_batch_field_by_index "$i" "upload_status" "COMPLETED"
+      upload_status="COMPLETED"
+    fi
+
+    local load_ok=false upload_ok=false
+    [[ "$load_status" == "COMPLETED" ]] && load_ok=true
+    if [[ "$UPLOAD" == true ]]; then
+      [[ "$upload_status" == "COMPLETED" ]] && upload_ok=true
+    else
+      upload_ok=true
+    fi
+
+    # This batch was, until this reconciliation pass, considered
+    # incomplete (that's the only way this loop iteration reaches here) -
+    # so if it is now fully resolved on every required axis, its files
+    # were never credited to processed_files. Credit them exactly once:
+    # once corrected to COMPLETED here, this batch will never again be
+    # selected by the needs_load_check/needs_upload_check test above on
+    # any future reconciliation pass, so this can't double-count.
+    if [[ "$load_ok" == true && "$upload_ok" == true ]]; then
+      state_add_processed "$selected_count"
+      echo "Batch $batch_id: reconciled as fully complete - credited $selected_count file(s) to processed_files"
+    fi
+  done
 }
 
 run_bulk_load() {
@@ -592,6 +736,8 @@ run_bulk_load() {
     state_set_image "$IMAGE_URI" "$NEW_REVISION_ARN"
   fi
 
+  reconcile_incomplete_batches
+
   start_epoch="$(date +%s)"
 
   while true; do
@@ -616,7 +762,7 @@ run_bulk_load() {
       echo "=== Resuming incomplete batch $last_batch_id (load_status=$last_load_status) ==="
       batch_id="$last_batch_id"
       selected_count="$(jq -r '.batches[-1].selected_count' "$STATE_FILE")"
-    elif [[ -n "$last_batch_id" && "$UPLOAD" == true && "$last_upload_status" != "COMPLETED" && "$last_upload_status" != "NOT_REQUESTED" ]]; then
+    elif [[ -n "$last_batch_id" && "$UPLOAD" == true && "$last_upload_status" != "COMPLETED" ]]; then
       echo "=== Resuming incomplete batch $last_batch_id (upload_status=$last_upload_status) ==="
       batch_id="$last_batch_id"
       selected_count="$(jq -r '.batches[-1].selected_count' "$STATE_FILE")"
@@ -830,6 +976,11 @@ build_and_register_task_definition() {
   echo "Registered: $NEW_REVISION_ARN"
 }
 
+# The single-shot path and the --bulk-load early-exit below - both need
+# TMP_DIR/the parsed globals from parse_and_validate_args, so this only
+# ever runs after that (see the sourced-guard at the bottom of this
+# file).
+dispatch() {
 # Non-secret configuration only - identifiers and connection routing
 # info, never a password/DSN/secret value. POSTGRES_SECRET_ID is always
 # required (checked above); ORACLE_SECRET_ID is required unless
@@ -878,3 +1029,15 @@ OVERRIDE_ARGS+=("${COMMON_OVERRIDE_ARGS[@]}")
 
 run_ecs_task
 exit "$TASK_EXIT_CODE"
+}
+
+# Only actually parse argv and run when this file is executed directly
+# (bash scripts/run-award-attachment-loader.sh ...) - never when it is
+# `source`d, e.g. by a test script that wants the function definitions
+# above (run_bulk_load, reconcile_incomplete_batches, the state_* helpers)
+# without argv parsing, its env-var requirements, or a real AWS/Docker
+# call ever firing.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  parse_and_validate_args "$@"
+  dispatch
+fi

@@ -167,6 +167,12 @@ Pass `--full` any time you want to force both legs regardless.
   `allow_admin_password_auth` enabled, which the dev pool already has —
   see `terraform/modules/cognito`).
 
+To get a token for your own manual `curl`/Postman testing (rather than
+this script's own non-interactive use of the same flow), use
+`scripts/get-access-token.sh <your-email>` instead — it prompts for your
+password interactively and prints only the access token, ready for
+`export ACCESS_TOKEN="$(scripts/get-access-token.sh you@bu.edu)"`.
+
 ## Troubleshooting
 
 - **"Resolved account (...) != expected"** — you're authenticated to
