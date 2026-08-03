@@ -23,10 +23,66 @@ import {
   xmlDisplayText,
 } from "./awardSectionsPresentation.mjs";
 
-test("formats currency amounts and treats null as an em dash", () => {
-  assert.equal(formatCurrencyAmount(1200), "$1,200");
-  assert.equal(formatCurrencyAmount(0), "$0");
+test("formats currency amounts to the cent and treats null as an em dash", () => {
+  assert.equal(formatCurrencyAmount(17551.63), "$17,551.63");
+  assert.equal(formatCurrencyAmount(0), "$0.00");
+  assert.equal(formatCurrencyAmount(-1250.5), "-$1,250.50");
   assert.equal(formatCurrencyAmount(null), "—");
+  assert.equal(formatCurrencyAmount(undefined), "—");
+  assert.equal(formatCurrencyAmount(1000000.01), "$1,000,000.01");
+});
+
+test("Award Summary and Time & Money both render amounts through the one shared currency formatter", () => {
+  const sharedModuleSource = readFileSync(
+    fileURLToPath(new URL("./awardSectionsPresentation.mjs", import.meta.url)),
+    "utf8",
+  );
+  const summarySource = readFileSync(
+    fileURLToPath(
+      new URL("../../components/award/AwardSummarySection.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const timeAndMoneySource = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../components/award/AwardTimeAndMoneySection.tsx",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const hierarchySource = readFileSync(
+    fileURLToPath(
+      new URL("../../components/award/AwardHierarchyTree.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  // The shared module must own the only maximumFractionDigits override for
+  // money - this is the exact code path that previously truncated cents.
+  assert.equal(
+    (sharedModuleSource.match(/maximumFractionDigits/g) ?? []).length,
+    1,
+    "the shared module should define the currency formatter exactly once",
+  );
+
+  for (const [label, source] of [
+    ["AwardSummarySection", summarySource],
+    ["AwardTimeAndMoneySection", timeAndMoneySource],
+    ["AwardHierarchyTree", hierarchySource],
+  ]) {
+    assert.match(
+      source,
+      /from\s+"..\/..\/features\/award\/awardSectionsPresentation\.mjs"/,
+      `${label} must import its currency formatter from the shared module`,
+    );
+    assert.equal(
+      /maximumFractionDigits/.test(source),
+      false,
+      `${label} must not redefine its own currency formatting`,
+    );
+  }
 });
 
 test("formats byte sizes across B/KB/MB and treats null as unknown", () => {

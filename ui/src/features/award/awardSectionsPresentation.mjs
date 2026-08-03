@@ -4,15 +4,18 @@
 // JS, and node:test-able the same way ../ai/awardAiPresentation.mjs is,
 // since this project has no component-render test setup.
 
+const CURRENCY_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 export function formatCurrencyAmount(amount) {
   if (amount === null || amount === undefined) {
     return "—";
   }
-  return amount.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+  return CURRENCY_FORMATTER.format(amount);
 }
 
 export function formatByteSize(bytes) {

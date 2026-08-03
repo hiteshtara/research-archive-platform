@@ -5,18 +5,7 @@ import { useState } from "react";
 import type { AwardHierarchyNode } from "../../types/api";
 
 import { AwardStatusPill } from "./AwardStatusPill";
-
-function fmt(amount: number | null): string {
-  if (amount === null) {
-    return "—";
-  }
-
-  return amount.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-}
+import { formatCurrencyAmount as fmt } from "../../features/award/awardSectionsPresentation.mjs";
 
 interface AwardHierarchyTreeProps {
   root: AwardHierarchyNode;

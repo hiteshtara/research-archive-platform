@@ -2,18 +2,7 @@ import { Alert, Box, CircularProgress, Skeleton } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 
 import { getAwardSummaryV1 } from "../../api/client";
-
-function formatAmount(amount: number | null): string {
-  if (amount === null) {
-    return "—";
-  }
-
-  return amount.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-}
+import { formatCurrencyAmount as formatAmount } from "../../features/award/awardSectionsPresentation.mjs";
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
