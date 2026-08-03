@@ -26,6 +26,7 @@ COPY etl/load_award_attachments.py .
 COPY etl/load_awards_from_csv.py .
 COPY oracle oracle
 COPY sql/extract/award sql/extract/award
+COPY sql/extract/reference sql/extract/reference
 COPY database/migrations database/migrations
 
 CMD ["uv", "run", "python", "load_from_s3.py"]
