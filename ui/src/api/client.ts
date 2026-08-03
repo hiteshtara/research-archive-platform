@@ -393,6 +393,46 @@ export function getAwardPeopleV1(
   return request(`/api/v1/awards/${encodeURIComponent(awardId)}/people`, signal);
 }
 
+export function getAwardUnitDetailsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardUnitDetailsV1> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/unit-details`,
+    signal,
+  );
+}
+
+export function getAwardUnitContactsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardUnitContactV1[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/unit-contacts`,
+    signal,
+  );
+}
+
+export function getAwardSponsorContactsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardSponsorContactV1[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/sponsor-contacts`,
+    signal,
+  );
+}
+
+export function getAwardCentralAdministrationContactsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardCentralAdministrationContactV1[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/central-administration-contacts`,
+    signal,
+  );
+}
+
 export function getAwardAmountsV1(
   awardId: number,
   parameters: {

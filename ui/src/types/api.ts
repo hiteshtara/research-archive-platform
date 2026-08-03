@@ -482,6 +482,54 @@ export interface AwardPersonDetailV1 {
   creditSplits: AwardCreditSplitV1[];
 }
 
+// An Award has exactly one lead unit (archive.unit, the shared
+// reference table Award/Proposal/Negotiation/Subaward/Time & Money are
+// all expected to reuse - never a second, Award-owned copy of Unit
+// data). leadUnit is always true here.
+export interface AwardUnitDetailsV1 {
+  unitNumber: string | null;
+  unitName: string | null;
+  parentUnitNumber: string | null;
+  parentUnitName: string | null;
+  organization: string | null;
+  leadUnit: boolean;
+}
+
+// Real, Award-specific archived data (archive.award_unit_contact) -
+// never derived, unlike AwardCentralAdministrationContactV1. unitNumber
+// is this contact's own associated unit and can differ from the
+// Award's lead unit - leadUnit is true only when it matches.
+export interface AwardUnitContactV1 {
+  personId: string | null;
+  fullName: string | null;
+  projectRole: string | null;
+  unitNumber: string | null;
+  leadUnit: boolean;
+  email: string | null;
+  phone: string | null;
+}
+
+// Resolves through archive.award_sponsor_contact and, when present,
+// the shared archive.rolodex table.
+export interface AwardSponsorContactV1 {
+  fullName: string | null;
+  organization: string | null;
+  contactRoleCode: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+// DERIVED, never persisted as its own table - reproduces Kuali's
+// Award.initCentralAdminContacts() exactly: the Award's lead unit's
+// administrators filtered to default_group_flag='C'.
+export interface AwardCentralAdministrationContactV1 {
+  personId: string | null;
+  fullName: string | null;
+  projectRole: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
 export interface AwardAmountHistoryV1 {
   awardAmountInfoId: number | null;
   awardId: number | null;

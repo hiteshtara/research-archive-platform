@@ -8,6 +8,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
@@ -23,9 +24,12 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 
 import org.junit.jupiter.api.Test;
@@ -236,6 +240,59 @@ class AwardV1ContractTest {
 
         JsonNode unit = objectMapper.valueToTree(person).get("units").get(0);
         assertFieldNames(unit, Set.of("unitNumber", "leadUnit", "creditSplits"));
+    }
+
+    @Test
+    void unitDetailsShapeIsStable() throws Exception {
+        AwardUnitDetailsResponse unit = new AwardUnitDetailsResponse(
+                "1203250000", "CAS SPACE PHYSICS", "1200000000",
+                "COLLEGE OF ARTS & SCIENCES (CAS)", "1", true
+        );
+
+        assertFieldNames(unit, Set.of(
+                "unitNumber", "unitName", "parentUnitNumber",
+                "parentUnitName", "organization", "leadUnit"
+        ));
+    }
+
+    @Test
+    void unitContactShapeIsStable() throws Exception {
+        AwardUnitContactResponse contact = new AwardUnitContactResponse(
+                "U17311007", "ERIN REYNOLDS",
+                "Post-Award - Department Administrator", "1203250000", true,
+                "EREYNOLD@BU.EDU", "617-358-0603"
+        );
+
+        assertFieldNames(contact, Set.of(
+                "personId", "fullName", "projectRole", "unitNumber",
+                "leadUnit", "email", "phone"
+        ));
+    }
+
+    @Test
+    void sponsorContactShapeIsStable() throws Exception {
+        AwardSponsorContactResponse contact = new AwardSponsorContactResponse(
+                "Jane Smith", "NIH", "TECHNICAL", "jane.smith@nih.gov",
+                "301-555-0100"
+        );
+
+        assertFieldNames(contact, Set.of(
+                "fullName", "organization", "contactRoleCode", "email",
+                "phone"
+        ));
+    }
+
+    @Test
+    void centralAdministrationContactShapeIsStable() throws Exception {
+        AwardCentralAdministrationContactResponse contact =
+                new AwardCentralAdministrationContactResponse(
+                        "U44984650", "NANCY SCHINDELE", "PAFO Administrator",
+                        "NANCYSCH@BU.EDU", "617-358-5117"
+                );
+
+        assertFieldNames(contact, Set.of(
+                "personId", "fullName", "projectRole", "email", "phone"
+        ));
     }
 
     @Test

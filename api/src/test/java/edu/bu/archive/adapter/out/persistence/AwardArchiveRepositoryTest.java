@@ -1,10 +1,14 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 
 import org.junit.jupiter.api.Test;
@@ -359,6 +363,125 @@ class AwardArchiveRepositoryTest {
 
         assertThat(result).isEmpty();
         org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void findUnitDetailsJoinsTheAwardsLeadUnitAgainstTheSharedUnitTable() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardUnitDetailsResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        AwardUnitDetailsResponse expected = new AwardUnitDetailsResponse(
+                "1203250000", "CAS SPACE PHYSICS", "1200000000",
+                "COLLEGE OF ARTS & SCIENCES (CAS)", "1", true
+        );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("awardId", 985585L)).thenReturn(statement);
+        when(statement.query(AwardUnitDetailsResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.of(expected));
+
+        Optional<AwardUnitDetailsResponse> result =
+                new AwardArchiveRepository(jdbc).findUnitDetails(985585L);
+
+        assertThat(result).contains(expected);
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_version av")
+                .contains("JOIN archive.unit u ON u.unit_number = av.lead_unit_number")
+                .contains("LEFT JOIN archive.unit parent")
+                .contains("av.award_id = :awardId");
+    }
+
+    @Test
+    void findCentralAdministrationContactsFiltersToDefaultGroupFlagC() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardCentralAdministrationContactResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        AwardCentralAdministrationContactResponse nancy =
+                new AwardCentralAdministrationContactResponse(
+                        "U44984650", "NANCY SCHINDELE", "PAFO Administrator",
+                        "NANCYSCH@BU.EDU", "617-358-5117"
+                );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardCentralAdministrationContactResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of(nancy));
+
+        List<AwardCentralAdministrationContactResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findCentralAdministrationContacts(985585L);
+
+        assertThat(result).containsExactly(nancy);
+        assertThat(firstSql(jdbc))
+                .contains("JOIN archive.unit_administrator ua")
+                .contains("ua.unit_number = av.lead_unit_number")
+                .contains("JOIN archive.unit_administrator_type uat")
+                .contains("uat.default_group_flag = 'C'")
+                .contains("LEFT JOIN archive.person pe");
+        verify(statement).param("awardId", 985585L);
+    }
+
+    @Test
+    void findUnitContactsUsesRealArchivedAwardUnitContactData() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardUnitContactResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        AwardUnitContactResponse erin = new AwardUnitContactResponse(
+                "U17311007", "ERIN REYNOLDS", "Post-Award - Department Administrator",
+                "1203250000", true, "EREYNOLD@BU.EDU", "617-358-0603"
+        );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardUnitContactResponse.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of(erin));
+
+        List<AwardUnitContactResponse> result =
+                new AwardArchiveRepository(jdbc).findUnitContacts(985585L);
+
+        assertThat(result).containsExactly(erin);
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_unit_contact auc")
+                .contains("JOIN archive.award_version av ON av.award_id = auc.award_id")
+                .contains("LEFT JOIN archive.unit_administrator_type uat")
+                .contains("LEFT JOIN archive.person pe ON pe.person_id = auc.person_id")
+                .contains("auc.award_id = :awardId");
+        verify(statement).param("awardId", 985585L);
+    }
+
+    @Test
+    void findSponsorContactsResolvesThroughRolodex() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSponsorContactResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardSponsorContactResponse.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        List<AwardSponsorContactResponse> result =
+                new AwardArchiveRepository(jdbc).findSponsorContacts(985585L);
+
+        assertThat(result).isEmpty();
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_sponsor_contact asc_")
+                .contains("LEFT JOIN archive.rolodex r ON r.rolodex_id = asc_.rolodex_id")
+                .contains("asc_.award_id = :awardId");
+        verify(statement).param("awardId", 985585L);
     }
 
     private String firstSql(JdbcClient jdbc) {

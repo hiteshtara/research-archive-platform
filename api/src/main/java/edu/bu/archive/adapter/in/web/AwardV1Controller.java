@@ -3,16 +3,21 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
+import edu.bu.archive.application.award.AwardContactService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -64,9 +69,14 @@ import java.util.List;
 public class AwardV1Controller {
 
     private final AwardArchiveService service;
+    private final AwardContactService contactService;
 
-    public AwardV1Controller(AwardArchiveService service) {
+    public AwardV1Controller(
+            AwardArchiveService service,
+            AwardContactService contactService
+    ) {
         this.service = service;
+        this.contactService = contactService;
     }
 
     @Operation(
@@ -205,6 +215,77 @@ public class AwardV1Controller {
             long awardId
     ) {
         return ResponseEntity.ok(service.findPeople(awardId));
+    }
+
+    @Operation(
+            summary = "Get an Award's Unit Details",
+            description = "The Award's lead unit (archive.unit, the "
+                    + "shared reference table - never a second, "
+                    + "Award-owned copy of Unit data), including its "
+                    + "parent unit name when archived."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's lead unit details.")
+    @ApiResponse(responseCode = "404", description = "No such award_id, or no lead unit archived for it.")
+    @GetMapping("/{awardId}/unit-details")
+    public ResponseEntity<AwardUnitDetailsResponse> unitDetails(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(contactService.findUnitDetails(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's Unit Contacts",
+            description = "Real, Award-specific archived data "
+                    + "(archive.award_unit_contact) - not derived, "
+                    + "unlike Central Administration Contacts."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's Unit Contacts.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/unit-contacts")
+    public ResponseEntity<List<AwardUnitContactResponse>> unitContacts(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(contactService.findUnitContacts(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's Sponsor Contacts",
+            description = "Resolves archive.award_sponsor_contact "
+                    + "against the shared archive.rolodex table for "
+                    + "organization/phone/email."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's Sponsor Contacts.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/sponsor-contacts")
+    public ResponseEntity<List<AwardSponsorContactResponse>> sponsorContacts(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(contactService.findSponsorContacts(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's Central Administration Contacts",
+            description = "DERIVED, never persisted as its own table - "
+                    + "reproduces Kuali's Award.initCentralAdminContacts() "
+                    + "exactly: the Award's lead unit's administrators "
+                    + "(archive.unit_administrator joined to "
+                    + "archive.unit_administrator_type), filtered to "
+                    + "default_group_flag = 'C'."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's Central Administration Contacts.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/central-administration-contacts")
+    public ResponseEntity<List<AwardCentralAdministrationContactResponse>>
+            centralAdministrationContacts(
+                    @PathVariable
+                    long awardId
+            ) {
+        return ResponseEntity.ok(
+                contactService.findCentralAdministrationContacts(awardId)
+        );
     }
 
     @Operation(

@@ -17,7 +17,7 @@ import { AwardAmountsSection } from "../../components/award/AwardAmountsSection"
 import { AwardAttachmentsSection } from "../../components/award/AwardAttachmentsSection";
 import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
 import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
-import { AwardPeopleSection } from "../../components/award/AwardPeopleSection";
+import { AwardContactsSection } from "../../components/award/AwardContactsSection";
 import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTransmissionsSection";
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
 import { AwardSummarySection } from "../../components/award/AwardSummarySection";
@@ -216,7 +216,7 @@ export function AwardDashboardPage() {
           )}
 
           {activeSection === "people" && (
-            <AwardPeopleSection awardId={awardId} />
+            <AwardContactsSection awardId={awardId} />
           )}
 
           {activeSection === "amounts" && (

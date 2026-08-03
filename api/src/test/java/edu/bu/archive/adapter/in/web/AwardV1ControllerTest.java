@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
@@ -13,9 +14,12 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
+import edu.bu.archive.application.award.AwardContactService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,12 +43,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AwardV1ControllerTest {
 
     private AwardArchiveService service;
+    private AwardContactService contactService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         service = mock(AwardArchiveService.class);
-        AwardV1Controller controller = new AwardV1Controller(service);
+        contactService = mock(AwardContactService.class);
+        AwardV1Controller controller = new AwardV1Controller(service, contactService);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -260,6 +266,120 @@ class AwardV1ControllerTest {
                 .thenThrow(new NoSuchElementException("Award not found: 999"));
 
         mockMvc.perform(get("/api/v1/awards/999/people"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void unitDetailsIsRoutedUnderTheV1Prefix() throws Exception {
+        AwardUnitDetailsResponse unit = new AwardUnitDetailsResponse(
+                "1203250000", "CAS SPACE PHYSICS", "1200000000",
+                "COLLEGE OF ARTS & SCIENCES (CAS)", "1", true
+        );
+        when(contactService.findUnitDetails(985585L)).thenReturn(unit);
+
+        mockMvc.perform(get("/api/v1/awards/985585/unit-details"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.unitNumber").value("1203250000"))
+                .andExpect(jsonPath("$.unitName").value("CAS SPACE PHYSICS"))
+                .andExpect(jsonPath("$.leadUnit").value(true));
+
+        verify(contactService).findUnitDetails(985585L);
+    }
+
+    @Test
+    void unitDetailsPropagatesNotFoundAsAnHttp404() throws Exception {
+        when(contactService.findUnitDetails(999L))
+                .thenThrow(new NoSuchElementException("Award not found: 999"));
+
+        mockMvc.perform(get("/api/v1/awards/999/unit-details"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void unitContactsIsRoutedUnderTheV1Prefix() throws Exception {
+        AwardUnitContactResponse erin = new AwardUnitContactResponse(
+                "U17311007", "ERIN REYNOLDS",
+                "Post-Award - Department Administrator", "1203250000", true,
+                "EREYNOLD@BU.EDU", "617-358-0603"
+        );
+        when(contactService.findUnitContacts(985585L)).thenReturn(List.of(erin));
+
+        mockMvc.perform(get("/api/v1/awards/985585/unit-contacts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].fullName").value("ERIN REYNOLDS"))
+                .andExpect(jsonPath("$[0].leadUnit").value(true));
+
+        verify(contactService).findUnitContacts(985585L);
+    }
+
+    @Test
+    void unitContactsPropagatesNotFoundAsAnHttp404() throws Exception {
+        when(contactService.findUnitContacts(999L))
+                .thenThrow(new NoSuchElementException("Award not found: 999"));
+
+        mockMvc.perform(get("/api/v1/awards/999/unit-contacts"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void sponsorContactsIsRoutedUnderTheV1PrefixAndCanBeEmpty() throws Exception {
+        when(contactService.findSponsorContacts(985585L)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/awards/985585/sponsor-contacts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$").isEmpty());
+
+        verify(contactService).findSponsorContacts(985585L);
+    }
+
+    @Test
+    void sponsorContactsPropagatesNotFoundAsAnHttp404() throws Exception {
+        when(contactService.findSponsorContacts(999L))
+                .thenThrow(new NoSuchElementException("Award not found: 999"));
+
+        mockMvc.perform(get("/api/v1/awards/999/sponsor-contacts"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void centralAdministrationContactsIsRoutedUnderTheV1Prefix() throws Exception {
+        AwardCentralAdministrationContactResponse nancy =
+                new AwardCentralAdministrationContactResponse(
+                        "U44984650", "NANCY SCHINDELE", "PAFO Administrator",
+                        "NANCYSCH@BU.EDU", "617-358-5117"
+                );
+        AwardCentralAdministrationContactResponse anthony =
+                new AwardCentralAdministrationContactResponse(
+                        "U98756203", "ANTHONY J MOY", "OSP Administrator",
+                        "TMOY@BU.EDU", "617-353-4365"
+                );
+        when(contactService.findCentralAdministrationContacts(985585L))
+                .thenReturn(List.of(anthony, nancy));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/985585/central-administration-contacts")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].fullName").value("ANTHONY J MOY"))
+                .andExpect(jsonPath("$[0].projectRole")
+                        .value("OSP Administrator"))
+                .andExpect(jsonPath("$[1].fullName").value("NANCY SCHINDELE"))
+                .andExpect(jsonPath("$[1].projectRole")
+                        .value("PAFO Administrator"));
+
+        verify(contactService).findCentralAdministrationContacts(985585L);
+    }
+
+    @Test
+    void centralAdministrationContactsPropagatesNotFoundAsAnHttp404()
+            throws Exception {
+        when(contactService.findCentralAdministrationContacts(999L))
+                .thenThrow(new NoSuchElementException("Award not found: 999"));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/999/central-administration-contacts")
+                )
                 .andExpect(status().isNotFound());
     }
 

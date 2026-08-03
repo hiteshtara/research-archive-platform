@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
@@ -18,9 +19,12 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -865,6 +869,114 @@ public class AwardArchiveRepository {
                 """)
                 .param("awardId", awardId)
                 .query(AwardPersonUnitCreditSplitRow.class)
+                .list();
+    }
+
+    /*
+     * --- Unit Details / Contacts (shared reference model) -----------------
+     *
+     * Award reuses archive.unit/unit_administrator/unit_administrator_type/
+     * rolodex/person - never a second, Award-owned copy of this data (see
+     * database/migrations/V056 and docs/architecture/AWARD_CONTACTS_DESIGN.md).
+     * Central Administration Contacts is DERIVED (reproduces
+     * Award.initCentralAdminContacts() exactly - lead unit's
+     * administrators filtered to default_group_flag='C'); Unit Contacts
+     * and Sponsor Contacts are real, already-archived Award-specific
+     * data (archive.award_unit_contact/archive.award_sponsor_contact),
+     * only joined against the shared reference tables for display
+     * fields (person contact info, rolodex organization/phone/email)
+     * neither Award-owned table carries itself.
+     */
+    public Optional<AwardUnitDetailsResponse> findUnitDetails(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    u.unit_number,
+                    u.unit_name,
+                    u.parent_unit_number,
+                    parent.unit_name AS parent_unit_name,
+                    u.organization_id AS organization,
+                    TRUE AS lead_unit
+                FROM archive.award_version av
+                JOIN archive.unit u ON u.unit_number = av.lead_unit_number
+                LEFT JOIN archive.unit parent
+                       ON parent.unit_number = u.parent_unit_number
+                WHERE av.award_id = :awardId
+                """)
+                .param("awardId", awardId)
+                .query(AwardUnitDetailsResponse.class)
+                .optional();
+    }
+
+    public List<AwardCentralAdministrationContactResponse>
+            findCentralAdministrationContacts(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    ua.person_id,
+                    COALESCE(pe.full_name, ua.person_id) AS full_name,
+                    uat.description AS project_role,
+                    pe.email_address AS email,
+                    pe.phone_number AS phone
+                FROM archive.award_version av
+                JOIN archive.unit_administrator ua
+                     ON ua.unit_number = av.lead_unit_number
+                JOIN archive.unit_administrator_type uat
+                     ON uat.unit_administrator_type_code
+                        = ua.unit_administrator_type_code
+                LEFT JOIN archive.person pe ON pe.person_id = ua.person_id
+                WHERE av.award_id = :awardId
+                  AND uat.default_group_flag = 'C'
+                ORDER BY ua.unit_administrator_type_code, ua.person_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardCentralAdministrationContactResponse.class)
+                .list();
+    }
+
+    public List<AwardUnitContactResponse> findUnitContacts(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    auc.person_id,
+                    auc.full_name,
+                    COALESCE(uat.description, auc.unit_administrator_type_code)
+                        AS project_role,
+                    auc.unit_administrator_unit_number AS unit_number,
+                    (
+                        auc.unit_administrator_unit_number
+                            = av.lead_unit_number
+                    ) AS lead_unit,
+                    pe.email_address AS email,
+                    pe.phone_number AS phone
+                FROM archive.award_unit_contact auc
+                JOIN archive.award_version av ON av.award_id = auc.award_id
+                LEFT JOIN archive.unit_administrator_type uat
+                       ON uat.unit_administrator_type_code
+                          = auc.unit_administrator_type_code
+                LEFT JOIN archive.person pe ON pe.person_id = auc.person_id
+                WHERE auc.award_id = :awardId
+                ORDER BY auc.award_unit_contact_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardUnitContactResponse.class)
+                .list();
+    }
+
+    public List<AwardSponsorContactResponse> findSponsorContacts(
+            long awardId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    asc_.full_name,
+                    r.organization,
+                    asc_.contact_role_code,
+                    r.email_address AS email,
+                    r.phone_number AS phone
+                FROM archive.award_sponsor_contact asc_
+                LEFT JOIN archive.rolodex r ON r.rolodex_id = asc_.rolodex_id
+                WHERE asc_.award_id = :awardId
+                ORDER BY asc_.award_sponsor_contact_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardSponsorContactResponse.class)
                 .list();
     }
 

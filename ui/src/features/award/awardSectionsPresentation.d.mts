@@ -34,6 +34,14 @@ export function hasAnyTransmissions(transmissions: unknown[]): boolean;
 
 export function hasAnyAttachments(attachments: unknown[]): boolean;
 
+export function hasAnyUnitContacts(unitContacts: unknown[]): boolean;
+
+export function hasAnySponsorContacts(sponsorContacts: unknown[]): boolean;
+
+export function hasAnyCentralAdministrationContacts(
+  contacts: unknown[],
+): boolean;
+
 export type AttachmentTypeCategory =
   | "pdf"
   | "word"

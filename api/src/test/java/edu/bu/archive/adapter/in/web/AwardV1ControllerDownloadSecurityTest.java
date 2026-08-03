@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
+import edu.bu.archive.application.award.AwardContactService;
 import edu.bu.archive.config.SecurityConfiguration;
 
 import java.io.ByteArrayInputStream;
@@ -70,6 +71,9 @@ class AwardV1ControllerDownloadSecurityTest {
 
     @MockitoBean
     private AwardArchiveService service;
+
+    @MockitoBean
+    private AwardContactService contactService;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;

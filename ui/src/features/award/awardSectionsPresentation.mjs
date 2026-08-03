@@ -87,6 +87,18 @@ export function hasAnyAttachments(attachments) {
   return attachments.length > 0;
 }
 
+export function hasAnyUnitContacts(unitContacts) {
+  return unitContacts.length > 0;
+}
+
+export function hasAnySponsorContacts(sponsorContacts) {
+  return sponsorContacts.length > 0;
+}
+
+export function hasAnyCentralAdministrationContacts(contacts) {
+  return contacts.length > 0;
+}
+
 // Classifies an attachment's type from its MIME content type (preferred)
 // or filename extension (fallback), returning a short display label and
 // a stable category key the UI maps to an icon. Never fabricates a type

@@ -12,10 +12,13 @@ import {
   formatCurrencyAmount,
   formatEffortNote,
   hasAnyAttachments,
+  hasAnyCentralAdministrationContacts,
   hasAnyComments,
   hasAnyPeople,
+  hasAnySponsorContacts,
   hasAnyTerms,
   hasAnyTransmissions,
+  hasAnyUnitContacts,
   parseDownloadFilename,
   xmlDisplayText,
 } from "./awardSectionsPresentation.mjs";
@@ -105,6 +108,9 @@ test("empty-state helpers report empty when every list is empty", () => {
   assert.equal(hasAnyComments([], []), false);
   assert.equal(hasAnyTransmissions([]), false);
   assert.equal(hasAnyAttachments([]), false);
+  assert.equal(hasAnyUnitContacts([]), false);
+  assert.equal(hasAnySponsorContacts([]), false);
+  assert.equal(hasAnyCentralAdministrationContacts([]), false);
 });
 
 test("empty-state helpers report non-empty when any one list has rows", () => {
@@ -115,6 +121,9 @@ test("empty-state helpers report non-empty when any one list has rows", () => {
   assert.equal(hasAnyComments([], [{}]), true);
   assert.equal(hasAnyTransmissions([{}]), true);
   assert.equal(hasAnyAttachments([{}]), true);
+  assert.equal(hasAnyUnitContacts([{}]), true);
+  assert.equal(hasAnySponsorContacts([{}]), true);
+  assert.equal(hasAnyCentralAdministrationContacts([{}]), true);
 });
 
 test("classifies attachment type from MIME content type first", () => {
