@@ -705,7 +705,8 @@ public class AwardArchiveRepository {
                     award_effective_date,
                     source_update_timestamp AS update_timestamp,
                     workflow_document_number AS document_number,
-                    modification_number
+                    modification_number,
+                    is_primary_current AS primary_current
                 FROM archive.award_version
                 WHERE award_number = :awardNumber
                 ORDER BY

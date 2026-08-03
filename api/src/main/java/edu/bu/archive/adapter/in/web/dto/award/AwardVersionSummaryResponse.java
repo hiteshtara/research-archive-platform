@@ -26,6 +26,7 @@ public record AwardVersionSummaryResponse(
         LocalDate awardEffectiveDate,
         LocalDateTime updateTimestamp,
         String documentNumber,
-        String modificationNumber
+        String modificationNumber,
+        boolean primaryCurrent
 ) {
 }

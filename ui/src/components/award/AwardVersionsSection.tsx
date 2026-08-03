@@ -57,6 +57,7 @@ export function AwardVersionsSection({ awardId }: { awardId: number }) {
               <TableCell>Effective date</TableCell>
               <TableCell>Updated</TableCell>
               <TableCell>Document number</TableCell>
+              <TableCell>Current</TableCell>
             </TableRow>
           </TableHead>
 
@@ -72,7 +73,14 @@ export function AwardVersionsSection({ awardId }: { awardId: number }) {
                 <TableCell>{version.transactionType ?? "—"}</TableCell>
                 <TableCell>{version.awardEffectiveDate ?? "—"}</TableCell>
                 <TableCell>{version.updateTimestamp ?? "—"}</TableCell>
-                <TableCell>{version.documentNumber ?? "—"}</TableCell>
+                <TableCell sx={{ userSelect: "text" }}>
+                  {version.documentNumber ?? "—"}
+                </TableCell>
+                <TableCell>
+                  {version.primaryCurrent && (
+                    <Chip size="small" color="success" label="Current" />
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

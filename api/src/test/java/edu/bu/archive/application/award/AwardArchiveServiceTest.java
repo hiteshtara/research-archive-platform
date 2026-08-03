@@ -312,7 +312,7 @@ class AwardArchiveServiceTest {
         AwardVersionSummaryResponse version =
                 new AwardVersionSummaryResponse(
                         3L, "100004-00003", 1, "Approved Award",
-                        "12", "Converted Record", null, null, null, null
+                        "12", "Converted Record", null, null, null, null, true
                 );
         when(repository.findAwardNumberForId(3L))
                 .thenReturn(Optional.of("100004-00003"));

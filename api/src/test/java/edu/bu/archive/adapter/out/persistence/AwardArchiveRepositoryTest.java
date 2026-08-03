@@ -284,6 +284,7 @@ class AwardArchiveRepositoryTest {
                 .contains("sequence_number DESC")
                 .contains("workflow_document_number AS document_number")
                 .contains("modification_number")
+                .contains("is_primary_current AS primary_current")
                 .contains("LIMIT :limit OFFSET :offset");
         verify(statement).param("awardNumber", "100004-00001");
         verify(statement).param("limit", 50);

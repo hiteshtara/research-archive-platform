@@ -207,7 +207,7 @@ class AwardV1ControllerTest {
         AwardVersionSummaryResponse version =
                 new AwardVersionSummaryResponse(
                         3L, "100004-00003", 1, "Approved Award",
-                        "12", "Converted Record", null, null, null, null
+                        "12", "Converted Record", null, null, null, null, true
                 );
         PageResponse<AwardVersionSummaryResponse> page = new PageResponse<>(
                 List.of(version), 0, 50, 1L, 1, true, true

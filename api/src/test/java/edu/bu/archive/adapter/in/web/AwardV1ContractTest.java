@@ -190,14 +190,15 @@ class AwardV1ContractTest {
                         LocalDate.of(2007, 9, 15),
                         LocalDateTime.of(2015, 2, 11, 15, 26, 17),
                         "328797",
-                        null
+                        null,
+                        true
                 );
 
         assertFieldNames(version, Set.of(
                 "awardId", "awardNumber", "sequenceNumber", "status",
                 "transactionTypeCode", "transactionType",
                 "awardEffectiveDate", "updateTimestamp",
-                "documentNumber", "modificationNumber"
+                "documentNumber", "modificationNumber", "primaryCurrent"
         ));
 
         JsonNode node = objectMapper.valueToTree(version);

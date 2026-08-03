@@ -449,6 +449,7 @@ export interface AwardVersionV1 {
   updateTimestamp: string | null;
   documentNumber: string | null;
   modificationNumber: string | null;
+  primaryCurrent: boolean;
 }
 
 export interface AwardVersionPageResponse extends PageResponse<AwardVersionV1> {}
