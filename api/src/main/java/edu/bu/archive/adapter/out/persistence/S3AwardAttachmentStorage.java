@@ -29,17 +29,24 @@ public class S3AwardAttachmentStorage implements AwardAttachmentStorage {
             @Value("${ARCHIVE_DOCUMENTS_BUCKET:}")
             String documentsBucket
     ) {
+        if (documentsBucket.isBlank()) {
+            throw new IllegalStateException(
+                    "ARCHIVE_DOCUMENTS_BUCKET is not configured - this "
+                            + "bean only activates when "
+                            + "app.attachments.storage is unset or 's3' "
+                            + "(see S3AwardAttachmentStorage), so failing "
+                            + "here at startup - rather than on the first "
+                            + "download request - is what makes a "
+                            + "misconfigured deployment impossible instead "
+                            + "of a 500 a user finds by clicking Download."
+            );
+        }
         this.s3 = s3;
         this.documentsBucket = documentsBucket;
     }
 
     @Override
     public StoredObject open(AwardArchivedAttachment attachment) {
-        if (documentsBucket.isBlank()) {
-            throw new IllegalStateException(
-                    "ARCHIVE_DOCUMENTS_BUCKET is not configured"
-            );
-        }
         if (!documentsBucket.equals(attachment.s3Bucket())) {
             throw new NoSuchElementException(
                     "Archived attachment object not found"

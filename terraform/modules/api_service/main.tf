@@ -20,11 +20,21 @@ locals {
     replace(value, "/:[^:]+::$/", "")
   ])
 
-  base_environment = {
-    SPRING_PROFILES_ACTIVE = "aws"
-    COGNITO_ISSUER_URI     = var.cognito_issuer_uri
-    COGNITO_CLIENT_ID      = var.cognito_client_id
-  }
+  base_environment = merge(
+    {
+      SPRING_PROFILES_ACTIVE = "aws"
+      COGNITO_ISSUER_URI     = var.cognito_issuer_uri
+      COGNITO_CLIENT_ID      = var.cognito_client_id
+    },
+    # S3AwardAttachmentStorage/S3SubawardAttachmentStorage read this at
+    # request time and fail closed (IllegalStateException) without it -
+    # granting task-role IAM access via documents_bucket_arn alone does
+    # not supply this; both are required together for document
+    # downloads to actually work, not just be permitted.
+    var.documents_bucket_name == null ? {} : {
+      ARCHIVE_DOCUMENTS_BUCKET = var.documents_bucket_name
+    }
+  )
 
   container_environment = [
     for key, value in merge(local.base_environment, var.additional_environment_variables) :

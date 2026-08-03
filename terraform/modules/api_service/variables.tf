@@ -106,3 +106,9 @@ variable "documents_bucket_arn" {
   type        = string
   default     = null
 }
+
+variable "documents_bucket_name" {
+  description = "Name (not ARN) of the same S3 bucket as documents_bucket_arn, passed through as the container's ARCHIVE_DOCUMENTS_BUCKET environment variable - S3AwardAttachmentStorage/S3SubawardAttachmentStorage read this at request time to resolve GetObject calls; granting IAM access via documents_bucket_arn alone is not sufficient, the application also needs the bucket *name* to know which bucket to call. Should be set whenever documents_bucket_arn is - leave null only if the API genuinely serves no document downloads at all."
+  type        = string
+  default     = null
+}

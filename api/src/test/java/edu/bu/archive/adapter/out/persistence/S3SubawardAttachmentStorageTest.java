@@ -36,13 +36,11 @@ class S3SubawardAttachmentStorageTest {
     }
 
     @Test
-    void throwsWhenTheDocumentsBucketIsNotConfigured() {
-        S3SubawardAttachmentStorage storage =
-                new S3SubawardAttachmentStorage(s3, "");
-
-        assertThatThrownBy(() ->
-                storage.open(archivedAttachment("configured-bucket"))
-        )
+    void throwsAtConstructionWhenTheDocumentsBucketIsNotConfigured() {
+        // Fails at bean construction (application startup), not on the
+        // first download request - a misconfigured deployment should
+        // never start successfully in the first place.
+        assertThatThrownBy(() -> new S3SubawardAttachmentStorage(s3, ""))
                 .isInstanceOf(IllegalStateException.class);
     }
 

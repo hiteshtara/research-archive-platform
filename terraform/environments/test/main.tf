@@ -254,7 +254,8 @@ module "api_service" {
   alb_deletion_protection = var.alb_deletion_protection
   log_retention_days      = var.api_log_retention_days
 
-  documents_bucket_arn = module.archive_s3.documents_bucket_arn
+  documents_bucket_arn  = module.archive_s3.documents_bucket_arn
+  documents_bucket_name = module.archive_s3.documents_bucket_name
 
   additional_environment_variables = var.additional_api_environment_variables
 
