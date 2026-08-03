@@ -29,9 +29,21 @@ from sqlalchemy.engine import Connection, Engine
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.pipeline.validation import normalize_columns
 
-REFERENCE_SQL_DIR = (
-    Path(__file__).resolve().parents[2] / "sql" / "extract" / "reference"
-)
+
+def _resolve_project_root() -> Path:
+    """Mirrors load_awards_from_csv.py's own _resolve_project_root()
+    exactly: this file lives at <repo>/etl/archive_etl/reference_data.py
+    locally (project root two levels up), but is copied to
+    /app/archive_etl/reference_data.py in the ECS loader container
+    image, where sql/ is directly under /app (one level up) - see
+    etl/Dockerfile.loader."""
+    container_root = Path(__file__).resolve().parents[1]
+    if (container_root / "sql").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[2]
+
+
+REFERENCE_SQL_DIR = _resolve_project_root() / "sql" / "extract" / "reference"
 
 UNIT_ADMINISTRATOR_TYPE_SQL = REFERENCE_SQL_DIR / "01_unit_administrator_type.sql"
 UNIT_SQL = REFERENCE_SQL_DIR / "02_unit.sql"
