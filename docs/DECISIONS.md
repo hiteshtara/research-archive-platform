@@ -37,6 +37,23 @@ Terraform as dead infrastructure (zero
 code references anywhere); `landing/`/`validation/` were kept because IRB's
 export pipeline actively uses those prefix namespaces.
 
+## Award identifiers: workflow document number vs. modification number
+
+`AWARD.MODIFICATION_NUMBER` is not the Kuali workflow document number —
+an earlier investigation this project made that exact mistake and wired
+the API's `documentNumber` field to it. The real workflow document
+identifier is `AWARD.DOCUMENT_NUMBER`, the foreign key into
+`KREW_DOC_HDR_T.DOC_HDR_ID` (both `VARCHAR2(40)` on BU's real schema).
+Both fields are now archived separately (`workflow_document_number` and
+`modification_number` on `archive.award_version`) and both exposed
+separately by the API (`documentNumber` re-sourced to the real value,
+`modificationNumber` added for the old data) — see
+[`docs/architecture/AWARD_IDENTIFIER_MODEL.md`](architecture/AWARD_IDENTIFIER_MODEL.md)
+for the full identifier model (Award Number, Award ID, Sequence Number,
+Workflow Document Number, Modification Number, and the Time and Money
+`TRANSACTION_ID` naming collision) and migration
+`V055__add_award_workflow_document_number.sql`.
+
 ## Protocol Archive (rebuilt, Oracle-direct)
 
 The "not license to rebuild" note in the superseded section below has since
