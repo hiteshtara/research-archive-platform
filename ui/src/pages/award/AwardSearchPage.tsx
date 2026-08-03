@@ -141,23 +141,83 @@ export function AwardSearchPage() {
 
           {searchQuery.data && (
             <>
+              {searchQuery.data.exactDocumentMatch && (
+                <Card
+                  variant="outlined"
+                  sx={{
+                    mb: 2.5,
+                    cursor: "pointer",
+                    borderColor: "primary.main",
+                    borderWidth: 2,
+                    transition: "border-color .12s ease",
+                    "&:hover": { borderColor: "primary.dark" },
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() =>
+                    navigate(
+                      `/awards/${searchQuery.data.exactDocumentMatch!.awardId}`,
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(
+                        `/awards/${searchQuery.data.exactDocumentMatch!.awardId}`,
+                      );
+                    }
+                  }}
+                >
+                  <CardContent sx={{ "&:last-child": { pb: 2 } }}>
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      sx={{ alignItems: "center", mb: 0.5 }}
+                    >
+                      <Chip
+                        label="Exact document number match"
+                        color="primary"
+                        size="small"
+                      />
+                      <AwardStatusPill
+                        status={searchQuery.data.exactDocumentMatch.status}
+                      />
+                    </Stack>
+                    <Typography sx={{ fontWeight: 700 }}>
+                      {searchQuery.data.exactDocumentMatch.awardNumber} &middot;
+                      sequence{" "}
+                      {searchQuery.data.exactDocumentMatch.sequenceNumber}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Document {
+                        searchQuery.data.exactDocumentMatch
+                          .workflowDocumentNumber
+                      } &middot;{" "}
+                      {searchQuery.data.exactDocumentMatch.title ??
+                        "Untitled award"}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              )}
+
               <Typography
                 variant="overline"
                 color="text.secondary"
                 sx={{ display: "block", mb: 1.5 }}
               >
-                {searchQuery.data.totalElements.toLocaleString()} award
-                {searchQuery.data.totalElements === 1 ? "" : "s"} found
+                {searchQuery.data.results.totalElements.toLocaleString()} award
+                {searchQuery.data.results.totalElements === 1 ? "" : "s"} found
               </Typography>
 
-              {searchQuery.data.content.length === 0 && (
-                <Typography color="text.secondary" sx={{ py: 2 }}>
-                  No awards match &ldquo;{appliedQuery}&rdquo;.
-                </Typography>
-              )}
+              {searchQuery.data.results.content.length === 0 &&
+                !searchQuery.data.exactDocumentMatch && (
+                  <Typography color="text.secondary" sx={{ py: 2 }}>
+                    No awards match &ldquo;{appliedQuery}&rdquo;.
+                  </Typography>
+                )}
 
               <Stack spacing={1.25}>
-                {searchQuery.data.content.map((hit) => (
+                {searchQuery.data.results.content.map((hit) => (
                   <Card
                     key={hit.awardId}
                     variant="outlined"
@@ -235,10 +295,10 @@ export function AwardSearchPage() {
                 ))}
               </Stack>
 
-              {searchQuery.data.totalPages > 1 && (
+              {searchQuery.data.results.totalPages > 1 && (
                 <Stack sx={{ alignItems: "center", mt: 3 }}>
                   <Pagination
-                    count={searchQuery.data.totalPages}
+                    count={searchQuery.data.results.totalPages}
                     page={page + 1}
                     onChange={(_event, value) => setPage(value - 1)}
                   />

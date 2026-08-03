@@ -7,7 +7,9 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
@@ -59,7 +61,8 @@ class AwardV1ControllerTest {
         PageResponse<AwardSearchResultResponse> page = new PageResponse<>(
                 List.of(result), 1, 10, 1L, 1, false, true
         );
-        when(service.search("cancer", 1, 10)).thenReturn(page);
+        when(service.search("cancer", 1, 10))
+                .thenReturn(new AwardSearchResponse(null, page));
 
         mockMvc.perform(
                         get("/api/v1/awards/search")
@@ -68,10 +71,11 @@ class AwardV1ControllerTest {
                                 .param("size", "10")
                 )
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.page").value(1))
-                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.exactDocumentMatch").doesNotExist())
+                .andExpect(jsonPath("$.results.page").value(1))
+                .andExpect(jsonPath("$.results.size").value(10))
                 .andExpect(
-                        jsonPath("$.content[0].awardNumber")
+                        jsonPath("$.results.content[0].awardNumber")
                                 .value("100004-00003")
                 );
 
@@ -80,14 +84,47 @@ class AwardV1ControllerTest {
 
     @Test
     void searchDefaultsPageAndSizeWhenOmitted() throws Exception {
-        when(service.search(null, 0, 25)).thenReturn(
+        when(service.search(null, 0, 25)).thenReturn(new AwardSearchResponse(
+                null,
                 new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true)
-        );
+        ));
 
         mockMvc.perform(get("/api/v1/awards/search"))
                 .andExpect(status().isOk());
 
         verify(service).search(null, 0, 25);
+    }
+
+    @Test
+    void searchReturnsTheExactWorkflowDocumentMatchWhenPresent()
+            throws Exception {
+        AwardDocumentNumberMatchResponse match =
+                new AwardDocumentNumberMatchResponse(
+                        1135067L, "100567-00001", 6, "328797", "Award",
+                        "Title", "Approved Award"
+                );
+        when(service.search("328797", 0, 25)).thenReturn(
+                new AwardSearchResponse(
+                        match,
+                        new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true)
+                )
+        );
+
+        mockMvc.perform(
+                        get("/api/v1/awards/search").param("q", "328797")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exactDocumentMatch.awardId").value(1135067))
+                .andExpect(
+                        jsonPath("$.exactDocumentMatch.sequenceNumber")
+                                .value(6)
+                )
+                .andExpect(
+                        jsonPath("$.exactDocumentMatch.workflowDocumentNumber")
+                                .value("328797")
+                );
+
+        verify(service).search("328797", 0, 25);
     }
 
     @Test
@@ -170,7 +207,7 @@ class AwardV1ControllerTest {
         AwardVersionSummaryResponse version =
                 new AwardVersionSummaryResponse(
                         3L, "100004-00003", 1, "Approved Award",
-                        "12", "Converted Record", null, null, null
+                        "12", "Converted Record", null, null, null, null
                 );
         PageResponse<AwardVersionSummaryResponse> page = new PageResponse<>(
                 List.of(version), 0, 50, 1L, 1, true, true

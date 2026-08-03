@@ -19,7 +19,9 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
@@ -85,6 +87,31 @@ class AwardV1ContractTest {
                 "content", "page", "size", "totalElements",
                 "totalPages", "first", "last"
         ));
+    }
+
+    @Test
+    void exactDocumentMatchShapeIsStable() throws Exception {
+        AwardDocumentNumberMatchResponse match =
+                new AwardDocumentNumberMatchResponse(
+                        1135067L, "100567-00001", 6, "328797", "Award",
+                        "Title", "Approved Award"
+                );
+
+        assertFieldNames(match, Set.of(
+                "awardId", "awardNumber", "sequenceNumber",
+                "workflowDocumentNumber", "documentType", "title", "status"
+        ));
+    }
+
+    @Test
+    void searchResponseShapeIsStableAndWrapsThePageEnvelope()
+            throws Exception {
+        AwardSearchResponse response = new AwardSearchResponse(
+                null,
+                new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true)
+        );
+
+        assertFieldNames(response, Set.of("exactDocumentMatch", "results"));
     }
 
     @Test
@@ -162,6 +189,7 @@ class AwardV1ContractTest {
                         "12", "Converted Record",
                         LocalDate.of(2007, 9, 15),
                         LocalDateTime.of(2015, 2, 11, 15, 26, 17),
+                        "328797",
                         null
                 );
 
@@ -169,7 +197,7 @@ class AwardV1ContractTest {
                 "awardId", "awardNumber", "sequenceNumber", "status",
                 "transactionTypeCode", "transactionType",
                 "awardEffectiveDate", "updateTimestamp",
-                "documentNumber"
+                "documentNumber", "modificationNumber"
         ));
 
         JsonNode node = objectMapper.valueToTree(version);

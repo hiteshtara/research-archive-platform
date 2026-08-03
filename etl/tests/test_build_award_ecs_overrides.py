@@ -228,6 +228,14 @@ class ParseArgsTest(unittest.TestCase):
         args = parse_args(["--diff-award-versions", "100567-00001"])
         self.assertEqual(args.diff_award_versions, "100567-00001")
 
+    def test_parses_investigate_workflow_document_number(self) -> None:
+        args = parse_args(
+            ["--investigate-workflow-document-number", "100567-00001"]
+        )
+        self.assertEqual(
+            args.investigate_workflow_document_number, "100567-00001"
+        )
+
     def test_has_no_ecs_flag_since_ecs_is_always_included(self) -> None:
         # --ecs is unconditionally baked into build_container_command's
         # output (this loader is only ever invoked this way from

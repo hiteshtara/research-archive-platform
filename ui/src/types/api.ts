@@ -372,6 +372,26 @@ export interface AwardSearchHit {
 
 export interface AwardSearchPageResponse extends PageResponse<AwardSearchHit> {}
 
+// An exact match against a real workflow document number
+// (archive.award_version.workflow_document_number - the Kuali
+// KREW_DOC_HDR_T.DOC_HDR_ID-linked identifier), searched across every
+// archived version of every Award, not only the current one - so it can
+// identify a specific superseded sequence, not just the Award family.
+export interface AwardDocumentNumberMatchV1 {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  workflowDocumentNumber: string;
+  documentType: string | null;
+  title: string | null;
+  status: string | null;
+}
+
+export interface AwardSearchResponseV1 {
+  exactDocumentMatch: AwardDocumentNumberMatchV1 | null;
+  results: AwardSearchPageResponse;
+}
+
 export interface AwardHierarchyNode {
   awardNumber: string;
   awardId: number | null;
@@ -428,6 +448,7 @@ export interface AwardVersionV1 {
   awardEffectiveDate: string | null;
   updateTimestamp: string | null;
   documentNumber: string | null;
+  modificationNumber: string | null;
 }
 
 export interface AwardVersionPageResponse extends PageResponse<AwardVersionV1> {}

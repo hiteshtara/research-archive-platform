@@ -7,7 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
@@ -81,10 +81,10 @@ public class AwardV1Controller {
                     + "a stable, deterministic sort with no explicit "
                     + "sort parameter needed yet)."
     )
-    @ApiResponse(responseCode = "200", description = "A page of matching Awards.")
+    @ApiResponse(responseCode = "200", description = "A page of matching Awards, plus an exact workflow document-number match if the query matched one.")
     @ApiResponse(responseCode = "400", description = "page/size out of range.")
     @GetMapping("/search")
-    public ResponseEntity<PageResponse<AwardSearchResultResponse>> search(
+    public ResponseEntity<AwardSearchResponse> search(
             @Parameter(description = "Free-text query. Supports "
                     + "*wildcard* syntax. Omit or leave blank to list "
                     + "all current Awards, paginated.")

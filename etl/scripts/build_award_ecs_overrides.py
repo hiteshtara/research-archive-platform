@@ -52,6 +52,7 @@ def build_container_command(
     load_batch: int | None = None,
     show_batch: int | None = None,
     diff_award_versions: str | None = None,
+    investigate_workflow_document_number: str | None = None,
     dry_run: bool = False,
 ) -> list[str]:
     """--ecs is always included: this command is only ever used for the
@@ -79,6 +80,11 @@ def build_container_command(
         command.extend(["--show-batch", str(show_batch)])
     if diff_award_versions is not None:
         command.extend(["--diff-award-versions", diff_award_versions])
+    if investigate_workflow_document_number is not None:
+        command.extend([
+            "--investigate-workflow-document-number",
+            investigate_workflow_document_number,
+        ])
     if dry_run:
         command.append("--dry-run")
 
@@ -121,6 +127,7 @@ def build_run_task_overrides(
     load_batch: int | None = None,
     show_batch: int | None = None,
     diff_award_versions: str | None = None,
+    investigate_workflow_document_number: str | None = None,
     dry_run: bool = False,
     postgres_secret_id: str | None = None,
     oracle_secret_id: str | None = None,
@@ -138,6 +145,7 @@ def build_run_task_overrides(
             load_batch=load_batch,
             show_batch=show_batch,
             diff_award_versions=diff_award_versions,
+            investigate_workflow_document_number=investigate_workflow_document_number,
             dry_run=dry_run,
         ),
     }
@@ -164,6 +172,9 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--load-batch", type=int, default=None)
     parser.add_argument("--show-batch", type=int, default=None)
     parser.add_argument("--diff-award-versions", type=str, default=None)
+    parser.add_argument(
+        "--investigate-workflow-document-number", type=str, default=None
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--postgres-secret-id", type=str, default=None)
     parser.add_argument("--oracle-secret-id", type=str, default=None)
@@ -183,6 +194,7 @@ def main() -> None:
         load_batch=args.load_batch,
         show_batch=args.show_batch,
         diff_award_versions=args.diff_award_versions,
+        investigate_workflow_document_number=args.investigate_workflow_document_number,
         dry_run=args.dry_run,
         postgres_secret_id=args.postgres_secret_id,
         oracle_secret_id=args.oracle_secret_id,

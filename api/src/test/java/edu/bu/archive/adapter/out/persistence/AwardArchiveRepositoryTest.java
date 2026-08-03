@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
@@ -281,7 +282,8 @@ class AwardArchiveRepositoryTest {
                 .contains("award_number = :awardNumber")
                 .contains("ORDER BY")
                 .contains("sequence_number DESC")
-                .contains("modification_number AS document_number")
+                .contains("workflow_document_number AS document_number")
+                .contains("modification_number")
                 .contains("LIMIT :limit OFFSET :offset");
         verify(statement).param("awardNumber", "100004-00001");
         verify(statement).param("limit", 50);
@@ -311,6 +313,51 @@ class AwardArchiveRepositoryTest {
                 .contains("SELECT COUNT(*)")
                 .contains("FROM archive.award_version")
                 .contains("award_number = :awardNumber");
+    }
+
+    @Test
+    void findExactWorkflowDocumentMatchQueriesAllVersionsNotJustCurrent() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardDocumentNumberMatchResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        AwardDocumentNumberMatchResponse expected =
+                new AwardDocumentNumberMatchResponse(
+                        1135067L, "100567-00001", 6, "328797", "Award",
+                        "Title", "Approved Award"
+                );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("rawQuery", "328797")).thenReturn(statement);
+        when(statement.query(AwardDocumentNumberMatchResponse.class))
+                .thenReturn(query);
+        when(query.optional()).thenReturn(Optional.of(expected));
+
+        Optional<AwardDocumentNumberMatchResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findExactWorkflowDocumentMatch("328797");
+
+        assertThat(result).contains(expected);
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_version")
+                .contains("workflow_document_number = :rawQuery")
+                .doesNotContain("is_primary_current")
+                .contains("ORDER BY sequence_number DESC")
+                .contains("LIMIT 1");
+    }
+
+    @Test
+    void findExactWorkflowDocumentMatchReturnsEmptyForBlankQuery() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+
+        Optional<AwardDocumentNumberMatchResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findExactWorkflowDocumentMatch("  ");
+
+        assertThat(result).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
     }
 
     private String firstSql(JdbcClient jdbc) {

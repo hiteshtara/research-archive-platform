@@ -188,6 +188,7 @@ def _version_row(**overrides: object) -> dict:
         "method_of_payment_code": "02",
         "method_of_payment_description": "Letter of Credit",
         "modification_number": None,
+        "document_number": None,
         "update_timestamp": "2025-01-01 00:00:00",
         "update_user": "kcuser",
         "is_current_version": True,
@@ -5692,6 +5693,105 @@ class RunLoadAwardIdTest(_AwardPostgresTestCase):
         self.assertFalse(hasattr(award_loader, "create_s3_client"))
 
 
+class AwardVersionWorkflowDocumentNumberTest(_AwardPostgresTestCase):
+    """Regression coverage for the Kuali workflow document number
+    (KCOEUS.AWARD.DOCUMENT_NUMBER -> KREW_DOC_HDR_T.DOC_HDR_ID), added
+    after investigation proved modification_number is a separate,
+    often-NULL business field, NOT the identifier users mean by "the
+    document number" - see V055's migration header and
+    docs/DECISIONS.md for the full investigation. Fixture values below
+    are the exact real result of a live --investigate-workflow-document-
+    number run against BU's Oracle for award_number=100567-00001 - not
+    synthesized."""
+
+    AWARD_NUMBER = "100567-00001"
+    # (award_id, sequence_number, workflow_document_number)
+    REAL_SEQUENCES = [
+        (511, 1, "511"),
+        (115975, 2, "110249"),
+        (117767, 3, "110655"),
+        (508634, 4, "209160"),
+        (686179, 5, "245520"),
+        (1135067, 6, "328797"),
+    ]
+
+    def _real_version_rows(self) -> list[dict]:
+        return [
+            _version_row(
+                award_id=award_id,
+                award_number=self.AWARD_NUMBER,
+                sequence_number=sequence_number,
+                modification_number=None,
+                document_number=workflow_document_number,
+            )
+            for award_id, sequence_number, workflow_document_number in self.REAL_SEQUENCES
+        ]
+
+    def test_real_award_100567_00001_workflow_document_numbers_are_archived_exactly(
+        self,
+    ) -> None:
+        with self._patched_oracle(versions=self._real_version_rows()):
+            report = award_loader._run_load_award_id(self.engine, 1135067)
+
+        self.assertEqual(report["family_size"], 6)
+        self.assertEqual(report["inserted"], 6)
+
+        for award_id, _sequence_number, workflow_document_number in self.REAL_SEQUENCES:
+            row = self._row("award_version", award_id=award_id)
+            self.assertEqual(
+                row["workflow_document_number"], workflow_document_number
+            )
+            # modification_number is a separate, genuinely-NULL field for
+            # this real award - proves the two columns are never conflated.
+            self.assertIsNone(row["modification_number"])
+
+    def test_reload_with_no_oracle_changes_is_unchanged(self) -> None:
+        with self._patched_oracle(versions=self._real_version_rows()):
+            award_loader._run_load_award_id(self.engine, 1135067)
+
+        with self._patched_oracle(versions=self._real_version_rows()):
+            report = award_loader._run_load_award_id(self.engine, 1135067)
+
+        self.assertEqual(report["inserted"], 0)
+        self.assertEqual(report["updated"], 0)
+        self.assertEqual(report["unchanged"], 6)
+
+    def test_workflow_document_number_change_produces_an_update(self) -> None:
+        with self._patched_oracle(versions=self._real_version_rows()):
+            award_loader._run_load_award_id(self.engine, 1135067)
+
+        amended_rows = self._real_version_rows()
+        amended_rows[-1]["document_number"] = "999999"
+        with self._patched_oracle(versions=amended_rows):
+            report = award_loader._run_load_award_id(self.engine, 1135067)
+
+        self.assertEqual(report["updated"], 1)
+        self.assertEqual(report["unchanged"], 5)
+        row = self._row("award_version", award_id=1135067)
+        self.assertEqual(row["workflow_document_number"], "999999")
+
+    def test_does_not_cast_workflow_document_number_to_numeric(self) -> None:
+        # A workflow document number that happens to look numeric must
+        # still be archived as text (VARCHAR), matching Oracle's own
+        # VARCHAR2(40) column - never coerced to an integer/numeric type
+        # anywhere in the pipeline.
+        with self._patched_oracle(
+            versions=[
+                _version_row(
+                    award_id=1135067,
+                    award_number=self.AWARD_NUMBER,
+                    sequence_number=6,
+                    document_number="328797",
+                )
+            ]
+        ):
+            award_loader._run_load_award_id(self.engine, 1135067)
+
+        row = self._row("award_version", award_id=1135067)
+        self.assertIsInstance(row["workflow_document_number"], str)
+        self.assertEqual(row["workflow_document_number"], "328797")
+
+
 # --- Batch framework integration -----------------------------------------
 
 
@@ -7895,11 +7995,13 @@ class RunEcsSetupOrchestrationTest(unittest.TestCase):
         migrate_only: bool,
         show_batch: int | None = None,
         diff_award_versions: str | None = None,
+        investigate_workflow_document_number: str | None = None,
     ) -> dict:
         arguments = MagicMock(
             migrate_only=migrate_only,
             show_batch=show_batch,
             diff_award_versions=diff_award_versions,
+            investigate_workflow_document_number=investigate_workflow_document_number,
         )
         calls: list[str] = []
 
@@ -8148,6 +8250,7 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 diff_award_versions=None,
+                investigate_workflow_document_number=None,
                 dry_run=False,
                 ecs=False,
                 migrate_only=False,
@@ -8356,6 +8459,7 @@ class MainDispatchTest(unittest.TestCase):
                 load_batch=None,
                 show_batch=None,
                 diff_award_versions=None,
+                investigate_workflow_document_number=None,
                 dry_run=False,
                 ecs=False,
                 migrate_only=False,

@@ -333,7 +333,7 @@ export function searchAwardsV1(
     size?: number;
   } = {},
   signal?: AbortSignal,
-): Promise<import("../types/api").AwardSearchPageResponse> {
+): Promise<import("../types/api").AwardSearchResponseV1> {
   const searchParameters = new URLSearchParams({
     page: String(parameters.page ?? 0),
     size: String(parameters.size ?? 25),

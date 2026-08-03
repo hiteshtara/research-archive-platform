@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
@@ -25,6 +26,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildResponse
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceResponse;
@@ -370,7 +372,7 @@ public class AwardArchiveService {
         );
     }
 
-    public PageResponse<AwardSearchResultResponse> search(
+    public AwardSearchResponse search(
             String query,
             int page,
             int size
@@ -401,7 +403,17 @@ public class AwardArchiveService {
                         offset
                 );
 
-        return new PageResponse<>(
+        // Additive, unrelated to the family-level results above (never
+        // scoped to is_primary_current) - an exact match against a real
+        // workflow document number ranks ahead of any title/sponsor/etc
+        // substring match by construction, since the frontend renders
+        // exactDocumentMatch before results.content rather than merging
+        // the two into one ordered list.
+        AwardDocumentNumberMatchResponse exactDocumentMatch =
+                repository.findExactWorkflowDocumentMatch(rawQuery)
+                        .orElse(null);
+
+        PageResponse<AwardSearchResultResponse> results = new PageResponse<>(
                 content,
                 safePage,
                 safeSize,
@@ -410,6 +422,8 @@ public class AwardArchiveService {
                 pageMetadata.first(),
                 pageMetadata.last()
         );
+
+        return new AwardSearchResponse(exactDocumentMatch, results);
     }
 
     /*

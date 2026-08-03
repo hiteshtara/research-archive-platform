@@ -121,6 +121,18 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 ),
             },
         ),
+        (
+            "--investigate-workflow-document-number",
+            {
+                "type": str,
+                "default": None,
+                "metavar": "AWARD_NUMBER",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--investigate-workflow-document-number."
+                ),
+            },
+        ),
     ],
     "award-attachment": [
         (

@@ -2209,6 +2209,18 @@ def load_dataframe(
 
             "active":
                 "active_flag",
+
+            # AWARD.DOCUMENT_NUMBER (post-normalize_columns:
+            # document_number) is the real Kuali workflow document
+            # number - KREW_DOC_HDR_T.DOC_HDR_ID - renamed the same way
+            # _CHILD_COLUMN_RENAMES does for the incremental
+            # (--load-award-id/--load-batch) path, so the full load and
+            # incremental load never diverge on this column. A no-op for
+            # every other table load_dataframe() is called for (only
+            # award_version's own call site passes "document_number" in
+            # its columns list).
+            "document_number":
+                "workflow_document_number",
         }
     )
 
@@ -2650,8 +2662,167 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
         ).info("Award/Oracle version diff complete")
         return True
 
+    if arguments.investigate_workflow_document_number is not None:
+        _run_investigate_workflow_document_number(
+            arguments.investigate_workflow_document_number
+        )
+        logger.bind(
+            stage="startup",
+            status="investigate_workflow_document_number_complete",
+        ).info("Workflow document number investigation complete")
+        return True
+
     logger.bind(stage="startup").info("Startup validation passed")
     return False
+
+
+# Schema investigation only - confirms whether AWARD.DOCUMENT_NUMBER and
+# KREW_DOC_HDR_T/KREW_DOC_TYP_T exist, are reachable, and have the exact
+# column names/datatypes a prior local checkout of the open-source Kuali
+# Research schema (coeus-db-sql's V300_002__schema.sql/V300_107__schema.sql)
+# suggests, before writing any extraction SQL, migration, or DTO change
+# against them. That open-source schema is strong evidence but is not by
+# itself proof of BU's actual deployed schema - see this function's own
+# report output for what it directly confirmed against BU's real Oracle.
+_WORKFLOW_DOCUMENT_INTROSPECTION_SQL = """
+    SELECT table_name, column_name, data_type, data_length, nullable
+    FROM all_tab_columns
+    WHERE table_name IN ('AWARD', 'KREW_DOC_HDR_T', 'KREW_DOC_TYP_T')
+      AND column_name IN (
+          'DOCUMENT_NUMBER', 'MODIFICATION_NUMBER', 'AWARD_ID',
+          'AWARD_NUMBER', 'SEQUENCE_NUMBER',
+          'DOC_HDR_ID', 'DOC_TYP_ID', 'DOC_HDR_STAT_CD', 'APP_DOC_ID',
+          'TTL', 'CRTE_DT', 'FNL_DT', 'INITR_PRNCPL_ID',
+          'DOC_TYP_NM'
+      )
+    ORDER BY table_name, column_name
+"""
+
+_WORKFLOW_DOCUMENT_JOIN_SQL = """
+    SELECT
+        a.award_id,
+        a.award_number,
+        a.sequence_number,
+        a.document_number AS award_document_reference,
+        h.doc_hdr_id       AS workflow_document_number,
+        t.doc_typ_nm,
+        h.doc_hdr_stat_cd,
+        h.app_doc_id,
+        h.ttl,
+        h.crte_dt,
+        h.fnl_dt,
+        h.initr_prncpl_id
+    FROM award a
+    LEFT JOIN krew_doc_hdr_t h
+        ON TO_CHAR(h.doc_hdr_id) = a.document_number
+    LEFT JOIN krew_doc_typ_t t
+        ON t.doc_typ_id = h.doc_typ_id
+    WHERE a.award_number = :award_number
+    ORDER BY a.sequence_number
+"""
+
+
+def _run_investigate_workflow_document_number(award_number: str) -> dict[str, Any]:
+    """--investigate-workflow-document-number: read-only Oracle schema
+    investigation, NOT a production feature and NOT yet wired to
+    PostgreSQL/the archive in any way. Confirms (1) whether
+    AWARD.DOCUMENT_NUMBER, KREW_DOC_HDR_T, and KREW_DOC_TYP_T actually
+    exist and are reachable from this Oracle connection, with their real
+    column names/datatypes, and (2), if so, runs the proposed
+    AWARD.DOCUMENT_NUMBER -> KREW_DOC_HDR_T.DOC_HDR_ID join for exactly
+    one award_number family, reporting per-sequence whether a workflow
+    document header was found. Uses TO_CHAR(h.doc_hdr_id) = a.document_number
+    (not TO_NUMBER(a.document_number) = h.doc_hdr_id) deliberately: Oracle
+    would raise ORA-01722 for the whole query if even one document_number
+    value were ever non-numeric, whereas TO_CHAR on the NUMBER side can
+    never fail. Never writes anything, to Oracle or PostgreSQL."""
+    investigate_logger = logger.bind(
+        stage="investigate_workflow_document_number",
+        award_number=award_number,
+    )
+
+    connection = _connect_oracle()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(_WORKFLOW_DOCUMENT_INTROSPECTION_SQL)
+            columns_found = cursor.fetchall()
+
+        print("=== Schema introspection (all_tab_columns) ===")
+        print(f"{'TABLE_NAME':<20}{'COLUMN_NAME':<20}{'DATA_TYPE':<15}{'LENGTH':>8}  NULLABLE")
+        for table_name, column_name, data_type, data_length, nullable in columns_found:
+            print(
+                f"{table_name:<20}{column_name:<20}{data_type:<15}"
+                f"{data_length:>8}  {nullable}"
+            )
+
+        found_tables = {row[0] for row in columns_found}
+        missing_tables = {"AWARD", "KREW_DOC_HDR_T", "KREW_DOC_TYP_T"} - found_tables
+        if missing_tables:
+            print(
+                f"\nWARNING: no columns visible at all for: {sorted(missing_tables)} "
+                "- either these tables don't exist under these exact names in "
+                "BU's schema, or this Oracle user has no SELECT grant on them."
+            )
+            investigate_logger.info(
+                "Schema introspection incomplete - missing/inaccessible tables: {}",
+                sorted(missing_tables),
+            )
+            return {
+                "award_number": award_number,
+                "columns_found": [
+                    {
+                        "table_name": row[0],
+                        "column_name": row[1],
+                        "data_type": row[2],
+                    }
+                    for row in columns_found
+                ],
+                "missing_tables": sorted(missing_tables),
+                "rows": [],
+            }
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                _WORKFLOW_DOCUMENT_JOIN_SQL, {"award_number": award_number}
+            )
+            join_columns = [d[0].lower() for d in cursor.description]
+            join_rows = cursor.fetchall()
+
+        print(f"\n=== Workflow document join for award_number={award_number} ===")
+        print("  ".join(join_columns))
+        report_rows = []
+        for row in join_rows:
+            row_dict = dict(zip(join_columns, row, strict=True))
+            print(row_dict)
+            report_rows.append(row_dict)
+
+        has_workflow_doc = sum(
+            1 for row in report_rows if row.get("workflow_document_number") is not None
+        )
+        investigate_logger.info(
+            "award_number={}: {} sequence(s), {} with a matched workflow "
+            "document header, {} without",
+            award_number,
+            len(report_rows),
+            has_workflow_doc,
+            len(report_rows) - has_workflow_doc,
+        )
+
+        return {
+            "award_number": award_number,
+            "columns_found": [
+                {
+                    "table_name": row[0],
+                    "column_name": row[1],
+                    "data_type": row[2],
+                }
+                for row in columns_found
+            ],
+            "missing_tables": [],
+            "rows": report_rows,
+        }
+    finally:
+        connection.close()
 
 
 def _run_diff_award_versions(
@@ -2816,6 +2987,7 @@ _AWARD_VERSION_COLUMNS = [
     "method_of_payment_code",
     "method_of_payment_description",
     "modification_number",
+    "workflow_document_number",
     "source_update_timestamp",
     "source_update_user",
     "is_current_version",
@@ -3594,6 +3766,12 @@ _CHILD_COLUMN_RENAMES = {
     "create_timestamp": "source_create_timestamp",
     "create_user": "source_create_user",
     "multiple": "multiple_flag",
+    # AWARD.DOCUMENT_NUMBER (post-normalize_columns: document_number) is
+    # the real Kuali workflow document number - KREW_DOC_HDR_T.DOC_HDR_ID
+    # - renamed on the way into the archive to avoid any reader assuming
+    # it's the same thing as the separate, often-NULL modification_number
+    # column (see V055's migration header for the full investigation).
+    "document_number": "workflow_document_number",
 }
 
 
@@ -3760,7 +3938,7 @@ def upsert_award_version(
                 transaction_type_code, transaction_type,
                 basis_of_payment_code, basis_of_payment_description,
                 method_of_payment_code, method_of_payment_description,
-                modification_number,
+                modification_number, workflow_document_number,
                 source_update_timestamp, source_update_user,
                 is_current_version, is_primary_current, load_id
             ) VALUES (
@@ -3773,7 +3951,8 @@ def upsert_award_version(
                 :closeout_date, :transaction_type_code, :transaction_type,
                 :basis_of_payment_code, :basis_of_payment_description,
                 :method_of_payment_code, :method_of_payment_description,
-                :modification_number, :source_update_timestamp,
+                :modification_number, :workflow_document_number,
+                :source_update_timestamp,
                 :source_update_user, :is_current_version, :is_primary_current,
                 :load_id
             )
@@ -3806,6 +3985,7 @@ def upsert_award_version(
                 method_of_payment_description =
                     EXCLUDED.method_of_payment_description,
                 modification_number = EXCLUDED.modification_number,
+                workflow_document_number = EXCLUDED.workflow_document_number,
                 source_update_timestamp = EXCLUDED.source_update_timestamp,
                 source_update_user = EXCLUDED.source_update_user,
                 is_current_version = EXCLUDED.is_current_version,
@@ -3864,6 +4044,8 @@ def upsert_award_version(
                     IS DISTINCT FROM EXCLUDED.method_of_payment_description
                 OR archive.award_version.modification_number
                     IS DISTINCT FROM EXCLUDED.modification_number
+                OR archive.award_version.workflow_document_number
+                    IS DISTINCT FROM EXCLUDED.workflow_document_number
                 OR archive.award_version.source_update_timestamp
                     IS DISTINCT FROM EXCLUDED.source_update_timestamp
                 OR archive.award_version.source_update_user
@@ -10315,6 +10497,22 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--investigate-workflow-document-number",
+        type=str,
+        default=None,
+        metavar="AWARD_NUMBER",
+        help=(
+            "Schema-investigation aid, NOT a production feature and NOT "
+            "yet wired to PostgreSQL/the archive: confirms whether "
+            "AWARD.DOCUMENT_NUMBER, KREW_DOC_HDR_T, and KREW_DOC_TYP_T "
+            "exist and are reachable (with their real column names/"
+            "datatypes) in BU's actual Oracle schema, then - only if so "
+            "- runs the proposed AWARD.DOCUMENT_NUMBER -> "
+            "KREW_DOC_HDR_T.DOC_HDR_ID join for exactly this "
+            "award_number family. Never writes anything."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -10418,6 +10616,15 @@ def main() -> None:
     if arguments.diff_award_versions is not None and not arguments.ecs:
         engine = create_postgres_engine()
         _run_diff_award_versions(engine, arguments.diff_award_versions)
+        return
+
+    if (
+        arguments.investigate_workflow_document_number is not None
+        and not arguments.ecs
+    ):
+        _run_investigate_workflow_document_number(
+            arguments.investigate_workflow_document_number
+        )
         return
 
     if arguments.load_award_id is not None:
@@ -10546,6 +10753,7 @@ def main() -> None:
                     "method_of_payment_code",
                     "method_of_payment_description",
                     "modification_number",
+                    "document_number",
                     "update_timestamp",
                     "update_user",
                     "is_current_version",

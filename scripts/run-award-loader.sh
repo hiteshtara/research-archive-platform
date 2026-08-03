@@ -138,6 +138,7 @@ CREATE_BATCH=""
 LOAD_BATCH=""
 SHOW_BATCH=""
 DIFF_AWARD_VERSIONS=""
+INVESTIGATE_WORKFLOW_DOCUMENT_NUMBER=""
 DRY_RUN=false
 IMAGE_URI_OVERRIDE=""
 
@@ -149,6 +150,7 @@ while [[ $# -gt 0 ]]; do
     --load-batch) LOAD_BATCH="$2"; shift 2 ;;
     --show-batch) SHOW_BATCH="$2"; shift 2 ;;
     --diff-award-versions) DIFF_AWARD_VERSIONS="$2"; shift 2 ;;
+    --investigate-workflow-document-number) INVESTIGATE_WORKFLOW_DOCUMENT_NUMBER="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
@@ -210,6 +212,25 @@ if [[ -n "$DIFF_AWARD_VERSIONS" ]]; then
   fi
   if [[ "$MIGRATE_ONLY" == true ]]; then
     echo "ERROR: --diff-award-versions cannot be combined with --migrate-only" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$INVESTIGATE_WORKFLOW_DOCUMENT_NUMBER" ]]; then
+  if [[ "${#ACTIVE_BATCH_VERBS[@]}" -gt 0 ]]; then
+    echo "ERROR: --investigate-workflow-document-number cannot be combined with ${ACTIVE_BATCH_VERBS[0]}" >&2
+    exit 1
+  fi
+  if [[ -n "$LOAD_AWARD_ID" ]]; then
+    echo "ERROR: --investigate-workflow-document-number cannot be combined with --load-award-id" >&2
+    exit 1
+  fi
+  if [[ -n "$DIFF_AWARD_VERSIONS" ]]; then
+    echo "ERROR: --investigate-workflow-document-number cannot be combined with --diff-award-versions" >&2
+    exit 1
+  fi
+  if [[ "$MIGRATE_ONLY" == true ]]; then
+    echo "ERROR: --investigate-workflow-document-number cannot be combined with --migrate-only" >&2
     exit 1
   fi
 fi
@@ -319,6 +340,7 @@ OVERRIDE_ARGS=()
 [[ -n "$LOAD_BATCH" ]] && OVERRIDE_ARGS+=(--load-batch "$LOAD_BATCH")
 [[ -n "$SHOW_BATCH" ]] && OVERRIDE_ARGS+=(--show-batch "$SHOW_BATCH")
 [[ -n "$DIFF_AWARD_VERSIONS" ]] && OVERRIDE_ARGS+=(--diff-award-versions "$DIFF_AWARD_VERSIONS")
+[[ -n "$INVESTIGATE_WORKFLOW_DOCUMENT_NUMBER" ]] && OVERRIDE_ARGS+=(--investigate-workflow-document-number "$INVESTIGATE_WORKFLOW_DOCUMENT_NUMBER")
 [[ "$DRY_RUN" == true ]] && OVERRIDE_ARGS+=(--dry-run)
 
 # Non-secret configuration only - identifiers and connection routing

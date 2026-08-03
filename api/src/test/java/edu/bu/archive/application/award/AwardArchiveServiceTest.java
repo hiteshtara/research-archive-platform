@@ -3,7 +3,9 @@ package edu.bu.archive.application.award;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
@@ -51,9 +53,11 @@ class AwardArchiveServiceTest {
                 .thenReturn(205L);
         when(repository.searchAwards("%cancer%", "cancer", 100, 0))
                 .thenReturn(List.of(result));
+        when(repository.findExactWorkflowDocumentMatch("cancer"))
+                .thenReturn(Optional.empty());
 
-        PageResponse<AwardSearchResultResponse> page =
-                service.search("cancer", -1, 500);
+        AwardSearchResponse response = service.search("cancer", -1, 500);
+        PageResponse<AwardSearchResultResponse> page = response.results();
 
         assertThat(page.content()).containsExactly(result);
         assertThat(page.page()).isZero();
@@ -62,6 +66,7 @@ class AwardArchiveServiceTest {
         assertThat(page.totalPages()).isEqualTo(3);
         assertThat(page.first()).isTrue();
         assertThat(page.last()).isFalse();
+        assertThat(response.exactDocumentMatch()).isNull();
         verify(repository).searchAwards("%cancer%", "cancer", 100, 0);
     }
 
@@ -70,11 +75,12 @@ class AwardArchiveServiceTest {
         when(repository.countSearchAwards("%%", "")).thenReturn(0L);
         when(repository.searchAwards("%%", "", 25, 0))
                 .thenReturn(List.of());
+        when(repository.findExactWorkflowDocumentMatch(""))
+                .thenReturn(Optional.empty());
 
-        PageResponse<AwardSearchResultResponse> page =
-                service.search(null, 0, 25);
+        AwardSearchResponse response = service.search(null, 0, 25);
 
-        assertThat(page.content()).isEmpty();
+        assertThat(response.results().content()).isEmpty();
         verify(repository).searchAwards("%%", "", 25, 0);
     }
 
@@ -84,10 +90,36 @@ class AwardArchiveServiceTest {
                 .thenReturn(0L);
         when(repository.searchAwards("%105698%", "*105698*", 25, 0))
                 .thenReturn(List.of());
+        when(repository.findExactWorkflowDocumentMatch("*105698*"))
+                .thenReturn(Optional.empty());
 
         service.search("*105698*", 0, 25);
 
         verify(repository).searchAwards("%105698%", "*105698*", 25, 0);
+    }
+
+    @Test
+    void searchSurfacesAnExactWorkflowDocumentNumberMatch() {
+        AwardDocumentNumberMatchResponse match =
+                new AwardDocumentNumberMatchResponse(
+                        1135067L, "100567-00001", 6, "328797", "Award",
+                        "Title", "Approved Award"
+                );
+        when(repository.countSearchAwards("%328797%", "328797"))
+                .thenReturn(0L);
+        when(repository.searchAwards("%328797%", "328797", 25, 0))
+                .thenReturn(List.of());
+        when(repository.findExactWorkflowDocumentMatch("328797"))
+                .thenReturn(Optional.of(match));
+
+        AwardSearchResponse response = service.search("328797", 0, 25);
+
+        assertThat(response.exactDocumentMatch()).isEqualTo(match);
+        assertThat(response.exactDocumentMatch().awardId())
+                .isEqualTo(1135067L);
+        assertThat(response.exactDocumentMatch().sequenceNumber())
+                .isEqualTo(6);
+        assertThat(response.results().content()).isEmpty();
     }
 
     @Test
@@ -280,7 +312,7 @@ class AwardArchiveServiceTest {
         AwardVersionSummaryResponse version =
                 new AwardVersionSummaryResponse(
                         3L, "100004-00003", 1, "Approved Award",
-                        "12", "Converted Record", null, null, null
+                        "12", "Converted Record", null, null, null, null
                 );
         when(repository.findAwardNumberForId(3L))
                 .thenReturn(Optional.of("100004-00003"));

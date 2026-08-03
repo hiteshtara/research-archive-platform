@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
@@ -703,7 +704,8 @@ public class AwardArchiveRepository {
                     transaction_type,
                     award_effective_date,
                     source_update_timestamp AS update_timestamp,
-                    modification_number AS document_number
+                    workflow_document_number AS document_number,
+                    modification_number
                 FROM archive.award_version
                 WHERE award_number = :awardNumber
                 ORDER BY
@@ -730,6 +732,49 @@ public class AwardArchiveRepository {
                 .single();
 
         return count == null ? 0L : count;
+    }
+
+    /*
+     * Exact match only (never ILIKE/substring - a workflow document
+     * number is an identifier, not free text) against
+     * workflow_document_number across every archived Award version -
+     * deliberately NOT scoped to is_primary_current, unlike
+     * searchAwards/countSearchAwards above, since a workflow document
+     * can belong to a superseded (non-current) sequence and must still
+     * be findable. documentType is a fixed 'Award' literal for this
+     * phase rather than a join to KREW_DOC_TYP_T.DOC_TYP_NM - that join
+     * needs KREW_DOC_HDR_T/KREW_DOC_TYP_T archived first, which this
+     * phase deliberately defers (see docs/DECISIONS.md) rather than
+     * building a generalized workflow-document archive just for this.
+     * blank/empty query never matches (workflow_document_number is
+     * never blank for a real row, but an equality check against '' is
+     * cheap insurance against a wasted index lookup on every keystroke
+     * of an empty search box).
+     */
+    public Optional<AwardDocumentNumberMatchResponse> findExactWorkflowDocumentMatch(
+            String rawQuery
+    ) {
+        if (rawQuery == null || rawQuery.isBlank()) {
+            return Optional.empty();
+        }
+
+        return jdbc.sql("""
+                SELECT
+                    award_id,
+                    award_number,
+                    sequence_number,
+                    workflow_document_number,
+                    'Award' AS document_type,
+                    title,
+                    status_description AS status
+                FROM archive.award_version
+                WHERE workflow_document_number = :rawQuery
+                ORDER BY sequence_number DESC
+                LIMIT 1
+                """)
+                .param("rawQuery", rawQuery)
+                .query(AwardDocumentNumberMatchResponse.class)
+                .optional();
     }
 
     /*
