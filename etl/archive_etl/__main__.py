@@ -421,6 +421,16 @@ def _run_check(domain: str | None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # "explore" has its own resource-specific subparsers (--award-number
+    # vs --unit-number vs ...), a different shape than every other
+    # command's flat --flag forwarding - handled entirely by its own
+    # module rather than shoehorned into build_parser()/_run_domain().
+    raw_argv = sys.argv[1:] if argv is None else argv
+    if raw_argv[:1] == ["explore"]:
+        from archive_etl.explorer import main as explore_main
+
+        return explore_main(raw_argv[1:])
+
     args = build_parser().parse_args(argv)
 
     if args.command == "check":

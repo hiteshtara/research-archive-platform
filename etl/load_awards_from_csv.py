@@ -25,6 +25,7 @@ from archive_etl.config.startup_validation import (
     validate_table_exists,
 )
 from archive_etl.pipeline.sources import OracleDataSource
+from archive_etl.reference_data import run_load_unit_reference_data
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
@@ -10513,6 +10514,21 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--load-unit-reference-data",
+        action="store_true",
+        help=(
+            "Loads the shared reference-data entities backing Award "
+            "Contacts (archive.unit, unit_administrator, "
+            "unit_administrator_type, rolodex, person) - full loads for "
+            "the first four (each small/bounded on BU's real Oracle: "
+            "~5.1K/~1K/11/~12.5K rows), a targeted Rice-KIM read for "
+            "person (scoped to person_ids already referenced by "
+            "unit_administrator/award_unit_contact, never a full scan). "
+            "Idempotent - combine with --dry-run to roll back. See "
+            "docs/architecture/AWARD_CONTACTS_DESIGN.md."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -10625,6 +10641,13 @@ def main() -> None:
         _run_investigate_workflow_document_number(
             arguments.investigate_workflow_document_number
         )
+        return
+
+    if arguments.load_unit_reference_data:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        run_load_unit_reference_data(engine, dry_run=arguments.dry_run)
         return
 
     if arguments.load_award_id is not None:

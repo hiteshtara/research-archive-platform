@@ -622,3 +622,21 @@ def test_main_dispatches_a_domain() -> None:
     assert called_domain == "award"
     assert called_args.limit == 5
     assert result == 0
+
+
+def test_main_dispatches_explore_to_the_explorer_module() -> None:
+    with patch("archive_etl.explorer.main", return_value=0) as explore_main:
+        result = main(["explore", "unit", "--unit-number", "1203250000"])
+
+    explore_main.assert_called_once_with(["unit", "--unit-number", "1203250000"])
+    assert result == 0
+
+
+def test_main_explore_never_reaches_the_generic_domain_dispatcher() -> None:
+    with (
+        patch("archive_etl.explorer.main", return_value=0),
+        patch("archive_etl.__main__._run_domain") as run_domain,
+    ):
+        main(["explore", "award", "--award-number", "100012-00002"])
+
+    run_domain.assert_not_called()
