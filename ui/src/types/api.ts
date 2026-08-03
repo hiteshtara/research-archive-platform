@@ -659,6 +659,131 @@ export interface AwardAttachmentV1 {
 export interface AwardAttachmentPageResponse
   extends PageResponse<AwardAttachmentV1> {}
 
+// --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
+//
+// Summary is scoped to one exact awardId (the version being viewed),
+// not the whole award_number family. Actions/History are family-wide.
+// timeAndMoneyDocumentNumber/pendingTransactionId/
+// awardAmountTransactionId/transactionDetailId are always named
+// explicitly - this bundle has several differently-typed columns
+// historically named TRANSACTION_ID in real Kuali, so a bare
+// "transactionId" is never used here.
+
+export interface TimeAndMoneySummaryV1 {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  obligatedTotalAmount: number | null;
+  obligatedTotalDirect: number | null;
+  obligatedTotalIndirect: number | null;
+  anticipatedTotalAmount: number | null;
+  anticipatedTotalDirect: number | null;
+  anticipatedTotalIndirect: number | null;
+  timeAndMoneyTransactionCount: number;
+  lastTimeAndMoneyDocumentNumber: string | null;
+  lastNoticeDate: string | null;
+  lastTransactionTypeDescription: string | null;
+}
+
+export interface TimeAndMoneyActionV1 {
+  awardAmountTransactionId: number;
+  awardNumber: string;
+  timeAndMoneyDocumentNumber: string;
+  transactionTypeCode: string | null;
+  transactionTypeDescription: string | null;
+  noticeDate: string | null;
+  comments: string | null;
+  documentStatus: string | null;
+  creationDate: string | null;
+  sourceUpdateUser: string | null;
+  sourceUpdateTimestamp: string | null;
+}
+
+export interface TimeAndMoneyActionPageResponse
+  extends PageResponse<TimeAndMoneyActionV1> {}
+
+// sequenceNumber is this row's own Award version (via the
+// award_version join). originatingAwardVersion is a separate value:
+// the Award version a Time and Money-created snapshot was produced
+// against - the two are usually equal but can differ. Both null
+// pendingTransactionId/timeAndMoneyDocumentNumber and false
+// timeAndMoneyCreated mean this is the Award's original entry, never
+// touched by a Time and Money action.
+export interface TimeAndMoneyHistoryEntryV1 {
+  awardAmountInfoId: number;
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  pendingTransactionId: number | null;
+  timeAndMoneyDocumentNumber: string | null;
+  originatingAwardVersion: number | null;
+  obligatedTotalDirect: number | null;
+  obligatedTotalIndirect: number | null;
+  obligatedTotalAmount: number | null;
+  anticipatedChangeDirect: number | null;
+  anticipatedChangeIndirect: number | null;
+  anticipatedTotalDirect: number | null;
+  anticipatedTotalIndirect: number | null;
+  anticipatedTotalAmount: number | null;
+  awardEffectiveDate: string | null;
+  timeAndMoneyCreated: boolean;
+}
+
+export interface TimeAndMoneyHistoryPageResponse
+  extends PageResponse<TimeAndMoneyHistoryEntryV1> {}
+
+export interface TimeAndMoneyTransactionDetailV1 {
+  transactionDetailId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  timeAndMoneyDocumentNumber: string;
+  sourceAwardNumber: string;
+  destinationAwardNumber: string;
+  obligatedAmount: number | null;
+  obligatedDirectAmount: number | null;
+  obligatedIndirectAmount: number | null;
+  anticipatedAmount: number | null;
+  anticipatedDirectAmount: number | null;
+  anticipatedIndirectAmount: number | null;
+  comments: string | null;
+  transactionDetailType: string | null;
+}
+
+// The pending_transaction-sourced fields (everything except
+// pendingTransactionId/timeAndMoneyDocumentNumber/details) are
+// nullable - an old, already-processed transaction's working-state row
+// may no longer exist in Oracle; transaction_detail (the durable
+// ledger) still resolves the lookup. fandaDistributionPeriod is an F&A
+// cost-distribution period identifier - never a Budget Version.
+export interface TimeAndMoneyTransactionV1 {
+  pendingTransactionId: number;
+  timeAndMoneyDocumentNumber: string | null;
+  sourceAwardNumber: string | null;
+  destinationAwardNumber: string | null;
+  obligatedAmount: number | null;
+  obligatedDirectAmount: number | null;
+  obligatedIndirectAmount: number | null;
+  anticipatedAmount: number | null;
+  anticipatedDirectAmount: number | null;
+  anticipatedIndirectAmount: number | null;
+  comments: string | null;
+  processedFlag: string | null;
+  fandaDistributionPeriod: string | null;
+  details: TimeAndMoneyTransactionDetailV1[];
+}
+
+// "Workflow Details" - a Time and Money KEW document's own header.
+// There is no live KEW connection in this archive - documentStatus/
+// creationDate are the only "workflow" information available, not a
+// live routing/approval trail. A different KEW document from any
+// Award's own workflowDocumentNumber - never cross-link the two.
+export interface TimeAndMoneyDocumentV1 {
+  timeAndMoneyDocumentNumber: string;
+  rootAwardNumber: string;
+  documentStatus: string | null;
+  creationDate: string | null;
+}
+
 export interface ProposalFamily {
   proposalNumber: string;
   title: string | null;

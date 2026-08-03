@@ -510,6 +510,90 @@ export function getAwardAttachmentsV1(
   );
 }
 
+// --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
+
+export function getAwardTimeAndMoneySummaryV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").TimeAndMoneySummaryV1> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/time-and-money/summary`,
+    signal,
+  );
+}
+
+export function getAwardTimeAndMoneyActionsV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").TimeAndMoneyActionPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/time-and-money/actions?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getAwardTimeAndMoneyHistoryV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").TimeAndMoneyHistoryPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/time-and-money/history?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getAwardTimeAndMoneyTransactionV1(
+  awardId: number,
+  pendingTransactionId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").TimeAndMoneyTransactionV1> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/time-and-money/transactions/${encodeURIComponent(
+      pendingTransactionId,
+    )}`,
+    signal,
+  );
+}
+
+export function getAwardTimeAndMoneyDocumentV1(
+  awardId: number,
+  timeAndMoneyDocumentNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").TimeAndMoneyDocumentV1> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/time-and-money/documents/${encodeURIComponent(
+      timeAndMoneyDocumentNumber,
+    )}`,
+    signal,
+  );
+}
+
 export async function downloadAwardAttachmentV1(
   awardId: number,
   attachmentId: number,

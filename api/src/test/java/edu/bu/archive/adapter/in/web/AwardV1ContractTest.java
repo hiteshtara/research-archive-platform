@@ -31,6 +31,12 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyDocumentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyHistoryEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionResponse;
 
 import org.junit.jupiter.api.Test;
 
@@ -408,6 +414,166 @@ class AwardV1ContractTest {
         String json = objectMapper.writeValueAsString(attachment);
         assertThat(json).doesNotContainIgnoringCase("s3Bucket");
         assertThat(json).doesNotContainIgnoringCase("s3Key");
+    }
+
+    @Test
+    void timeAndMoneySummaryShapeIsStableAndDatesSerializeAsIsoStrings()
+            throws Exception {
+        TimeAndMoneySummaryResponse summary = new TimeAndMoneySummaryResponse(
+                3L, "100004-00003", 7,
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                2L, "281518", LocalDate.of(2021, 1, 1), "Supplement"
+        );
+
+        assertFieldNames(summary, Set.of(
+                "awardId", "awardNumber", "sequenceNumber",
+                "obligatedTotalAmount", "obligatedTotalDirect",
+                "obligatedTotalIndirect", "anticipatedTotalAmount",
+                "anticipatedTotalDirect", "anticipatedTotalIndirect",
+                "timeAndMoneyTransactionCount",
+                "lastTimeAndMoneyDocumentNumber", "lastNoticeDate",
+                "lastTransactionTypeDescription"
+        ));
+
+        // "distributable" amounts and an obligated-change direct/
+        // indirect split are deliberately never fields here - neither
+        // is archived today, see
+        // docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md.
+        String json = objectMapper.writeValueAsString(summary);
+        assertThat(json).doesNotContainIgnoringCase("distributable");
+        assertThat(json).doesNotContainIgnoringCase("obligatedChange");
+    }
+
+    @Test
+    void timeAndMoneyActionShapeIsStableAndUsesExplicitDocumentNumberNaming()
+            throws Exception {
+        TimeAndMoneyActionResponse action = new TimeAndMoneyActionResponse(
+                1L, "100004-00003", "281518", "3", "Supplement",
+                LocalDate.of(2021, 1, 1), "comments", "PROCESSED",
+                LocalDateTime.of(2021, 1, 1, 0, 0),
+                "jsmith", LocalDateTime.of(2021, 1, 1, 0, 0)
+        );
+
+        assertFieldNames(action, Set.of(
+                "awardAmountTransactionId", "awardNumber",
+                "timeAndMoneyDocumentNumber", "transactionTypeCode",
+                "transactionTypeDescription", "noticeDate", "comments",
+                "documentStatus", "creationDate", "sourceUpdateUser",
+                "sourceUpdateTimestamp"
+        ));
+
+        // never a bare "documentNumber" - see the design doc's Traps
+        // section on the TRANSACTION_ID/document-number naming
+        // collision this field name exists specifically to avoid.
+        String json = objectMapper.writeValueAsString(action);
+        assertThat(json).doesNotContain("\"documentNumber\"");
+    }
+
+    @Test
+    void timeAndMoneyHistoryEntryShapeIsStableAndSeparatesSequenceFromOriginatingVersion()
+            throws Exception {
+        TimeAndMoneyHistoryEntryResponse entry =
+                new TimeAndMoneyHistoryEntryResponse(
+                        10L, 3L, "100004-00003", 7,
+                        555L, "281518", 6,
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        BigDecimal.ONE, BigDecimal.ONE,
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        LocalDate.of(2021, 1, 1), true
+                );
+
+        assertFieldNames(entry, Set.of(
+                "awardAmountInfoId", "awardId", "awardNumber",
+                "sequenceNumber", "pendingTransactionId",
+                "timeAndMoneyDocumentNumber", "originatingAwardVersion",
+                "obligatedTotalDirect", "obligatedTotalIndirect",
+                "obligatedTotalAmount", "anticipatedChangeDirect",
+                "anticipatedChangeIndirect", "anticipatedTotalDirect",
+                "anticipatedTotalIndirect", "anticipatedTotalAmount",
+                "awardEffectiveDate", "timeAndMoneyCreated"
+        ));
+
+        JsonNode node = objectMapper.valueToTree(entry);
+        assertThat(node.get("sequenceNumber").asInt()).isEqualTo(7);
+        assertThat(node.get("originatingAwardVersion").asInt())
+                .isEqualTo(6);
+        assertThat(node.get("timeAndMoneyCreated").asBoolean()).isTrue();
+    }
+
+    @Test
+    void timeAndMoneyTransactionShapeIsStableAndNestsMultipleDetailRows()
+            throws Exception {
+        TimeAndMoneyTransactionDetailResponse detailOne =
+                new TimeAndMoneyTransactionDetailResponse(
+                        900L, "100004-00001", 4, "281518",
+                        "100004-00001", "100004-00003",
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        "comments", "INTERMEDIATE"
+                );
+        TimeAndMoneyTransactionDetailResponse detailTwo =
+                new TimeAndMoneyTransactionDetailResponse(
+                        901L, "100004-00003", 7, "281518",
+                        "100004-00001", "100004-00003",
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        "comments", "PRIMARY"
+                );
+        TimeAndMoneyTransactionResponse transaction =
+                new TimeAndMoneyTransactionResponse(
+                        555L, "281518", "100004-00001", "100004-00003",
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        BigDecimal.TEN, BigDecimal.ONE, BigDecimal.TEN,
+                        "comments", "Y", "07/01/2020 - 06/30/2021",
+                        List.of(detailOne, detailTwo)
+                );
+
+        assertFieldNames(transaction, Set.of(
+                "pendingTransactionId", "timeAndMoneyDocumentNumber",
+                "sourceAwardNumber", "destinationAwardNumber",
+                "obligatedAmount", "obligatedDirectAmount",
+                "obligatedIndirectAmount", "anticipatedAmount",
+                "anticipatedDirectAmount", "anticipatedIndirectAmount",
+                "comments", "processedFlag", "fandaDistributionPeriod",
+                "details"
+        ));
+
+        // never called budgetPeriod - see the design doc's "Every
+        // relationship to Budget" finding this field name exists to
+        // avoid re-litigating.
+        String json = objectMapper.writeValueAsString(transaction);
+        assertThat(json).doesNotContain("\"budgetPeriod\"");
+
+        JsonNode details = objectMapper.valueToTree(transaction).get("details");
+        assertThat(details).hasSize(2);
+        assertFieldNames(details.get(0), Set.of(
+                "transactionDetailId", "awardNumber", "sequenceNumber",
+                "timeAndMoneyDocumentNumber", "sourceAwardNumber",
+                "destinationAwardNumber", "obligatedAmount",
+                "obligatedDirectAmount", "obligatedIndirectAmount",
+                "anticipatedAmount", "anticipatedDirectAmount",
+                "anticipatedIndirectAmount", "comments",
+                "transactionDetailType"
+        ));
+        // the two details span different Award numbers - proves the
+        // response never assumes one "owning" Award for a transaction.
+        assertThat(details.get(0).get("awardNumber").asText())
+                .isNotEqualTo(details.get(1).get("awardNumber").asText());
+    }
+
+    @Test
+    void timeAndMoneyDocumentShapeIsStable() throws Exception {
+        TimeAndMoneyDocumentResponse document =
+                new TimeAndMoneyDocumentResponse(
+                        "281518", "100004-00001", "PROCESSED",
+                        LocalDateTime.of(2021, 1, 1, 0, 0)
+                );
+
+        assertFieldNames(document, Set.of(
+                "timeAndMoneyDocumentNumber", "rootAwardNumber",
+                "documentStatus", "creationDate"
+        ));
     }
 
     private void assertFieldNames(Object value, Set<String> expected)

@@ -15,6 +15,11 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyDocumentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyHistoryEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
 import edu.bu.archive.application.award.AwardContactService;
@@ -26,6 +31,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -315,6 +322,151 @@ public class AwardV1Controller {
             int size
     ) {
         return ResponseEntity.ok(service.findAmounts(awardId, page, size));
+    }
+
+    @Operation(
+            summary = "Get an Award's Time and Money summary",
+            description = "Scoped to this exact award_id (the version "
+                    + "being viewed), not the whole award_number "
+                    + "family - the latest award_amount_info row for "
+                    + "this award_id plus its most recent Time and "
+                    + "Money action, if any."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's Time and Money summary.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/time-and-money/summary")
+    public ResponseEntity<TimeAndMoneySummaryResponse> timeAndMoneySummary(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findTimeAndMoneySummary(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's Time and Money actions",
+            description = "\"Action Summary\" - one row per (Time and "
+                    + "Money document, affected award) pair, "
+                    + "family-wide (every version of awardId's "
+                    + "award_number)."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of Time and Money actions.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/time-and-money/actions")
+    public ResponseEntity<PageResponse<TimeAndMoneyActionResponse>>
+            timeAndMoneyActions(
+                    @PathVariable
+                    long awardId,
+
+                    @Parameter(description = "Zero-based page index.")
+                    @RequestParam(defaultValue = "0")
+                    @Min(0)
+                    int page,
+
+                    @Parameter(description = "Page size, 1-100.")
+                    @RequestParam(defaultValue = "50")
+                    @Min(1)
+                    @Max(100)
+                    int size
+            ) {
+        return ResponseEntity.ok(
+                service.findTimeAndMoneyActions(awardId, page, size)
+        );
+    }
+
+    @Operation(
+            summary = "List an Award's Time and Money history",
+            description = "\"History Timeline\" - the "
+                    + "award_amount_info append-only ledger, "
+                    + "family-wide, newest version first, each row "
+                    + "carrying its own sequenceNumber (the version it "
+                    + "belongs to) alongside originatingAwardVersion "
+                    + "(the version a Time and Money-created snapshot "
+                    + "was produced against) - the two can differ."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of Time and Money history.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/time-and-money/history")
+    public ResponseEntity<PageResponse<TimeAndMoneyHistoryEntryResponse>>
+            timeAndMoneyHistory(
+                    @PathVariable
+                    long awardId,
+
+                    @Parameter(description = "Zero-based page index.")
+                    @RequestParam(defaultValue = "0")
+                    @Min(0)
+                    int page,
+
+                    @Parameter(description = "Page size, 1-100.")
+                    @RequestParam(defaultValue = "50")
+                    @Min(1)
+                    @Max(100)
+                    int size
+            ) {
+        return ResponseEntity.ok(
+                service.findTimeAndMoneyHistory(awardId, page, size)
+        );
+    }
+
+    @Operation(
+            summary = "Get one Time and Money transaction's details",
+            description = "\"Transaction Details\" - looked up by "
+                    + "pendingTransactionId, the numeric surrogate key "
+                    + "shared by archive.pending_transaction/"
+                    + "transaction_detail/award_amount_info's own "
+                    + "transaction_id column (never confused with "
+                    + "award_amount_transaction's differently-typed, "
+                    + "differently-meaning TRANSACTION_ID). A single "
+                    + "transaction can span more than one Award "
+                    + "(source/destination), so details is a list."
+    )
+    @ApiResponse(responseCode = "200", description = "The transaction's details.")
+    @ApiResponse(responseCode = "404", description = "No such award_id, or no such transaction.")
+    @GetMapping("/{awardId}/time-and-money/transactions/{pendingTransactionId}")
+    public ResponseEntity<TimeAndMoneyTransactionResponse>
+            timeAndMoneyTransaction(
+                    @PathVariable
+                    long awardId,
+
+                    @PathVariable
+                    @Positive
+                    long pendingTransactionId
+            ) {
+        return ResponseEntity.ok(
+                service.findTimeAndMoneyTransaction(
+                        awardId,
+                        pendingTransactionId
+                )
+        );
+    }
+
+    @Operation(
+            summary = "Get one Time and Money document's header",
+            description = "\"Workflow Details\" for one Time and Money "
+                    + "document - archive.time_and_money_document's own "
+                    + "row (document status/creation date - there is "
+                    + "no live KEW connection in this archive). This is "
+                    + "a different KEW document from any Award's own "
+                    + "workflowDocumentNumber - never cross-link the "
+                    + "two."
+    )
+    @ApiResponse(responseCode = "200", description = "The Time and Money document's header.")
+    @ApiResponse(responseCode = "404", description = "No such award_id, or no such document.")
+    @GetMapping("/{awardId}/time-and-money/documents/{timeAndMoneyDocumentNumber}")
+    public ResponseEntity<TimeAndMoneyDocumentResponse>
+            timeAndMoneyDocument(
+                    @PathVariable
+                    long awardId,
+
+                    @PathVariable
+                    @NotBlank
+                    String timeAndMoneyDocumentNumber
+            ) {
+        return ResponseEntity.ok(
+                service.findTimeAndMoneyDocument(
+                        awardId,
+                        timeAndMoneyDocumentNumber
+                )
+        );
     }
 
     @Operation(

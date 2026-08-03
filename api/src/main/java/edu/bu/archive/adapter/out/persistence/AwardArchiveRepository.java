@@ -31,6 +31,12 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyDocumentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyHistoryEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionHeaderRow;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -1527,6 +1533,235 @@ public class AwardArchiveRepository {
                 .param("attachmentId", attachmentId)
                 .param("awardId", awardId)
                 .query(AwardArchivedAttachment.class)
+                .optional();
+    }
+
+    /*
+     * --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
+     *
+     * Every method below reads only already-archived tables (V048/V049)
+     * - no new migration, no new ETL. Summary is scoped to one exact
+     * award_id (the version being viewed), matching
+     * findSummaryByAwardId; Actions/History are family-wide (every
+     * version of awardNumber), matching findAmountHistory's own
+     * precedent, since award_amount_transaction carries no
+     * sequence_number of its own to scope by. timeAndMoneyCreated is
+     * computed here, in SQL, rather than left to the service/UI layer -
+     * see TimeAndMoneyHistoryEntryResponse.
+     */
+
+    public Optional<TimeAndMoneySummaryResponse> findTimeAndMoneySummary(
+            long awardId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    amount.award_id,
+                    amount.award_number,
+                    av.sequence_number,
+                    amount.obligated_total_amount,
+                    amount.obligated_total_direct,
+                    amount.obligated_total_indirect,
+                    amount.anticipated_total_amount,
+                    amount.anticipated_total_direct,
+                    amount.anticipated_total_indirect,
+                    tm_count.count AS time_and_money_transaction_count,
+                    latest_tnm.document_number AS last_time_and_money_document_number,
+                    last_action.notice_date AS last_notice_date,
+                    last_action.transaction_type_description AS last_transaction_type_description
+                FROM archive.award_amount_info amount
+                INNER JOIN archive.award_version av ON av.award_id = amount.award_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS count
+                    FROM archive.award_amount_info tnm
+                    WHERE tnm.award_id = amount.award_id
+                      AND tnm.transaction_id IS NOT NULL
+                      AND tnm.tnm_document_number IS NOT NULL
+                ) tm_count ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT tnm.tnm_document_number AS document_number
+                    FROM archive.award_amount_info tnm
+                    WHERE tnm.award_id = amount.award_id
+                      AND tnm.transaction_id IS NOT NULL
+                      AND tnm.tnm_document_number IS NOT NULL
+                    ORDER BY tnm.award_amount_info_id DESC
+                    LIMIT 1
+                ) latest_tnm ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT aat.notice_date, aat.transaction_type_description
+                    FROM archive.award_amount_transaction aat
+                    WHERE aat.award_number = amount.award_number
+                      AND aat.document_number = latest_tnm.document_number
+                    ORDER BY aat.award_amount_transaction_id DESC
+                    LIMIT 1
+                ) last_action ON TRUE
+                WHERE amount.award_id = :awardId
+                ORDER BY amount.award_amount_info_id DESC
+                LIMIT 1
+                """)
+                .param("awardId", awardId)
+                .query(TimeAndMoneySummaryResponse.class)
+                .optional();
+    }
+
+    public long countTimeAndMoneyActions(String awardNumber) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_amount_transaction
+                WHERE award_number = :awardNumber
+                """)
+                .param("awardNumber", awardNumber)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    public List<TimeAndMoneyActionResponse> findTimeAndMoneyActions(
+            String awardNumber,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    aat.award_amount_transaction_id,
+                    aat.award_number,
+                    aat.document_number AS time_and_money_document_number,
+                    aat.transaction_type_code,
+                    aat.transaction_type_description,
+                    aat.notice_date,
+                    aat.comments,
+                    tmd.document_status,
+                    tmd.creation_date,
+                    aat.source_update_user,
+                    aat.source_update_timestamp
+                FROM archive.award_amount_transaction aat
+                LEFT JOIN archive.time_and_money_document tmd
+                    ON tmd.document_number = aat.document_number
+                WHERE aat.award_number = :awardNumber
+                ORDER BY
+                    aat.notice_date DESC NULLS LAST,
+                    aat.award_amount_transaction_id DESC
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("awardNumber", awardNumber)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(TimeAndMoneyActionResponse.class)
+                .list();
+    }
+
+    public List<TimeAndMoneyHistoryEntryResponse> findTimeAndMoneyHistory(
+            String awardNumber,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    amount.award_amount_info_id,
+                    amount.award_id,
+                    amount.award_number,
+                    av.sequence_number,
+                    amount.transaction_id AS pending_transaction_id,
+                    amount.tnm_document_number AS time_and_money_document_number,
+                    amount.originating_award_version,
+                    amount.obligated_total_direct,
+                    amount.obligated_total_indirect,
+                    amount.obligated_total_amount,
+                    amount.anticipated_change_direct,
+                    amount.anticipated_change_indirect,
+                    amount.anticipated_total_direct,
+                    amount.anticipated_total_indirect,
+                    amount.anticipated_total_amount,
+                    av.award_effective_date,
+                    (
+                        amount.transaction_id IS NOT NULL
+                        AND amount.tnm_document_number IS NOT NULL
+                    ) AS time_and_money_created
+                FROM archive.award_amount_info amount
+                INNER JOIN archive.award_version av ON av.award_id = amount.award_id
+                WHERE av.award_number = :awardNumber
+                ORDER BY
+                    av.sequence_number DESC,
+                    amount.award_amount_info_id DESC
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("awardNumber", awardNumber)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(TimeAndMoneyHistoryEntryResponse.class)
+                .list();
+    }
+
+    public Optional<TimeAndMoneyTransactionHeaderRow> findTimeAndMoneyTransactionHeader(
+            long pendingTransactionId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    pt.transaction_id AS pending_transaction_id,
+                    pt.document_number AS time_and_money_document_number,
+                    pt.source_award_number,
+                    pt.destination_award_number,
+                    pt.obligated_amount,
+                    pt.obligated_direct_amount,
+                    pt.obligated_indirect_amount,
+                    pt.anticipated_amount,
+                    pt.anticipated_direct_amount,
+                    pt.anticipated_indirect_amount,
+                    pt.comments,
+                    pt.processed_flag,
+                    pte.budget_period AS fanda_distribution_period
+                FROM archive.pending_transaction pt
+                LEFT JOIN archive.pending_transaction_extension pte
+                    ON pte.transaction_id = pt.transaction_id
+                WHERE pt.transaction_id = :pendingTransactionId
+                """)
+                .param("pendingTransactionId", pendingTransactionId)
+                .query(TimeAndMoneyTransactionHeaderRow.class)
+                .optional();
+    }
+
+    public List<TimeAndMoneyTransactionDetailResponse> findTimeAndMoneyTransactionDetails(
+            long pendingTransactionId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    td.transaction_detail_id,
+                    td.award_number,
+                    td.sequence_number,
+                    td.time_and_money_document_number,
+                    td.source_award_number,
+                    td.destination_award_number,
+                    td.obligated_amount,
+                    td.obligated_direct_amount,
+                    td.obligated_indirect_amount,
+                    td.anticipated_amount,
+                    td.anticipated_direct_amount,
+                    td.anticipated_indirect_amount,
+                    td.comments,
+                    td.transaction_detail_type
+                FROM archive.transaction_detail td
+                WHERE td.transaction_id = :pendingTransactionId
+                ORDER BY td.transaction_detail_id
+                """)
+                .param("pendingTransactionId", pendingTransactionId)
+                .query(TimeAndMoneyTransactionDetailResponse.class)
+                .list();
+    }
+
+    public Optional<TimeAndMoneyDocumentResponse> findTimeAndMoneyDocument(
+            String timeAndMoneyDocumentNumber
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    document_number AS time_and_money_document_number,
+                    root_award_number,
+                    document_status,
+                    creation_date
+                FROM archive.time_and_money_document
+                WHERE document_number = :documentNumber
+                """)
+                .param("documentNumber", timeAndMoneyDocumentNumber)
+                .query(TimeAndMoneyDocumentResponse.class)
                 .optional();
     }
 

@@ -22,6 +22,7 @@ import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTra
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
 import { AwardSummarySection } from "../../components/award/AwardSummarySection";
 import { AwardTermsSection } from "../../components/award/AwardTermsSection";
+import { AwardTimeAndMoneySection } from "../../components/award/AwardTimeAndMoneySection";
 import { AwardVersionsSection } from "../../components/award/AwardVersionsSection";
 import { ComingSoonSection } from "../../components/award/ComingSoonSection";
 import { flattenHierarchyNodes } from "../../components/award/hierarchyUtils";
@@ -47,6 +48,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "versions",
   "people",
   "amounts",
+  "timeMoney",
   "terms",
   "comments",
   "sap",
@@ -221,6 +223,10 @@ export function AwardDashboardPage() {
 
           {activeSection === "amounts" && (
             <AwardAmountsSection awardId={awardId} />
+          )}
+
+          {activeSection === "timeMoney" && (
+            <AwardTimeAndMoneySection awardId={awardId} />
           )}
 
           {activeSection === "terms" && (

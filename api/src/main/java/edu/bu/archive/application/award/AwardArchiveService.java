@@ -37,6 +37,13 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyDocumentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyHistoryEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionHeaderRow;
+import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.AwardArchivedAttachment;
@@ -52,6 +59,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -752,6 +760,171 @@ public class AwardArchiveService {
                 pageMetadata.first(),
                 pageMetadata.last()
         );
+    }
+
+    /*
+     * --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
+     *
+     * Summary is scoped to this exact awardId (the version being
+     * viewed) - consistent with findSummary, not family-wide.
+     * Actions/History are family-wide, matching findAmounts's own
+     * precedent.
+     */
+
+    public TimeAndMoneySummaryResponse findTimeAndMoneySummary(long awardId) {
+        return repository.findTimeAndMoneySummary(awardId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Award not found: " + awardId
+                ));
+    }
+
+    public PageResponse<TimeAndMoneyActionResponse> findTimeAndMoneyActions(
+            long awardId,
+            int page,
+            int size
+    ) {
+        String awardNumber = requireAwardNumberForId(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countTimeAndMoneyActions(awardNumber);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        int offset = safePage * safeSize;
+
+        List<TimeAndMoneyActionResponse> content =
+                repository.findTimeAndMoneyActions(
+                        awardNumber,
+                        safeSize,
+                        offset
+                );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    public PageResponse<TimeAndMoneyHistoryEntryResponse> findTimeAndMoneyHistory(
+            long awardId,
+            int page,
+            int size
+    ) {
+        String awardNumber = requireAwardNumberForId(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        // Same ledger findAmounts already counts (archive.award_amount_info
+        // joined to archive.award_version by award_number) - reused
+        // rather than duplicated.
+        long totalElements = repository.countAmountHistory(awardNumber);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        int offset = safePage * safeSize;
+
+        List<TimeAndMoneyHistoryEntryResponse> content =
+                repository.findTimeAndMoneyHistory(
+                        awardNumber,
+                        safeSize,
+                        offset
+                );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    public TimeAndMoneyTransactionResponse findTimeAndMoneyTransaction(
+            long awardId,
+            long pendingTransactionId
+    ) {
+        requireAwardNumberForId(awardId);
+
+        Optional<TimeAndMoneyTransactionHeaderRow> header =
+                repository.findTimeAndMoneyTransactionHeader(
+                        pendingTransactionId
+                );
+        List<TimeAndMoneyTransactionDetailResponse> details =
+                repository.findTimeAndMoneyTransactionDetails(
+                        pendingTransactionId
+                );
+
+        if (header.isEmpty() && details.isEmpty()) {
+            throw new NoSuchElementException(
+                    "Time and Money transaction not found: "
+                            + pendingTransactionId
+            );
+        }
+
+        // pending_transaction may no longer exist for an old,
+        // already-processed transaction (see
+        // TimeAndMoneyTransactionResponse's own Javadoc) - fall back to
+        // transaction_detail's own timeAndMoneyDocumentNumber, which is
+        // NOT NULL on every detail row, so the document number is
+        // always available even when the header is not.
+        String timeAndMoneyDocumentNumber = header
+                .map(TimeAndMoneyTransactionHeaderRow::timeAndMoneyDocumentNumber)
+                .orElseGet(() -> details.isEmpty()
+                        ? null
+                        : details.get(0).timeAndMoneyDocumentNumber());
+
+        return new TimeAndMoneyTransactionResponse(
+                pendingTransactionId,
+                timeAndMoneyDocumentNumber,
+                header.map(TimeAndMoneyTransactionHeaderRow::sourceAwardNumber)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::destinationAwardNumber)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::obligatedAmount)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::obligatedDirectAmount)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::obligatedIndirectAmount)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::anticipatedAmount)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::anticipatedDirectAmount)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::anticipatedIndirectAmount)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::comments)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::processedFlag)
+                        .orElse(null),
+                header.map(TimeAndMoneyTransactionHeaderRow::fandaDistributionPeriod)
+                        .orElse(null),
+                details
+        );
+    }
+
+    public TimeAndMoneyDocumentResponse findTimeAndMoneyDocument(
+            long awardId,
+            String timeAndMoneyDocumentNumber
+    ) {
+        requireAwardNumberForId(awardId);
+
+        return repository.findTimeAndMoneyDocument(timeAndMoneyDocumentNumber)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Time and Money document not found: "
+                                + timeAndMoneyDocumentNumber
+                ));
     }
 
     public AwardTermsResponse findTerms(long awardId) {
