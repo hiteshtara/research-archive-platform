@@ -7,6 +7,7 @@ import {
   HandshakeOutlined,
   LogoutOutlined,
   SearchOutlined,
+  TravelExploreOutlined,
 } from "@mui/icons-material";
 import {
   AppBar,
@@ -29,6 +30,8 @@ import { NavLink, Outlet } from "react-router-dom";
 import { currentUser, logout } from "../auth";
 
 const drawerWidth = 250;
+
+const EXPLORER_ENABLED = import.meta.env.VITE_EXPLORER_ENABLED === "true";
 
 const navigation = [
   {
@@ -61,6 +64,19 @@ const navigation = [
     icon: <SearchOutlined />,
     path: "/search",
   },
+  // Dev-only developer tool - hidden unless the deployed environment's
+  // VITE_EXPLORER_ENABLED matches the API's own APP_EXPLORER_ENABLED
+  // (see docs/ARCHIVE_EXPLORER.md). Never enable in test/prod.
+  ...(EXPLORER_ENABLED
+    ? [
+        {
+          label: "Archive Explorer",
+          icon: <TravelExploreOutlined />,
+          path: "/explorer",
+          badge: "Dev",
+        },
+      ]
+    : []),
 ];
 
 export function AppLayout() {
@@ -247,6 +263,10 @@ export function AppLayout() {
               </ListItemIcon>
 
               <ListItemText primary={item.label} />
+
+              {item.badge && (
+                <Chip label={item.badge} size="small" variant="outlined" />
+              )}
             </ListItemButton>
           ))}
         </List>

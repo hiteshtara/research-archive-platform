@@ -827,3 +827,110 @@ export function getSubawardNotifications(
     `/api/subawards/${encodeURIComponent(subawardId)}/notifications`,
   );
 }
+
+// --- Archive Explorer (Phase 2, /api/v1/explorer/**) -----------------------
+//
+// Dev-only, feature-flagged (VITE_EXPLORER_ENABLED) - see
+// docs/ARCHIVE_EXPLORER.md. Every call is a fixed, predefined
+// lookup by natural identifier, same as the backend - no arbitrary
+// query is ever constructed here.
+
+export function getExplorerAward(
+  awardNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerAward> {
+  const parameters = new URLSearchParams({ awardNumber: awardNumber.trim() });
+  return request(`/api/v1/explorer/awards?${parameters.toString()}`, signal);
+}
+
+export function getExplorerAwardVersion(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerAward> {
+  const parameters = new URLSearchParams({ awardId: String(awardId) });
+  return request(
+    `/api/v1/explorer/award-versions?${parameters.toString()}`,
+    signal,
+  );
+}
+
+export function getExplorerWorkflow(
+  documentNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardDocumentNumberMatchV1> {
+  const parameters = new URLSearchParams({
+    documentNumber: documentNumber.trim(),
+  });
+  return request(
+    `/api/v1/explorer/workflows?${parameters.toString()}`,
+    signal,
+  );
+}
+
+export function getExplorerUnit(
+  unitNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerUnit> {
+  const parameters = new URLSearchParams({ unitNumber: unitNumber.trim() });
+  return request(`/api/v1/explorer/units?${parameters.toString()}`, signal);
+}
+
+export function getExplorerUnitAdministrators(
+  unitNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerUnitAdministrator[]> {
+  const parameters = new URLSearchParams({ unitNumber: unitNumber.trim() });
+  return request(
+    `/api/v1/explorer/unit-administrators?${parameters.toString()}`,
+    signal,
+  );
+}
+
+export function getExplorerAwardContacts(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerAwardContacts> {
+  const parameters = new URLSearchParams({ awardId: String(awardId) });
+  return request(
+    `/api/v1/explorer/award-contacts?${parameters.toString()}`,
+    signal,
+  );
+}
+
+export function getExplorerPerson(
+  personId: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerPerson> {
+  const parameters = new URLSearchParams({ personId: personId.trim() });
+  return request(`/api/v1/explorer/persons?${parameters.toString()}`, signal);
+}
+
+export function getExplorerRolodex(
+  rolodexId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerRolodex> {
+  const parameters = new URLSearchParams({ rolodexId: String(rolodexId) });
+  return request(`/api/v1/explorer/rolodex?${parameters.toString()}`, signal);
+}
+
+export function getExplorerSponsors(
+  sponsorCode: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerAward[]> {
+  const parameters = new URLSearchParams({ sponsorCode: sponsorCode.trim() });
+  return request(
+    `/api/v1/explorer/sponsors?${parameters.toString()}`,
+    signal,
+  );
+}
+
+export function getExplorerAttachments(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardAttachmentV1[]> {
+  const parameters = new URLSearchParams({ awardId: String(awardId) });
+  return request(
+    `/api/v1/explorer/attachments?${parameters.toString()}`,
+    signal,
+  );
+}

@@ -10,6 +10,7 @@ import { AwardSearchPage } from "./pages/award/AwardSearchPage";
 
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { ExplorerPage } from "./pages/ExplorerPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
 import { InvestigatorProfilePage } from "./pages/InvestigatorProfilePage";
 import { IrbDetailPage } from "./pages/IrbDetailPage";
@@ -114,6 +115,17 @@ export default function App() {
         <Route
           path="documents"
           element={<ComingSoonPage />}
+        />
+
+        <Route
+          path="explorer"
+          element={
+            import.meta.env.VITE_EXPLORER_ENABLED === "true" ? (
+              <ExplorerPage />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
         />
 
         <Route

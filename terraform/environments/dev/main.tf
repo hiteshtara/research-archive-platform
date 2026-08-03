@@ -302,6 +302,11 @@ module "amplify" {
     VITE_COGNITO_DOMAIN       = local.cognito_hosted_ui_domain_hostname
     VITE_COGNITO_REDIRECT_URL = local.ui_redirect_url
     VITE_COGNITO_LOGOUT_URL   = local.ui_logout_url
+    # Archive Explorer (Phase 2, /explorer) - dev-only developer tool,
+    # hidden entirely (nav item + route) unless this matches the API's
+    # own APP_EXPLORER_ENABLED. See docs/ARCHIVE_EXPLORER.md. Never set
+    # in test/prod.
+    VITE_EXPLORER_ENABLED     = "true"
   }
 }
 

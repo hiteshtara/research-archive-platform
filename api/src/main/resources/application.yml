@@ -52,6 +52,12 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  explorer:
+    # Read-only Archive Explorer (Phase 2, /api/v1/explorer/**) - see
+    # docs/ARCHIVE_EXPLORER.md. Disabled by default everywhere; enabled
+    # explicitly per-environment (dev only, for now) via Terraform.
+    enabled: ${APP_EXPLORER_ENABLED:false}
+
   ai:
     enabled: ${APP_AI_ENABLED:${AI_ENABLED:false}}
     stub-enabled: ${APP_AI_STUB_ENABLED:${AI_STUB_ENABLED:false}}

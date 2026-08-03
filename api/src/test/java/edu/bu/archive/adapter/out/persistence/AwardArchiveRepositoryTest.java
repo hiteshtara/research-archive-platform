@@ -10,6 +10,11 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitRow;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -455,7 +460,19 @@ class AwardArchiveRepositoryTest {
                 .contains("JOIN archive.award_version av ON av.award_id = auc.award_id")
                 .contains("LEFT JOIN archive.unit_administrator_type uat")
                 .contains("LEFT JOIN archive.person pe ON pe.person_id = auc.person_id")
-                .contains("auc.award_id = :awardId");
+                .contains("auc.award_id = :awardId")
+                // lead_unit binds to a primitive boolean field - a plain
+                // "a = b" equality is SQL NULL (not false) whenever
+                // unit_administrator_unit_number is NULL, which
+                // SimplePropertyRowMapper cannot bind to a primitive and
+                // throws "A null value cannot be assigned to a primitive
+                // type" (reproduced live against Award 877025 - a real
+                // contact row with a null unit number). The COALESCE(...,
+                // FALSE) guard around that comparison must stay in place.
+                .containsPattern(
+                        "COALESCE\\(\\s*auc\\.unit_administrator_unit_number\\s*"
+                                + "=\\s*av\\.lead_unit_number,\\s*FALSE\\s*\\)\\s*AS lead_unit"
+                );
         verify(statement).param("awardId", 985585L);
     }
 
@@ -482,6 +499,179 @@ class AwardArchiveRepositoryTest {
                 .contains("LEFT JOIN archive.rolodex r ON r.rolodex_id = asc_.rolodex_id")
                 .contains("asc_.award_id = :awardId");
         verify(statement).param("awardId", 985585L);
+    }
+
+    @Test
+    void findExplorerAwardByNumberFiltersToPrimaryCurrent() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerAwardResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        ExplorerAwardResponse expected = new ExplorerAwardResponse(
+                985585L, "100012-00002", 7, "Title", "Closed",
+                "JOHN T CLARKE", "300940", null, "1203250000",
+                "CAS SPACE PHYSICS", true
+        );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("awardNumber", "100012-00002"))
+                .thenReturn(statement);
+        when(statement.query(ExplorerAwardResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.of(expected));
+
+        Optional<ExplorerAwardResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findExplorerAwardByNumber("100012-00002");
+
+        assertThat(result).contains(expected);
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_version av")
+                .contains("LEFT JOIN LATERAL")
+                .contains("av.award_number = :awardNumber")
+                .contains("av.is_primary_current = TRUE");
+    }
+
+    @Test
+    void findExplorerAwardVersionByIdDoesNotFilterToPrimaryCurrent() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerAwardResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("awardId", 511L)).thenReturn(statement);
+        when(statement.query(ExplorerAwardResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.empty());
+
+        new AwardArchiveRepository(jdbc).findExplorerAwardVersionById(511L);
+
+        assertThat(firstSql(jdbc))
+                .contains("av.award_id = :awardId")
+                .doesNotContain("is_primary_current = TRUE");
+    }
+
+    @Test
+    void findUnitByNumberJoinsParentUnit() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerUnitRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        ExplorerUnitRow expected = new ExplorerUnitRow(
+                "1203250000", "CAS SPACE PHYSICS", "1200000000",
+                "COLLEGE OF ARTS & SCIENCES (CAS)", "1"
+        );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("unitNumber", "1203250000")).thenReturn(statement);
+        when(statement.query(ExplorerUnitRow.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.of(expected));
+
+        Optional<ExplorerUnitRow> result =
+                new AwardArchiveRepository(jdbc).findUnitByNumber("1203250000");
+
+        assertThat(result).contains(expected);
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.unit u")
+                .contains("LEFT JOIN archive.unit parent")
+                .contains("u.unit_number = :unitNumber");
+    }
+
+    @Test
+    void findUnitAdministratorsByUnitNumberIncludesEveryGroupNotOnlyC() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerUnitAdministratorResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(ExplorerUnitAdministratorResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc)
+                .findUnitAdministratorsByUnitNumber("1203250000");
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.unit_administrator ua")
+                .contains("ua.unit_number = :unitNumber")
+                .doesNotContain("default_group_flag = 'C'");
+        verify(statement).param("unitNumber", "1203250000");
+    }
+
+    @Test
+    void findExplorerPersonByIdQueriesArchivePerson() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerPersonResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("personId", "U44984650")).thenReturn(statement);
+        when(statement.query(ExplorerPersonResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.empty());
+
+        new AwardArchiveRepository(jdbc).findExplorerPersonById("U44984650");
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.person")
+                .contains("person_id = :personId");
+    }
+
+    @Test
+    void findExplorerRolodexByIdQueriesArchiveRolodex() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerRolodexResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("rolodexId", 501L)).thenReturn(statement);
+        when(statement.query(ExplorerRolodexResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.empty());
+
+        new AwardArchiveRepository(jdbc).findExplorerRolodexById(501L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.rolodex")
+                .contains("rolodex_id = :rolodexId");
+    }
+
+    @Test
+    void findAwardsBySponsorCodeQueriesAwardVersionNotRolodex() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ExplorerAwardResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("sponsorCode", "NIH")).thenReturn(statement);
+        when(statement.query(ExplorerAwardResponse.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findAwardsBySponsorCode("NIH");
+
+        // archive.rolodex has no sponsor_code column at all (confirmed
+        // against information_schema/V056) - sponsor_code/sponsor_name
+        // are denormalized directly onto archive.award_version instead.
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_version")
+                .contains("av.sponsor_code = :sponsorCode")
+                .doesNotContain("archive.rolodex");
     }
 
     private String firstSql(JdbcClient jdbc) {

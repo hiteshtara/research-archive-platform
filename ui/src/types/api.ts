@@ -1093,3 +1093,77 @@ export interface SubawardNotification {
   sourceVersionNumber: number | null;
   sourceObjectId: string | null;
 }
+
+// --- Archive Explorer (Phase 2, /api/v1/explorer/**) -----------------------
+//
+// Dedicated Explorer contracts (docs/ARCHIVE_EXPLORER.md) - kept
+// independent of the public v1 Award API's DTOs above so either can
+// evolve without the other, except where an Explorer response reuses an
+// Award Contacts section verbatim (AwardPersonDetailV1/
+// AwardUnitDetailsV1/AwardUnitContactV1/AwardSponsorContactV1/
+// AwardCentralAdministrationContactV1), matching the backend, which
+// reuses those exact DTOs rather than duplicating their shape.
+
+export interface ExplorerAward {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number;
+  title: string | null;
+  status: string | null;
+  principalInvestigator: string | null;
+  workflowDocumentNumber: string | null;
+  modificationNumber: string | null;
+  leadUnitNumber: string | null;
+  leadUnitName: string | null;
+  primaryCurrent: boolean;
+}
+
+export interface ExplorerUnitAdministrator {
+  personId: string | null;
+  fullName: string | null;
+  administratorTypeCode: string | null;
+  administratorTypeDescription: string | null;
+  defaultGroupFlag: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+export interface ExplorerUnit {
+  unitNumber: string | null;
+  unitName: string | null;
+  parentUnitNumber: string | null;
+  parentUnitName: string | null;
+  organization: string | null;
+  administrators: ExplorerUnitAdministrator[];
+}
+
+export interface ExplorerAwardContacts {
+  award: ExplorerAward;
+  keyPersonnel: AwardPersonDetailV1[];
+  unitDetails: AwardUnitDetailsV1;
+  unitContacts: AwardUnitContactV1[];
+  sponsorContacts: AwardSponsorContactV1[];
+  centralAdministrationContacts: AwardCentralAdministrationContactV1[];
+}
+
+export interface ExplorerPerson {
+  personId: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  fullName: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+export interface ExplorerRolodex {
+  rolodexId: number;
+  firstName: string | null;
+  lastName: string | null;
+  organization: string | null;
+  phone: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
+  active: boolean | null;
+}

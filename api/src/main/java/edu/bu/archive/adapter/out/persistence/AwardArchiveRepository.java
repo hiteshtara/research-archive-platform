@@ -6,6 +6,11 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContact
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonCreditSplitRow;
@@ -940,9 +945,10 @@ public class AwardArchiveRepository {
                     COALESCE(uat.description, auc.unit_administrator_type_code)
                         AS project_role,
                     auc.unit_administrator_unit_number AS unit_number,
-                    (
+                    COALESCE(
                         auc.unit_administrator_unit_number
-                            = av.lead_unit_number
+                            = av.lead_unit_number,
+                        FALSE
                     ) AS lead_unit,
                     pe.email_address AS email,
                     pe.phone_number AS phone
@@ -977,6 +983,184 @@ public class AwardArchiveRepository {
                 """)
                 .param("awardId", awardId)
                 .query(AwardSponsorContactResponse.class)
+                .list();
+    }
+
+    /*
+     * --- Archive Explorer (Phase 2 - see docs/ARCHIVE_EXPLORER.md) ---------
+     *
+     * Reuses the exact query shapes already proven live in Phase 1's
+     * Python CLI (etl/archive_etl/explorer.py) - never a new, unproven
+     * SQL shape. Runs in-process against the same PostgreSQL connection
+     * every other repository method uses (no per-request Fargate task,
+     * unlike Phase 1's ECS-mediated CLI). unit_number/rolodex_id/
+     * person_id/award_number/document_number lookups are standalone
+     * (never Award-scoped), unlike findUnitDetails/
+     * findCentralAdministrationContacts/findUnitContacts above.
+     */
+    private static final String EXPLORER_AWARD_SELECT = """
+            SELECT
+                av.award_id,
+                av.award_number,
+                av.sequence_number,
+                av.title,
+                av.status_description AS status,
+                pi.full_name AS principal_investigator,
+                av.workflow_document_number,
+                av.modification_number,
+                av.lead_unit_number,
+                av.lead_unit_name,
+                av.is_primary_current AS primary_current
+            FROM archive.award_version av
+            LEFT JOIN LATERAL (
+                SELECT ap.full_name
+                FROM archive.award_person ap
+                WHERE ap.award_id = av.award_id
+                ORDER BY
+                    CASE
+                        WHEN UPPER(TRIM(ap.contact_role_code)) = 'PI'
+                        THEN 0
+                        ELSE 1
+                    END,
+                    ap.full_name NULLS LAST,
+                    ap.award_person_id
+                LIMIT 1
+            ) pi ON TRUE
+            """;
+
+    public Optional<ExplorerAwardResponse> findExplorerAwardByNumber(
+            String awardNumber
+    ) {
+        return jdbc.sql(
+                        EXPLORER_AWARD_SELECT
+                                + "WHERE av.award_number = :awardNumber "
+                                + "AND av.is_primary_current = TRUE"
+                )
+                .param("awardNumber", awardNumber)
+                .query(ExplorerAwardResponse.class)
+                .optional();
+    }
+
+    public Optional<ExplorerAwardResponse> findExplorerAwardVersionById(
+            long awardId
+    ) {
+        return jdbc.sql(EXPLORER_AWARD_SELECT + "WHERE av.award_id = :awardId")
+                .param("awardId", awardId)
+                .query(ExplorerAwardResponse.class)
+                .optional();
+    }
+
+    public Optional<ExplorerUnitRow> findUnitByNumber(String unitNumber) {
+        return jdbc.sql("""
+                SELECT
+                    u.unit_number,
+                    u.unit_name,
+                    u.parent_unit_number,
+                    parent.unit_name AS parent_unit_name,
+                    u.organization_id AS organization
+                FROM archive.unit u
+                LEFT JOIN archive.unit parent
+                       ON parent.unit_number = u.parent_unit_number
+                WHERE u.unit_number = :unitNumber
+                """)
+                .param("unitNumber", unitNumber)
+                .query(ExplorerUnitRow.class)
+                .optional();
+    }
+
+    public List<ExplorerUnitAdministratorResponse>
+            findUnitAdministratorsByUnitNumber(String unitNumber) {
+        return jdbc.sql("""
+                SELECT
+                    ua.person_id,
+                    COALESCE(pe.full_name, ua.person_id) AS full_name,
+                    ua.unit_administrator_type_code AS administrator_type_code,
+                    uat.description AS administrator_type_description,
+                    uat.default_group_flag,
+                    pe.email_address AS email,
+                    pe.phone_number AS phone
+                FROM archive.unit_administrator ua
+                LEFT JOIN archive.unit_administrator_type uat
+                       ON uat.unit_administrator_type_code
+                          = ua.unit_administrator_type_code
+                LEFT JOIN archive.person pe ON pe.person_id = ua.person_id
+                WHERE ua.unit_number = :unitNumber
+                ORDER BY ua.unit_administrator_type_code, ua.person_id
+                """)
+                .param("unitNumber", unitNumber)
+                .query(ExplorerUnitAdministratorResponse.class)
+                .list();
+    }
+
+    public Optional<ExplorerPersonResponse> findExplorerPersonById(
+            String personId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    person_id,
+                    first_name,
+                    middle_name,
+                    last_name,
+                    full_name,
+                    email_address AS email,
+                    phone_number AS phone
+                FROM archive.person
+                WHERE person_id = :personId
+                """)
+                .param("personId", personId)
+                .query(ExplorerPersonResponse.class)
+                .optional();
+    }
+
+    public Optional<ExplorerRolodexResponse> findExplorerRolodexById(
+            long rolodexId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    rolodex_id,
+                    first_name,
+                    last_name,
+                    organization,
+                    phone_number AS phone,
+                    email_address AS email,
+                    city,
+                    state,
+                    active
+                FROM archive.rolodex
+                WHERE rolodex_id = :rolodexId
+                """)
+                .param("rolodexId", rolodexId)
+                .query(ExplorerRolodexResponse.class)
+                .optional();
+    }
+
+    /*
+     * "Sponsors" as its own Explorer resource means the current-version
+     * Awards carrying a given SPONSOR_CODE. archive.rolodex has no
+     * sponsor_code column at all (confirmed against
+     * information_schema/V056 - an earlier version of this method
+     * wrongly assumed one existed and threw
+     * "column sponsor_code does not exist" against the real dev
+     * database); sponsor_code/sponsor_name are instead denormalized
+     * directly onto archive.award_version (see AwardArchiveRepository's
+     * existing sponsor ILIKE search above, and
+     * ix_award_version_sponsor - V053), so this reuses
+     * EXPLORER_AWARD_SELECT rather than inventing a new join. A
+     * different concept from an Award's own Sponsor Contacts
+     * (archive.award_sponsor_contact, already covered by
+     * findSponsorContacts/the /award-contacts aggregate above).
+     */
+    public List<ExplorerAwardResponse> findAwardsBySponsorCode(
+            String sponsorCode
+    ) {
+        return jdbc.sql(
+                        EXPLORER_AWARD_SELECT
+                                + "WHERE av.sponsor_code = :sponsorCode "
+                                + "AND av.is_primary_current = TRUE "
+                                + "ORDER BY av.award_number"
+                )
+                .param("sponsorCode", sponsorCode)
+                .query(ExplorerAwardResponse.class)
                 .list();
     }
 
