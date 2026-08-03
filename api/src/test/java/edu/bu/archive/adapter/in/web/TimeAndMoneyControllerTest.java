@@ -64,7 +64,7 @@ class TimeAndMoneyControllerTest {
         mockMvc.perform(get("/api/v1/awards/3/time-and-money/summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.awardNumber").value("100004-00003"))
-                .andExpect(jsonPath("$.lastTimeAndMoneyDocumentNumber")
+                .andExpect(jsonPath("$.lastFamilyTimeAndMoneyDocumentNumber")
                         .value("281518"));
 
         verify(service).findTimeAndMoneySummary(3L);

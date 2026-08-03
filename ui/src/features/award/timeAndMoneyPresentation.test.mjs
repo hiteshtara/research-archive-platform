@@ -61,21 +61,21 @@ test("describeHistoryEntry: Time and Money-created row where versions differ - n
 
 test("describeLastAction: no Time and Money action yet", () => {
   assert.equal(
-    describeLastAction({ lastTimeAndMoneyDocumentNumber: null }),
-    "No Time and Money action recorded for this version yet.",
+    describeLastAction({ lastFamilyTimeAndMoneyDocumentNumber: null }),
+    "No Time and Money action recorded for this Award.",
   );
   assert.equal(
     describeLastAction(null),
-    "No Time and Money action recorded for this version yet.",
+    "No Time and Money action recorded for this Award.",
   );
 });
 
 test("describeLastAction: composes document number, type, and notice date", () => {
   assert.equal(
     describeLastAction({
-      lastTimeAndMoneyDocumentNumber: "281518",
-      lastTransactionTypeDescription: "Supplement",
-      lastNoticeDate: "2021-01-01",
+      lastFamilyTimeAndMoneyDocumentNumber: "281518",
+      lastFamilyTransactionTypeDescription: "Supplement",
+      lastFamilyNoticeDate: "2021-01-01",
     }),
     "Document 281518 · Supplement · 2021-01-01",
   );
@@ -84,9 +84,9 @@ test("describeLastAction: composes document number, type, and notice date", () =
 test("describeLastAction: omits missing optional parts", () => {
   assert.equal(
     describeLastAction({
-      lastTimeAndMoneyDocumentNumber: "281518",
-      lastTransactionTypeDescription: null,
-      lastNoticeDate: null,
+      lastFamilyTimeAndMoneyDocumentNumber: "281518",
+      lastFamilyTransactionTypeDescription: null,
+      lastFamilyNoticeDate: null,
     }),
     "Document 281518",
   );

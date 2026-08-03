@@ -1540,14 +1540,34 @@ public class AwardArchiveRepository {
      * --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
      *
      * Every method below reads only already-archived tables (V048/V049)
-     * - no new migration, no new ETL. Summary is scoped to one exact
-     * award_id (the version being viewed), matching
-     * findSummaryByAwardId; Actions/History are family-wide (every
-     * version of awardNumber), matching findAmountHistory's own
-     * precedent, since award_amount_transaction carries no
-     * sequence_number of its own to scope by. timeAndMoneyCreated is
-     * computed here, in SQL, rather than left to the service/UI layer -
-     * see TimeAndMoneyHistoryEntryResponse.
+     * - no new migration, no new ETL.
+     *
+     * Scoping model (proven against TimeAndMoneyHistoryServiceImpl.java
+     * in the real Kuali source, and against live data across several
+     * ordinary Awards - see the "Time and Money scoping" investigation
+     * this comment summarizes): Kuali's own Time and Money History
+     * screen is entered by awardNumber
+     * (buildTimeAndMoneyHistoryObjects(String awardNumber, ...)), not
+     * by a single award_id - it walks every version in the family. A
+     * single Award VERSION's own award_amount_info rows are frequently
+     * NOT the version that was actually Time-and-Money-touched (a
+     * plain, non-T&M amendment can mint a new "current" version whose
+     * only row is a copy-forward snapshot, while the real T&M activity
+     * sits on an earlier sequence) - confirmed live: 3 of 4 sampled
+     * ordinary Awards had zero Time-and-Money-created rows on their
+     * current version despite real family history.
+     *
+     * findTimeAndMoneySummary therefore splits its scope in two:
+     *   - obligated/anticipated totals stay scoped to this EXACT
+     *     award_id's own latest award_amount_info row (genuinely
+     *     version-specific financial state, correct as version-scoped -
+     *     this part was never the bug).
+     *   - "last action"/transaction count search the WHOLE award_number
+     *     family via archive.award_amount_transaction, matching
+     *     findTimeAndMoneyActions/findTimeAndMoneyHistory's own
+     *     family-wide scope exactly (award_amount_transaction has no
+     *     sequence_number column in real Kuali at all, so there is no
+     *     version to lose by doing this).
      */
 
     public Optional<TimeAndMoneySummaryResponse> findTimeAndMoneySummary(
@@ -1564,34 +1584,27 @@ public class AwardArchiveRepository {
                     amount.anticipated_total_amount,
                     amount.anticipated_total_direct,
                     amount.anticipated_total_indirect,
-                    tm_count.count AS time_and_money_transaction_count,
-                    latest_tnm.document_number AS last_time_and_money_document_number,
-                    last_action.notice_date AS last_notice_date,
-                    last_action.transaction_type_description AS last_transaction_type_description
+                    family_count.count AS family_transaction_count,
+                    last_action.document_number AS last_family_time_and_money_document_number,
+                    last_action.notice_date AS last_family_notice_date,
+                    last_action.transaction_type_description AS last_family_transaction_type_description
                 FROM archive.award_amount_info amount
                 INNER JOIN archive.award_version av ON av.award_id = amount.award_id
                 LEFT JOIN LATERAL (
                     SELECT COUNT(*) AS count
-                    FROM archive.award_amount_info tnm
-                    WHERE tnm.award_id = amount.award_id
-                      AND tnm.transaction_id IS NOT NULL
-                      AND tnm.tnm_document_number IS NOT NULL
-                ) tm_count ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT tnm.tnm_document_number AS document_number
-                    FROM archive.award_amount_info tnm
-                    WHERE tnm.award_id = amount.award_id
-                      AND tnm.transaction_id IS NOT NULL
-                      AND tnm.tnm_document_number IS NOT NULL
-                    ORDER BY tnm.award_amount_info_id DESC
-                    LIMIT 1
-                ) latest_tnm ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT aat.notice_date, aat.transaction_type_description
                     FROM archive.award_amount_transaction aat
                     WHERE aat.award_number = amount.award_number
-                      AND aat.document_number = latest_tnm.document_number
-                    ORDER BY aat.award_amount_transaction_id DESC
+                ) family_count ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        aat.document_number,
+                        aat.notice_date,
+                        aat.transaction_type_description
+                    FROM archive.award_amount_transaction aat
+                    WHERE aat.award_number = amount.award_number
+                    ORDER BY
+                        aat.notice_date DESC NULLS LAST,
+                        aat.award_amount_transaction_id DESC
                     LIMIT 1
                 ) last_action ON TRUE
                 WHERE amount.award_id = :awardId

@@ -410,10 +410,15 @@ export function AwardTimeAndMoneySection({ awardId }: { awardId: number }) {
           value={formatCurrencyAmount(summary.anticipatedTotalAmount)}
         />
         <StatCard
-          label="Time and Money actions"
-          value={String(summary.timeAndMoneyTransactionCount)}
+          label="Time and Money actions (all versions)"
+          value={String(summary.familyTransactionCount)}
         />
       </Stack>
+
+      <Typography variant="caption" color="text.disabled">
+        Totals above reflect this Award version (sequence{" "}
+        {summary.sequenceNumber}) only.
+      </Typography>
 
       <Typography color="text.secondary">
         {describeLastAction(summary)}
@@ -424,6 +429,11 @@ export function AwardTimeAndMoneySection({ awardId }: { awardId: number }) {
       </Alert>
 
       <Divider />
+
+      <Typography variant="caption" color="text.disabled">
+        Actions and history below include all versions of Award{" "}
+        {summary.awardNumber}, not just the one you&rsquo;re viewing.
+      </Typography>
 
       <Tabs
         value={tab}
@@ -638,15 +648,34 @@ function HistoryTable({
                   sx={clickable ? { cursor: "pointer" } : undefined}
                 >
                   <TableCell>
-                    <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-                      <Chip size="small" label={entry.sequenceNumber} />
-                      {!described.versionsAgree && (
+                    <Stack spacing={0.25}>
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        sx={{ alignItems: "center" }}
+                      >
                         <Chip
                           size="small"
-                          variant="outlined"
-                          color="warning"
-                          label={described.versionNote}
+                          label={`Seq ${entry.sequenceNumber}`}
+                          title={`award_id ${entry.awardId}`}
                         />
+                        {!described.versionsAgree && (
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            label={described.versionNote}
+                          />
+                        )}
+                      </Stack>
+                      {entry.originatingAwardVersion !== null && (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                        >
+                          Recorded against version{" "}
+                          {entry.originatingAwardVersion}
+                        </Typography>
                       )}
                     </Stack>
                   </TableCell>

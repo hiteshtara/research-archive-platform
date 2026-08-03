@@ -4,13 +4,28 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /*
- * Scoped to one exact award_id (the specific Award version being
- * viewed), not the whole award_number family - consistent with
- * AwardSummaryResponse. Reflects the latest archive.award_amount_info
- * row for this award_id; lastTimeAndMoneyDocumentNumber/lastNoticeDate/
- * lastTransactionTypeDescription are null when that latest row was
- * never Time and Money-created (the Award's original entry, not yet
- * touched by a Time and Money action).
+ * Split scope, proven against real Kuali source and live data (see
+ * AwardArchiveRepository.findTimeAndMoneySummary):
+ *
+ * - awardId/awardNumber/sequenceNumber and every obligated/anticipated
+ *   amount are scoped to this EXACT award_id (the specific Award version being
+ *   viewed) - genuinely version-specific financial state (the latest
+ *   archive.award_amount_info row for this award_id, whether or not
+ *   that row itself was Time and Money-created - a plain amendment
+ *   copies the running totals forward into the new version's own row).
+ * - familyTransactionCount/lastFamilyTimeAndMoneyDocumentNumber/
+ *   lastFamilyNoticeDate/lastFamilyTransactionTypeDescription are
+ *   scoped to the WHOLE award_number family (every version), matching
+ *   TimeAndMoneyActionResponse/TimeAndMoneyHistoryEntryResponse's own
+ *   family-wide scope - archive.award_amount_transaction has no
+ *   sequence_number column in real Kuali at all, so there is no
+ *   version to attribute a "last action" to more narrowly than the
+ *   family. Do NOT restrict these four fields back to this exact
+ *   award_id: live data across ordinary Awards showed most current
+ *   versions have zero Time-and-Money-created rows of their own even
+ *   when their family has real history (see the design doc's own
+ *   finding that a non-T&M amendment can mint a new "current" version
+ *   with nothing but a copy-forward snapshot).
  *
  * Deliberately omits anticipated/obligated "distributable" amounts
  * (ant_distributable_amount/obli_distributable_amount) and an
@@ -31,9 +46,9 @@ public record TimeAndMoneySummaryResponse(
         BigDecimal anticipatedTotalAmount,
         BigDecimal anticipatedTotalDirect,
         BigDecimal anticipatedTotalIndirect,
-        long timeAndMoneyTransactionCount,
-        String lastTimeAndMoneyDocumentNumber,
-        LocalDate lastNoticeDate,
-        String lastTransactionTypeDescription
+        long familyTransactionCount,
+        String lastFamilyTimeAndMoneyDocumentNumber,
+        LocalDate lastFamilyNoticeDate,
+        String lastFamilyTransactionTypeDescription
 ) {
 }

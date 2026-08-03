@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 class TimeAndMoneyRepositoryTest {
 
     @Test
-    void findTimeAndMoneySummaryScopesToExactAwardIdAndComputesLastAction() {
+    void findTimeAndMoneySummaryScopesTotalsToExactAwardIdButLastActionToTheWholeFamily() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =
                 mock(JdbcClient.StatementSpec.class);
@@ -46,15 +46,26 @@ class TimeAndMoneyRepositoryTest {
 
         new AwardArchiveRepository(jdbc).findTimeAndMoneySummary(3L);
 
-        assertThat(firstSql(jdbc))
+        String sql = firstSql(jdbc);
+        assertThat(sql)
                 .contains("FROM archive.award_amount_info amount")
                 .contains("INNER JOIN archive.award_version av ON av.award_id = amount.award_id")
-                .contains("amount.award_id = :awardId")
-                .contains("LEFT JOIN LATERAL")
-                .contains("tnm.transaction_id IS NOT NULL")
-                .contains("tnm.tnm_document_number IS NOT NULL")
+                // totals stay scoped to this exact award_id
+                .contains("WHERE amount.award_id = :awardId")
                 .contains("ORDER BY amount.award_amount_info_id DESC")
-                .contains("LIMIT 1");
+                .contains("LIMIT 1")
+                // last action/count scope to the whole award_number
+                // family via award_amount_transaction, NOT to this
+                // exact award_id's own award_amount_info rows - the
+                // bug this test guards against (empty summaries on
+                // most ordinary Awards' current version).
+                .contains("FROM archive.award_amount_transaction aat")
+                .contains("aat.award_number = amount.award_number")
+                .doesNotContain("tnm.transaction_id IS NOT NULL");
+        // exactly two family-scoped subqueries (count + last action),
+        // neither filtered down to this one award_id.
+        assertThat(sql.split("aat\\.award_number = amount\\.award_number", -1))
+                .hasSize(3);
         verify(statement).param("awardId", 3L);
     }
 

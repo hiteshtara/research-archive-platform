@@ -669,6 +669,16 @@ export interface AwardAttachmentPageResponse
 // historically named TRANSACTION_ID in real Kuali, so a bare
 // "transactionId" is never used here.
 
+// Split scope, proven against real Kuali source and live data:
+// awardId/awardNumber/sequenceNumber/obligated*/anticipated* are
+// scoped to this EXACT awardId (the version being viewed) -
+// genuinely version-specific financial state. familyTransactionCount/
+// lastFamilyTimeAndMoneyDocumentNumber/lastFamilyNoticeDate/
+// lastFamilyTransactionTypeDescription are scoped to the WHOLE
+// awardNumber family (every version) - most ordinary Awards' current
+// version has never itself been Time-and-Money-created even when
+// their family has real history, so these four fields deliberately
+// search across all versions rather than just this one.
 export interface TimeAndMoneySummaryV1 {
   awardId: number;
   awardNumber: string;
@@ -679,10 +689,10 @@ export interface TimeAndMoneySummaryV1 {
   anticipatedTotalAmount: number | null;
   anticipatedTotalDirect: number | null;
   anticipatedTotalIndirect: number | null;
-  timeAndMoneyTransactionCount: number;
-  lastTimeAndMoneyDocumentNumber: string | null;
-  lastNoticeDate: string | null;
-  lastTransactionTypeDescription: string | null;
+  familyTransactionCount: number;
+  lastFamilyTimeAndMoneyDocumentNumber: string | null;
+  lastFamilyNoticeDate: string | null;
+  lastFamilyTransactionTypeDescription: string | null;
 }
 
 export interface TimeAndMoneyActionV1 {

@@ -431,9 +431,9 @@ class AwardV1ContractTest {
                 "obligatedTotalAmount", "obligatedTotalDirect",
                 "obligatedTotalIndirect", "anticipatedTotalAmount",
                 "anticipatedTotalDirect", "anticipatedTotalIndirect",
-                "timeAndMoneyTransactionCount",
-                "lastTimeAndMoneyDocumentNumber", "lastNoticeDate",
-                "lastTransactionTypeDescription"
+                "familyTransactionCount",
+                "lastFamilyTimeAndMoneyDocumentNumber", "lastFamilyNoticeDate",
+                "lastFamilyTransactionTypeDescription"
         ));
 
         // "distributable" amounts and an obligated-change direct/

@@ -36,20 +36,22 @@ export function describeHistoryEntry(entry) {
   };
 }
 
-// Summary's "last action" line - null document number means no Time
-// and Money action has ever touched this exact award_id/version yet
-// (still on its original entry).
+// Summary's "last action" line is family-wide (every version of this
+// Award number) - most ordinary Awards' current version has never
+// itself been Time and Money-created even when their family has real
+// history, so a null document number here means no Time and Money
+// action has EVER touched this Award number, not just this version.
 export function describeLastAction(summary) {
-  if (!summary?.lastTimeAndMoneyDocumentNumber) {
-    return "No Time and Money action recorded for this version yet.";
+  if (!summary?.lastFamilyTimeAndMoneyDocumentNumber) {
+    return "No Time and Money action recorded for this Award.";
   }
 
-  const parts = [`Document ${summary.lastTimeAndMoneyDocumentNumber}`];
-  if (summary.lastTransactionTypeDescription) {
-    parts.push(summary.lastTransactionTypeDescription);
+  const parts = [`Document ${summary.lastFamilyTimeAndMoneyDocumentNumber}`];
+  if (summary.lastFamilyTransactionTypeDescription) {
+    parts.push(summary.lastFamilyTransactionTypeDescription);
   }
-  if (summary.lastNoticeDate) {
-    parts.push(summary.lastNoticeDate);
+  if (summary.lastFamilyNoticeDate) {
+    parts.push(summary.lastFamilyNoticeDate);
   }
   return parts.join(" · ");
 }
