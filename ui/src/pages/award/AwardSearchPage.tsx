@@ -18,6 +18,8 @@ import { useNavigate } from "react-router-dom";
 
 import { searchAwardsV1 } from "../../api/client";
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
+import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
+import { describeSearchResults } from "../../features/award/awardSearchPresentation.mjs";
 
 const PAGE_SIZE = 25;
 
@@ -31,18 +33,6 @@ const SEARCH_DIMENSIONS = [
   "Title",
   "Document Number",
 ];
-
-function formatAmount(amount: number | null): string {
-  if (amount === null) {
-    return "—";
-  }
-
-  return amount.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-}
 
 // Entry point of the primary Award workflow: Search -> Search Results ->
 // Award Hierarchy -> Award Dashboard. Matches the approved mockup's
@@ -139,9 +129,13 @@ export function AwardSearchPage() {
             </Alert>
           )}
 
-          {searchQuery.data && (
+          {searchQuery.data && (() => {
+            const { totalElements, totalPages, content, exactDocumentMatch } =
+              describeSearchResults(searchQuery.data);
+
+            return (
             <>
-              {searchQuery.data.exactDocumentMatch && (
+              {exactDocumentMatch && (
                 <Card
                   variant="outlined"
                   sx={{
@@ -155,16 +149,12 @@ export function AwardSearchPage() {
                   role="button"
                   tabIndex={0}
                   onClick={() =>
-                    navigate(
-                      `/awards/${searchQuery.data.exactDocumentMatch!.awardId}`,
-                    )
+                    navigate(`/awards/${exactDocumentMatch.awardId}`)
                   }
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      navigate(
-                        `/awards/${searchQuery.data.exactDocumentMatch!.awardId}`,
-                      );
+                      navigate(`/awards/${exactDocumentMatch.awardId}`);
                     }
                   }}
                 >
@@ -179,22 +169,17 @@ export function AwardSearchPage() {
                         color="primary"
                         size="small"
                       />
-                      <AwardStatusPill
-                        status={searchQuery.data.exactDocumentMatch.status}
-                      />
+                      <AwardStatusPill status={exactDocumentMatch.status} />
                     </Stack>
                     <Typography sx={{ fontWeight: 700 }}>
-                      {searchQuery.data.exactDocumentMatch.awardNumber} &middot;
+                      {exactDocumentMatch.awardNumber} &middot;
                       sequence{" "}
-                      {searchQuery.data.exactDocumentMatch.sequenceNumber}
+                      {exactDocumentMatch.sequenceNumber}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Document {
-                        searchQuery.data.exactDocumentMatch
-                          .workflowDocumentNumber
-                      } &middot;{" "}
-                      {searchQuery.data.exactDocumentMatch.title ??
-                        "Untitled award"}
+                      Document {exactDocumentMatch.workflowDocumentNumber}
+                      {" "}&middot;{" "}
+                      {exactDocumentMatch.title ?? "Untitled award"}
                     </Typography>
                   </CardContent>
                 </Card>
@@ -205,19 +190,18 @@ export function AwardSearchPage() {
                 color="text.secondary"
                 sx={{ display: "block", mb: 1.5 }}
               >
-                {searchQuery.data.results.totalElements.toLocaleString()} award
-                {searchQuery.data.results.totalElements === 1 ? "" : "s"} found
+                {totalElements.toLocaleString()} award
+                {totalElements === 1 ? "" : "s"} found
               </Typography>
 
-              {searchQuery.data.results.content.length === 0 &&
-                !searchQuery.data.exactDocumentMatch && (
-                  <Typography color="text.secondary" sx={{ py: 2 }}>
-                    No awards match &ldquo;{appliedQuery}&rdquo;.
-                  </Typography>
-                )}
+              {content.length === 0 && !exactDocumentMatch && (
+                <Typography color="text.secondary" sx={{ py: 2 }}>
+                  No awards match &ldquo;{appliedQuery}&rdquo;.
+                </Typography>
+              )}
 
               <Stack spacing={1.25}>
-                {searchQuery.data.results.content.map((hit) => (
+                {content.map((hit) => (
                   <Card
                     key={hit.awardId}
                     variant="outlined"
@@ -288,24 +272,25 @@ export function AwardSearchPage() {
                       </Box>
 
                       <Typography sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
-                        {formatAmount(hit.currentObligatedAmount)}
+                        {formatCurrencyAmount(hit.currentObligatedAmount)}
                       </Typography>
                     </CardContent>
                   </Card>
                 ))}
               </Stack>
 
-              {searchQuery.data.results.totalPages > 1 && (
+              {totalPages > 1 && (
                 <Stack sx={{ alignItems: "center", mt: 3 }}>
                   <Pagination
-                    count={searchQuery.data.results.totalPages}
+                    count={totalPages}
                     page={page + 1}
                     onChange={(_event, value) => setPage(value - 1)}
                   />
                 </Stack>
               )}
             </>
-          )}
+            );
+          })()}
         </Box>
       )}
     </Stack>
