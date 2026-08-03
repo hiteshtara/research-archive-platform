@@ -2643,8 +2643,151 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> bool:
     validate_oracle_reachable(_connect_oracle)
     logger.bind(stage="startup").info("Oracle reachable")
 
+    if arguments.diff_award_versions is not None:
+        _run_diff_award_versions(engine, arguments.diff_award_versions)
+        logger.bind(
+            stage="startup", status="diff_award_versions_complete"
+        ).info("Award/Oracle version diff complete")
+        return True
+
     logger.bind(stage="startup").info("Startup validation passed")
     return False
+
+
+def _run_diff_award_versions(
+    engine: Engine, award_number: str
+) -> dict[str, Any]:
+    """--diff-award-versions: developer/investigation aid, read-only
+    side-by-side comparison of Oracle's AWARD rows for exactly this
+    award_number family against archive.award_version - explains, per
+    Oracle-side sequence, whether it is archived at all and whether its
+    modification_number ("document number" - see
+    AwardVersionSummaryResponse's own doc-comment for why this column,
+    not a fabricated one, is what "document number" means) value
+    matches. Never writes to either database.
+
+    Reads Oracle via a targeted, bind-variable AWARD_NUMBER IN (...)
+    filter (read_award_versions_matching_award_numbers ->
+    OracleDataSource.read_filtered), never a full-table scan - unlike
+    --show-batch, this DOES require ORACLE_SECRET_ID/Oracle
+    connectivity."""
+    diff_logger = logger.bind(
+        stage="diff_award_versions", award_number=award_number
+    )
+
+    oracle_rows = read_award_versions_matching_award_numbers(
+        OracleDataSource(VERSIONS_ORACLE_SQL), {award_number}
+    )
+    if oracle_rows.empty:
+        diff_logger.info(
+            "award_number={} not found in Oracle at all", award_number
+        )
+        return {
+            "award_number": award_number,
+            "oracle_count": 0,
+            "archive_count": 0,
+            "rows": [],
+        }
+
+    oracle_rows = prepare_versions(oracle_rows)
+
+    with engine.connect() as connection:
+        archive_rows = connection.execute(
+            text(
+                """
+                SELECT award_id, sequence_number, modification_number,
+                       transaction_type, source_update_timestamp
+                FROM archive.award_version
+                WHERE award_number = :award_number
+                """
+            ),
+            {"award_number": award_number},
+        ).mappings().all()
+
+    archive_by_award_id = {
+        int(row["award_id"]): row for row in archive_rows
+    }
+
+    report_rows: list[dict[str, Any]] = []
+    for _, oracle_row in oracle_rows.sort_values("sequence_number").iterrows():
+        award_id = int(oracle_row["award_id"])
+        archive_row = archive_by_award_id.get(award_id)
+
+        oracle_doc_number = oracle_row.get("modification_number")
+        oracle_doc_number = (
+            None if pd.isna(oracle_doc_number) else str(oracle_doc_number)
+        )
+
+        if archive_row is None:
+            reason = "award_id not archived at all - ETL has never loaded this sequence"
+            archive_doc_number = None
+        else:
+            archive_doc_number = archive_row["modification_number"]
+            if oracle_doc_number == archive_doc_number:
+                reason = (
+                    "present and matches Oracle"
+                    if oracle_doc_number
+                    else (
+                        "blank/null in both Oracle and archive - not a "
+                        "bug, Oracle genuinely has no value here"
+                    )
+                )
+            else:
+                reason = (
+                    f"MISMATCH: Oracle has {oracle_doc_number!r} but "
+                    f"archive has {archive_doc_number!r} - a real ETL "
+                    "load gap, not a naming/mapping bug"
+                )
+
+        report_rows.append(
+            {
+                "award_id": award_id,
+                "sequence_number": int(oracle_row["sequence_number"]),
+                "oracle_document_number": oracle_doc_number,
+                "archive_document_number": archive_doc_number,
+                "oracle_transaction_type": oracle_row.get("transaction_type"),
+                "oracle_update_timestamp": str(
+                    oracle_row.get("update_timestamp")
+                ),
+                "reason": reason,
+            }
+        )
+
+    header = (
+        f"{'AWARD_ID':>10}  {'SEQ':>4}  {'ORACLE_DOC_NUM':<20}"
+        f"  {'ARCHIVE_DOC_NUM':<20}  {'TXN_TYPE':<25}  REASON"
+    )
+    print(header)
+    print("-" * len(header))
+    for row in report_rows:
+        print(
+            f"{row['award_id']:>10}  {row['sequence_number']:>4}  "
+            f"{str(row['oracle_document_number']):<20}  "
+            f"{str(row['archive_document_number']):<20}  "
+            f"{str(row['oracle_transaction_type'])[:25]:<25}  {row['reason']}"
+        )
+
+    mismatches = [
+        r
+        for r in report_rows
+        if "MISMATCH" in r["reason"] or "not archived" in r["reason"]
+    ]
+    diff_logger.info(
+        "award_number={}: Oracle has {} sequence(s), archive has {}, "
+        "{} discrepant",
+        award_number,
+        len(report_rows),
+        len(archive_by_award_id),
+        len(mismatches),
+    )
+
+    return {
+        "award_number": award_number,
+        "oracle_count": len(report_rows),
+        "archive_count": len(archive_by_award_id),
+        "rows": report_rows,
+    }
+
 
 _AWARD_VERSION_COLUMNS = [
     "award_number",
@@ -10155,6 +10298,23 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--diff-award-versions",
+        type=str,
+        default=None,
+        metavar="AWARD_NUMBER",
+        help=(
+            "Developer/investigation aid, not a production feature: "
+            "read-only side-by-side comparison of Oracle's AWARD rows "
+            "for exactly this award_number family against "
+            "archive.award_version, explaining per-sequence whether it "
+            "is archived at all and whether its modification_number "
+            "('document number') value matches Oracle. Reads Oracle (a "
+            "targeted bind-variable filter, not a full-table scan) and "
+            "PostgreSQL - requires ORACLE_SECRET_ID. Never writes "
+            "anything."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -10253,6 +10413,11 @@ def main() -> None:
     if arguments.show_batch is not None:
         engine = create_postgres_engine()
         _run_show_batch(engine, arguments.show_batch)
+        return
+
+    if arguments.diff_award_versions is not None and not arguments.ecs:
+        engine = create_postgres_engine()
+        _run_diff_award_versions(engine, arguments.diff_award_versions)
         return
 
     if arguments.load_award_id is not None:

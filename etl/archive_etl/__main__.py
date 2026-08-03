@@ -109,6 +109,18 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
                 "help": "Forwarded to the underlying loader's --migrate-only.",
             },
         ),
+        (
+            "--diff-award-versions",
+            {
+                "type": str,
+                "default": None,
+                "metavar": "AWARD_NUMBER",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--diff-award-versions."
+                ),
+            },
+        ),
     ],
     "award-attachment": [
         (

@@ -7890,11 +7890,16 @@ class RunEcsSetupOrchestrationTest(unittest.TestCase):
     that file is not modified or imported from here."""
 
     def _run(
-        self, *, migrate_only: bool, show_batch: int | None = None
+        self,
+        *,
+        migrate_only: bool,
+        show_batch: int | None = None,
+        diff_award_versions: str | None = None,
     ) -> dict:
         arguments = MagicMock(
             migrate_only=migrate_only,
             show_batch=show_batch,
+            diff_award_versions=diff_award_versions,
         )
         calls: list[str] = []
 
@@ -8142,6 +8147,7 @@ class MainDispatchTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                diff_award_versions=None,
                 dry_run=False,
                 ecs=False,
                 migrate_only=False,
@@ -8349,6 +8355,7 @@ class MainDispatchTest(unittest.TestCase):
                 create_batch=None,
                 load_batch=None,
                 show_batch=None,
+                diff_award_versions=None,
                 dry_run=False,
                 ecs=False,
                 migrate_only=False,

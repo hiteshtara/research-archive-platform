@@ -137,6 +137,7 @@ LOAD_AWARD_ID=""
 CREATE_BATCH=""
 LOAD_BATCH=""
 SHOW_BATCH=""
+DIFF_AWARD_VERSIONS=""
 DRY_RUN=false
 IMAGE_URI_OVERRIDE=""
 
@@ -147,6 +148,7 @@ while [[ $# -gt 0 ]]; do
     --create-batch) CREATE_BATCH="$2"; shift 2 ;;
     --load-batch) LOAD_BATCH="$2"; shift 2 ;;
     --show-batch) SHOW_BATCH="$2"; shift 2 ;;
+    --diff-award-versions) DIFF_AWARD_VERSIONS="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
@@ -195,6 +197,21 @@ fi
 if [[ "$DRY_RUN" == true && "$MIGRATE_ONLY" == true ]]; then
   echo "ERROR: --dry-run cannot be combined with --migrate-only" >&2
   exit 1
+fi
+
+if [[ -n "$DIFF_AWARD_VERSIONS" ]]; then
+  if [[ "${#ACTIVE_BATCH_VERBS[@]}" -gt 0 ]]; then
+    echo "ERROR: --diff-award-versions cannot be combined with ${ACTIVE_BATCH_VERBS[0]}" >&2
+    exit 1
+  fi
+  if [[ -n "$LOAD_AWARD_ID" ]]; then
+    echo "ERROR: --diff-award-versions cannot be combined with --load-award-id" >&2
+    exit 1
+  fi
+  if [[ "$MIGRATE_ONLY" == true ]]; then
+    echo "ERROR: --diff-award-versions cannot be combined with --migrate-only" >&2
+    exit 1
+  fi
 fi
 
 # --show-batch is PostgreSQL-only (like --migrate-only), so it's exempt
@@ -301,6 +318,7 @@ OVERRIDE_ARGS=()
 [[ -n "$CREATE_BATCH" ]] && OVERRIDE_ARGS+=(--create-batch "$CREATE_BATCH")
 [[ -n "$LOAD_BATCH" ]] && OVERRIDE_ARGS+=(--load-batch "$LOAD_BATCH")
 [[ -n "$SHOW_BATCH" ]] && OVERRIDE_ARGS+=(--show-batch "$SHOW_BATCH")
+[[ -n "$DIFF_AWARD_VERSIONS" ]] && OVERRIDE_ARGS+=(--diff-award-versions "$DIFF_AWARD_VERSIONS")
 [[ "$DRY_RUN" == true ]] && OVERRIDE_ARGS+=(--dry-run)
 
 # Non-secret configuration only - identifiers and connection routing

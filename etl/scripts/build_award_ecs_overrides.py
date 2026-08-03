@@ -51,6 +51,7 @@ def build_container_command(
     create_batch: int | None = None,
     load_batch: int | None = None,
     show_batch: int | None = None,
+    diff_award_versions: str | None = None,
     dry_run: bool = False,
 ) -> list[str]:
     """--ecs is always included: this command is only ever used for the
@@ -76,6 +77,8 @@ def build_container_command(
         command.extend(["--load-batch", str(load_batch)])
     if show_batch is not None:
         command.extend(["--show-batch", str(show_batch)])
+    if diff_award_versions is not None:
+        command.extend(["--diff-award-versions", diff_award_versions])
     if dry_run:
         command.append("--dry-run")
 
@@ -117,6 +120,7 @@ def build_run_task_overrides(
     create_batch: int | None = None,
     load_batch: int | None = None,
     show_batch: int | None = None,
+    diff_award_versions: str | None = None,
     dry_run: bool = False,
     postgres_secret_id: str | None = None,
     oracle_secret_id: str | None = None,
@@ -133,6 +137,7 @@ def build_run_task_overrides(
             create_batch=create_batch,
             load_batch=load_batch,
             show_batch=show_batch,
+            diff_award_versions=diff_award_versions,
             dry_run=dry_run,
         ),
     }
@@ -158,6 +163,7 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--create-batch", type=int, default=None)
     parser.add_argument("--load-batch", type=int, default=None)
     parser.add_argument("--show-batch", type=int, default=None)
+    parser.add_argument("--diff-award-versions", type=str, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--postgres-secret-id", type=str, default=None)
     parser.add_argument("--oracle-secret-id", type=str, default=None)
@@ -176,6 +182,7 @@ def main() -> None:
         create_batch=args.create_batch,
         load_batch=args.load_batch,
         show_batch=args.show_batch,
+        diff_award_versions=args.diff_award_versions,
         dry_run=args.dry_run,
         postgres_secret_id=args.postgres_secret_id,
         oracle_secret_id=args.oracle_secret_id,
