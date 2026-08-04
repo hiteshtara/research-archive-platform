@@ -472,6 +472,69 @@ version 5 (`budget_id` 176666, `award_id` 2280896, sequence 9) is the
 screenshot of this exact Award, and matched to the cent by the live
 deployed API.
 
+## Budget Personnel: why the panel is usually empty (investigated, not a bug)
+
+The Personnel tab/panel (`archive.award_budget_personnel_detail`/
+`_calculated_amount`) reads as empty for nearly every Award in this
+archive. Traced end to end (Oracle → extraction SQL → ETL prepare/
+upsert → archive) for the real fixture (Award 105698-00002, Budget
+version 1, `budget_id` 126805, whose live Kuali "Personnel" tab shows
+four roster rows for Gael Orsmond with red "not found" job codes and
+$0.00 salaries):
+
+| Table | Oracle row count | Archive row count |
+|---|---|---|
+| `BUDGET_PERSONS` (roster) | 4,431, Award-scoped (confirmed: joining through `AWARD_BUDGET_EXT` doesn't reduce the count — every row belongs to an Award budget, none to Proposal Development) | 202 (187 distinct budgets) |
+| `BUDGET_PERSONNEL_DETAILS` + `AWD_BUDGET_PER_DET_EXT` | **0** — a direct, unfiltered `COUNT(*)` against production Oracle, every Award and every Proposal, not scoped to our loaded population at all | 0 |
+| `BUDGET_PERSONNEL_CAL_AMTS` + `AWD_BUDGET_PER_CAL_AMTS_EXT` | **0** — same direct check | 0 |
+
+**Conclusion: the archive faithfully mirrors Oracle. There is no
+failing extraction/staging/upsert layer to fix.** BU's real Kuali usage
+records personnel costs as a bulk "Personnel (ONLY IF PERSONNEL TAB IS
+NOT USED)" non-personnel line item (already correctly archived via
+`archive.award_budget_line_item` — real fixture: cost_element `51`,
+$309,513 direct on budget_id 126805) rather than through the per-person
+`BUDGET_PERSONNEL_DETAILS` mechanism this archive's Personnel panel
+reads from. The roster shown on Kuali's Personnel tab for a budget with
+no real `BUDGET_PERSONS` row is very likely a UI-synthesized default
+(seeded from the Award's own investigator list), not a persisted record
+this archive is missing — its "not found" job codes are consistent with
+that.
+
+Checked and ruled out along the way:
+- **Join keys**: all three extraction queries correctly join
+  `BUDGET_ID` → `BUDGET` → `AWARD_BUDGET_EXT` (roster) or
+  `BUDGET_PERSONNEL_DETAILS_ID`/`BUDGET_DETAILS_ID` (detail/calculated-
+  amount chains) — no wrong-key join found.
+- **Load order/FK dependencies**: `_AWARD_OWNED_TABLES` in
+  `load_awards_from_csv.py` (child-before-parent) is a deletion-safe
+  order, not the insert order — the real upsert call sequence inserts
+  parent-before-child correctly throughout the whole 5-level Budget
+  bundle.
+- **Staging/upsert silently dropping rows**: not applicable — Oracle
+  itself has zero `BUDGET_PERSONNEL_DETAILS`/`BUDGET_PERSONNEL_CAL_AMTS`
+  rows to drop, archive-wide, not just for this fixture.
+- **Roster shortfall (202 vs. Oracle's 4,431)**: partially, not fully,
+  explained by population coverage — this archive currently holds
+  12,195 of Oracle's 75,034 total Award budgets (16.2%), which would
+  proportionally predict ~720 roster rows; the real 202 is ~28% of that
+  estimate. Worth re-checking as the population grows; not conclusively
+  a bug today, since roster usage likely isn't uniformly distributed
+  across `award_id`s and this population was loaded in `award_id` order,
+  not a random sample.
+
+**New, previously-uncaptured table found during this investigation:**
+`BUDGET_PERSON_SALARY_DETAILS` (owner `KCOEUS`, a real schema table, not
+custom to BU) — `BUDGET_PERSON_SALARY_DETAIL_ID`, `PERSON_SEQUENCE_NUMBER`,
+`BUDGET_ID`, `BUDGET_PERIOD`, `BASE_SALARY`, `PERSON_ID`, plus standard
+OJB audit columns. 1,431 rows total, **all** Award-scoped (joining
+through `AWARD_BUDGET_EXT` preserves the full count — Award-only,
+unlike the shared `BUDGET_PERSONS`), but **every single row has
+`BASE_SALARY = 0`** — zero non-zero rows archive-wide in Oracle. No FK
+relationship in either direction; standalone table, own PK only. Not
+yet archived. Real and Award-scoped, but would add all-zero data if
+archived as-is — a decision for a future session, not acted on here.
+
 ## Date last updated
 
 2026-08-04 (Budget Total Cost Limit / Budget Change Total Cost Limit
@@ -480,4 +543,9 @@ semantic fix: live comparison against real Kuali for Award
 only the selected version's own `total_cost`, not the two Award-level
 snapshot fields Kuali's own header also displays — both were already
 archived on `archive.award_budget` and required no migration/ETL
-change, only DTO/repository/service/UI exposure).
+change, only DTO/repository/service/UI exposure. Same-day follow-up:
+Budget Personnel data-gap investigation traced all three personnel
+tables to genuinely empty/near-empty Oracle source data — no code
+fix applied, only a clarifying empty-state message in the UI — and
+surfaced one new, unarchived Oracle table, `BUDGET_PERSON_SALARY_DETAILS`,
+for a future decision).

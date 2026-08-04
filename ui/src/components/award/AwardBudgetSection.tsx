@@ -29,6 +29,7 @@ import { formatCurrencyAmount } from "../../features/award/awardSectionsPresenta
 import {
   budgetScopeNote,
   hasAnyBudgetVersions,
+  personnelEmptyStateMessage,
   selectedBudgetLabel,
 } from "../../features/award/budgetPresentation.mjs";
 import type {
@@ -475,7 +476,7 @@ function BudgetPersonnelPanel({ awardId }: { awardId: number }) {
   if (content.length === 0 && page === 0) {
     return (
       <Typography color="text.secondary">
-        No personnel recorded for this Award's selected Budget.
+        {personnelEmptyStateMessage()}
       </Typography>
     );
   }

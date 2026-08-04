@@ -7,6 +7,7 @@ import {
   budgetScopeNote,
   hasAnyBudgetVersions,
   owningSequenceLabel,
+  personnelEmptyStateMessage,
   selectedBudgetLabel,
 } from "./budgetPresentation.mjs";
 import { formatCurrencyAmount } from "./awardSectionsPresentation.mjs";
@@ -90,6 +91,12 @@ test("hasAnyBudgetVersions treats a non-empty array as having versions", () => {
   assert.equal(hasAnyBudgetVersions([{}]), true);
   assert.equal(hasAnyBudgetVersions(null), false);
   assert.equal(hasAnyBudgetVersions(undefined), false);
+});
+
+test("personnelEmptyStateMessage explains the empty state rather than implying missing data", () => {
+  const message = personnelEmptyStateMessage();
+  assert.match(message, /bulk line item/);
+  assert.doesNotMatch(message, /^No personnel recorded/);
 });
 
 // Budget semantic fix (docs/kuali-business-rules/Budget.md): Award
