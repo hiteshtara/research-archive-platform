@@ -74,6 +74,9 @@ PERSON_UNITS_ORACLE_SQL = (
 UNIT_CONTACTS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "05_proposal_unit_contacts.sql"
 )
+COMMENTS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "06_proposal_comments.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "proposal_id",
@@ -111,6 +114,11 @@ UNIT_CONTACT_REQUIRED_COLUMNS = {
     "proposal_id",
     "proposal_number",
     "sequence_number",
+}
+
+COMMENT_REQUIRED_COLUMNS = {
+    "proposal_comment_id",
+    "proposal_id",
 }
 
 VERSION_COLUMNS = [
@@ -236,6 +244,22 @@ UNIT_CONTACT_COLUMNS = [
     "full_name",
     "unit_administrator_type_code",
     "unit_contact_type",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
+# PROPOSAL_COMMENTS - comment_type_code is a bare lookup code into the
+# shared archive.comment_type table (same table Award's own comments
+# already reuse), kept unjoined here - the API layer resolves the
+# description and filters to the categories a Proposal actually
+# displays.
+COMMENT_COLUMNS = [
+    "proposal_comment_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+    "comment_type_code",
+    "comments",
     "source_update_timestamp",
     "source_update_user",
 ]
@@ -744,6 +768,53 @@ def prepare_unit_contacts(
 
     available_columns = [
         column for column in UNIT_CONTACT_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
+
+
+def prepare_comments(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        COMMENT_REQUIRED_COLUMNS,
+        "proposal_comments.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "proposal_comment_id",
+            "proposal_id",
+            "sequence_number",
+        ],
+    )
+
+    convert_dates(dataframe, ["source_update_timestamp"])
+
+    require_values(
+        dataframe,
+        ["proposal_comment_id", "proposal_id"],
+        "proposal_comments.csv",
+    )
+
+    # PROPOSAL_COMMENTS_ID is PROPOSAL_COMMENTS' own real Oracle PK -
+    # the correct UPSERT key.
+    duplicate_comments = dataframe.duplicated(
+        subset=["proposal_comment_id"],
+        keep="first",
+    )
+
+    if duplicate_comments.any():
+        logger.warning(
+            "Removed {} duplicate PROPOSAL_COMMENTS_ID rows",
+            int(duplicate_comments.sum()),
+        )
+
+        dataframe = dataframe.loc[~duplicate_comments].copy()
+
+    available_columns = [
+        column for column in COMMENT_COLUMNS if column in dataframe.columns
     ]
     return dataframe[available_columns].copy()
 
@@ -1356,6 +1427,66 @@ def upsert_proposal_unit_contacts(
     return int(result.rowcount)
 
 
+def upsert_proposal_comments(
+    connection: Connection,
+    comments: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_comment, keyed by
+    proposal_comment_id (PROPOSAL_COMMENTS' own real Oracle PK)."""
+    connection.execute(
+        text(
+            """
+            CREATE TEMPORARY TABLE proposal_comment_stage (
+                proposal_comment_id BIGINT NOT NULL,
+                proposal_id BIGINT NOT NULL,
+                proposal_number TEXT,
+                sequence_number INTEGER,
+                comment_type_code TEXT,
+                comments TEXT,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        "proposal_comment_stage",
+        len(comments),
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=comments[COMMENT_COLUMNS],
+        schema="pg_temp",
+        table="proposal_comment_stage",
+    )
+
+    update_columns = [
+        column for column in COMMENT_COLUMNS if column != "proposal_comment_id"
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_comment (
+                {", ".join(COMMENT_COLUMNS)}
+            )
+            SELECT {", ".join(COMMENT_COLUMNS)}
+            FROM proposal_comment_stage
+            ON CONFLICT (proposal_comment_id) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
 def resolve_target_proposal_numbers(max_families: int) -> list[str]:
     """--max-families: resolve the first N distinct PROPOSAL_NUMBERs
     from Oracle (ordered), for a real, bounded batch load - the same
@@ -1455,15 +1586,28 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         else unit_contacts_raw
     )
 
+    comments_source = OracleDataSource(COMMENTS_ORACLE_SQL)
+    comments_raw = (
+        comments_source.read_filtered(column="proposal_id", values=proposal_ids)
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    comments = (
+        prepare_comments(comments_raw)
+        if not comments_raw.empty
+        else comments_raw
+    )
+
     logger.info(
         "Prepared Proposal rows: versions={:,} awards={:,} attachments={:,} "
-        "persons={:,} person_units={:,} unit_contacts={:,}",
+        "persons={:,} person_units={:,} unit_contacts={:,} comments={:,}",
         len(versions),
         len(awards),
         len(attachments),
         len(persons),
         len(person_units),
         len(unit_contacts),
+        len(comments),
     )
 
     engine = create_postgres_engine()
@@ -1480,6 +1624,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         + len(persons)
         + len(person_units)
         + len(unit_contacts)
+        + len(comments)
     )
 
     with engine.begin() as connection:
@@ -1517,6 +1662,11 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
                 if not unit_contacts.empty
                 else 0
             )
+            comment_rows = (
+                upsert_proposal_comments(connection, comments)
+                if not comments.empty
+                else 0
+            )
 
             total_written = (
                 version_rows
@@ -1525,6 +1675,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
                 + person_rows
                 + person_unit_rows
                 + unit_contact_rows
+                + comment_rows
             )
 
             mark_load_complete(
@@ -1536,7 +1687,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         logger.success(
             "Proposal targeted load completed. "
             "load_id={} families={} versions={} awards={} attachments={} "
-            "persons={} person_units={} unit_contacts={} total={}",
+            "persons={} person_units={} unit_contacts={} comments={} total={}",
             load_id,
             len(proposal_numbers),
             version_rows,
@@ -1545,6 +1696,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
             person_rows,
             person_unit_rows,
             unit_contact_rows,
+            comment_rows,
             total_written,
         )
     except Exception as error:

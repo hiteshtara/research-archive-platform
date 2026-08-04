@@ -9,6 +9,7 @@ import load_proposals_from_csv
 from load_proposals_from_csv import (
     ATTACHMENT_COLUMNS,
     AWARD_COLUMNS,
+    COMMENT_COLUMNS,
     PERSON_COLUMNS,
     PERSON_UNIT_COLUMNS,
     UNIT_CONTACT_COLUMNS,
@@ -16,6 +17,7 @@ from load_proposals_from_csv import (
     parse_args,
     prepare_attachments,
     prepare_awards,
+    prepare_comments,
     prepare_person_units,
     prepare_persons,
     prepare_unit_contacts,
@@ -724,6 +726,86 @@ class PrepareUnitContactsTest(unittest.TestCase):
             "source_update_user",
         ):
             self.assertIn(column, UNIT_CONTACT_COLUMNS)
+
+
+class PrepareCommentsTest(unittest.TestCase):
+    def _fixture_row(self, **overrides):
+        # Real fixture: family 205, proposal_id 2986 (sequence 2) -
+        # PROPOSAL_COMMENTS_ID 433 ("Proposal Comments", type_code 12).
+        # A sibling row (id 434, type_code 13, "Proposal IP Review
+        # Comments") exists on the same proposal_id with a NULL
+        # comment body - both are real, distinct rows.
+        row = {
+            "proposal_comment_id": 433,
+            "proposal_id": 2986,
+            "proposal_number": "205",
+            "sequence_number": 1,
+            "comment_type_code": "12",
+            "comments": "Continuation of BU source #5039-5.",
+            "source_update_timestamp": "2011-09-07",
+            "source_update_user": "dmarkey",
+        }
+        row.update(overrides)
+        return row
+
+    def test_preserves_the_real_fixture_row_verbatim(self) -> None:
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_comments(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertEqual(row["proposal_comment_id"], 433)
+        self.assertEqual(row["proposal_id"], 2986)
+        self.assertEqual(row["comment_type_code"], "12")
+        self.assertEqual(
+            row["comments"], "Continuation of BU source #5039-5."
+        )
+
+    def test_a_null_comment_body_is_a_real_distinct_row(self) -> None:
+        # Real fixture: proposal_comment_id 434 has comment_type_code
+        # 13 and a NULL comment body - still a real row, never dropped
+        # for having no text.
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(
+                proposal_comment_id=434,
+                comment_type_code="13",
+                comments=None,
+            ),
+        ])
+
+        prepared = prepare_comments(dataframe)
+
+        self.assertEqual(len(prepared), 2)
+
+    def test_collapses_a_true_duplicate_proposal_comment_id(self) -> None:
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(),
+        ])
+
+        prepared = prepare_comments(dataframe)
+
+        self.assertEqual(len(prepared), 1)
+
+    def test_requires_identity_columns(self) -> None:
+        dataframe = pd.DataFrame([{"comments": "no identity columns"}])
+
+        with self.assertRaises(RuntimeError):
+            prepare_comments(dataframe)
+
+    def test_all_expected_columns_are_declared(self) -> None:
+        for column in (
+            "proposal_comment_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+            "comment_type_code",
+            "comments",
+            "source_update_timestamp",
+            "source_update_user",
+        ):
+            self.assertIn(column, COMMENT_COLUMNS)
 
 
 class ParseArgsTest(unittest.TestCase):
