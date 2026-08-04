@@ -328,29 +328,41 @@ public class ProposalV1Repository {
      * proposal_number family), matching Kuali's own
      * AllFundingProposalQueryCustomizer business logic - see
      * docs/kuali-business-rules/InstitutionalProposal.md's Award
-     * relationship section. active = TRUE excludes deactivated links;
-     * is_primary_current resolves each linked Award to its own current
-     * version for status. Never selects award_id - internal Award IDs
-     * are resolved separately, only at click-time, via
-     * AwardV1Controller.resolveByNumber.
+     * relationship section. active = TRUE excludes deactivated links.
+     *
+     * Deliberately does NOT join archive.award_version on
+     * pa.award_id: that column is the EXACT Award version that was
+     * linked at extraction time (often years-old and long since
+     * superseded - real fixture: family 205 links award_id 148155,
+     * award_number 200268-00001's sequence 1 of 5, is_primary_current
+     * = FALSE), so filtering that same joined row by
+     * is_primary_current = TRUE would silently return zero rows for
+     * every Award whose linked version isn't itself the current one.
+     * Instead resolves through pa.award_number (already denormalized
+     * on archive.proposal_award) to that Award family's own current
+     * version, the same "always resolve to current for display"
+     * convention used throughout this codebase (e.g.
+     * AwardArchiveRepository.findCurrent). Never selects award_id -
+     * internal Award IDs are resolved separately, only at click-time,
+     * via AwardV1Controller.resolveByNumber.
      */
     public List<ProposalFundedAwardResponse> findFundedAwardRows(
             String proposalNumber
     ) {
         return jdbc.sql("""
                 SELECT DISTINCT
-                    av.award_number,
-                    av.sequence_number,
-                    av.status_description AS status
+                    current_award.award_number,
+                    current_award.sequence_number,
+                    current_award.status_description AS status
                 FROM archive.proposal_version pv
                 JOIN archive.proposal_award pa
                     ON pa.proposal_id = pv.proposal_id
-                JOIN archive.award_version av
-                    ON av.award_id = pa.award_id
+                JOIN archive.award_version current_award
+                    ON current_award.award_number = pa.award_number
+                    AND current_award.is_primary_current = TRUE
                 WHERE pv.proposal_number = :proposalNumber
                   AND pa.active = TRUE
-                  AND av.is_primary_current = TRUE
-                ORDER BY av.award_number
+                ORDER BY current_award.award_number
                 """)
                 .param("proposalNumber", proposalNumber)
                 .query(ProposalFundedAwardResponse.class)

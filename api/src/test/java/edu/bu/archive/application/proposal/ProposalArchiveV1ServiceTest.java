@@ -241,8 +241,14 @@ class ProposalArchiveV1ServiceTest {
     void findFundedAwardsResolvesTheWholeFamilyAndNeverExposesAnAwardId() {
         when(repository.findProposalNumber(2986L))
                 .thenReturn(Optional.of("205"));
+        // Real fixture: the link (archive.proposal_award) points at
+        // award_id 148155 (award_number 200268-00001's sequence 1 of
+        // 5, is_primary_current = FALSE - a long-superseded version),
+        // but the repository resolves through award_number to that
+        // family's CURRENT version (sequence 5, "Closed") - never the
+        // stale linked version's own status.
         ProposalFundedAwardResponse fundedAward =
-                new ProposalFundedAwardResponse("200268-00001", 1, "Active");
+                new ProposalFundedAwardResponse("200268-00001", 5, "Closed");
         when(repository.findFundedAwardRows("205"))
                 .thenReturn(List.of(fundedAward));
 
