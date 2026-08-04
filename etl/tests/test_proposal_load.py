@@ -364,6 +364,7 @@ class PrepareAttachmentsTest(unittest.TestCase):
             "attachment_number": 4,
             "attachment_title": "Ryan_NSF_1.11.17_Guidelines",
             "attachment_type_code": 7,
+            "attachment_type_description": "Other",
             "file_name": "Ryan_NSF_1.11.17_Guidelines.pdf",
             "content_type": "application/pdf",
             "comments": "Ryan_NSF_1.11.17_Guidelines NSF-12-8086 DEMS",
@@ -388,6 +389,21 @@ class PrepareAttachmentsTest(unittest.TestCase):
             row["file_data_id"], "d208062d-77ca-4a12-aa1f-0e69318a91ae"
         )
         self.assertEqual(row["document_status_code"], "A")
+
+    def test_attachment_type_description_is_oracles_real_taxonomy_not_the_title(
+        self,
+    ) -> None:
+        # Live-verified: PROPOSAL_ATTACHMENT_TYPE has no "Guidelines"
+        # category - a file whose TITLE contains "Guidelines" is
+        # actually filed under Oracle's real type_code 7 ("Other").
+        # Never derive the group label from attachment_title.
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_attachments(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertIn("Guidelines", row["attachment_title"])
+        self.assertEqual(row["attachment_type_description"], "Other")
 
     def test_two_rows_may_legitimately_share_one_file_data_id(self) -> None:
         # proposal_attachment_id 2395 (ARCHIVED version 2) and 86484
@@ -456,6 +472,7 @@ class PrepareAttachmentsTest(unittest.TestCase):
             "attachment_number",
             "attachment_title",
             "attachment_type_code",
+            "attachment_type_description",
             "file_name",
             "content_type",
             "comments",
