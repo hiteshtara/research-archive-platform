@@ -15,4 +15,4 @@ FROM proposal_comments pc
 ORDER BY
     pc.proposal_number,
     pc.sequence_number,
-    pc.proposal_comment_id;
+    pc.proposal_comments_id;
