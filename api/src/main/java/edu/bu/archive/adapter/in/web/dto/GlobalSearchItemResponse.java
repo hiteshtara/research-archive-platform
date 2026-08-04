@@ -1,14 +1,33 @@
 package edu.bu.archive.adapter.in.web.dto;
 
+/*
+ * The one stable, cross-domain result shape Global Search returns
+ * regardless of which domain a result came from - see
+ * GlobalSearchService, which is the only place that constructs these.
+ * Every domain-specific identifier is nullable (protocolId is IRB-only,
+ * awardId/sequenceNumber/primaryCurrent are Award-only) so the frontend
+ * never has to guess which fields apply to which module.
+ *
+ * route is the backend-computed, ready-to-navigate frontend path (e.g.
+ * "/awards/3831872" or "/irb/history/42") - null when this result has
+ * no real place to click through to, so the frontend never has to
+ * reconstruct a route from module-specific identifiers itself. A card
+ * with a null route must render as non-clickable.
+ */
 public record GlobalSearchItemResponse(
-        Long recordId,
-        Long protocolId,
         String module,
+        Long recordId,
         String identifier,
-        String secondaryIdentifier,
         String title,
+        String subtitle,
         String status,
-        String personName,
-        String recordType
+        String documentNumber,
+        String matchedField,
+        String matchedValue,
+        String route,
+        Long protocolId,
+        Long awardId,
+        Integer sequenceNumber,
+        Boolean primaryCurrent
 ) {
 }

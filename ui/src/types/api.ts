@@ -38,22 +38,37 @@ export interface PageResponse<T> {
   last: boolean;
 }
 
+// The one stable, cross-domain result shape Global Search returns
+// regardless of which domain a result came from - route is the
+// backend-computed, ready-to-navigate frontend path (null when this
+// result has no real place to click through to - a card with a null
+// route must render as non-clickable, never guess a route from
+// module-specific identifiers on the frontend).
 export interface GlobalSearchItem {
-  recordId: number | null;
-  protocolId: number;
   module: string;
+  recordId: number | null;
   identifier: string;
-  secondaryIdentifier: string | null;
   title: string;
+  subtitle: string | null;
   status: string | null;
-  personName: string | null;
-  recordType: string | null;
+  documentNumber: string | null;
+  matchedField: string | null;
+  matchedValue: string | null;
+  route: string | null;
+  protocolId: number | null;
+  awardId: number | null;
+  sequenceNumber: number | null;
+  primaryCurrent: boolean | null;
 }
 
+// failedModules names every domain whose search errored during this
+// request (e.g. "IRB", "AWARD") - partial results are always returned
+// rather than failing the whole search for one domain's outage.
 export interface GlobalSearchResponse {
   query: string;
   totalResults: number;
   results: GlobalSearchItem[];
+  failedModules: string[];
 }
 
 export interface IrbWorkspaceProtocol {

@@ -43,22 +43,6 @@ export function GlobalSearchPage() {
     }
   };
 
-  const resultPath = (
-    result: import("../types/api").GlobalSearchItem,
-  ) => {
-    if (result.module.trim().toUpperCase() === "PROPOSAL") {
-      return `/proposals/${encodeURIComponent(result.identifier)}`;
-    }
-
-    const protocolId = Number(result.protocolId);
-
-    if (Number.isInteger(protocolId) && protocolId > 0) {
-      return `/irb/history/${protocolId}`;
-    }
-
-    return null;
-  };
-
   return (
     <Stack spacing={3}>
       <Box>
@@ -75,7 +59,7 @@ export function GlobalSearchPage() {
         </Typography>
 
         <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Search by study ID, protocol number, document number, CRC number, title, investigator, sponsor, award, funding source, status, or review type.
+          Global Search currently covers IRB and Awards. Search by study ID, protocol number, document number, CRC number, title, investigator, sponsor, award, funding source, status, or review type.
         </Typography>
       </Box>
 
@@ -151,120 +135,148 @@ export function GlobalSearchPage() {
             “{searchQuery.data.query}”
           </Typography>
 
+          {searchQuery.data.failedModules.length > 0 && (
+            <Alert severity="warning">
+              {searchQuery.data.failedModules.join(", ")} could not be
+              searched right now. Showing results from the remaining
+              modules.
+            </Alert>
+          )}
+
           {searchQuery.data.results.length === 0 && (
             <Alert severity="info">
               No matching archive records were found.
             </Alert>
           )}
 
-          {searchQuery.data.results.map((result) => (
-            <Card
-              key={`${result.module}-${result.recordId}-${result.identifier}-${result.secondaryIdentifier}`}
-              onClick={() => {
-                const path = resultPath(result);
+          {searchQuery.data.results.map((result) => {
+            const clickable = Boolean(result.route);
 
-                if (path) {
-                  navigate(path);
-                }
-              }}
-              sx={{
-                cursor: "pointer",
-                transition: "transform 150ms ease, box-shadow 150ms ease",
-                "&:hover": {
-                  transform: "translateY(-2px)",
-                  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.10)",
-                },
-              }}
-            >
-              <CardContent sx={{ p: 3 }}>
-                <Stack
-                  spacing={2}
-                  sx={{
-                    flexDirection: {
-                      xs: "column",
-                      md: "row",
+            return (
+              <Card
+                key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
+                onClick={() => {
+                  if (result.route) {
+                    navigate(result.route);
+                  }
+                }}
+                sx={{
+                  cursor: clickable ? "pointer" : "default",
+                  transition: "transform 150ms ease, box-shadow 150ms ease",
+                  ...(clickable && {
+                    "&:hover": {
+                      transform: "translateY(-2px)",
+                      boxShadow: "0 12px 28px rgba(15, 23, 42, 0.10)",
                     },
-                    justifyContent: "space-between",
-                    alignItems: {
-                      md: "center",
-                    },
-                  }}
-                >
+                  }),
+                }}
+              >
+                <CardContent sx={{ p: 3 }}>
                   <Stack
                     spacing={2}
                     sx={{
-                      flexDirection: "row",
-                      alignItems: "flex-start",
+                      flexDirection: {
+                        xs: "column",
+                        md: "row",
+                      },
+                      justifyContent: "space-between",
+                      alignItems: {
+                        md: "center",
+                      },
                     }}
                   >
-                    <Box
+                    <Stack
+                      spacing={2}
                       sx={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 2,
-                        display: "grid",
-                        placeItems: "center",
-                        flexShrink: 0,
-                        backgroundColor: "rgba(139, 24, 50, 0.10)",
-                        color: "primary.main",
+                        flexDirection: "row",
+                        alignItems: "flex-start",
                       }}
                     >
-                      <MenuBookOutlined />
-                    </Box>
-
-                    <Box>
-                      <Stack
-                        spacing={1}
+                      <Box
                         sx={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                          gap: 1,
+                          width: 44,
+                          height: 44,
+                          borderRadius: 2,
+                          display: "grid",
+                          placeItems: "center",
+                          flexShrink: 0,
+                          backgroundColor: "rgba(139, 24, 50, 0.10)",
+                          color: "primary.main",
                         }}
                       >
-                        <Chip
-                          label={result.module}
-                          size="small"
-                          color="primary"
-                        />
+                        <MenuBookOutlined />
+                      </Box>
 
-                        {result.status && (
+                      <Box>
+                        <Stack
+                          spacing={1}
+                          sx={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                            gap: 1,
+                          }}
+                        >
                           <Chip
-                            label={result.status}
+                            label={result.module}
                             size="small"
-                            variant="outlined"
+                            color="primary"
                           />
+
+                          {result.status && (
+                            <Chip
+                              label={result.status}
+                              size="small"
+                              variant="outlined"
+                            />
+                          )}
+
+                          {result.documentNumber && (
+                            <Chip
+                              label={`Doc ${result.documentNumber}`}
+                              size="small"
+                              variant="outlined"
+                            />
+                          )}
+                        </Stack>
+
+                        <Typography
+                          variant="h6"
+                          sx={{ mt: 1.5 }}
+                        >
+                          {result.title}
+                        </Typography>
+
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ mt: 0.8 }}
+                        >
+                          {result.identifier}
+                          {result.subtitle ? ` • ${result.subtitle}` : ""}
+                        </Typography>
+
+                        {result.matchedField && (
+                          <Typography
+                            variant="caption"
+                            color="text.disabled"
+                            sx={{ mt: 0.5, display: "block" }}
+                          >
+                            Matched on: {result.matchedField}
+                            {result.matchedValue
+                              ? ` (${result.matchedValue})`
+                              : ""}
+                          </Typography>
                         )}
-                      </Stack>
+                      </Box>
+                    </Stack>
 
-                      <Typography
-                        variant="h6"
-                        sx={{ mt: 1.5 }}
-                      >
-                        {result.title}
-                      </Typography>
-
-                      <Typography
-                        variant="body2"
-                        color="text.secondary"
-                        sx={{ mt: 0.8 }}
-                      >
-                        {result.identifier}
-                        {result.secondaryIdentifier
-                          ? ` • ${result.secondaryIdentifier}`
-                          : ""}
-                        {result.personName
-                          ? ` • ${result.personName}`
-                          : ""}
-                      </Typography>
-                    </Box>
+                    {clickable && <ArrowForwardOutlined color="action" />}
                   </Stack>
-
-                  <ArrowForwardOutlined color="action" />
-                </Stack>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </Stack>
       )}
     </Stack>
