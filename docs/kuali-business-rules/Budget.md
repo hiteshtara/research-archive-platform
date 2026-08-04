@@ -488,18 +488,27 @@ $0.00 salaries):
 | `BUDGET_PERSONNEL_DETAILS` + `AWD_BUDGET_PER_DET_EXT` | **0** — a direct, unfiltered `COUNT(*)` against production Oracle, every Award and every Proposal, not scoped to our loaded population at all | 0 |
 | `BUDGET_PERSONNEL_CAL_AMTS` + `AWD_BUDGET_PER_CAL_AMTS_EXT` | **0** — same direct check | 0 |
 
-**Conclusion: the archive faithfully mirrors Oracle. There is no
-failing extraction/staging/upsert layer to fix.** BU's real Kuali usage
-records personnel costs as a bulk "Personnel (ONLY IF PERSONNEL TAB IS
-NOT USED)" non-personnel line item (already correctly archived via
-`archive.award_budget_line_item` — real fixture: cost_element `51`,
-$309,513 direct on budget_id 126805) rather than through the per-person
-`BUDGET_PERSONNEL_DETAILS` mechanism this archive's Personnel panel
-reads from. The roster shown on Kuali's Personnel tab for a budget with
-no real `BUDGET_PERSONS` row is very likely a UI-synthesized default
-(seeded from the Award's own investigator list), not a persisted record
-this archive is missing — its "not found" job codes are consistent with
-that.
+**Conclusion (proven): the archive faithfully mirrors Oracle. There is
+no failing extraction/staging/upsert layer to fix, and no migration/ETL
+change is warranted.** For `budget_id` 126805 specifically, direct
+Oracle queries confirm **zero** rows in all four personnel-adjacent
+tables checked: `BUDGET_PERSONS`, `BUDGET_PERSON_SALARY_DETAILS` (see
+below), `BUDGET_PERSONNEL_DETAILS`, `BUDGET_PERSONNEL_CAL_AMTS`. The
+Personnel endpoint/UI must stay faithful to persisted Oracle data —
+report "no persisted roster," never synthesize or infer rows to match
+what Kuali's screen happens to display.
+
+**Open, deliberately untraced question:** why does Kuali's live
+Personnel tab render four rows (Gael Orsmond, job codes flagged "not
+found") for a budget with zero real `BUDGET_PERSONS` rows? A plausible
+but **unproven** hypothesis is that Kuali synthesizes a default
+personnel view (seeded from the Award's own investigator list) when no
+real roster row exists, and that BU's actual cost entry for this budget
+went through the bulk "Personnel (ONLY IF PERSONNEL TAB IS NOT USED)"
+non-personnel line item instead (already correctly archived —
+cost_element `51`, $309,513 direct on this same budget_id). Tracing the
+exact Budget Personnel JSP/Java population path to confirm this is a
+separate future task, not a blocker for anything currently in progress.
 
 Checked and ruled out along the way:
 - **Join keys**: all three extraction queries correctly join

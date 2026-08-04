@@ -93,9 +93,9 @@ test("hasAnyBudgetVersions treats a non-empty array as having versions", () => {
   assert.equal(hasAnyBudgetVersions(undefined), false);
 });
 
-test("personnelEmptyStateMessage explains the empty state rather than implying missing data", () => {
+test("personnelEmptyStateMessage states only what's proven - no persisted roster, not a cause", () => {
   const message = personnelEmptyStateMessage();
-  assert.match(message, /bulk line item/);
+  assert.match(message, /No persisted Budget personnel roster/);
   assert.doesNotMatch(message, /^No personnel recorded/);
 });
 

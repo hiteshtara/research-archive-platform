@@ -40,15 +40,16 @@ export function hasAnyBudgetVersions(versions) {
   return Array.isArray(versions) && versions.length > 0;
 }
 
-// archive.award_budget_personnel_detail/_calculated_amount are empty
-// across the ENTIRE Oracle source database (every Award and every
-// Proposal, not just this archive's loaded population) - confirmed by a
-// direct, unfiltered COUNT(*) against production Oracle. BU's real
-// Kuali usage records personnel costs as a bulk non-personnel line item
-// ("Personnel (ONLY IF PERSONNEL TAB IS NOT USED)") rather than through
-// this per-person mechanism, so an empty Personnel panel reflects real
-// upstream data, not a gap in this archive. See
-// docs/kuali-business-rules/Budget.md's Personnel investigation.
+// archive.award_budget_personnel_detail/_calculated_amount (and, for
+// the real fixture, archive.award_budget_person and the unarchived
+// BUDGET_PERSON_SALARY_DETAILS) are empty in Oracle itself, not just
+// this archive - confirmed by direct, unfiltered queries against
+// production Oracle. This message states only what's proven (no
+// persisted roster for THIS Budget version) - it deliberately does not
+// assert why Kuali's own screen shows unpersisted-looking personnel
+// rows for the same fixture, since that population path hasn't been
+// traced. See docs/kuali-business-rules/Budget.md's Personnel
+// investigation.
 export function personnelEmptyStateMessage() {
-  return "No per-person Budget entries recorded for this Award's selected Budget. Personnel costs for this Award were entered as a bulk line item rather than itemized by person - see the Line Items tab.";
+  return "No persisted Budget personnel roster was recorded for this Budget version.";
 }
