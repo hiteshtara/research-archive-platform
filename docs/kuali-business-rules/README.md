@@ -41,3 +41,8 @@ explicitly — the project has been burned by this exact gap before (see
   isn't always "current."
 - [Award Hierarchy](Award%20Hierarchy.md) — why hierarchy nodes never
   financially aggregate, and how money actually moves between them.
+- [Budget](Budget.md) — the bounded-family scoping rule (proven a third
+  time, after Comments and Time & Money), why Kuali's own
+  `getCurrentBudget()` doesn't transfer to a closed archive, and why
+  Budget and SAP transmission share a real data dependency but no
+  foreign key.

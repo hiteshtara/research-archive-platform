@@ -1,0 +1,352 @@
+# Budget
+
+## Authoritative scoping rule
+
+**`archive.award_budget` (and every table beneath it) is keyed to one
+exact `award_id`, but the Budget screen and every Budget-selection
+service method operate on the whole `award_number` family, bounded to
+sequences ≤ the Award version being viewed** — the same bounded-family
+pattern already found for [Award Comments](Award%20Comments.md) and
+[Time and Money](Time%20and%20Money.md), now confirmed a third time,
+this time for Budget.
+
+This directly overturns the "exact `awardId`" default the Time & Money
+incident argued for defaulting to — Budget is provably the same
+family-wide shape, not the exception.
+
+### Source proof
+
+`Award.getBudgets()` (`Award.java`) is the method every Budget-selection
+service call in Kuali actually uses — not `getCurrentVersionBudgets()`
+(the literal FK-scoped collection for one `award_id`, which exists but
+is not what drives the screen):
+
+```java
+public List<AwardBudgetExt> getBudgets() {
+    if (budgets == null || budgets.isEmpty()) {
+        budgets = getAwardBudgetService().getAllBudgetsForAward(this);
+    }
+    return budgets;
+}
+```
+
+`AwardBudgetServiceImpl.getAllBudgetsForAward` resolves the whole
+version history by **`award.getAwardNumber()`** (the family), then
+includes a sequence's budgets only if that sequence is **≤ the current
+Award's own `sequence_number`**:
+
+```java
+public List<AwardBudgetExt> getAllBudgetsForAward(Award award) {
+    HashSet<AwardBudgetExt> result = new HashSet<>();
+    List<VersionHistory> versions = getVersionHistoryService()
+        .loadVersionHistory(Award.class, award.getAwardNumber());
+    for (VersionHistory version : versions) {
+        if (version.getSequenceOwnerSequenceNumber() <= award.getSequenceNumber()
+                && version.getSequenceOwner() != null
+                && ((Award) version.getSequenceOwner()).getAwardDocument() != null) {
+            result.addAll(((Award) version.getSequenceOwner()).getCurrentVersionBudgets());
+        }
+    }
+    List<AwardBudgetExt> listResult = new ArrayList<>(result);
+    Collections.sort(listResult);
+    return listResult;
+}
+```
+
+Both `getCurrentBudget(award)` (drives the Budget Summary screen) and
+`getLastBudgetVersion(awardDocument)` (used by SAP integration, see
+below) iterate over this same family-wide `award.getBudgets()` list —
+neither one is scoped to a single `award_id`.
+
+### Real-data proof
+
+Award family `103692-00002` (26 Award sequences, `award_id`s 881365
+through 3831872) has 38 `archive.award_budget` rows spread across
+**26 distinct `award_id`s** — one or more budgets on nearly every
+sequence, not concentrated on one version:
+
+```
+award_id=881365  seq=14  budget_version_number=1..12   (12 budgets on ONE sequence)
+award_id=1114674 seq=15  budget_version_number=13
+award_id=1226449 seq=16  budget_version_number=14
+award_id=1377197 seq=17  budget_version_number=15
+...
+award_id=3831872 seq=46  budget_version_number=38
+```
+
+**`budget_version_number` is a monotonically increasing counter across
+the whole family, not a per-`award_id` counter that restarts at 1 for
+each new sequence.** Version 1–12 all belong to `award_id` 881365
+(twelve separate budget revisions while the Award stayed on that one
+sequence); version 13 is the first budget of the *next* sequence
+(881365 → 1114674); the counter keeps climbing without resetting. This
+is only interpretable at the family level — grouping strictly by
+`award_id` would present versions 1–12 as "the whole history" and
+completely miss that the family has 38.
+
+## The real "current budget" rule — and why it doesn't transfer directly to a closed archive
+
+Kuali's actual `getCurrentBudget()` is **not** "highest version number."
+It is the newest budget, among `award.getBudgets()`, whose status is
+one of three specific in-progress codes:
+
+```java
+protected AwardBudgetExt getCurrentBudget(Award award) {
+    return getNewestBudgetByStatus(award,
+        Arrays.asList(BUDGET_STATUS_CODE_IN_PROGRESS,   // "1"
+                      BUDGET_STATUS_CODE_SUBMITTED,      // "5"
+                      BUDGET_STATUS_CODE_TO_BE_POSTED)); // "10"
+}
+```
+
+A *separate* method, `getPreviousBudget()`, returns the newest budget
+whose status is the parameter-configured "Posted" status:
+
+```java
+protected AwardBudgetExt getPreviousBudget(Award award) {
+    return getNewestBudgetByStatus(award, Collections.singletonList(getPostedBudgetStatus()));
+}
+```
+
+**Confirmed against real archived data: status codes `1`
+(In Progress) and `5` (Submitted) never appear anywhere in the whole
+archive** (12,195 `award_budget` rows total). Only three codes exist in
+practice: `9` = Posted (11,475 rows, the overwhelming majority), `14` =
+Cancelled (711 rows), `10` = To Be Posted (9 rows total, archive-wide).
+This makes sense for a **closed, historical archive**: every Award here
+finished its real workflow long ago, so a budget "in progress" or
+"submitted" essentially never survives to be the state Oracle has today
+— those states are transient and get superseded by Posted or Cancelled
+almost immediately in the live system.
+
+**Practical consequence: Kuali's own `getCurrentBudget()` would return
+an empty stub for nearly every Award in this archive**, because its
+three target statuses almost never exist in already-closed data. The
+archive's meaningful equivalent of "current" is therefore
+`getPreviousBudget()`'s definition, not `getCurrentBudget()`'s literal
+one:
+
+> **Authoritative rule for this archive: "Current Budget Version" =
+> the highest `budget_version_number`, among budgets scoped to
+> sequences ≤ the Award version being viewed, whose
+> `award_budget_status_code = '9'` (Posted). If no Posted budget
+> exists in scope, fall back to the highest version number overall
+> (excluding Cancelled) rather than showing nothing.**
+
+This also explains real data like `award_id=881365`'s versions 2–9,
+all `Cancelled`, sitting between a `Posted` version 1 and a `Posted`
+version 10 — sequential version numbers routinely include abandoned
+revision attempts. Naively picking "the highest version number" without
+filtering by status would surface a `Cancelled` budget as if it were
+the real current one.
+
+## Hierarchy behavior
+
+Budget does **not** cross Award Hierarchy boundaries (parent/child
+Award, different `award_number`s). Every scoping mechanism found —
+`AWARD_BUDGET_EXT.AWARD_ID`'s real Oracle FK, `getAllBudgetsForAward`'s
+family resolution by `award.getAwardNumber()` — operates strictly
+within one `award_number`. Nothing in `AwardBudgetServiceImpl`,
+`AwardHierarchyServiceImpl`, or the OJB mappings joins Budget to a
+different `award_number`. This matches [Award
+Hierarchy](Award%20Hierarchy.md)'s own finding that hierarchy nodes are
+financially independent — Budget is exact-`award_number`-family-scoped,
+the same shape as Comments and Time & Money, not hierarchy-wide.
+
+## Are Budget totals stored or computed?
+
+**Stored, not computed.** `archive.award_budget.total_cost` /
+`.total_direct_cost` / `.total_indirect_cost` are real, persisted
+Oracle columns (`BUDGET.TOTAL_COST`/etc.), already-calculated values
+Kuali itself maintains — not something this archive (or its API) needs
+to sum from periods/line items. Real values above (e.g. `award_id
+2104047`: total_cost=95.00, total_direct_cost=95.00,
+total_indirect_cost=0.00) are internally consistent
+(direct + indirect = total) in every sampled row. `archive.award_budget_period`
+carries its own independent `total_cost`/`total_direct_cost`/
+`total_indirect_cost` per period, likewise stored, not derived. The API
+must surface these stored values directly and must not invent its own
+summation logic — consistent with the user's explicit "no invented
+calculations" rule.
+
+## Budget ↔ SAP: related but not linked by any foreign key
+
+This is the second confirmed case in the Award domain (after Time &
+Money's shared use of `AwardAmountInfo`) of two subsystems that share a
+real *data* dependency without sharing a real *foreign key*.
+
+### What actually happens, traced from `SapIntegrationServiceImpl`
+
+- The Budget package (`org.kuali.kra.award.budget.*`) has **zero**
+  references to `SapIntegrationService` or anything SAP-related — the
+  dependency runs the other direction: `SapIntegrationServiceImpl`
+  imports and reads `AwardBudgetExt`, not the reverse.
+- When building an outbound SAP payload, `SapIntegrationServiceImpl`
+  calls `getLastBudgetVersion(awardDocument)`, which is — again —
+  `award.getBudgets()` (the same family-wide, sequence-bounded list),
+  taking the last (highest-version) entry:
+  ```java
+  protected AwardBudgetExt getLastBudgetVersion(AwardDocument awardDocument) {
+      List<AwardBudgetExt> versions = awardDocument.getAward().getBudgets();
+      return versions.isEmpty() ? null : versions.get(versions.size() - 1);
+  }
+  ```
+- Whether that budget's totals are actually included in the SAP payload
+  is gated on one specific status check:
+  ```java
+  String budgetStatus = abvoe.getAwardBudgetStatusCode();
+  boolean awardBudgetVersionToBePosted =
+      Constants.BUDGET_STATUS_CODE_TO_BE_POSTED.equalsIgnoreCase(budgetStatus); // "10"
+  ...
+  if (awardBudgetVersionToBePosted && budget != null && budget.getTotalDirectCost() != null) {
+      sponsoredProgramStructure.setBUDGETTDC(budget.getTotalDirectCost().bigDecimalValue());
+  }
+  ```
+  **The transmission-eligible moment is specifically "To Be Posted"
+  (status `10`) — not "Posted" (status `9`).** "To Be Posted" is the
+  transient pre-final state immediately before Kuali flips the same row
+  to "Posted."
+- `archive.award_transmission`/`archive.award_transmission_child` (see
+  [`SAP_AWARD_TRANSMISSION_ARCHIVE_DESIGN.md`](../architecture/SAP_AWARD_TRANSMISSION_ARCHIVE_DESIGN.md))
+  have **no `budget_id` column at all**, on either table — confirmed by
+  querying `information_schema.columns` directly. The transmission
+  record is purely Award-scoped (`award_id`, `award_number`,
+  `sequence_number`); it captures *that a transmission happened*, not
+  *which budget row supplied its numbers*.
+- That existing document's own finding reinforces this: F&A rate-basis
+  columns on `award_transmission_child`
+  (`overhead_key`/`base_code`/`off_campus`) are "frequently copied
+  forward from the *prior* transmission's own child row (not recomputed
+  from current Budget) once a budget moves past 'to be posted'" — i.e.
+  even Kuali's own live system doesn't always re-derive these from the
+  current budget on every transmission.
+
+### Why the two lifecycles cannot be reliably joined after the fact
+
+1. **No shared key.** Neither `award_transmission` nor
+   `award_transmission_child` references `budget_id`, so no query can
+   attribute a specific archived transmission to a specific archived
+   budget row with certainty.
+2. **The triggering status doesn't survive to archival.** Because
+   status `10` (To Be Posted) is Oracle's live value only in the brief
+   window before it flips to `9` (Posted) — and this archive UPSERTs
+   each budget row keyed by its own stable `budget_id`, always
+   reflecting Oracle's *current* value, never a history of status
+   transitions — an archived Posted budget gives no evidence of whether
+   it was ever transmitted while briefly at "To Be Posted."
+3. **Confirmed empirically**: in the ~8,590-family sample loaded so
+   far, **zero families have both a budget and a transmission row at
+   all** (19,621 `award_transmission` rows total, 12,195 `award_budget`
+   rows total, no overlap by `award_number`). This is very likely a
+   sampling artifact of loading Oracle's smallest `award_id`s first
+   (not yet a representative cross-section), not proof that Budget and
+   SAP transmission never co-occur in the full population — but it does
+   mean **no real example is available today** to further validate any
+   attempted correlation. This should be re-checked once a broader
+   sample is loaded, but the *absence of a `budget_id` column* is
+   proof enough on its own that no reliable join will ever exist,
+   regardless of sample size.
+
+### Recommended UI treatment (per explicit instruction)
+
+Keep Budget and SAP as two independent sections, never gated on each
+other:
+
+- **Budget Status**: `award_budget_status_description` (Posted / To Be
+  Posted / Cancelled), straight from the archived row — this is
+  Budget's own lifecycle.
+- **SAP Transmission Status**: a separate section, populated from
+  `archive.award_transmission` scoped to the exact `award_id` (matching
+  the existing, already-shipped `/sap-transmissions` endpoint's own
+  scoping — see `AwardArchiveRepository.countTransmissions`/
+  `findTransmissionRows`, both `WHERE award_id = :awardId`) — **not**
+  matched to any specific budget version. Show `success_indicator`
+  (Success/Failure) and `transmission_date` for the latest transmission
+  if any exist; do not synthesize a richer Draft/Final/Posted/Sent/
+  Accepted/Rejected state machine, because the archive genuinely does
+  not have that data — only a boolean-ish `success_indicator` plus raw,
+  unparsed `sent_data`/`returned_data` XML. **Do not block or hide the
+  Budget section when no transmission exists** — a budget with zero
+  SAP activity is still real, useful data.
+- If no transmission rows exist for this `award_id` (the common case —
+  see empirical finding above), show that plainly ("No SAP transmission
+  recorded for this Award") rather than omitting the section entirely,
+  so its absence is visibly confirmed rather than silently missing.
+
+## Should a historical Award version show only its own budgets, or the whole family?
+
+**Neither absolute answer — the real rule is bounded-family**: when
+viewing Award version at sequence *N*, show every budget belonging to
+sequences 1..*N* of that `award_number` (not sequence *N* alone, and
+not sequences beyond *N* either). This exactly mirrors
+`getAllBudgetsForAward`'s own bound
+(`sequenceOwnerSequenceNumber <= award.getSequenceNumber()`). Viewing
+an *older* historical Award version should see less budget history than
+viewing the current one — never more, never a totally different set.
+
+## Source-to-target mapping (already implemented at the ETL layer — no changes needed)
+
+| Archive table | Role | Scoped by |
+|---|---|---|
+| `archive.award_budget` | Root budget document, one row per `budget_version_number` | exact `award_id` (real FK); family assembled by joining across sibling `award_id`s of the same `award_number` |
+| `archive.award_budget_period` | Periods within one budget | `budget_id` |
+| `archive.award_budget_line_item` | Non-personnel line items within a period | `budget_period_id` |
+| `archive.award_budget_line_item_calculated_amount` | Calculated (rate-applied) amounts per line item | `budget_line_item_id` |
+| `archive.award_budget_personnel_detail` | Personnel cost entries within a period | `budget_line_item_id` |
+| `archive.award_budget_personnel_calculated_amount` | Calculated (rate-applied) personnel amounts | `budget_personnel_line_item_id` |
+| `archive.award_budget_period_summary_calculated_amount` | Fringe (`rate_class_type='E'`)/F&A (`='O'`) summary per period | `budget_period_id` |
+| `archive.award_budget_limit` | Budget ceilings | `award_id` + `budget_id` (both real FKs) |
+| `archive.award_transmission`/`_child` | SAP transmission history — related but **not** budget-linked (see above) | exact `award_id` |
+
+See
+[`docs/architecture/AWARD_BUDGET_DESIGN.md`](../architecture/AWARD_BUDGET_DESIGN.md)
+for the full schema derivation, nullable-column decisions, and the
+six-level merged-`_EXT`-pair structure.
+
+## Recommended API semantics
+
+Given the bounded-family rule above, every `/api/v1/awards/{awardId}/budget/*`
+endpoint should:
+
+1. Resolve `awardId` → `award_number` + `sequence_number` (already a
+   standard step via `requireAwardNumberForId`-style lookup).
+2. Query `archive.award_budget` (joined to `archive.award_version` for
+   the bound) `WHERE award_number = :awardNumber AND sequence_number <= :sequenceNumber`
+   — not `WHERE award_id = :awardId` alone.
+3. Determine "current" as: highest `budget_version_number` among rows
+   with `award_budget_status_code = '9'` in that scoped set; if none,
+   highest `budget_version_number` overall excluding `'14'` (Cancelled).
+4. Child tables (`period`/`line_item`/`personnel_*`/etc.) join down from
+   whichever `budget_id`(s) are in scope for the requested view (e.g.
+   "current budget's periods" vs. "every version's periods" — the
+   summary/versions/periods/details endpoints differ in how much of the
+   scoped set they expand, not in the family-vs-exact-id question
+   itself, which is answered the same way for all of them).
+5. `document_number` on `archive.award_budget` is Budget's **own**
+   workflow document number (from the now-not-independently-archived
+   `BUDGET_DOCUMENT` KEW envelope) — display it as "Workflow Document"
+   per-budget-version, the same pattern already used for Award's own
+   `workflow_document_number` (see [Workflow
+   Documents](Workflow%20Documents.md)), but note it is a **different**
+   document number than the Award's own — never conflate or reuse
+   Award's `workflow_document_number` for Budget, and never substitute
+   `award_budget_type_code`/`modification_number` for it.
+
+## Real fixture Award
+
+**`award_number = "103692-00002"`**, 26 sequences (`award_id` 881365
+through 3831872), 38 budget versions (`budget_version_number` 1–38),
+statuses spanning Posted/Cancelled — real, deep, multi-sequence budget
+history, ideal for verifying both the family-wide bound and the
+Posted-status "current" rule end to end. Does not currently have SAP
+transmission rows (see the empirical SAP finding above), so it cannot
+by itself validate the SAP section's empty-state UI — a second fixture
+with real transmission data should be located separately once a larger
+population sample is loaded, if SAP-Budget co-occurrence needs live
+verification later.
+
+## Date last updated
+
+2026-08-04 (live Oracle/archive investigation completed before any
+Repository/Service/Controller/DTO/React code was written, per explicit
+instruction).
