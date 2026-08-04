@@ -17,6 +17,7 @@ import { IrbPage } from "./pages/IrbPage";
 import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
 import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
 import { ProposalFamiliesPage } from "./pages/ProposalFamiliesPage";
+import { ProposalDashboardPage } from "./pages/proposal/ProposalDashboardPage";
 import { ProposalWorkspacePage } from "./pages/ProposalWorkspacePage";
 import { SubawardFamiliesPage } from "./pages/SubawardFamiliesPage";
 import { SubawardWorkspacePage } from "./pages/SubawardWorkspacePage";
@@ -95,6 +96,11 @@ export default function App() {
         <Route
           path="proposals/:proposalNumber"
           element={<ProposalWorkspacePage />}
+        />
+
+        <Route
+          path="proposals/dashboard/:proposalId"
+          element={<ProposalDashboardPage />}
         />
 
         <Route

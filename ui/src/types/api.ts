@@ -307,6 +307,22 @@ export interface AwardHierarchy {
   selectedAwardPath: string[];
 }
 
+// The Funding Proposal(s) behind this Award - family-wide (every
+// award_id in this Award's whole award_number family), from
+// archive.award_funding_proposal (GET /api/awards/{awardNumber}/proposals).
+// proposalId links directly to the Institutional Proposal dashboard -
+// a real, exact archive.proposal_version.proposal_id, distinct from
+// any Award identifier.
+export interface AwardProposalLink {
+  awardFundingProposalId: number | null;
+  awardId: number | null;
+  proposalId: number | null;
+  activeFlag: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+}
+
 export interface AwardSummaryV1 {
   awardId: number;
   awardNumber: string;
@@ -855,6 +871,168 @@ export interface ProposalAward {
   proposalId: number;
   awardId: number | null;
   awardNumber: string | null;
+}
+
+// --- Institutional Proposal API v1 (/api/v1/proposals) ---
+//
+// Keyed by the exact surrogate proposalId (one specific version), not
+// proposalNumber - mirrors the Award v1 API's own convention.
+// proposalId, proposalNumber, sequenceNumber, and
+// workflowDocumentNumber are four distinct identifiers, never inferred
+// one from another. Distinct from the older, family-number-scoped
+// ProposalRow/ProposalWorkspaceResponse/ProposalFamily types above.
+
+export interface ProposalSummaryV1 {
+  proposalId: number;
+  proposalNumber: string;
+  sequenceNumber: number;
+  workflowDocumentNumber: string | null;
+  title: string | null;
+  status: string | null;
+  proposalSequenceStatus: string | null;
+  proposalType: string | null;
+  activityType: string | null;
+  leadUnitNumber: string | null;
+  leadUnitName: string | null;
+  sponsorCode: string | null;
+  sponsorName: string | null;
+  principalInvestigatorId: string | null;
+  principalInvestigatorName: string | null;
+  initialStartDate: string | null;
+  initialEndDate: string | null;
+  initialDirectCost: number | null;
+  initialIndirectCost: number | null;
+  initialTotalCost: number | null;
+  totalStartDate: string | null;
+  totalEndDate: string | null;
+  totalDirectCost: number | null;
+  totalIndirectCost: number | null;
+  totalCost: number | null;
+}
+
+export interface ProposalVersionV1 {
+  proposalId: number;
+  proposalNumber: string;
+  sequenceNumber: number;
+  workflowDocumentNumber: string | null;
+  proposalSequenceStatus: string | null;
+  status: string | null;
+  title: string | null;
+  sourceUpdateTimestamp: string | null;
+}
+
+export interface ProposalVersionPageResponseV1
+  extends PageResponse<ProposalVersionV1> {}
+
+export interface ProposalPersonV1 {
+  proposalPersonId: number;
+  personId: string | null;
+  fullName: string | null;
+  contactRoleCode: string | null;
+  keyPersonProjectRole: string | null;
+  principalInvestigator: boolean;
+  facultyFlag: string | null;
+  academicYearEffort: number | null;
+  calendarYearEffort: number | null;
+  summerEffort: number | null;
+  totalEffort: number | null;
+}
+
+export interface ProposalAssociatedUnitV1 {
+  proposalPersonUnitId: number;
+  proposalPersonId: number;
+  personName: string | null;
+  unitNumber: string | null;
+  unitName: string | null;
+  leadUnit: boolean;
+}
+
+// A genuinely separate sibling table from ProposalPersonV1 - never
+// merged (live-verified as a different real person than the PI in the
+// reference fixture).
+export interface ProposalUnitContactV1 {
+  proposalUnitContactId: number;
+  personId: string | null;
+  fullName: string | null;
+  unitAdministratorTypeCode: string | null;
+  unitAdministratorTypeDescription: string | null;
+  unitContactType: string | null;
+}
+
+export interface ProposalUnitsV1 {
+  associatedUnits: ProposalAssociatedUnitV1[];
+  unitContacts: ProposalUnitContactV1[];
+}
+
+export interface ProposalAttachmentV1 {
+  proposalAttachmentId: number;
+  sequenceNumber: number | null;
+  attachmentNumber: number | null;
+  attachmentTitle: string | null;
+  attachmentTypeCode: number | null;
+  attachmentTypeDescription: string | null;
+  fileName: string | null;
+  contentType: string | null;
+  comments: string | null;
+  fileSizeBytes: number | null;
+  uploadStatus: string | null;
+  downloadable: boolean;
+  sourceUpdateTimestamp: string | null;
+}
+
+// Grouped by Oracle's real PROPOSAL_ATTACHMENT_TYPE taxonomy - never
+// by attachmentTitle (a title containing "Guidelines" is still filed
+// under Oracle's real "Other" type - see the API's own migration
+// comment for the live-verified proof).
+export interface ProposalAttachmentGroupV1 {
+  attachmentTypeCode: number | null;
+  attachmentTypeDescription: string | null;
+  attachments: ProposalAttachmentV1[];
+}
+
+export interface ProposalAttachmentsV1 {
+  groups: ProposalAttachmentGroupV1[];
+}
+
+export interface ProposalCommentEntryV1 {
+  proposalCommentId: number | null;
+  proposalId: number | null;
+  sequenceNumber: number | null;
+  comments: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}
+
+// Only "Proposal Comments" and "Proposal IP Review Comments" (codes
+// 12/13) are shown, per explicit instruction - family-wide, with
+// history behavior matching Award's own Comments screen (consecutive
+// identical text collapsed to its earliest occurrence).
+export interface ProposalCommentCategoryV1 {
+  commentTypeCode: string;
+  commentTypeDescription: string | null;
+  current: ProposalCommentEntryV1 | null;
+  history: ProposalCommentEntryV1[];
+}
+
+export interface ProposalCommentsV1 {
+  commentCategories: ProposalCommentCategoryV1[];
+}
+
+// Deliberately carries no internal awardId - see AwardIdentifierV1 for
+// how a client resolves one, only at click-time.
+export interface ProposalFundedAwardV1 {
+  awardNumber: string;
+  sequenceNumber: number | null;
+  status: string | null;
+}
+
+// Resolve-only: a caller supplies a stable awardNumber and gets back
+// the current version's internal awardId, immediately before
+// navigating - never stored, never rendered as visible text.
+export interface AwardIdentifierV1 {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number | null;
 }
 
 export interface NegotiationSummary {

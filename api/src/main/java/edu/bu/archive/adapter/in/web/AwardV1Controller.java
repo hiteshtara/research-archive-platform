@@ -13,6 +13,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
@@ -148,6 +149,25 @@ public class AwardV1Controller {
             String awardNumber
     ) {
         return ResponseEntity.ok(service.resolveIdentifier(awardNumber));
+    }
+
+    @Operation(
+            summary = "List the Funding Proposal(s) behind an Award",
+            description = "Family-wide (every award_id in this Award's "
+                    + "whole award_number family), from "
+                    + "archive.award_funding_proposal - the bidirectional "
+                    + "counterpart to Institutional Proposal's own "
+                    + "Funded Awards section. proposalId links directly "
+                    + "to the Institutional Proposal dashboard."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's linked Proposal(s).")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/funding-proposals")
+    public ResponseEntity<List<AwardProposalResponse>> fundingProposals(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findFundingProposals(awardId));
     }
 
     @Operation(

@@ -9,6 +9,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
@@ -159,6 +160,20 @@ class AwardV1ControllerTest {
         mockMvc.perform(get("/api/v1/awards/by-number/NO-SUCH-AWARD"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void fundingProposalsIsRoutedUnderTheV1Prefix() throws Exception {
+        AwardProposalResponse link = new AwardProposalResponse(
+                148183L, 148155L, 2986L, "Y", null, null, null
+        );
+        when(service.findFundingProposals(148155L)).thenReturn(List.of(link));
+
+        mockMvc.perform(get("/api/v1/awards/148155/funding-proposals"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].proposalId").value(2986));
+
+        verify(service).findFundingProposals(148155L);
     }
 
     @Test

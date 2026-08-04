@@ -19,6 +19,7 @@ import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
 import { AwardBudgetSection } from "../../components/award/AwardBudgetSection";
 import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
 import { AwardContactsSection } from "../../components/award/AwardContactsSection";
+import { AwardFundingProposalsSection } from "../../components/award/AwardFundingProposalsSection";
 import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTransmissionsSection";
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
 import { AwardSummarySection } from "../../components/award/AwardSummarySection";
@@ -33,6 +34,7 @@ const SECTIONS = [
   { key: "summary", label: "Summary" },
   { key: "versions", label: "Versions" },
   { key: "people", label: "People and Units" },
+  { key: "fundingProposals", label: "Funding Proposal" },
   { key: "amounts", label: "Amounts" },
   { key: "budget", label: "Budget" },
   { key: "timeMoney", label: "Time & Money" },
@@ -48,6 +50,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "summary",
   "versions",
   "people",
+  "fundingProposals",
   "amounts",
   "budget",
   "timeMoney",
@@ -221,6 +224,10 @@ export function AwardDashboardPage() {
 
           {activeSection === "people" && (
             <AwardContactsSection awardId={awardId} />
+          )}
+
+          {activeSection === "fundingProposals" && (
+            <AwardFundingProposalsSection awardId={awardId} />
           )}
 
           {activeSection === "amounts" && (

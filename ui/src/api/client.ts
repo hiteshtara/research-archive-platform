@@ -278,6 +278,16 @@ export function getAwardSummaryV1(
   return request(`/api/v1/awards/${encodeURIComponent(awardId)}/summary`, signal);
 }
 
+export function getAwardFundingProposalsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardProposalLink[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/funding-proposals`,
+    signal,
+  );
+}
+
 export function getAwardVersionsV1(
   awardId: number,
   parameters: {
@@ -706,6 +716,139 @@ export function getProposalAwards(
   proposalNumber: string,
 ): Promise<import("../types/api").ProposalAward[]> {
   return request(`/api/proposals/${encodeURIComponent(proposalNumber)}/awards`);
+}
+
+// --- Institutional Proposal API v1 (/api/v1/proposals) - keyed by the
+// exact surrogate proposalId, distinct from the family-number-scoped
+// functions above, which this section does not modify or replace.
+
+export function getProposalSummaryV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalSummaryV1> {
+  return request(`/api/v1/proposals/${encodeURIComponent(proposalId)}`, signal);
+}
+
+export function getProposalVersionsV1(
+  proposalId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalVersionPageResponseV1> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(
+      proposalId,
+    )}/versions?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getProposalPeopleV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalPersonV1[]> {
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/people`,
+    signal,
+  );
+}
+
+export function getProposalUnitsV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalUnitsV1> {
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/units`,
+    signal,
+  );
+}
+
+export function getProposalAttachmentsV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalAttachmentsV1> {
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/attachments`,
+    signal,
+  );
+}
+
+export async function downloadProposalAttachmentV1(
+  proposalId: number,
+  attachmentId: number,
+  fallbackFileName: string,
+): Promise<void> {
+  const token = await accessToken();
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const path =
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}` +
+    `/attachments/${encodeURIComponent(attachmentId)}/download`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This attachment is not available for download.");
+    }
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = parseDownloadFilename(
+    response.headers.get("Content-Disposition"),
+    fallbackFileName,
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+export function getProposalCommentsV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalCommentsV1> {
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/comments`,
+    signal,
+  );
+}
+
+export function getProposalFundedAwardsV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalFundedAwardV1[]> {
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/funded-awards`,
+    signal,
+  );
+}
+
+// Resolve-only: never exposes an internal awardId from the Proposal
+// domain's own payload - a caller (Funded Awards' "Open Award" link)
+// calls this immediately before navigating to /awards/{awardId}.
+export function resolveAwardByNumberV1(
+  awardNumber: string,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardIdentifierV1> {
+  return request(
+    `/api/v1/awards/by-number/${encodeURIComponent(awardNumber)}`,
+    signal,
+  );
 }
 
 export function getNegotiations(

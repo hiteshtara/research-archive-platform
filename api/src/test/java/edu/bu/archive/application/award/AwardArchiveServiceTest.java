@@ -6,6 +6,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
@@ -68,6 +69,31 @@ class AwardArchiveServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.resolveIdentifier("NO-SUCH-AWARD"))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void findFundingProposalsResolvesAwardIdToNumberAndDelegates() {
+        when(repository.findAwardNumberForId(148155L))
+                .thenReturn(Optional.of("200268-00001"));
+        AwardProposalResponse link = new AwardProposalResponse(
+                148183L, 148155L, 2986L, "Y", null, null, null
+        );
+        when(repository.findCurrentProposals("200268-00001"))
+                .thenReturn(List.of(link));
+
+        List<AwardProposalResponse> result =
+                service.findFundingProposals(148155L);
+
+        assertThat(result).containsExactly(link);
+    }
+
+    @Test
+    void findFundingProposalsThrowsNotFoundWhenTheAwardDoesNotExist() {
+        when(repository.findAwardNumberForId(999L))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.findFundingProposals(999L))
                 .isInstanceOf(NoSuchElementException.class);
     }
 
