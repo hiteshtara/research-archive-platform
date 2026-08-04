@@ -209,6 +209,27 @@ data "aws_iam_policy_document" "task_documents_s3" {
       "${var.documents_bucket_arn}/award-files/by-file-id/*"
     ]
   }
+
+  # Proposal Attachments (ProposalAttachmentPlugin,
+  # archive_etl.attachments.runner --module proposal) - its own prefix,
+  # separate from Award's award-files/by-file-id/* above, matching
+  # ProposalAttachmentPlugin.default_s3_prefix / s3_key() (see
+  # etl/archive_etl/attachments/plugins/proposal.py).
+  statement {
+    sid    = "UploadProposalAttachmentObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts"
+    ]
+
+    resources = [
+      "${var.documents_bucket_arn}/proposal/*"
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "task_documents_s3" {
