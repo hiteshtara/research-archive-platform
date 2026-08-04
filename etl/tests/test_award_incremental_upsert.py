@@ -6049,6 +6049,116 @@ class CreateAwardBatchProductionSelectionTest(_AwardPostgresTestCase):
             "ORACLE_SCAN_ASCENDING_AWARD_ID_VALIDATION_OVERLAP",
         )
 
+    def _seed_archived_award_version(
+        self, award_id: int, award_number: str, sequence_number: int = 1
+    ) -> None:
+        """Inserts an archive.award_version row directly, with NO
+        etl_batch/etl_batch_item row at all - reproduces the real
+        production gap (batch 7): an award_id archived before/outside
+        the batch framework, which _excluded_completed_and_active_award_ids'
+        batch-tracking half alone cannot see."""
+        with self.engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO archive.award_version "
+                    "(award_id, award_number, sequence_number) "
+                    "VALUES (:award_id, :award_number, :sequence_number)"
+                ),
+                {
+                    "award_id": award_id,
+                    "award_number": award_number,
+                    "sequence_number": sequence_number,
+                },
+            )
+
+    def test_already_archived_award_ids_with_no_batch_tracking_are_excluded(
+        self,
+    ) -> None:
+        # The batch-7 production incident: award_ids 1-3 are fully
+        # archived (e.g. via a direct --load-award-id call, or a
+        # pre-batch-framework bulk load) but have never been through
+        # the batch framework at all - no etl_batch/etl_batch_item row
+        # exists for them whatsoever.
+        self._seed_archived_award_version(1, "A-0001")
+        self._seed_archived_award_version(2, "A-0002")
+        self._seed_archived_award_version(3, "A-0003")
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 11)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [4, 5, 6, 7, 8])
+
+    def test_genuinely_new_award_ids_are_still_selected(self) -> None:
+        # Companion to the exclusion test above: award_ids with neither
+        # batch-tracking history nor an archive.award_version row are
+        # ordinary, genuinely-new candidates and must be selected
+        # normally.
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 6)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [1, 2, 3, 4, 5])
+
+    def test_archived_multi_version_family_excludes_every_sibling_award_id(
+        self,
+    ) -> None:
+        # --load-award-id always widens to load a family's EVERY
+        # award_id in one pass, so once any one award_id of a family is
+        # archived, every sibling award_id of that same award_number is
+        # guaranteed to be archived too - both must be excluded, not
+        # just the one that happens to be checked first.
+        self._seed_archived_award_version(1, "A-0001", sequence_number=1)
+        self._seed_archived_award_version(2, "A-0001", sequence_number=2)
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 6)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 3)
+
+        self.assertEqual(result["selected_award_ids"], [3, 4, 5])
+
+    def test_batch_tracked_and_archive_only_exclusions_combine(self) -> None:
+        # award_id 1: excluded via etl_batch_item COMPLETED tracking.
+        # award_id 2: excluded via archive.award_version with no
+        # tracking at all. Both exclusion paths must apply together.
+        self._seed_batch(
+            [1], batch_status="COMPLETED", item_status="COMPLETED"
+        )
+        self._seed_archived_award_version(2, "A-0002")
+
+        with self._patched_oracle(
+            award_ids=[{"award_id": aid} for aid in range(1, 8)]
+        ):
+            result = award_loader._run_create_award_batch(self.engine, 5)
+
+        self.assertEqual(result["selected_award_ids"], [3, 4, 5, 6, 7])
+
+    def test_deliberate_reload_of_an_already_archived_award_id_still_works(
+        self,
+    ) -> None:
+        # The exclusion fix only narrows --create-batch's own
+        # SELECTION - it must never block the deliberate reload paths
+        # (--load-award-id / --load-batch), which stay fully callable
+        # and idempotent against an already-archived award_id.
+        self._seed_archived_award_version(1, "A-0001")
+
+        with self._patched_oracle(
+            versions=[_version_row(award_id=1, award_number="A-0001")]
+        ):
+            result = award_loader._run_load_award_id(self.engine, 1)
+
+        # Not blocked by the exclusion fix above (that fix only narrows
+        # --create-batch's own selection) - the deliberate reload still
+        # runs and processes the family, whether that lands as an
+        # update (fixture row differs from the minimal seed row above)
+        # or a no-op unchanged UPSERT.
+        self.assertEqual(result["award_number"], "A-0001")
+        self.assertEqual(result["family_size"], 1)
+        self.assertEqual(result["inserted"] + result["updated"] + result["unchanged"], 1)
+
 
 class RunLoadAwardBatchTest(_AwardPostgresTestCase):
     def _create_batch(self, award_ids: list[int]) -> int:

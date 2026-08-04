@@ -9383,16 +9383,40 @@ def _excluded_completed_and_active_award_ids(engine: Engine) -> set[int]:
     (b) belongs to a batch that is still active (READY or PROCESSING) -
         so two batches can never concurrently claim the same award_id,
         regardless of that item's own individual status within the
-        active batch.
+        active batch - or
+
+    (c) is already present in archive.award_version, regardless of
+        whether any etl_batch_item row exists for it at all. This
+        closes a real gap found in production: this archive's initial
+        ~5,000-family population was loaded before/outside the batch
+        framework (direct --load-award-id calls, or a pre-batch-
+        framework bulk load), so those award_ids have no etl_batch_item
+        history whatsoever - (a)/(b) alone let a later --create-batch
+        reselect them for free, producing a batch that looks fine
+        (task exit 0, no missing_in_oracle) but adds zero new families
+        (inserted=0, unchanged=<already-archived total>). Checking
+        archive.award_version directly makes selection archive-aware
+        instead of relying solely on batch-tracking history, so this
+        never matters again regardless of how an award_id first got
+        archived. Safe to check by award_id specifically (not
+        award_number): --load-award-id always widens to load a
+        family's EVERY award_id in one pass (see its own docstring), so
+        if any award_id of a family is archived, every sibling award_id
+        of that same family is guaranteed to be archived too - a bare
+        per-award_id existence check is already family-complete.
 
     Deliberately does NOT exclude FAILED or PENDING items belonging to
     an already-resolved batch (COMPLETED/FAILED/PARTIAL/ABANDONED) -
     the entire point of production selection is that an award_id which
     never successfully completed remains eligible for a later batch to
     pick up again, not permanently skipped. Read-only; touches only
-    archive.etl_batch/etl_batch_item, never Oracle."""
+    archive.etl_batch/etl_batch_item/award_version, never Oracle. Only
+    affects --create-batch's selection - --load-award-id and
+    --load-batch remain fully callable against an already-archived
+    award_id regardless of this exclusion set (both are idempotent
+    UPSERTs by design, used deliberately for backfills/reloads)."""
     with engine.connect() as connection:
-        rows = connection.execute(
+        batch_tracked_rows = connection.execute(
             text(
                 """
                 SELECT DISTINCT ebi.entity_key
@@ -9414,7 +9438,12 @@ def _excluded_completed_and_active_award_ids(engine: Engine) -> set[int]:
                 "processing_status": batch_framework.BATCH_STATUS_PROCESSING,
             },
         ).scalars()
-        return {int(value) for value in rows}
+        already_archived_rows = connection.execute(
+            text("SELECT DISTINCT award_id FROM archive.award_version")
+        ).scalars()
+        return {int(value) for value in batch_tracked_rows} | {
+            int(value) for value in already_archived_rows
+        }
 
 
 def _run_create_award_batch(
@@ -9432,9 +9461,15 @@ def _run_create_award_batch(
     Two selection modes:
 
     - Production (default, validation_overlap=False): excludes every
-      award_id already COMPLETED in a prior batch, and every award_id
-      currently claimed by a still-active (READY/PROCESSING) batch (see
-      _excluded_completed_and_active_award_ids) - so repeated
+      award_id already COMPLETED in a prior batch, every award_id
+      currently claimed by a still-active (READY/PROCESSING) batch, AND
+      every award_id already present in archive.award_version regardless
+      of batch-tracking history (see
+      _excluded_completed_and_active_award_ids - this last exclusion is
+      what makes selection archive-aware rather than trusting
+      etl_batch_item alone, closing a real gap where this archive's
+      initial population, loaded before/outside the batch framework,
+      had no batch-tracking history to exclude it by) - so repeated
       `--create-batch N` calls advance through the Award population
       (batch 1: the smallest N eligible award_ids; batch 2: the next N
       after excluding batch 1's now-COMPLETED items; and so on) instead
