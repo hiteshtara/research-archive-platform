@@ -46,3 +46,10 @@ explicitly — the project has been burned by this exact gap before (see
   `getCurrentBudget()` doesn't transfer to a closed archive, and why
   Budget and SAP transmission share a real data dependency but no
   foreign key.
+- [Institutional Proposal](InstitutionalProposal.md) — the
+  `AWARD_FUNDING_PROPOSALS` many-to-many relationship resolved
+  family-wide/active/non-Cancelled on both sides (a fourth proof of the
+  bounded-family pattern), the `PROPOSAL_LOG.INST_PROPOSAL_NUMBER`
+  naming trap (it holds a `PROPOSAL_ID`, not a `PROPOSAL_NUMBER`, and
+  is unreliably populated), and why the Proposal archive currently
+  holds zero live rows despite its schema existing since V015.
