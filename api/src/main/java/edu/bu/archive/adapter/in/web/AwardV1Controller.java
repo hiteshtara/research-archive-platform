@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
@@ -127,6 +128,26 @@ public class AwardV1Controller {
         return ResponseEntity.ok(
                 service.search(q, page, size)
         );
+    }
+
+    @Operation(
+            summary = "Resolve an Award number to its current awardId",
+            description = "Resolve-only endpoint for other domains "
+                    + "(e.g. Institutional Proposal's Funded Awards "
+                    + "section) that hold a stable awardNumber but "
+                    + "must never receive or display the internal "
+                    + "awardId directly from another domain's own "
+                    + "response payload - the caller resolves it here, "
+                    + "server-side, immediately before navigating."
+    )
+    @ApiResponse(responseCode = "200", description = "The current version's identifiers.")
+    @ApiResponse(responseCode = "404", description = "No such award_number.")
+    @GetMapping("/by-number/{awardNumber}")
+    public ResponseEntity<AwardIdentifierResponse> resolveByNumber(
+            @PathVariable
+            String awardNumber
+    ) {
+        return ResponseEntity.ok(service.resolveIdentifier(awardNumber));
     }
 
     @Operation(

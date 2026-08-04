@@ -19,6 +19,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonCreditSplitRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
@@ -104,6 +105,33 @@ public class AwardArchiveService {
         return new AwardWorkspaceResponse(
                 normalizedAwardNumber,
                 current
+        );
+    }
+
+    /*
+     * Resolve-only: a caller from another domain (e.g. Institutional
+     * Proposal's Funded Awards section) supplies the stable, human-
+     * meaningful awardNumber and gets back the current version's
+     * internal awardId to navigate with - never handed a raw awardId
+     * by that other domain's own response payload.
+     */
+    public AwardIdentifierResponse resolveIdentifier(String awardNumber) {
+        String normalizedAwardNumber =
+                normalizeAwardNumber(awardNumber);
+
+        AwardRowResponse current =
+                repository.findCurrent(normalizedAwardNumber)
+                        .orElseThrow(() ->
+                                new NoSuchElementException(
+                                        "Award not found: "
+                                                + normalizedAwardNumber
+                                )
+                        );
+
+        return new AwardIdentifierResponse(
+                current.awardId(),
+                current.awardNumber(),
+                current.sequenceNumber()
         );
     }
 

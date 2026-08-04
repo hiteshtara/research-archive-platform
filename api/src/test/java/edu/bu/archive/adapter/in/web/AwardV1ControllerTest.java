@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContact
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
@@ -131,6 +132,33 @@ class AwardV1ControllerTest {
                 );
 
         verify(service).search("328797", 0, 25);
+    }
+
+    @Test
+    void resolveByNumberReturnsTheCurrentAwardIdentifiers() throws Exception {
+        when(service.resolveIdentifier("200268-00001")).thenReturn(
+                new AwardIdentifierResponse(148155L, "200268-00001", 1)
+        );
+
+        mockMvc.perform(get("/api/v1/awards/by-number/200268-00001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.awardId").value(148155))
+                .andExpect(jsonPath("$.awardNumber").value("200268-00001"))
+                .andExpect(jsonPath("$.sequenceNumber").value(1));
+
+        verify(service).resolveIdentifier("200268-00001");
+    }
+
+    @Test
+    void resolveByNumberPropagatesNotFoundWithConsistentErrorShape()
+            throws Exception {
+        when(service.resolveIdentifier("NO-SUCH-AWARD")).thenThrow(
+                new NoSuchElementException("Award not found: NO-SUCH-AWARD")
+        );
+
+        mockMvc.perform(get("/api/v1/awards/by-number/NO-SUCH-AWARD"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test

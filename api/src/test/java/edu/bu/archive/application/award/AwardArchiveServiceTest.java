@@ -5,6 +5,8 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
@@ -40,6 +42,33 @@ class AwardArchiveServiceTest {
                 repository,
                 mock(AwardAttachmentStorage.class)
         );
+    }
+
+    @Test
+    void resolveIdentifierReturnsTheCurrentVersionsAwardId() {
+        when(repository.findCurrent("200268-00001")).thenReturn(
+                Optional.of(new AwardRowResponse(
+                        148155L, "200268-00001", 1, "Title", "Active",
+                        "Active", "Sponsor", null, "Lead Unit", null, null,
+                        null, null, true, true
+                ))
+        );
+
+        AwardIdentifierResponse identifier =
+                service.resolveIdentifier("200268-00001");
+
+        assertThat(identifier.awardId()).isEqualTo(148155L);
+        assertThat(identifier.awardNumber()).isEqualTo("200268-00001");
+        assertThat(identifier.sequenceNumber()).isEqualTo(1);
+    }
+
+    @Test
+    void resolveIdentifierThrowsNotFoundWhenTheAwardDoesNotExist() {
+        when(repository.findCurrent("NO-SUCH-AWARD"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.resolveIdentifier("NO-SUCH-AWARD"))
+                .isInstanceOf(NoSuchElementException.class);
     }
 
     @Test
