@@ -38,13 +38,18 @@ def _resolve_project_root() -> Path:
 
 PROJECT_ROOT = _resolve_project_root()
 
-# Oracle extraction queries exist and match the loader's expected columns
-# for versions and awards. Proposal people had no verified Oracle extraction
-# query and has been removed entirely (API, UI, ETL, and the
-# archive.proposal_person table) - see docs/DECISIONS.md. That decision is
-# about the Person/PersonUnit/UnitContact feature specifically, not about
-# Proposal as a whole - see docs/kuali-business-rules/InstitutionalProposal.md
-# for the live-verified People relationship this loader does not yet cover.
+# Proposal People & Units (PROPOSAL_PERSONS/PROPOSAL_PERSON_UNITS/
+# PROPOSAL_UNIT_CONTACTS) previously had no verified Oracle extraction
+# query and archive.proposal_person was dropped entirely (V033) - see
+# docs/DECISIONS.md. A live schema + fixture-data probe this session
+# proved the real columns and the family-205 fixture relationship
+# (PI Lois K Horwitz via PROPOSAL_PERSONS/PROPOSAL_PERSON_UNITS vs. a
+# genuinely different Unit Contact, Andrea Cozzi, via the separate
+# PROPOSAL_UNIT_CONTACTS table) - see
+# docs/kuali-business-rules/InstitutionalProposal.md's People & Units
+# section and V061's own migration comment. That reverses the "removed
+# entirely" state for this specific decision, not the Protocol Archive
+# or any other removal in docs/DECISIONS.md.
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "01_proposal_versions.sql"
 )
@@ -60,6 +65,15 @@ AWARDS_ORACLE_SQL = (
 ATTACHMENTS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "02_proposal_attachments.sql"
 )
+PERSONS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "03_proposal_persons.sql"
+)
+PERSON_UNITS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "04_proposal_person_units.sql"
+)
+UNIT_CONTACTS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "05_proposal_unit_contacts.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "proposal_id",
@@ -74,6 +88,26 @@ AWARD_REQUIRED_COLUMNS = {
 
 ATTACHMENT_REQUIRED_COLUMNS = {
     "proposal_attachment_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+}
+
+PERSON_REQUIRED_COLUMNS = {
+    "proposal_person_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+}
+
+PERSON_UNIT_REQUIRED_COLUMNS = {
+    "proposal_person_unit_id",
+    "proposal_person_id",
+    "proposal_id",
+}
+
+UNIT_CONTACT_REQUIRED_COLUMNS = {
+    "proposal_unit_contact_id",
     "proposal_id",
     "proposal_number",
     "sequence_number",
@@ -151,14 +185,68 @@ ATTACHMENT_COLUMNS = [
     "source_update_user",
 ]
 
+# PROPOSAL_PERSONS - PI/MPI/COI/KP via contact_role_code, the same
+# shared vocabulary already proven for archive.award_person.
+PERSON_COLUMNS = [
+    "proposal_person_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+    "person_id",
+    "rolodex_id",
+    "full_name",
+    "contact_role_code",
+    "key_person_project_role",
+    "faculty_flag",
+    "academic_year_effort",
+    "calendar_year_effort",
+    "summer_effort",
+    "total_effort",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
+# PROPOSAL_PERSON_UNITS - a person's associated unit(s), each with its
+# own lead_unit_flag. proposal_id/proposal_number/sequence_number are
+# denormalized via the extraction SQL's join back to PROPOSAL_PERSONS
+# (see 04_proposal_person_units.sql) - never inferred client-side.
+PERSON_UNIT_COLUMNS = [
+    "proposal_person_unit_id",
+    "proposal_person_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+    "unit_number",
+    "lead_unit_flag",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
+# PROPOSAL_UNIT_CONTACTS - a genuinely separate sibling table, never
+# merged with proposal_person (see V061's migration comment for the
+# live-verified fixture proof that this is a different person than
+# the PI).
+UNIT_CONTACT_COLUMNS = [
+    "proposal_unit_contact_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+    "person_id",
+    "full_name",
+    "unit_administrator_type_code",
+    "unit_contact_type",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
 
 def parse_args(
     arguments: list[str] | None = None,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Load Proposal versions/awards from Oracle. People is not "
-            "loaded - see docs/DECISIONS.md."
+            "Load Proposal versions/awards/attachments/people/units from "
+            "Oracle."
         )
     )
     parser.add_argument(
@@ -487,6 +575,174 @@ def prepare_attachments(
 
     available_columns = [
         column for column in ATTACHMENT_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
+
+
+def prepare_persons(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        PERSON_REQUIRED_COLUMNS,
+        "proposal_persons.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "proposal_person_id",
+            "proposal_id",
+            "sequence_number",
+            "rolodex_id",
+            "academic_year_effort",
+            "calendar_year_effort",
+            "summer_effort",
+            "total_effort",
+        ],
+    )
+
+    convert_dates(dataframe, ["source_update_timestamp"])
+
+    require_values(
+        dataframe,
+        [
+            "proposal_person_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+        ],
+        "proposal_persons.csv",
+    )
+
+    # PROPOSAL_PERSON_ID is PROPOSAL_PERSONS' own real Oracle PK - the
+    # correct UPSERT key. Preserve every row: a new Proposal version
+    # can carry its own PROPOSAL_PERSON_ID rows distinct from a prior
+    # version's (mirrors archive.award_person's own per-version grain).
+    duplicate_persons = dataframe.duplicated(
+        subset=["proposal_person_id"],
+        keep="first",
+    )
+
+    if duplicate_persons.any():
+        logger.warning(
+            "Removed {} duplicate PROPOSAL_PERSON_ID rows",
+            int(duplicate_persons.sum()),
+        )
+
+        dataframe = dataframe.loc[~duplicate_persons].copy()
+
+    available_columns = [
+        column for column in PERSON_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
+
+
+def prepare_person_units(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        PERSON_UNIT_REQUIRED_COLUMNS,
+        "proposal_person_units.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "proposal_person_unit_id",
+            "proposal_person_id",
+            "proposal_id",
+            "sequence_number",
+        ],
+    )
+
+    convert_dates(dataframe, ["source_update_timestamp"])
+
+    require_values(
+        dataframe,
+        [
+            "proposal_person_unit_id",
+            "proposal_person_id",
+            "proposal_id",
+        ],
+        "proposal_person_units.csv",
+    )
+
+    # PROPOSAL_PERSON_UNIT_ID is PROPOSAL_PERSON_UNITS' own real Oracle
+    # PK - the correct UPSERT key. A single person legitimately carries
+    # more than one unit row (live-verified shape mirrors
+    # archive.award_person_unit) - never collapsed to one row per
+    # person.
+    duplicate_person_units = dataframe.duplicated(
+        subset=["proposal_person_unit_id"],
+        keep="first",
+    )
+
+    if duplicate_person_units.any():
+        logger.warning(
+            "Removed {} duplicate PROPOSAL_PERSON_UNIT_ID rows",
+            int(duplicate_person_units.sum()),
+        )
+
+        dataframe = dataframe.loc[~duplicate_person_units].copy()
+
+    available_columns = [
+        column for column in PERSON_UNIT_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
+
+
+def prepare_unit_contacts(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        UNIT_CONTACT_REQUIRED_COLUMNS,
+        "proposal_unit_contacts.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "proposal_unit_contact_id",
+            "proposal_id",
+            "sequence_number",
+        ],
+    )
+
+    convert_dates(dataframe, ["source_update_timestamp"])
+
+    require_values(
+        dataframe,
+        [
+            "proposal_unit_contact_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+        ],
+        "proposal_unit_contacts.csv",
+    )
+
+    # PROPOSAL_UNIT_CONTACT_ID is PROPOSAL_UNIT_CONTACTS' own real
+    # Oracle PK - the correct UPSERT key. Never merged with
+    # proposal_person: live-verified as a genuinely distinct person in
+    # the reference fixture (see V061's migration comment).
+    duplicate_unit_contacts = dataframe.duplicated(
+        subset=["proposal_unit_contact_id"],
+        keep="first",
+    )
+
+    if duplicate_unit_contacts.any():
+        logger.warning(
+            "Removed {} duplicate PROPOSAL_UNIT_CONTACT_ID rows",
+            int(duplicate_unit_contacts.sum()),
+        )
+
+        dataframe = dataframe.loc[~duplicate_unit_contacts].copy()
+
+    available_columns = [
+        column for column in UNIT_CONTACT_COLUMNS if column in dataframe.columns
     ]
     return dataframe[available_columns].copy()
 
@@ -870,6 +1126,234 @@ def upsert_proposal_attachments(
     return int(result.rowcount)
 
 
+def upsert_proposal_persons(
+    connection: Connection,
+    persons: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_person, keyed by
+    proposal_person_id (PROPOSAL_PERSONS' own real Oracle PK)."""
+    connection.execute(
+        text(
+            """
+            CREATE TEMPORARY TABLE proposal_person_stage (
+                proposal_person_id BIGINT NOT NULL,
+                proposal_id BIGINT NOT NULL,
+                proposal_number TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                person_id TEXT,
+                rolodex_id BIGINT,
+                full_name TEXT,
+                contact_role_code TEXT,
+                key_person_project_role TEXT,
+                faculty_flag TEXT,
+                academic_year_effort NUMERIC,
+                calendar_year_effort NUMERIC,
+                summer_effort NUMERIC,
+                total_effort NUMERIC,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        "proposal_person_stage",
+        len(persons),
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=persons[PERSON_COLUMNS],
+        schema="pg_temp",
+        table="proposal_person_stage",
+    )
+
+    update_columns = [
+        column for column in PERSON_COLUMNS if column != "proposal_person_id"
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_person (
+                {", ".join(PERSON_COLUMNS)}
+            )
+            SELECT {", ".join(PERSON_COLUMNS)}
+            FROM proposal_person_stage
+            ON CONFLICT (proposal_person_id) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
+def upsert_proposal_person_units(
+    connection: Connection,
+    person_units: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_person_unit, keyed by
+    proposal_person_unit_id (PROPOSAL_PERSON_UNITS' own real Oracle
+    PK). A row whose proposal_person_id is not yet loaded in
+    archive.proposal_person is skipped with a warning rather than
+    aborting the whole batch - same "preserve everything resolvable
+    now, re-run resolves the rest later" precedent already established
+    for upsert_proposal_awards."""
+    connection.execute(
+        text(
+            """
+            CREATE TEMPORARY TABLE proposal_person_unit_stage (
+                proposal_person_unit_id BIGINT NOT NULL,
+                proposal_person_id BIGINT NOT NULL,
+                proposal_id BIGINT NOT NULL,
+                proposal_number TEXT,
+                sequence_number INTEGER,
+                unit_number TEXT,
+                lead_unit_flag TEXT,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        "proposal_person_unit_stage",
+        len(person_units),
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=person_units[PERSON_UNIT_COLUMNS],
+        schema="pg_temp",
+        table="proposal_person_unit_stage",
+    )
+
+    unresolved_person_ids = (
+        connection.execute(
+            text(
+                """
+                SELECT DISTINCT stage.proposal_person_id
+                FROM proposal_person_unit_stage stage
+                LEFT JOIN archive.proposal_person person
+                    ON person.proposal_person_id = stage.proposal_person_id
+                WHERE person.proposal_person_id IS NULL
+                """
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    if unresolved_person_ids:
+        logger.warning(
+            "Skipping {} proposal_person_unit row(s) whose Proposal "
+            "Person ID is not yet loaded in archive.proposal_person: {}",
+            len(unresolved_person_ids),
+            ", ".join(str(value) for value in unresolved_person_ids[:20]),
+        )
+
+    update_columns = [
+        column
+        for column in PERSON_UNIT_COLUMNS
+        if column != "proposal_person_unit_id"
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_person_unit (
+                {", ".join(PERSON_UNIT_COLUMNS)}
+            )
+            SELECT {", ".join(f"stage.{column}" for column in PERSON_UNIT_COLUMNS)}
+            FROM proposal_person_unit_stage stage
+            JOIN archive.proposal_person person
+                ON person.proposal_person_id = stage.proposal_person_id
+            ON CONFLICT (proposal_person_unit_id) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
+def upsert_proposal_unit_contacts(
+    connection: Connection,
+    unit_contacts: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_unit_contact, keyed by
+    proposal_unit_contact_id (PROPOSAL_UNIT_CONTACTS' own real Oracle
+    PK). Never merged with archive.proposal_person - a genuinely
+    separate sibling table (see V061's migration comment)."""
+    connection.execute(
+        text(
+            """
+            CREATE TEMPORARY TABLE proposal_unit_contact_stage (
+                proposal_unit_contact_id BIGINT NOT NULL,
+                proposal_id BIGINT NOT NULL,
+                proposal_number TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                person_id TEXT,
+                full_name TEXT,
+                unit_administrator_type_code TEXT,
+                unit_contact_type TEXT,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        "proposal_unit_contact_stage",
+        len(unit_contacts),
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=unit_contacts[UNIT_CONTACT_COLUMNS],
+        schema="pg_temp",
+        table="proposal_unit_contact_stage",
+    )
+
+    update_columns = [
+        column
+        for column in UNIT_CONTACT_COLUMNS
+        if column != "proposal_unit_contact_id"
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_unit_contact (
+                {", ".join(UNIT_CONTACT_COLUMNS)}
+            )
+            SELECT {", ".join(UNIT_CONTACT_COLUMNS)}
+            FROM proposal_unit_contact_stage
+            ON CONFLICT (proposal_unit_contact_id) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
 def resolve_target_proposal_numbers(max_families: int) -> list[str]:
     """--max-families: resolve the first N distinct PROPOSAL_NUMBERs
     from Oracle (ordered), for a real, bounded batch load - the same
@@ -933,11 +1417,51 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         else attachments_raw
     )
 
+    persons_source = OracleDataSource(PERSONS_ORACLE_SQL)
+    persons_raw = (
+        persons_source.read_filtered(column="proposal_id", values=proposal_ids)
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    persons = prepare_persons(persons_raw) if not persons_raw.empty else persons_raw
+
+    person_units_source = OracleDataSource(PERSON_UNITS_ORACLE_SQL)
+    person_units_raw = (
+        person_units_source.read_filtered(
+            column="proposal_id", values=proposal_ids
+        )
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    person_units = (
+        prepare_person_units(person_units_raw)
+        if not person_units_raw.empty
+        else person_units_raw
+    )
+
+    unit_contacts_source = OracleDataSource(UNIT_CONTACTS_ORACLE_SQL)
+    unit_contacts_raw = (
+        unit_contacts_source.read_filtered(
+            column="proposal_id", values=proposal_ids
+        )
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    unit_contacts = (
+        prepare_unit_contacts(unit_contacts_raw)
+        if not unit_contacts_raw.empty
+        else unit_contacts_raw
+    )
+
     logger.info(
-        "Prepared Proposal rows: versions={:,} awards={:,} attachments={:,}",
+        "Prepared Proposal rows: versions={:,} awards={:,} attachments={:,} "
+        "persons={:,} person_units={:,} unit_contacts={:,}",
         len(versions),
         len(awards),
         len(attachments),
+        len(persons),
+        len(person_units),
+        len(unit_contacts),
     )
 
     engine = create_postgres_engine()
@@ -947,7 +1471,14 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         PROJECT_ROOT / "database" / "migrations",
     )
 
-    total_rows = len(versions) + len(awards) + len(attachments)
+    total_rows = (
+        len(versions)
+        + len(awards)
+        + len(attachments)
+        + len(persons)
+        + len(person_units)
+        + len(unit_contacts)
+    )
 
     with engine.begin() as connection:
         load_id = create_load_run(connection, total_rows)
@@ -965,22 +1496,54 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
                 if not attachments.empty
                 else 0
             )
+            # Persons before person_units: the latter's insert JOINs
+            # back to archive.proposal_person and must see this
+            # batch's parent rows already committed within the same
+            # transaction.
+            person_rows = (
+                upsert_proposal_persons(connection, persons)
+                if not persons.empty
+                else 0
+            )
+            person_unit_rows = (
+                upsert_proposal_person_units(connection, person_units)
+                if not person_units.empty
+                else 0
+            )
+            unit_contact_rows = (
+                upsert_proposal_unit_contacts(connection, unit_contacts)
+                if not unit_contacts.empty
+                else 0
+            )
+
+            total_written = (
+                version_rows
+                + award_rows
+                + attachment_rows
+                + person_rows
+                + person_unit_rows
+                + unit_contact_rows
+            )
 
             mark_load_complete(
                 connection,
                 load_id,
-                version_rows + award_rows + attachment_rows,
+                total_written,
             )
 
         logger.success(
             "Proposal targeted load completed. "
-            "load_id={} families={} versions={} awards={} attachments={} total={}",
+            "load_id={} families={} versions={} awards={} attachments={} "
+            "persons={} person_units={} unit_contacts={} total={}",
             load_id,
             len(proposal_numbers),
             version_rows,
             award_rows,
             attachment_rows,
-            version_rows + award_rows + attachment_rows,
+            person_rows,
+            person_unit_rows,
+            unit_contact_rows,
+            total_written,
         )
     except Exception as error:
         mark_load_failed(engine, load_id, str(error))

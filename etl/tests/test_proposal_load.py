@@ -9,10 +9,16 @@ import load_proposals_from_csv
 from load_proposals_from_csv import (
     ATTACHMENT_COLUMNS,
     AWARD_COLUMNS,
+    PERSON_COLUMNS,
+    PERSON_UNIT_COLUMNS,
+    UNIT_CONTACT_COLUMNS,
     VERSION_COLUMNS,
     parse_args,
     prepare_attachments,
     prepare_awards,
+    prepare_person_units,
+    prepare_persons,
+    prepare_unit_contacts,
     prepare_versions,
 )
 
@@ -459,6 +465,248 @@ class PrepareAttachmentsTest(unittest.TestCase):
             "source_update_user",
         ):
             self.assertIn(column, ATTACHMENT_COLUMNS)
+
+
+class PreparePersonsTest(unittest.TestCase):
+    def _fixture_row(self, **overrides):
+        # Real fixture, live-verified: Institutional Proposal family
+        # 205, PI Lois K Horwitz (U56572816) on proposal_id 212
+        # (sequence 1). The same person/role reappears on proposal_id
+        # 2986 (sequence 2) with a different proposal_person_id -
+        # PROPOSAL_PERSON_ID is Oracle's own real PK, not a
+        # cross-version identity.
+        row = {
+            "proposal_person_id": 126591,
+            "proposal_id": 212,
+            "proposal_number": "205",
+            "sequence_number": 1,
+            "person_id": "U56572816",
+            "rolodex_id": None,
+            "full_name": "LOIS K HORWITZ",
+            "contact_role_code": "PI",
+            "key_person_project_role": None,
+            "faculty_flag": "N",
+            "academic_year_effort": None,
+            "calendar_year_effort": None,
+            "summer_effort": None,
+            "total_effort": None,
+            "source_update_timestamp": "2011-08-10",
+            "source_update_user": "baccari",
+        }
+        row.update(overrides)
+        return row
+
+    def test_preserves_the_real_fixture_row_verbatim(self) -> None:
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_persons(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertEqual(row["proposal_person_id"], 126591)
+        self.assertEqual(row["proposal_id"], 212)
+        self.assertEqual(row["person_id"], "U56572816")
+        self.assertEqual(row["full_name"], "LOIS K HORWITZ")
+        self.assertEqual(row["contact_role_code"], "PI")
+
+    def test_the_same_person_may_appear_on_more_than_one_version(self) -> None:
+        # Real fixture: the same PI appears on both proposal_id 212 and
+        # 2986 with two DIFFERENT proposal_person_id values - never
+        # collapsed to one row per person.
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(
+                proposal_person_id=148162,
+                proposal_id=2986,
+                sequence_number=2,
+                source_update_timestamp="2011-09-07",
+                source_update_user="dmarkey",
+            ),
+        ])
+
+        prepared = prepare_persons(dataframe)
+
+        self.assertEqual(len(prepared), 2)
+        self.assertEqual(prepared["person_id"].nunique(), 1)
+
+    def test_collapses_a_true_duplicate_proposal_person_id(self) -> None:
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(),
+        ])
+
+        prepared = prepare_persons(dataframe)
+
+        self.assertEqual(len(prepared), 1)
+
+    def test_requires_identity_columns(self) -> None:
+        dataframe = pd.DataFrame([{"full_name": "no identity columns"}])
+
+        with self.assertRaises(RuntimeError):
+            prepare_persons(dataframe)
+
+    def test_all_expected_columns_are_declared(self) -> None:
+        for column in (
+            "proposal_person_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+            "person_id",
+            "rolodex_id",
+            "full_name",
+            "contact_role_code",
+            "key_person_project_role",
+            "faculty_flag",
+            "academic_year_effort",
+            "calendar_year_effort",
+            "summer_effort",
+            "total_effort",
+            "source_update_timestamp",
+            "source_update_user",
+        ):
+            self.assertIn(column, PERSON_COLUMNS)
+
+
+class PreparePersonUnitsTest(unittest.TestCase):
+    def _fixture_row(self, **overrides):
+        # Real fixture: PI Lois K Horwitz's PROPOSAL_PERSON_UNITS row on
+        # proposal_id 212 - unit 1262160000, lead_unit_flag='Y',
+        # matching PROPOSAL.LEAD_UNIT_NUMBER for this same proposal_id
+        # (live-confirmed - see V061's migration comment). A different
+        # concept from the proposal's own lead_unit_number column,
+        # despite agreeing here.
+        row = {
+            "proposal_person_unit_id": 126592,
+            "proposal_person_id": 126591,
+            "proposal_id": 212,
+            "proposal_number": "205",
+            "sequence_number": 1,
+            "unit_number": "1262160000",
+            "lead_unit_flag": "Y",
+            "source_update_timestamp": "2011-08-10",
+            "source_update_user": "baccari",
+        }
+        row.update(overrides)
+        return row
+
+    def test_preserves_the_real_fixture_row_verbatim(self) -> None:
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_person_units(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertEqual(row["proposal_person_unit_id"], 126592)
+        self.assertEqual(row["proposal_person_id"], 126591)
+        self.assertEqual(row["unit_number"], "1262160000")
+        self.assertEqual(row["lead_unit_flag"], "Y")
+
+    def test_collapses_a_true_duplicate_proposal_person_unit_id(self) -> None:
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(),
+        ])
+
+        prepared = prepare_person_units(dataframe)
+
+        self.assertEqual(len(prepared), 1)
+
+    def test_requires_identity_columns(self) -> None:
+        dataframe = pd.DataFrame([{"unit_number": "no identity columns"}])
+
+        with self.assertRaises(RuntimeError):
+            prepare_person_units(dataframe)
+
+    def test_all_expected_columns_are_declared(self) -> None:
+        for column in (
+            "proposal_person_unit_id",
+            "proposal_person_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+            "unit_number",
+            "lead_unit_flag",
+            "source_update_timestamp",
+            "source_update_user",
+        ):
+            self.assertIn(column, PERSON_UNIT_COLUMNS)
+
+
+class PrepareUnitContactsTest(unittest.TestCase):
+    def _fixture_row(self, **overrides):
+        # Real fixture: PROPOSAL_UNIT_CONTACTS row on proposal_id 212 -
+        # Andrea Cozzi (U19663726), unit_administrator_type_code '1'
+        # ("Pre-Award - Department Administrator"). A genuinely
+        # different person than the PI (Lois K Horwitz, U56572816) on
+        # the same proposal - live-confirmed distinct, never merged
+        # with proposal_person.
+        row = {
+            "proposal_unit_contact_id": 204,
+            "proposal_id": 212,
+            "proposal_number": "205",
+            "sequence_number": 1,
+            "person_id": "U19663726",
+            "full_name": "ANDREA COZZI",
+            "unit_administrator_type_code": "1",
+            "unit_contact_type": "CONTACT",
+            "source_update_timestamp": "2011-08-10",
+            "source_update_user": "baccari",
+        }
+        row.update(overrides)
+        return row
+
+    def test_preserves_the_real_fixture_row_verbatim(self) -> None:
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_unit_contacts(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertEqual(row["proposal_unit_contact_id"], 204)
+        self.assertEqual(row["person_id"], "U19663726")
+        self.assertEqual(row["full_name"], "ANDREA COZZI")
+        self.assertEqual(row["unit_administrator_type_code"], "1")
+
+    def test_is_a_different_person_than_the_pi_on_the_same_proposal(
+        self,
+    ) -> None:
+        unit_contact = prepare_unit_contacts(
+            pd.DataFrame([self._fixture_row()])
+        ).iloc[0]
+        person = prepare_persons(
+            pd.DataFrame([PreparePersonsTest()._fixture_row()])
+        ).iloc[0]
+
+        self.assertEqual(unit_contact["proposal_id"], person["proposal_id"])
+        self.assertNotEqual(unit_contact["person_id"], person["person_id"])
+
+    def test_collapses_a_true_duplicate_proposal_unit_contact_id(self) -> None:
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(),
+        ])
+
+        prepared = prepare_unit_contacts(dataframe)
+
+        self.assertEqual(len(prepared), 1)
+
+    def test_requires_identity_columns(self) -> None:
+        dataframe = pd.DataFrame([{"full_name": "no identity columns"}])
+
+        with self.assertRaises(RuntimeError):
+            prepare_unit_contacts(dataframe)
+
+    def test_all_expected_columns_are_declared(self) -> None:
+        for column in (
+            "proposal_unit_contact_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+            "person_id",
+            "full_name",
+            "unit_administrator_type_code",
+            "unit_contact_type",
+            "source_update_timestamp",
+            "source_update_user",
+        ):
+            self.assertIn(column, UNIT_CONTACT_COLUMNS)
 
 
 class ParseArgsTest(unittest.TestCase):
