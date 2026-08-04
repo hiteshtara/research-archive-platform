@@ -580,13 +580,30 @@ export interface AwardTermsV1 {
   reportTerms: AwardReportTermV1[];
 }
 
-export interface AwardCommentV1 {
+// One archived award_comment row - a specific Award version's comment,
+// with its workflow_document_number joined in. Appears both as a
+// category's "current" entry and as a member of its "history" list.
+export interface AwardCommentEntryV1 {
   awardCommentId: number | null;
-  commentTypeCode: string | null;
-  checklistPrintFlag: string | null;
-  comments: string | null;
-  sourceUpdateTimestamp: string | null;
-  sourceUpdateUser: string | null;
+  awardId: number;
+  sequenceNumber: number | null;
+  workflowDocumentNumber: string | null;
+  commentText: string | null;
+  updateTimestamp: string | null;
+  updateUser: string | null;
+}
+
+// One human-readable comment category (e.g. "General Comments"),
+// covering every archived version of the whole Award number family -
+// not just the version being viewed. "current" is the newest entry in
+// "history" (null when this Award family has no comment of this type
+// at all - render "No comment recorded"). "history" is newest-to-oldest
+// with only consecutive exact-text duplicates collapsed.
+export interface AwardCommentCategoryV1 {
+  commentTypeCode: string;
+  commentTypeDescription: string | null;
+  current: AwardCommentEntryV1 | null;
+  history: AwardCommentEntryV1[];
 }
 
 export interface AwardNotepadEntryV1 {
@@ -602,7 +619,7 @@ export interface AwardNotepadEntryV1 {
 }
 
 export interface AwardCommentsV1 {
-  comments: AwardCommentV1[];
+  commentCategories: AwardCommentCategoryV1[];
   notepadEntries: AwardNotepadEntryV1[];
 }
 

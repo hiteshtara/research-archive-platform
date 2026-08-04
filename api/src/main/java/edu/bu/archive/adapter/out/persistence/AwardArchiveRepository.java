@@ -3,7 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
@@ -1298,29 +1298,54 @@ public class AwardArchiveRepository {
     /*
      * --- Comments and Notepad --------------------------------------------
      *
-     * award_comment is scoped to this specific award_id (a real
-     * sequence_number column). award_notepad has NO sequence_number at
-     * all - it is scoped to the whole award_number family (see V042's
-     * header comment) - so it is looked up by award_number, not
-     * award_id.
+     * award_comment has a real, backfilled sequence_number column (a
+     * specific Award version owns each row), but Kuali's own
+     * AwardCommentServiceImpl.retrieveCommentHistoryByType() looks up
+     * comment history by awardNumber across the WHOLE version family,
+     * not by award_id - the same family-wide scoping fix already
+     * applied to Time and Money (see findTimeAndMoneySummary's header
+     * comment above). award_notepad has NO sequence_number at all - it
+     * is scoped to the whole award_number family (see V042's header
+     * comment) - so it is looked up by award_number too, for a
+     * different reason.
+     *
+     * Starts FROM archive.comment_type (not award_comment) and LEFT
+     * JOINs award_comment, so every screen_flag='Y' comment type is
+     * represented even when this Award family has zero comments of
+     * that type - AwardArchiveService turns that all-null row into a
+     * "no comment recorded" category rather than omitting it.
+     * award_comment_screen_flag='Y' reproduces Kuali's own
+     * retrieveCommentTypes() filter (e.g. code 21, "Current Action
+     * Comments", is screen_flag='N' and real archived data, but never
+     * shown on this screen).
      */
-    public List<AwardCommentResponse> findComments(long awardId) {
+    public List<AwardCommentRow> findComments(String awardNumber) {
         return jdbc.sql("""
                 SELECT
-                    award_comment_id,
-                    comment_type_code,
-                    checklist_print_flag,
-                    comments,
-                    source_update_timestamp,
-                    source_update_user
-                FROM archive.award_comment
-                WHERE award_id = :awardId
+                    ct.comment_type_code,
+                    ct.description AS comment_type_description,
+                    ac.award_comment_id,
+                    ac.award_id,
+                    ac.sequence_number,
+                    av.workflow_document_number,
+                    ac.comments,
+                    ac.source_update_timestamp,
+                    ac.source_update_user
+                FROM archive.comment_type ct
+                LEFT JOIN archive.award_comment ac
+                    ON ac.comment_type_code = ct.comment_type_code
+                    AND ac.award_number = :awardNumber
+                LEFT JOIN archive.award_version av
+                    ON av.award_id = ac.award_id
+                WHERE ct.award_comment_screen_flag = 'Y'
                 ORDER BY
-                    source_update_timestamp DESC NULLS LAST,
-                    award_comment_id DESC
+                    ct.comment_type_code,
+                    ac.sequence_number DESC,
+                    ac.source_update_timestamp DESC NULLS LAST,
+                    ac.award_comment_id DESC
                 """)
-                .param("awardId", awardId)
-                .query(AwardCommentResponse.class)
+                .param("awardNumber", awardNumber)
+                .query(AwardCommentRow.class)
                 .list();
     }
 

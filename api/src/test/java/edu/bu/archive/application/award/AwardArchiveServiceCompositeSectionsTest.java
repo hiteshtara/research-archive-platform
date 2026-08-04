@@ -3,7 +3,9 @@ package edu.bu.archive.application.award;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonCreditSplitRow;
@@ -206,9 +208,10 @@ class AwardArchiveServiceCompositeSectionsTest {
     // --- Comments and Notepad --------------------------------------------
 
     @Test
-    void findCommentsKeepsCommentsAndNotepadAsSeparateGroups() {
-        AwardCommentResponse comment = new AwardCommentResponse(
-                1L, "GENERAL", "N", "A version-scoped comment.",
+    void findCommentsGroupsIntoOneCategoryAndKeepsNotepadSeparate() {
+        AwardCommentRow row = new AwardCommentRow(
+                1L, 3L, 1, "AWD000030001", "2", "General Comments",
+                "A version-scoped comment.",
                 LocalDateTime.of(2021, 1, 1, 0, 0), "jsmith"
         );
         AwardNotepadEntryResponse notepadEntry = new AwardNotepadEntryResponse(
@@ -216,26 +219,203 @@ class AwardArchiveServiceCompositeSectionsTest {
                 "N", LocalDateTime.of(2020, 1, 1, 0, 0), "jsmith",
                 LocalDateTime.of(2020, 1, 1, 0, 0), "jsmith"
         );
-        when(repository.findComments(3L)).thenReturn(List.of(comment));
+        when(repository.findComments("100004-00003")).thenReturn(List.of(row));
         when(repository.findNotepadEntries("100004-00003"))
                 .thenReturn(List.of(notepadEntry));
 
         AwardCommentsResponse comments = service.findComments(3L);
 
-        assertThat(comments.comments()).containsExactly(comment);
+        assertThat(comments.commentCategories()).hasSize(1);
+        AwardCommentCategoryResponse category = comments.commentCategories().get(0);
+        assertThat(category.commentTypeCode()).isEqualTo("2");
+        assertThat(category.commentTypeDescription()).isEqualTo("General Comments");
+        assertThat(category.current().commentText())
+                .isEqualTo("A version-scoped comment.");
+        assertThat(category.history()).hasSize(1);
         assertThat(comments.notepadEntries()).containsExactly(notepadEntry);
     }
 
     @Test
     void findCommentsReturnsEmptyListsRatherThanNull() {
-        when(repository.findComments(3L)).thenReturn(List.of());
+        when(repository.findComments("100004-00003")).thenReturn(List.of());
         when(repository.findNotepadEntries("100004-00003"))
                 .thenReturn(List.of());
 
         AwardCommentsResponse comments = service.findComments(3L);
 
-        assertThat(comments.comments()).isEmpty();
+        assertThat(comments.commentCategories()).isEmpty();
         assertThat(comments.notepadEntries()).isEmpty();
+    }
+
+    @Test
+    void findCommentsShowsNoCommentRecordedWhenACommentTypeHasNoRealRows() {
+        // The LEFT JOIN in AwardArchiveRepository.findComments returns one
+        // all-null-except-type row for a screen_flag='Y' comment type this
+        // Award family has never used - award_comment_id is null.
+        AwardCommentRow noCommentsOfThisType = new AwardCommentRow(
+                null, null, null, null, "3", "Fiscal Report Comments",
+                null, null, null
+        );
+        when(repository.findComments("100004-00003"))
+                .thenReturn(List.of(noCommentsOfThisType));
+        when(repository.findNotepadEntries("100004-00003"))
+                .thenReturn(List.of());
+
+        AwardCommentsResponse comments = service.findComments(3L);
+
+        assertThat(comments.commentCategories()).hasSize(1);
+        AwardCommentCategoryResponse category = comments.commentCategories().get(0);
+        assertThat(category.commentTypeCode()).isEqualTo("3");
+        assertThat(category.commentTypeDescription())
+                .isEqualTo("Fiscal Report Comments");
+        assertThat(category.current()).isNull();
+        assertThat(category.history()).isEmpty();
+    }
+
+    @Test
+    void findCommentsCollapsesOnlyTrulyConsecutiveIdenticalText() {
+        AwardCommentRow newest = new AwardCommentRow(
+                3L, 3L, 3, "AWD000030003", "2", "General Comments",
+                "Same text.",
+                LocalDateTime.of(2022, 1, 1, 0, 0), "jsmith"
+        );
+        AwardCommentRow middleIdenticalToNewest = new AwardCommentRow(
+                2L, 3L, 2, "AWD000030002", "2", "General Comments",
+                "Same text.",
+                LocalDateTime.of(2021, 1, 1, 0, 0), "jsmith"
+        );
+        AwardCommentRow oldestDifferent = new AwardCommentRow(
+                1L, 3L, 1, "AWD000030001", "2", "General Comments",
+                "Different text.",
+                LocalDateTime.of(2020, 1, 1, 0, 0), "jsmith"
+        );
+        when(repository.findComments("100004-00003")).thenReturn(
+                List.of(newest, middleIdenticalToNewest, oldestDifferent)
+        );
+        when(repository.findNotepadEntries("100004-00003"))
+                .thenReturn(List.of());
+
+        AwardCommentsResponse comments = service.findComments(3L);
+
+        AwardCommentCategoryResponse category = comments.commentCategories().get(0);
+        // The consecutive duplicate (middleIdenticalToNewest) collapses into
+        // the OLDER of the pair - matching real Kuali's
+        // AwardCommentServiceImpl.filterAwardComment, which walks oldest-
+        // to-newest and keeps the version where the text was first
+        // introduced, not the latest copy-forward repetition (confirmed
+        // against real Award 100330-00001 data - see
+        // findCommentsPreservesTheRealAward100330GeneralCommentsHistory).
+        assertThat(category.history()).hasSize(2);
+        assertThat(category.history().get(0).awardCommentId()).isEqualTo(2L);
+        assertThat(category.history().get(1).awardCommentId()).isEqualTo(1L);
+    }
+
+    @Test
+    void findCommentsPreservesTheRealAward100330GeneralCommentsHistory() {
+        // Real, live-verified data for Award 100330-00001 / award_id
+        // 3038231 (fetched directly from the dev archive database): 12
+        // award_comment rows for comment_type_code "2" (General Comments),
+        // sequence 1 through 12. The "*Converted Record" text is
+        // copy-forward-identical across sequence 4 through 12 (2014-03-11
+        // through 2021-09-20) - real Kuali's AwardCommentServiceImpl
+        // attributes that whole run to its EARLIEST occurrence (sequence
+        // 4, 2014-03-11), not the latest copy, matching this test's
+        // expected "current" entry. Sequence 2 and 3 are likewise
+        // identical to each other (no "*Converted Record" suffix) and
+        // collapse to sequence 2, the earlier of the pair. Sequence 1
+        // (2011) is unrelated and always its own entry.
+        when(repository.findAwardNumberForId(3038231L))
+                .thenReturn(Optional.of("100330-00001"));
+
+        String convertedRecordText =
+                "This action: Modification No.7 dated 2/27/2014 extends "
+                        + "period of performance to 2/28/2014. All other "
+                        + "terms and conditions remain unchanged and in "
+                        + "effect. \n*Converted Record.  See original "
+                        + "sponsor documentation for terms and conditions.";
+        String noSuffixText =
+                "This action: Modification No.7 dated 2/27/2014 extends "
+                        + "period of performance to 2/28/2014. All other "
+                        + "terms and conditions remain unchanged and in "
+                        + "effect.";
+        String mod5Text =
+                "MODIFICATION NO.5 APPROVES NO-COST EXTENSION TO 2/29/12. "
+                        + "SUBCONTRACT UNDER PRIME NSF COOPERATIVE "
+                        + "AGREEMENT NO. HRD-0450339. SEE SOURC E 6377-7 "
+                        + "FOR PARTICIPANT SUPPORT COSTS ASSOCIATED WITH "
+                        + "THIS PROJECT. TOTAL FUNDING ALLOCATED TO DATE: "
+                        + "$673,710.     ";
+
+        List<AwardCommentRow> realRowsNewestFirst = List.of(
+                row(1663054L, 3038231L, 12, "876895", convertedRecordText,
+                        LocalDateTime.of(2021, 9, 20, 13, 52, 59), "mlmacd"),
+                row(1662945L, 3037985L, 11, "876865", convertedRecordText,
+                        LocalDateTime.of(2021, 9, 20, 13, 47, 36), "mlmacd"),
+                row(1654620L, 3025758L, 10, "874105", convertedRecordText,
+                        LocalDateTime.of(2021, 9, 8, 17, 38, 31), "mlmacd"),
+                row(572940L, 1415859L, 9, "391375", convertedRecordText,
+                        LocalDateTime.of(2015, 10, 20, 10, 59, 47), "brycekel"),
+                row(544658L, 1323390L, 8, "378047", convertedRecordText,
+                        LocalDateTime.of(2015, 8, 11, 10, 35, 11), "brycekel"),
+                row(522314L, 1284132L, 7, "367288", convertedRecordText,
+                        LocalDateTime.of(2015, 6, 11, 14, 44, 57), "zaccaria"),
+                row(448446L, 1153439L, 6, "332546", convertedRecordText,
+                        LocalDateTime.of(2014, 10, 23, 10, 13, 44), "zaccaria"),
+                row(437729L, 1133724L, 5, "328586", convertedRecordText,
+                        LocalDateTime.of(2014, 9, 29, 14, 25, 50), "brycekel"),
+                row(347503L, 877063L, 4, "281754", convertedRecordText,
+                        LocalDateTime.of(2014, 3, 11, 15, 55, 34), "prokorym"),
+                row(347037L, 875833L, 3, "281498", noSuffixText,
+                        LocalDateTime.of(2014, 3, 11, 12, 44, 10), "acolon"),
+                row(346986L, 875677L, 2, "281462", noSuffixText,
+                        LocalDateTime.of(2014, 3, 11, 12, 30, 46), "acolon"),
+                row(448L, 224L, 1, "224", mod5Text,
+                        LocalDateTime.of(2011, 6, 24, 16, 49, 46), "kcrm")
+        );
+        when(repository.findComments("100330-00001"))
+                .thenReturn(realRowsNewestFirst);
+        when(repository.findNotepadEntries("100330-00001"))
+                .thenReturn(List.of());
+
+        AwardCommentsResponse comments = service.findComments(3038231L);
+
+        assertThat(comments.commentCategories()).hasSize(1);
+        AwardCommentCategoryResponse general = comments.commentCategories().get(0);
+        assertThat(general.commentTypeCode()).isEqualTo("2");
+        assertThat(general.history()).hasSize(3);
+
+        AwardCommentEntryResponse current = general.current();
+        assertThat(current.awardCommentId()).isEqualTo(347503L);
+        assertThat(current.awardId()).isEqualTo(877063L);
+        assertThat(current.sequenceNumber()).isEqualTo(4);
+        assertThat(current.commentText()).contains("*Converted Record");
+
+        AwardCommentEntryResponse noSuffixEntry = general.history().get(1);
+        assertThat(noSuffixEntry.awardCommentId()).isEqualTo(346986L);
+        assertThat(noSuffixEntry.awardId()).isEqualTo(875677L);
+        assertThat(noSuffixEntry.sequenceNumber()).isEqualTo(2);
+        assertThat(noSuffixEntry.commentText()).isEqualTo(noSuffixText);
+
+        AwardCommentEntryResponse mod5Entry = general.history().get(2);
+        assertThat(mod5Entry.awardCommentId()).isEqualTo(448L);
+        assertThat(mod5Entry.awardId()).isEqualTo(224L);
+        assertThat(mod5Entry.sequenceNumber()).isEqualTo(1);
+        assertThat(mod5Entry.commentText()).contains("MODIFICATION NO.5");
+    }
+
+    private static AwardCommentRow row(
+            long awardCommentId,
+            long awardId,
+            int sequenceNumber,
+            String workflowDocumentNumber,
+            String comments,
+            LocalDateTime updateTimestamp,
+            String updateUser
+    ) {
+        return new AwardCommentRow(
+                awardCommentId, awardId, sequenceNumber, workflowDocumentNumber,
+                "2", "General Comments", comments, updateTimestamp, updateUser
+        );
     }
 
     // --- SAP Transmission History -----------------------------------

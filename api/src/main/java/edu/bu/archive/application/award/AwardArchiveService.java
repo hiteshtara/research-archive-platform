@@ -2,7 +2,9 @@ package edu.bu.archive.application.award;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
@@ -59,6 +61,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -976,12 +979,106 @@ public class AwardArchiveService {
     public AwardCommentsResponse findComments(long awardId) {
         String awardNumber = requireAwardNumberForId(awardId);
 
-        List<AwardCommentResponse> comments =
-                repository.findComments(awardId);
+        List<AwardCommentRow> rows = repository.findComments(awardNumber);
         List<AwardNotepadEntryResponse> notepadEntries =
                 repository.findNotepadEntries(awardNumber);
 
-        return new AwardCommentsResponse(comments, notepadEntries);
+        return new AwardCommentsResponse(
+                groupCommentsByType(rows), notepadEntries
+        );
+    }
+
+    /*
+     * Groups the flat, comment-type-then-newest-to-oldest rows from
+     * AwardArchiveRepository.findComments into one category per
+     * screen_flag='Y' comment type. A type with zero real comments for
+     * this Award family arrives as a single all-null-except-type row
+     * (from findComments' LEFT JOIN) - filtered out here so its
+     * category renders as "no comment recorded" (current=null,
+     * history=empty) rather than a fake entry.
+     */
+    private static List<AwardCommentCategoryResponse> groupCommentsByType(
+            List<AwardCommentRow> rows
+    ) {
+        Map<String, List<AwardCommentRow>> rowsByType = new LinkedHashMap<>();
+        for (AwardCommentRow row : rows) {
+            rowsByType
+                    .computeIfAbsent(row.commentTypeCode(), key -> new ArrayList<>())
+                    .add(row);
+        }
+
+        List<AwardCommentCategoryResponse> categories = new ArrayList<>();
+        for (Map.Entry<String, List<AwardCommentRow>> entry : rowsByType.entrySet()) {
+            List<AwardCommentRow> typeRows = entry.getValue();
+            String description = typeRows.get(0).commentTypeDescription();
+
+            List<AwardCommentRow> actualComments = typeRows.stream()
+                    .filter(row -> row.awardCommentId() != null)
+                    .toList();
+            List<AwardCommentEntryResponse> history =
+                    collapseConsecutiveIdenticalText(actualComments);
+            AwardCommentEntryResponse current =
+                    history.isEmpty() ? null : history.get(0);
+
+            categories.add(new AwardCommentCategoryResponse(
+                    entry.getKey(), description, current, history
+            ));
+        }
+        return categories;
+    }
+
+    /*
+     * Reproduces Kuali's own AwardCommentServiceImpl.filterAwardComment():
+     * that method walks its BusinessObjectService.findMatching() results
+     * in their natural (oldest-to-newest / insertion) order and, for each
+     * run of consecutive identical comment text, keeps only the FIRST
+     * (oldest) row - i.e. the version where that text was actually
+     * introduced - silently dropping every later version that just
+     * carried the same text forward unchanged. Confirmed against real
+     * Award 100330-00001 data: General Comments' "*Converted Record"
+     * text is copy-forward-identical on award_ids 877063 (2014-03-11)
+     * through 3038231 (2021-09-20) - Kuali's real UI attributes that
+     * text to its EARLIEST occurrence (877063/2014-03-11), not the
+     * latest copy, which is why this method walks rowsNewestFirst in
+     * reverse (oldest-to-newest) before collapsing, then reverses the
+     * result back to newest-first for presentation (current = index 0).
+     * A later row with merely similar (not identical) text, or an
+     * identical text that recurs non-consecutively, is preserved as its
+     * own distinct entry. No prefix/partial-text matching.
+     */
+    private static List<AwardCommentEntryResponse> collapseConsecutiveIdenticalText(
+            List<AwardCommentRow> rowsNewestFirst
+    ) {
+        List<AwardCommentRow> rowsOldestFirst = new ArrayList<>(rowsNewestFirst);
+        Collections.reverse(rowsOldestFirst);
+
+        List<AwardCommentEntryResponse> historyOldestFirst = new ArrayList<>();
+        String previousNormalizedText = null;
+        boolean isFirst = true;
+
+        for (AwardCommentRow row : rowsOldestFirst) {
+            String normalizedText = row.comments() == null
+                    ? null
+                    : row.comments().trim();
+
+            if (!isFirst && Objects.equals(normalizedText, previousNormalizedText)) {
+                continue;
+            }
+
+            historyOldestFirst.add(new AwardCommentEntryResponse(
+                    row.awardCommentId(),
+                    row.awardId(),
+                    row.sequenceNumber(),
+                    row.workflowDocumentNumber(),
+                    row.comments(),
+                    row.sourceUpdateTimestamp(),
+                    row.sourceUpdateUser()
+            ));
+            previousNormalizedText = normalizedText;
+            isFirst = false;
+        }
+        Collections.reverse(historyOldestFirst);
+        return historyOldestFirst;
     }
 
     public PageResponse<AwardSapTransmissionResponse> findSapTransmissions(

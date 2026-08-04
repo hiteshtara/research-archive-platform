@@ -78,8 +78,15 @@ export function hasAnyTerms(sponsorTerms, reportTerms) {
   return sponsorTerms.length > 0 || reportTerms.length > 0;
 }
 
-export function hasAnyComments(comments, notepadEntries) {
-  return comments.length > 0 || notepadEntries.length > 0;
+// commentCategories always has one entry per screen_flag='Y' comment
+// type, even when this Award family has never used it (current: null,
+// history: []) - so "any comments" means at least one category has a
+// real current entry, not merely that the categories list is non-empty.
+export function hasAnyComments(commentCategories, notepadEntries) {
+  return (
+    commentCategories.some((category) => category.current != null) ||
+    notepadEntries.length > 0
+  );
 }
 
 export function hasAnyTransmissions(transmissions) {

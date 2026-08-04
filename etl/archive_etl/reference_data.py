@@ -50,6 +50,7 @@ UNIT_SQL = REFERENCE_SQL_DIR / "02_unit.sql"
 UNIT_ADMINISTRATOR_SQL = REFERENCE_SQL_DIR / "03_unit_administrator.sql"
 ROLODEX_SQL = REFERENCE_SQL_DIR / "04_rolodex.sql"
 PERSON_SQL = REFERENCE_SQL_DIR / "05_person.sql"
+COMMENT_TYPE_SQL = REFERENCE_SQL_DIR / "06_comment_type.sql"
 
 
 def _sql_value(value: Any) -> Any:
@@ -185,6 +186,17 @@ _PERSON_COLUMNS = [
     "full_name",
     "email_address",
     "phone_number",
+]
+
+_COMMENT_TYPE_COLUMNS = [
+    "comment_type_code",
+    "description",
+    "template_flag",
+    "checklist_flag",
+    "award_comment_screen_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
 ]
 
 
@@ -341,6 +353,87 @@ def load_person_reference_data(
         rows=frame,
         load_id=load_id,
     )
+
+
+def load_comment_types(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(COMMENT_TYPE_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="comment_type",
+        pk_columns=["comment_type_code"],
+        columns=_COMMENT_TYPE_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def run_load_comment_type_reference_data(
+    engine: Engine, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """Loads archive.comment_type - independent of the Unit/Person
+    reference bundle above (no FK relationship to it), so it gets its
+    own top-level entry point and CLI flag rather than being folded
+    into run_load_unit_reference_data's FK-ordered chain. See
+    database/migrations/V057 and
+    docs/architecture/AWARD_COMMENT_DESIGN.md."""
+    started = time.perf_counter()
+    report: dict[str, Any] = {}
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = connection.execute(
+                text(
+                    """
+                    INSERT INTO archive.load_run (
+                        domain, source_system, source_file_name,
+                        rows_read, status
+                    ) VALUES (
+                        'COMMENT_TYPE_REFERENCE_DATA', 'KUALI',
+                        'Oracle KCOEUS export', 0, 'STARTED'
+                    )
+                    RETURNING load_id
+                    """
+                )
+            ).scalar_one()
+
+            report["comment_type"] = load_comment_types(connection, load_id)
+
+            connection.execute(
+                text(
+                    """
+                    UPDATE archive.load_run
+                       SET status = 'LOADED', completed_at = CURRENT_TIMESTAMP
+                     WHERE load_id = :load_id
+                    """
+                ),
+                {"load_id": load_id},
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    report["elapsed_ms"] = (time.perf_counter() - started) * 1000
+    logger.bind(stage="load_comment_type_reference_data").info(
+        "Comment type reference data load{}: {}",
+        " [DRY RUN - not persisted]" if dry_run else "",
+        report,
+    )
+    return report
 
 
 def run_load_unit_reference_data(

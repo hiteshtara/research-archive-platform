@@ -173,6 +173,136 @@ def _person_frame() -> pd.DataFrame:
     )
 
 
+def _comment_type_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "COMMENT_TYPE_CODE": "2",
+                "DESCRIPTION": "General Comments",
+                "TEMPLATE_FLAG": "Y",
+                "CHECKLIST_FLAG": "N",
+                "AWARD_COMMENT_SCREEN_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2020-01-01"),
+                "UPDATE_USER": "kuali",
+                "VER_NBR": 1,
+            },
+            {
+                "COMMENT_TYPE_CODE": "3",
+                "DESCRIPTION": "Fiscal Report Comments",
+                "TEMPLATE_FLAG": "Y",
+                "CHECKLIST_FLAG": "N",
+                "AWARD_COMMENT_SCREEN_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2020-01-01"),
+                "UPDATE_USER": "kuali",
+                "VER_NBR": 1,
+            },
+            {
+                "COMMENT_TYPE_CODE": "21",
+                "DESCRIPTION": "Current Action Comments",
+                "TEMPLATE_FLAG": "N",
+                "CHECKLIST_FLAG": "N",
+                "AWARD_COMMENT_SCREEN_FLAG": "N",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2020-01-01"),
+                "UPDATE_USER": "kuali",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+@unittest.skipUnless(_postgres_available(), "local PostgreSQL is not reachable")
+class CommentTypeReferenceDataLoadTest(unittest.TestCase):
+    db_prefix = "pytest_comment_type_reference_data"
+
+    def setUp(self) -> None:
+        self.db_name = f"{self.db_prefix}_{uuid.uuid4().hex[:12]}"
+
+        maintenance = _maintenance_engine()
+        with maintenance.connect() as connection:
+            connection.execution_options(isolation_level="AUTOCOMMIT")
+            connection.execute(text(f'CREATE DATABASE "{self.db_name}"'))
+        maintenance.dispose()
+
+        self.engine = create_engine(
+            f"postgresql+psycopg://{POSTGRES_USER}@{POSTGRES_HOST}:"
+            f"{POSTGRES_PORT}/{self.db_name}"
+        )
+        apply_migrations(self.engine, MIGRATIONS_DIR)
+
+    def tearDown(self) -> None:
+        self.engine.dispose()
+
+        maintenance = _maintenance_engine()
+        with maintenance.connect() as connection:
+            connection.execution_options(isolation_level="AUTOCOMMIT")
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{self.db_name}"'))
+        maintenance.dispose()
+
+    def _row(self, table: str, **where: object) -> dict:
+        clause = " AND ".join(f"{key} = :{key}" for key in where)
+        with self.engine.connect() as connection:
+            return dict(
+                connection.execute(
+                    text(f"SELECT * FROM archive.{table} WHERE {clause}"),
+                    where,
+                )
+                .mappings()
+                .one()
+            )
+
+    def _patched_oracle(self):
+        return patch.multiple(
+            reference_data.OracleDataSource,
+            __init__=lambda self, sql_path, **kwargs: setattr(
+                self, "sql_path", sql_path
+            ),
+            read=lambda self: _comment_type_frame().copy(),
+        )
+
+    def test_loads_real_fixture_comment_types(self) -> None:
+        with self._patched_oracle():
+            report = reference_data.run_load_comment_type_reference_data(
+                self.engine
+            )
+
+        self.assertEqual(
+            report["comment_type"],
+            {"inserted": 3, "updated": 0, "unchanged": 0},
+        )
+
+        general = self._row("comment_type", comment_type_code="2")
+        self.assertEqual(general["description"], "General Comments")
+        self.assertEqual(general["award_comment_screen_flag"], "Y")
+
+        current_action = self._row("comment_type", comment_type_code="21")
+        self.assertEqual(current_action["description"], "Current Action Comments")
+        self.assertEqual(current_action["award_comment_screen_flag"], "N")
+
+    def test_reload_with_no_oracle_changes_is_unchanged(self) -> None:
+        with self._patched_oracle():
+            reference_data.run_load_comment_type_reference_data(self.engine)
+            report = reference_data.run_load_comment_type_reference_data(
+                self.engine
+            )
+
+        self.assertEqual(
+            report["comment_type"],
+            {"inserted": 0, "updated": 0, "unchanged": 3},
+        )
+
+    def test_dry_run_does_not_persist(self) -> None:
+        with self._patched_oracle():
+            reference_data.run_load_comment_type_reference_data(
+                self.engine, dry_run=True
+            )
+
+        with self.engine.connect() as connection:
+            count = connection.execute(
+                text("SELECT COUNT(*) FROM archive.comment_type")
+            ).scalar_one()
+        self.assertEqual(count, 0)
+
+
 @unittest.skipUnless(_postgres_available(), "local PostgreSQL is not reachable")
 class UnitReferenceDataLoadTest(unittest.TestCase):
     db_prefix = "pytest_unit_reference_data"

@@ -2,7 +2,7 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildRow;
@@ -81,25 +81,33 @@ class AwardArchiveRepositoryCompositeSectionsTest {
     }
 
     @Test
-    void findCommentsScopesByAwardIdUnlikeNotepad() {
+    void findCommentsScopesByAwardNumberLikeNotepadAndJoinsCommentType() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =
                 mock(JdbcClient.StatementSpec.class);
         @SuppressWarnings("unchecked")
-        JdbcClient.MappedQuerySpec<AwardCommentResponse> query =
+        JdbcClient.MappedQuerySpec<AwardCommentRow> query =
                 mock(JdbcClient.MappedQuerySpec.class);
 
         when(jdbc.sql(anyString())).thenReturn(statement);
         when(statement.param(anyString(), any())).thenReturn(statement);
-        when(statement.query(AwardCommentResponse.class)).thenReturn(query);
+        when(statement.query(AwardCommentRow.class)).thenReturn(query);
         when(query.list()).thenReturn(List.of());
 
-        new AwardArchiveRepository(jdbc).findComments(3L);
+        new AwardArchiveRepository(jdbc).findComments("100004-00003");
 
+        // award_comment has its own real sequence_number, but Kuali's
+        // Award Comments screen looks up history by awardNumber across
+        // every version - the same family-wide bug pattern already
+        // fixed for Time and Money - so this must key off award_number,
+        // not award_id, and must only surface screen_flag='Y' types.
         assertThat(firstSql(jdbc))
-                .contains("FROM archive.award_comment")
-                .contains("WHERE award_id = :awardId");
-        verify(statement).param("awardId", 3L);
+                .contains("FROM archive.comment_type")
+                .contains("LEFT JOIN archive.award_comment")
+                .contains("ac.award_number = :awardNumber")
+                .contains("ct.award_comment_screen_flag = 'Y'")
+                .doesNotContain("award_id = :awardId");
+        verify(statement).param("awardNumber", "100004-00003");
     }
 
     @Test

@@ -442,7 +442,7 @@ class AwardV1ControllerTest {
 
         mockMvc.perform(get("/api/v1/awards/3/comments"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.comments").isArray())
+                .andExpect(jsonPath("$.commentCategories").isArray())
                 .andExpect(jsonPath("$.notepadEntries").isArray());
 
         verify(service).findComments(3L);

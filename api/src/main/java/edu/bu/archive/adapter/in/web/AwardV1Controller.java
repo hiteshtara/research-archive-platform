@@ -488,10 +488,13 @@ public class AwardV1Controller {
 
     @Operation(
             summary = "Get an Award's Comments and Notepad",
-            description = "Keyed by the surrogate award_id. Comments "
-                    + "are scoped to this specific version; notepad "
-                    + "entries have no sequence_number and are scoped "
-                    + "to the whole award_number family instead - see "
+            description = "Keyed by the surrogate award_id, resolved to "
+                    + "its award_number. Comments are grouped by "
+                    + "human-readable category and cover every version "
+                    + "in the Award's whole number family, newest to "
+                    + "oldest (matching Kuali's own Award Comments "
+                    + "screen); notepad entries have no sequence_number "
+                    + "and are likewise scoped to the whole family - see "
                     + "AwardCommentsResponse."
     )
     @ApiResponse(responseCode = "200", description = "The Award's comments and notepad entries.")

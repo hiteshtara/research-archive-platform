@@ -161,7 +161,6 @@ test("AwardSapTransmissionsSection never uses dangerouslySetInnerHTML", () => {
 test("empty-state helpers report empty when every list is empty", () => {
   assert.equal(hasAnyPeople([]), false);
   assert.equal(hasAnyTerms([], []), false);
-  assert.equal(hasAnyComments([], []), false);
   assert.equal(hasAnyTransmissions([]), false);
   assert.equal(hasAnyAttachments([]), false);
   assert.equal(hasAnyUnitContacts([]), false);
@@ -173,13 +172,31 @@ test("empty-state helpers report non-empty when any one list has rows", () => {
   assert.equal(hasAnyPeople([{}]), true);
   assert.equal(hasAnyTerms([{}], []), true);
   assert.equal(hasAnyTerms([], [{}]), true);
-  assert.equal(hasAnyComments([{}], []), true);
-  assert.equal(hasAnyComments([], [{}]), true);
   assert.equal(hasAnyTransmissions([{}]), true);
   assert.equal(hasAnyAttachments([{}]), true);
   assert.equal(hasAnyUnitContacts([{}]), true);
   assert.equal(hasAnySponsorContacts([{}]), true);
   assert.equal(hasAnyCentralAdministrationContacts([{}]), true);
+});
+
+test("hasAnyComments treats categories with no current entry as empty, even when the category itself exists", () => {
+  assert.equal(hasAnyComments([], []), false);
+  assert.equal(
+    hasAnyComments(
+      [{ commentTypeCode: "3", current: null, history: [] }],
+      [],
+    ),
+    false,
+    "a category with no real comments (current: null) is not \"any comments\"",
+  );
+  assert.equal(
+    hasAnyComments(
+      [{ commentTypeCode: "2", current: { commentText: "text" }, history: [] }],
+      [],
+    ),
+    true,
+  );
+  assert.equal(hasAnyComments([], [{}]), true);
 });
 
 test("classifies attachment type from MIME content type first", () => {

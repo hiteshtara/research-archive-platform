@@ -9,7 +9,8 @@ import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardCommentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
@@ -348,10 +349,13 @@ class AwardV1ContractTest {
 
     @Test
     void commentsShapeIsStableAndKeepsNotepadSeparate() throws Exception {
+        AwardCommentEntryResponse entry = new AwardCommentEntryResponse(
+                1L, 3038231L, 12, "AWD001003300012", "text",
+                LocalDateTime.of(2021, 1, 1, 0, 0), "jsmith"
+        );
         AwardCommentsResponse comments = new AwardCommentsResponse(
-                List.of(new AwardCommentResponse(
-                        1L, "GENERAL", "N", "text",
-                        LocalDateTime.of(2021, 1, 1, 0, 0), "jsmith"
+                List.of(new AwardCommentCategoryResponse(
+                        "2", "General Comments", entry, List.of(entry)
                 )),
                 List.of(new AwardNotepadEntryResponse(
                         1L, 1, "Kickoff", "note", "N",
@@ -360,7 +364,18 @@ class AwardV1ContractTest {
                 ))
         );
 
-        assertFieldNames(comments, Set.of("comments", "notepadEntries"));
+        assertFieldNames(comments, Set.of("commentCategories", "notepadEntries"));
+
+        JsonNode category =
+                objectMapper.valueToTree(comments).get("commentCategories").get(0);
+        assertFieldNames(category, Set.of(
+                "commentTypeCode", "commentTypeDescription", "current", "history"
+        ));
+        assertFieldNames(category.get("current"), Set.of(
+                "awardCommentId", "awardId", "sequenceNumber",
+                "workflowDocumentNumber", "commentText", "updateTimestamp",
+                "updateUser"
+        ));
     }
 
     @Test
