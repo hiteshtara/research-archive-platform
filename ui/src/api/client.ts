@@ -425,6 +425,91 @@ export function getAwardAttachmentsV1(
   );
 }
 
+// --- Budget (see docs/kuali-business-rules/Budget.md) ----------------------
+
+export function getAwardBudgetSummaryV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardBudgetSummaryV1> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/budget/summary`,
+    signal,
+  );
+}
+
+export function getAwardBudgetVersionsV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardBudgetVersionPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/budget/versions?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getAwardBudgetPeriodsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardBudgetPeriodV1[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/budget/periods`,
+    signal,
+  );
+}
+
+export function getAwardBudgetLineItemsV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardBudgetLineItemPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/budget/line-items?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
+export function getAwardBudgetPersonnelV1(
+  awardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardBudgetPersonnelPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 50),
+  });
+
+  return request(
+    `/api/v1/awards/${encodeURIComponent(
+      awardId,
+    )}/budget/personnel?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
 // --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
 
 export function getAwardTimeAndMoneySummaryV1(

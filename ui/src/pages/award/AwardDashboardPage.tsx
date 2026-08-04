@@ -16,6 +16,7 @@ import { getAwardHierarchyV1, getAwardSummaryV1 } from "../../api/client";
 import { AwardAmountsSection } from "../../components/award/AwardAmountsSection";
 import { AwardAttachmentsSection } from "../../components/award/AwardAttachmentsSection";
 import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
+import { AwardBudgetSection } from "../../components/award/AwardBudgetSection";
 import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
 import { AwardContactsSection } from "../../components/award/AwardContactsSection";
 import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTransmissionsSection";
@@ -48,6 +49,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "versions",
   "people",
   "amounts",
+  "budget",
   "timeMoney",
   "terms",
   "comments",
@@ -223,6 +225,10 @@ export function AwardDashboardPage() {
 
           {activeSection === "amounts" && (
             <AwardAmountsSection awardId={awardId} />
+          )}
+
+          {activeSection === "budget" && (
+            <AwardBudgetSection awardId={awardId} />
           )}
 
           {activeSection === "timeMoney" && (

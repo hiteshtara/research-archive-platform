@@ -574,6 +574,99 @@ export interface AwardAttachmentPageResponse
 // version has never itself been Time-and-Money-created even when
 // their family has real history, so these four fields deliberately
 // search across all versions rather than just this one.
+// Budget: proven live against real Oracle/archive data (see
+// docs/kuali-business-rules/Budget.md) that budget_version_number is a
+// family-wide monotonic counter, not scoped to one award_id -
+// selectedBudgetId/selectedBudgetVersionNumber are the archive-facing
+// "current" Budget (highest version with Posted status, falling back
+// to highest non-Cancelled), deliberately named "selected" rather than
+// "current" so it is never mistaken for Kuali's own live
+// getCurrentBudget() concept, which targets transient in-progress
+// statuses that essentially never survive to a closed archive.
+export interface AwardBudgetSummaryV1 {
+  awardId: number;
+  awardNumber: string;
+  viewedSequenceNumber: number;
+  selectedBudgetId: number | null;
+  selectedBudgetVersionNumber: number | null;
+  statusCode: string | null;
+  statusDescription: string | null;
+  workflowDocumentNumber: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  totalDirectCost: number | null;
+  totalIndirectCost: number | null;
+  totalCost: number | null;
+}
+
+// owningAwardId/owningAwardSequenceNumber record which specific Award
+// version this budget actually belongs to - consecutive budget
+// versions routinely belong to different Award sequences within the
+// same award_number family (budget_version_number is family-wide, not
+// per-award_id). selected marks the same budget the Summary's
+// selectedBudgetId points to.
+export interface AwardBudgetVersionV1 {
+  budgetId: number;
+  budgetVersionNumber: number;
+  owningAwardId: number;
+  owningAwardSequenceNumber: number;
+  workflowDocumentNumber: string | null;
+  statusCode: string | null;
+  statusDescription: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  totalDirectCost: number | null;
+  totalIndirectCost: number | null;
+  totalCost: number | null;
+  selected: boolean;
+}
+
+export interface AwardBudgetVersionPageResponse
+  extends PageResponse<AwardBudgetVersionV1> {}
+
+export interface AwardBudgetPeriodV1 {
+  budgetPeriodId: number;
+  periodNumber: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  totalDirectCost: number | null;
+  totalIndirectCost: number | null;
+  totalCost: number | null;
+}
+
+export interface AwardBudgetLineItemV1 {
+  budgetLineItemId: number;
+  budgetPeriodId: number;
+  lineItemNumber: number | null;
+  description: string | null;
+  costElement: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  lineItemCost: number | null;
+  costSharingAmount: number | null;
+}
+
+export interface AwardBudgetLineItemPageResponse
+  extends PageResponse<AwardBudgetLineItemV1> {}
+
+// calculatedSalary is the sum of every real, persisted calculated-cost
+// row for this personnel line (Oracle stores one row per rate
+// application, never a single "calculated salary" field) - a sum of
+// real stored numbers, not a computed/invented figure. See
+// docs/kuali-business-rules/Budget.md.
+export interface AwardBudgetPersonnelV1 {
+  budgetPersonId: number;
+  personId: string | null;
+  fullName: string | null;
+  jobCode: string | null;
+  appointmentType: string | null;
+  baseSalary: number | null;
+  calculatedSalary: number | null;
+}
+
+export interface AwardBudgetPersonnelPageResponse
+  extends PageResponse<AwardBudgetPersonnelV1> {}
+
 export interface TimeAndMoneySummaryV1 {
   awardId: number;
   awardNumber: string;

@@ -2,9 +2,14 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
@@ -1801,6 +1806,197 @@ public class AwardArchiveRepository {
                 .param("documentNumber", timeAndMoneyDocumentNumber)
                 .query(TimeAndMoneyDocumentResponse.class)
                 .optional();
+    }
+
+    /*
+     * --- Budget (see docs/kuali-business-rules/Budget.md) -----------------
+     *
+     * Proven live against real Oracle/archive data before any of this
+     * was written: budget_version_number is a family-wide monotonic
+     * counter, not scoped to one award_id - Kuali's own
+     * Award.getBudgets()/AwardBudgetServiceImpl.getAllBudgetsForAward
+     * resolve every Budget across the whole award_number family,
+     * bounded to sequences <= the Award version being viewed. Every
+     * query below follows that same bound; none of them ever filter to
+     * a single exact award_id the way most other Award child tables in
+     * this project correctly do.
+     */
+
+    public Optional<AwardFamilyPositionRow> findFamilyPositionForId(
+            long awardId
+    ) {
+        return jdbc.sql("""
+                SELECT award_number, sequence_number
+                FROM archive.award_version
+                WHERE award_id = :awardId
+                """)
+                .param("awardId", awardId)
+                .query(AwardFamilyPositionRow.class)
+                .optional();
+    }
+
+    /*
+     * Every Budget in scope for (awardNumber, viewedSequenceNumber),
+     * newest budget_version_number first. Shared by both the Summary
+     * endpoint (picks one row via the Posted-then-non-Cancelled rule)
+     * and the Versions endpoint (returns all of them with a computed
+     * "selected" flag) - one query, two presentations, avoiding a
+     * second near-identical SQL statement.
+     */
+    public List<AwardBudgetRow> findBudgetsInScope(
+            String awardNumber,
+            int viewedSequenceNumber
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    ab.budget_id,
+                    ab.award_id AS owning_award_id,
+                    av.sequence_number AS owning_award_sequence_number,
+                    ab.budget_version_number,
+                    ab.document_number AS workflow_document_number,
+                    ab.award_budget_status_code AS status_code,
+                    ab.award_budget_status_description AS status_description,
+                    ab.start_date,
+                    ab.end_date,
+                    ab.total_direct_cost,
+                    ab.total_indirect_cost,
+                    ab.total_cost
+                FROM archive.award_budget ab
+                JOIN archive.award_version av ON av.award_id = ab.award_id
+                WHERE av.award_number = :awardNumber
+                    AND av.sequence_number <= :viewedSequenceNumber
+                ORDER BY ab.budget_version_number DESC
+                """)
+                .param("awardNumber", awardNumber)
+                .param("viewedSequenceNumber", viewedSequenceNumber)
+                .query(AwardBudgetRow.class)
+                .list();
+    }
+
+    public List<AwardBudgetPeriodResponse> findBudgetPeriods(long budgetId) {
+        return jdbc.sql("""
+                SELECT
+                    budget_period_id,
+                    budget_period AS period_number,
+                    start_date,
+                    end_date,
+                    total_direct_cost,
+                    total_indirect_cost,
+                    total_cost
+                FROM archive.award_budget_period
+                WHERE budget_id = :budgetId
+                ORDER BY budget_period, budget_period_id
+                """)
+                .param("budgetId", budgetId)
+                .query(AwardBudgetPeriodResponse.class)
+                .list();
+    }
+
+    public long countBudgetLineItems(long budgetId) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_budget_line_item bli
+                JOIN archive.award_budget_period bp
+                    ON bp.budget_period_id = bli.budget_period_id
+                WHERE bp.budget_id = :budgetId
+                """)
+                .param("budgetId", budgetId)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    public List<AwardBudgetLineItemResponse> findBudgetLineItems(
+            long budgetId,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    bli.budget_line_item_id,
+                    bli.budget_period_id,
+                    bli.line_item_number,
+                    bli.line_item_description AS description,
+                    bli.cost_element,
+                    bli.start_date,
+                    bli.end_date,
+                    bli.line_item_cost,
+                    bli.cost_sharing_amount
+                FROM archive.award_budget_line_item bli
+                JOIN archive.award_budget_period bp
+                    ON bp.budget_period_id = bli.budget_period_id
+                WHERE bp.budget_id = :budgetId
+                ORDER BY bp.budget_period, bli.line_item_number, bli.budget_line_item_id
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("budgetId", budgetId)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AwardBudgetLineItemResponse.class)
+                .list();
+    }
+
+    public long countBudgetPersonnel(long budgetId) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_budget_personnel_detail
+                WHERE budget_id = :budgetId
+                """)
+                .param("budgetId", budgetId)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    /*
+     * archive.award_budget_person is the budget-level personnel
+     * roster (name/appointment type), joined in by (budget_id,
+     * person_sequence_number) - the same composite key Oracle itself
+     * uses (see V051's header comment). calculated_salary sums every
+     * real, persisted award_budget_personnel_calculated_amount row for
+     * this personnel line - Oracle stores one row per rate
+     * application (rate_class_code/rate_type_code), never a single
+     * "calculated salary" field, so this is a sum of real stored
+     * numbers across however many rate applications exist, not a
+     * computed/invented figure. NULL (not zero) when no calculated-
+     * amount rows exist at all, via SUM's own null-on-no-rows behavior
+     * combined with the LEFT JOIN.
+     */
+    public List<AwardBudgetPersonnelResponse> findBudgetPersonnel(
+            long budgetId,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    bpd.budget_personnel_line_item_id AS budget_person_id,
+                    bpd.person_id,
+                    abp.person_name AS full_name,
+                    bpd.job_code,
+                    abp.appointment_type_code AS appointment_type,
+                    bpd.salary_requested AS base_salary,
+                    calc.calculated_salary
+                FROM archive.award_budget_personnel_detail bpd
+                LEFT JOIN archive.award_budget_person abp
+                    ON abp.budget_id = bpd.budget_id
+                    AND abp.person_sequence_number = bpd.person_sequence_number
+                LEFT JOIN LATERAL (
+                    SELECT SUM(bpca.calculated_cost) AS calculated_salary
+                    FROM archive.award_budget_personnel_calculated_amount bpca
+                    WHERE bpca.budget_personnel_line_item_id
+                        = bpd.budget_personnel_line_item_id
+                ) calc ON TRUE
+                WHERE bpd.budget_id = :budgetId
+                ORDER BY bpd.budget_personnel_line_item_id
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("budgetId", budgetId)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AwardBudgetPersonnelResponse.class)
+                .list();
     }
 
 }

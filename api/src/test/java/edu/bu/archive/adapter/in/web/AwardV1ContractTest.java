@@ -8,6 +8,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
@@ -429,6 +434,91 @@ class AwardV1ContractTest {
         String json = objectMapper.writeValueAsString(attachment);
         assertThat(json).doesNotContainIgnoringCase("s3Bucket");
         assertThat(json).doesNotContainIgnoringCase("s3Key");
+    }
+
+    @Test
+    void budgetSummaryShapeIsStableAndUsesSelectedNamingNotCurrent()
+            throws Exception {
+        AwardBudgetSummaryResponse summary = new AwardBudgetSummaryResponse(
+                3831872L, "103692-00002", 46,
+                213641L, 37, "9", "Posted", "1054966",
+                LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31),
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11)
+        );
+
+        assertFieldNames(summary, Set.of(
+                "awardId", "awardNumber", "viewedSequenceNumber",
+                "selectedBudgetId", "selectedBudgetVersionNumber",
+                "statusCode", "statusDescription", "workflowDocumentNumber",
+                "startDate", "endDate",
+                "totalDirectCost", "totalIndirectCost", "totalCost"
+        ));
+
+        // "selected", never "current" - see
+        // docs/kuali-business-rules/Budget.md on why this is
+        // deliberately not Kuali's own live getCurrentBudget() concept.
+        String json = objectMapper.writeValueAsString(summary);
+        assertThat(json).doesNotContainIgnoringCase("currentBudget");
+    }
+
+    @Test
+    void budgetVersionShapeIsStableAndRecordsWhichAwardSequenceOwnsIt()
+            throws Exception {
+        AwardBudgetVersionResponse version = new AwardBudgetVersionResponse(
+                213642L, 38, 3831872L, 46, "1130568",
+                "9", "Posted", LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31),
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11), true
+        );
+
+        assertFieldNames(version, Set.of(
+                "budgetId", "budgetVersionNumber",
+                "owningAwardId", "owningAwardSequenceNumber",
+                "workflowDocumentNumber", "statusCode", "statusDescription",
+                "startDate", "endDate",
+                "totalDirectCost", "totalIndirectCost", "totalCost",
+                "selected"
+        ));
+    }
+
+    @Test
+    void budgetPeriodShapeIsStable() throws Exception {
+        AwardBudgetPeriodResponse period = new AwardBudgetPeriodResponse(
+                1L, 1, LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31),
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11)
+        );
+
+        assertFieldNames(period, Set.of(
+                "budgetPeriodId", "periodNumber", "startDate", "endDate",
+                "totalDirectCost", "totalIndirectCost", "totalCost"
+        ));
+    }
+
+    @Test
+    void budgetLineItemShapeIsStable() throws Exception {
+        AwardBudgetLineItemResponse lineItem = new AwardBudgetLineItemResponse(
+                1L, 1L, 1, "Supplies", "1000",
+                LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31),
+                BigDecimal.TEN, BigDecimal.ZERO
+        );
+
+        assertFieldNames(lineItem, Set.of(
+                "budgetLineItemId", "budgetPeriodId", "lineItemNumber",
+                "description", "costElement", "startDate", "endDate",
+                "lineItemCost", "costSharingAmount"
+        ));
+    }
+
+    @Test
+    void budgetPersonnelShapeIsStable() throws Exception {
+        AwardBudgetPersonnelResponse personnel = new AwardBudgetPersonnelResponse(
+                1L, "P123", "Jane Doe", "1234", "Faculty",
+                BigDecimal.valueOf(50000), BigDecimal.valueOf(52000)
+        );
+
+        assertFieldNames(personnel, Set.of(
+                "budgetPersonId", "personId", "fullName", "jobCode",
+                "appointmentType", "baseSalary", "calculatedSalary"
+        ));
     }
 
     @Test

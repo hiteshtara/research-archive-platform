@@ -3,6 +3,11 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
@@ -620,5 +625,137 @@ public class AwardV1Controller {
                         disposition.toString()
                 )
                 .body(body);
+    }
+
+    @Operation(
+            summary = "Get an Award's Budget summary",
+            description = "Resolves awardId to its award_number family "
+                    + "and its own sequence_number, then returns the "
+                    + "archive-facing \"selected\" Budget: the highest "
+                    + "budget_version_number with Posted status among "
+                    + "every Budget in that family bounded to "
+                    + "sequences <= this Award version (falling back "
+                    + "to the highest non-Cancelled version if none "
+                    + "are Posted) - see "
+                    + "docs/kuali-business-rules/Budget.md. Every "
+                    + "field is null when this Award family has no "
+                    + "qualifying Budget - a real empty state, not an "
+                    + "error."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's Budget summary.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/budget/summary")
+    public ResponseEntity<AwardBudgetSummaryResponse> budgetSummary(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findBudgetSummary(awardId));
+    }
+
+    @Operation(
+            summary = "List an Award's Budget versions",
+            description = "Every Budget in scope (the same "
+                    + "award_number family, bounded to sequences <= "
+                    + "this Award version), newest budget_version_number "
+                    + "first, each marked with the owning award_id/"
+                    + "sequence_number it actually belongs to (budget "
+                    + "versions routinely span sibling Award "
+                    + "sequences) and whether it is the response's own "
+                    + "\"selected\" Budget."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of Budget versions.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/budget/versions")
+    public ResponseEntity<PageResponse<AwardBudgetVersionResponse>> budgetVersions(
+            @PathVariable
+            long awardId,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "50")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(service.findBudgetVersions(awardId, page, size));
+    }
+
+    @Operation(
+            summary = "List the selected Budget's periods",
+            description = "archive.award_budget_period rows for this "
+                    + "Award's selected Budget (see /budget/summary) - "
+                    + "empty if this Award family has no qualifying "
+                    + "Budget."
+    )
+    @ApiResponse(responseCode = "200", description = "The selected Budget's periods.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/budget/periods")
+    public ResponseEntity<List<AwardBudgetPeriodResponse>> budgetPeriods(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findBudgetPeriods(awardId));
+    }
+
+    @Operation(
+            summary = "List the selected Budget's line items",
+            description = "archive.award_budget_line_item rows across "
+                    + "every period of this Award's selected Budget "
+                    + "(see /budget/summary) - empty if this Award "
+                    + "family has no qualifying Budget."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of Budget line items.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/budget/line-items")
+    public ResponseEntity<PageResponse<AwardBudgetLineItemResponse>> budgetLineItems(
+            @PathVariable
+            long awardId,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "50")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(service.findBudgetLineItems(awardId, page, size));
+    }
+
+    @Operation(
+            summary = "List the selected Budget's personnel",
+            description = "archive.award_budget_personnel_detail rows "
+                    + "for this Award's selected Budget (see "
+                    + "/budget/summary), joined to the "
+                    + "archive.award_budget_person roster for name/"
+                    + "appointment type - empty if this Award family "
+                    + "has no qualifying Budget."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of Budget personnel.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/budget/personnel")
+    public ResponseEntity<PageResponse<AwardBudgetPersonnelResponse>> budgetPersonnel(
+            @PathVariable
+            long awardId,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "50")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(service.findBudgetPersonnel(awardId, page, size));
     }
 }

@@ -2,12 +2,19 @@ package edu.bu.archive.application.award;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
@@ -1426,5 +1433,238 @@ public class AwardArchiveService {
         }
 
         return normalized;
+    }
+
+    /*
+     * --- Budget (see docs/kuali-business-rules/Budget.md) -----------------
+     *
+     * Every Budget query here is scoped by awardNumber, bounded to
+     * sequences <= the viewed Award's own sequence_number - proven
+     * live against real Oracle/archive data that budget_version_number
+     * is a family-wide monotonic counter, not per-award_id, mirroring
+     * how Award.getBudgets()/AwardBudgetServiceImpl.getAllBudgetsForAward
+     * actually resolve Budget history in real Kuali. Never scope a
+     * Budget query to the exact awardId alone - that would hide most
+     * of a family's real Budget history (see the design doc's own
+     * incident: batch7-style silent under-scoping).
+     */
+
+    public AwardBudgetSummaryResponse findBudgetSummary(long awardId) {
+        AwardFamilyPositionRow position = requireFamilyPosition(awardId);
+
+        List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
+                position.awardNumber(), position.sequenceNumber()
+        );
+        AwardBudgetRow selected = selectArchiveBudget(budgetsInScope);
+
+        if (selected == null) {
+            return new AwardBudgetSummaryResponse(
+                    awardId,
+                    position.awardNumber(),
+                    position.sequenceNumber(),
+                    null, null, null, null, null, null, null, null, null, null
+            );
+        }
+
+        return new AwardBudgetSummaryResponse(
+                awardId,
+                position.awardNumber(),
+                position.sequenceNumber(),
+                selected.budgetId(),
+                selected.budgetVersionNumber(),
+                selected.statusCode(),
+                selected.statusDescription(),
+                selected.workflowDocumentNumber(),
+                selected.startDate(),
+                selected.endDate(),
+                selected.totalDirectCost(),
+                selected.totalIndirectCost(),
+                selected.totalCost()
+        );
+    }
+
+    public PageResponse<AwardBudgetVersionResponse> findBudgetVersions(
+            long awardId,
+            int page,
+            int size
+    ) {
+        AwardFamilyPositionRow position = requireFamilyPosition(awardId);
+
+        List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
+                position.awardNumber(), position.sequenceNumber()
+        );
+        Long selectedBudgetId = Optional.ofNullable(
+                selectArchiveBudget(budgetsInScope)
+        ).map(AwardBudgetRow::budgetId).orElse(null);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        List<AwardBudgetVersionResponse> allVersions = budgetsInScope.stream()
+                .map(row -> new AwardBudgetVersionResponse(
+                        row.budgetId(),
+                        row.budgetVersionNumber(),
+                        row.owningAwardId(),
+                        row.owningAwardSequenceNumber(),
+                        row.workflowDocumentNumber(),
+                        row.statusCode(),
+                        row.statusDescription(),
+                        row.startDate(),
+                        row.endDate(),
+                        row.totalDirectCost(),
+                        row.totalIndirectCost(),
+                        row.totalCost(),
+                        row.budgetId().equals(selectedBudgetId)
+                ))
+                .toList();
+
+        long totalElements = allVersions.size();
+        int fromIndex = Math.min(safePage * safeSize, allVersions.size());
+        int toIndex = Math.min(fromIndex + safeSize, allVersions.size());
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        return new PageResponse<>(
+                allVersions.subList(fromIndex, toIndex),
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    public List<AwardBudgetPeriodResponse> findBudgetPeriods(long awardId) {
+        Long selectedBudgetId = requireSelectedBudgetId(awardId);
+
+        if (selectedBudgetId == null) {
+            return List.of();
+        }
+
+        return repository.findBudgetPeriods(selectedBudgetId);
+    }
+
+    public PageResponse<AwardBudgetLineItemResponse> findBudgetLineItems(
+            long awardId,
+            int page,
+            int size
+    ) {
+        Long selectedBudgetId = requireSelectedBudgetId(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        if (selectedBudgetId == null) {
+            PaginationSupport.PageMetadata emptyMetadata =
+                    PaginationSupport.metadata(safePage, safeSize, 0);
+            return new PageResponse<>(
+                    List.of(), safePage, safeSize, 0,
+                    emptyMetadata.totalPages(), emptyMetadata.first(),
+                    emptyMetadata.last()
+            );
+        }
+
+        long totalElements = repository.countBudgetLineItems(selectedBudgetId);
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+        int offset = safePage * safeSize;
+
+        List<AwardBudgetLineItemResponse> content = repository.findBudgetLineItems(
+                selectedBudgetId, safeSize, offset
+        );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    public PageResponse<AwardBudgetPersonnelResponse> findBudgetPersonnel(
+            long awardId,
+            int page,
+            int size
+    ) {
+        Long selectedBudgetId = requireSelectedBudgetId(awardId);
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        if (selectedBudgetId == null) {
+            PaginationSupport.PageMetadata emptyMetadata =
+                    PaginationSupport.metadata(safePage, safeSize, 0);
+            return new PageResponse<>(
+                    List.of(), safePage, safeSize, 0,
+                    emptyMetadata.totalPages(), emptyMetadata.first(),
+                    emptyMetadata.last()
+            );
+        }
+
+        long totalElements = repository.countBudgetPersonnel(selectedBudgetId);
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+        int offset = safePage * safeSize;
+
+        List<AwardBudgetPersonnelResponse> content = repository.findBudgetPersonnel(
+                selectedBudgetId, safeSize, offset
+        );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    private Long requireSelectedBudgetId(long awardId) {
+        AwardFamilyPositionRow position = requireFamilyPosition(awardId);
+        List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
+                position.awardNumber(), position.sequenceNumber()
+        );
+        AwardBudgetRow selected = selectArchiveBudget(budgetsInScope);
+        return selected == null ? null : selected.budgetId();
+    }
+
+    private AwardFamilyPositionRow requireFamilyPosition(long awardId) {
+        return repository.findFamilyPositionForId(awardId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Award not found: " + awardId
+                ));
+    }
+
+    /*
+     * The archive-facing "selectedArchiveBudget" rule (see
+     * docs/kuali-business-rules/Budget.md - deliberately NOT Kuali's
+     * own live getCurrentBudget(), which targets transient in-progress
+     * statuses that essentially never survive to a closed archive):
+     * the highest budget_version_number with Posted status ('9');
+     * if none, the highest budget_version_number that is not
+     * Cancelled ('14'). rowsNewestFirst is already ordered by
+     * budget_version_number DESC (see findBudgetsInScope), so the
+     * first match within each filter is already the highest version
+     * in that tier. Returns null when nothing qualifies (e.g. every
+     * budget in scope is Cancelled) - a real, valid "no current
+     * budget" state, not an error.
+     */
+    private static AwardBudgetRow selectArchiveBudget(
+            List<AwardBudgetRow> rowsNewestFirst
+    ) {
+        return rowsNewestFirst.stream()
+                .filter(row -> "9".equals(row.statusCode()))
+                .findFirst()
+                .or(() -> rowsNewestFirst.stream()
+                        .filter(row -> !"14".equals(row.statusCode()))
+                        .findFirst())
+                .orElse(null);
     }
 }
