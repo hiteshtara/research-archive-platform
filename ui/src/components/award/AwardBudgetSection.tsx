@@ -39,21 +39,40 @@ import type {
 
 const PAGE_SIZE = 25;
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({
+  label,
+  value,
+  caption,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  caption?: string;
+  accent?: boolean;
+}) {
   return (
     <Box
       sx={{
         border: "1px solid",
-        borderColor: "divider",
+        borderColor: accent ? "primary.main" : "divider",
         borderRadius: 2,
         p: 2,
-        minWidth: 160,
+        minWidth: 200,
       }}
     >
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>
       <Typography sx={{ fontWeight: 700, fontSize: 18 }}>{value}</Typography>
+      {caption && (
+        <Typography
+          variant="caption"
+          color="text.disabled"
+          sx={{ display: "block", mt: 0.5 }}
+        >
+          {caption}
+        </Typography>
+      )}
     </Box>
   );
 }
@@ -108,20 +127,46 @@ function BudgetSummaryPanel({ awardId }: { awardId: number }) {
         </Stack>
       </Box>
 
-      <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
-        <StatCard
-          label="Total Direct"
-          value={formatCurrencyAmount(summary.totalDirectCost)}
-        />
-        <StatCard
-          label="Total Indirect"
-          value={formatCurrencyAmount(summary.totalIndirectCost)}
-        />
-        <StatCard
-          label="Total Cost"
-          value={formatCurrencyAmount(summary.totalCost)}
-        />
-      </Stack>
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          This Budget version's requested amount
+        </Typography>
+        <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+          <StatCard
+            label="Version Total Direct"
+            value={formatCurrencyAmount(summary.totalDirectCost)}
+          />
+          <StatCard
+            label="Version Total Indirect"
+            value={formatCurrencyAmount(summary.totalIndirectCost)}
+          />
+          <StatCard
+            label="Version Total Cost"
+            value={formatCurrencyAmount(summary.totalCost)}
+          />
+        </Stack>
+      </Box>
+
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          Award-level ceiling snapshots stored on this Budget version - not
+          this version's own requested amount (see above)
+        </Typography>
+        <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+          <StatCard
+            accent
+            label="Budget Total Cost Limit"
+            value={formatCurrencyAmount(summary.awardBudgetTotalCostLimit)}
+            caption="Award-level ceiling, frozen when this version was created"
+          />
+          <StatCard
+            accent
+            label="Budget Change Total Cost Limit"
+            value={formatCurrencyAmount(summary.budgetChangeTotalCostLimit)}
+            caption="Remaining headroom snapshot at that same moment"
+          />
+        </Stack>
+      </Box>
 
       <Typography variant="caption" color="text.secondary">
         {summary.startDate ?? "—"} – {summary.endDate ?? "—"}
@@ -156,6 +201,12 @@ function BudgetVersionRow({ version }: { version: AwardBudgetVersionV1 }) {
       </TableCell>
       <TableCell align="right">
         {formatCurrencyAmount(version.totalCost)}
+      </TableCell>
+      <TableCell align="right" title="Award-level ceiling, frozen when this version was created">
+        {formatCurrencyAmount(version.awardBudgetTotalCostLimit)}
+      </TableCell>
+      <TableCell align="right" title="Remaining headroom snapshot at that same moment">
+        {formatCurrencyAmount(version.budgetChangeTotalCostLimit)}
       </TableCell>
     </TableRow>
   );
@@ -204,6 +255,12 @@ function BudgetVersionsPanel({ awardId }: { awardId: number }) {
               <TableCell>Status</TableCell>
               <TableCell>Owning Award Sequence</TableCell>
               <TableCell align="right">Total Cost</TableCell>
+              <TableCell align="right" title="Award-level ceiling, frozen when this version was created">
+                Budget Total Cost Limit
+              </TableCell>
+              <TableCell align="right" title="Remaining headroom snapshot at that same moment">
+                Budget Change Total Cost Limit
+              </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>

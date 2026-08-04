@@ -597,6 +597,13 @@ export interface AwardBudgetSummaryV1 {
   totalDirectCost: number | null;
   totalIndirectCost: number | null;
   totalCost: number | null;
+  // Frozen, per-version snapshots of an Award-level computation - real
+  // Kuali source proves these are NOT the version's own requested
+  // amount (totalCost above) and NOT something to recompute; see
+  // docs/kuali-business-rules/Budget.md. Null for legacy "Converted
+  // Budget Document" versions that predate this snapshot.
+  awardBudgetTotalCostLimit: number | null;
+  budgetChangeTotalCostLimit: number | null;
 }
 
 // owningAwardId/owningAwardSequenceNumber record which specific Award
@@ -618,6 +625,8 @@ export interface AwardBudgetVersionV1 {
   totalDirectCost: number | null;
   totalIndirectCost: number | null;
   totalCost: number | null;
+  awardBudgetTotalCostLimit: number | null;
+  budgetChangeTotalCostLimit: number | null;
   selected: boolean;
 }
 

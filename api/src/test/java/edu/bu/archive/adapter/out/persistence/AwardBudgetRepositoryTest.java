@@ -76,6 +76,10 @@ class AwardBudgetRepositoryTest {
                 .contains("WHERE av.award_number = :awardNumber")
                 .contains("av.sequence_number <= :viewedSequenceNumber")
                 .doesNotContain("ab.award_id = :awardId")
+                // Budget semantic fix (docs/kuali-business-rules/Budget.md):
+                // these are selected verbatim, never recomputed in SQL.
+                .contains("ab.obligated_total AS award_budget_total_cost_limit")
+                .contains("ab.total_cost_limit AS budget_change_total_cost_limit")
                 .contains("ORDER BY ab.budget_version_number DESC");
         verify(statement).param("awardNumber", "103692-00002");
         verify(statement).param("viewedSequenceNumber", 46);

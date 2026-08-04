@@ -55,11 +55,29 @@ class AwardBudgetServiceTest {
             String statusCode,
             String statusDescription
     ) {
+        return row(
+                budgetId, owningAwardId, owningSequence, budgetVersionNumber,
+                statusCode, statusDescription, BigDecimal.valueOf(11), null, null
+        );
+    }
+
+    private static AwardBudgetRow row(
+            long budgetId,
+            long owningAwardId,
+            int owningSequence,
+            int budgetVersionNumber,
+            String statusCode,
+            String statusDescription,
+            BigDecimal totalCost,
+            BigDecimal awardBudgetTotalCostLimit,
+            BigDecimal budgetChangeTotalCostLimit
+    ) {
         return new AwardBudgetRow(
                 budgetId, owningAwardId, owningSequence, budgetVersionNumber,
                 String.valueOf(budgetId + 1_000_000), statusCode, statusDescription,
                 LocalDate.of(2020, 1, 1), LocalDate.of(2021, 1, 1),
-                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11)
+                BigDecimal.TEN, BigDecimal.ONE, totalCost,
+                awardBudgetTotalCostLimit, budgetChangeTotalCostLimit
         );
     }
 
@@ -118,6 +136,81 @@ class AwardBudgetServiceTest {
         assertThat(summary.selectedBudgetId()).isEqualTo(146583L);
         assertThat(summary.selectedBudgetVersionNumber()).isEqualTo(5);
         assertThat(summary.statusCode()).isEqualTo("10");
+    }
+
+    // --- Budget semantic fix: awardBudgetTotalCostLimit/budgetChangeTotalCostLimit ---
+    // Real fixture, live-verified against Kuali and the archive (see
+    // docs/kuali-business-rules/Budget.md): Award 105698-00002, budget_id
+    // 176666 (version 5, "closeout" doc, sequence 9/award_id 2280896).
+    // Kuali's screen shows "Budget Total Cost Limit: 699,246.57" and
+    // "Budget Change Total Cost Limit: 0.01" alongside this version's own
+    // Total of 0.01 - three distinct numbers, all persisted verbatim on
+    // archive.award_budget (obligated_total/total_cost_limit/total_cost).
+
+    private static final String LIMIT_FIXTURE_AWARD_NUMBER = "105698-00002";
+
+    @Test
+    void findBudgetSummaryExposesTheAwardLevelLimitSnapshotsFromTheSelectedVersionVerbatim() {
+        when(repository.findFamilyPositionForId(2280896L))
+                .thenReturn(Optional.of(new AwardFamilyPositionRow(LIMIT_FIXTURE_AWARD_NUMBER, 9)));
+        when(repository.findBudgetsInScope(LIMIT_FIXTURE_AWARD_NUMBER, 9)).thenReturn(List.of(
+                row(176666L, 2280896L, 9, 5, "9", "Posted",
+                        new BigDecimal("0.01"),
+                        new BigDecimal("699246.57"),
+                        new BigDecimal("0.01"))
+        ));
+
+        AwardBudgetSummaryResponse summary = service.findBudgetSummary(2280896L);
+
+        assertThat(summary.totalCost()).isEqualByComparingTo("0.01");
+        assertThat(summary.awardBudgetTotalCostLimit()).isEqualByComparingTo("699246.57");
+        assertThat(summary.budgetChangeTotalCostLimit()).isEqualByComparingTo("0.01");
+    }
+
+    @Test
+    void findBudgetSummaryLeavesLimitSnapshotsNullForConvertedVersionsWhereTheyWereNeverSet() {
+        // Real fixture: this award's own versions 1-4 ("Converted Budget
+        // Document"/pre-snapshot amendments) never had obligated_total/
+        // total_cost_limit populated in Kuali - archived as null, not 0.
+        when(repository.findFamilyPositionForId(558547L))
+                .thenReturn(Optional.of(new AwardFamilyPositionRow(LIMIT_FIXTURE_AWARD_NUMBER, 8)));
+        when(repository.findBudgetsInScope(LIMIT_FIXTURE_AWARD_NUMBER, 8)).thenReturn(List.of(
+                row(126808L, 558547L, 8, 4, "9", "Posted",
+                        new BigDecimal("-27627.44"), null, null)
+        ));
+
+        AwardBudgetSummaryResponse summary = service.findBudgetSummary(558547L);
+
+        assertThat(summary.totalCost()).isEqualByComparingTo("-27627.44");
+        assertThat(summary.awardBudgetTotalCostLimit()).isNull();
+        assertThat(summary.budgetChangeTotalCostLimit()).isNull();
+    }
+
+    @Test
+    void findBudgetVersionsCarriesTheLimitSnapshotsThroughForEveryVersionInScope() {
+        when(repository.findFamilyPositionForId(2280896L))
+                .thenReturn(Optional.of(new AwardFamilyPositionRow(LIMIT_FIXTURE_AWARD_NUMBER, 9)));
+        List<AwardBudgetRow> rows = List.of(
+                row(176666L, 2280896L, 9, 5, "9", "Posted",
+                        new BigDecimal("0.01"), new BigDecimal("699246.57"), new BigDecimal("0.01")),
+                row(126808L, 558547L, 8, 4, "9", "Posted",
+                        new BigDecimal("-27627.44"), null, null)
+        );
+        when(repository.findBudgetsInScope(LIMIT_FIXTURE_AWARD_NUMBER, 9)).thenReturn(rows);
+
+        PageResponse<AwardBudgetVersionResponse> page =
+                service.findBudgetVersions(2280896L, 0, 20);
+
+        AwardBudgetVersionResponse v5 = page.content().stream()
+                .filter(v -> v.budgetVersionNumber() == 5).findFirst().orElseThrow();
+        assertThat(v5.awardBudgetTotalCostLimit()).isEqualByComparingTo("699246.57");
+        assertThat(v5.budgetChangeTotalCostLimit()).isEqualByComparingTo("0.01");
+        assertThat(v5.selected()).isTrue();
+
+        AwardBudgetVersionResponse v4 = page.content().stream()
+                .filter(v -> v.budgetVersionNumber() == 4).findFirst().orElseThrow();
+        assertThat(v4.awardBudgetTotalCostLimit()).isNull();
+        assertThat(v4.budgetChangeTotalCostLimit()).isNull();
     }
 
     @Test

@@ -18,6 +18,17 @@ import java.time.LocalDate;
  * All fields are null when this Award family has no Budget in scope at
  * all (or only Cancelled ones) - a real, valid empty state, not an
  * error.
+ *
+ * totalDirectCost/totalIndirectCost/totalCost are the selected Budget
+ * version's own requested amount - a genuinely different concept from
+ * awardBudgetTotalCostLimit and budgetChangeTotalCostLimit, both frozen
+ * per-version snapshots of an Award-level computation (real Kuali
+ * source: Award.getBudgetTotalCostLimit()/
+ * AwardBudgetServiceImpl.getTotalCostLimit(), proven live against Award
+ * 105698-00002 - see docs/kuali-business-rules/Budget.md). Kuali's own
+ * Budget Overview screen renders all three side by side under different
+ * labels ("Budget Total Cost Limit", "Budget Change Total Cost Limit",
+ * and the version's own Total) - never collapse them into one number.
  */
 public record AwardBudgetSummaryResponse(
         long awardId,
@@ -32,6 +43,8 @@ public record AwardBudgetSummaryResponse(
         LocalDate endDate,
         BigDecimal totalDirectCost,
         BigDecimal totalIndirectCost,
-        BigDecimal totalCost
+        BigDecimal totalCost,
+        BigDecimal awardBudgetTotalCostLimit,
+        BigDecimal budgetChangeTotalCostLimit
 ) {
 }

@@ -13,6 +13,16 @@ import java.time.LocalDate;
  * AwardBudgetSummaryResponse (the selected/"current" budget) and
  * AwardBudgetVersionResponse (every budget in scope, with a computed
  * "selected" flag) from the same query.
+ *
+ * awardBudgetTotalCostLimit/budgetChangeTotalCostLimit are
+ * archive.award_budget.obligated_total/total_cost_limit verbatim - real
+ * Kuali source (AwardBudgetServiceImpl.setBudgetLimits/getTotalCostLimit)
+ * proves these are frozen, per-version snapshots of an Award-level
+ * computation taken when the version was created, not the version's own
+ * requested amount (totalCost) and not something to recompute here - see
+ * docs/kuali-business-rules/Budget.md. Both are null for budget versions
+ * created before this snapshot existed (e.g. legacy "Converted Budget
+ * Document" versions) - a real archive gap, not a defect.
  */
 public record AwardBudgetRow(
         Long budgetId,
@@ -26,6 +36,8 @@ public record AwardBudgetRow(
         LocalDate endDate,
         BigDecimal totalDirectCost,
         BigDecimal totalIndirectCost,
-        BigDecimal totalCost
+        BigDecimal totalCost,
+        BigDecimal awardBudgetTotalCostLimit,
+        BigDecimal budgetChangeTotalCostLimit
 ) {
 }

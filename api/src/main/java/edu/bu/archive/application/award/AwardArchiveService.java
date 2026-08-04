@@ -1462,7 +1462,7 @@ public class AwardArchiveService {
                     awardId,
                     position.awardNumber(),
                     position.sequenceNumber(),
-                    null, null, null, null, null, null, null, null, null, null
+                    null, null, null, null, null, null, null, null, null, null, null, null
             );
         }
 
@@ -1479,7 +1479,9 @@ public class AwardArchiveService {
                 selected.endDate(),
                 selected.totalDirectCost(),
                 selected.totalIndirectCost(),
-                selected.totalCost()
+                selected.totalCost(),
+                selected.awardBudgetTotalCostLimit(),
+                selected.budgetChangeTotalCostLimit()
         );
     }
 
@@ -1514,6 +1516,8 @@ public class AwardArchiveService {
                         row.totalDirectCost(),
                         row.totalIndirectCost(),
                         row.totalCost(),
+                        row.awardBudgetTotalCostLimit(),
+                        row.budgetChangeTotalCostLimit(),
                         row.budgetId().equals(selectedBudgetId)
                 ))
                 .toList();

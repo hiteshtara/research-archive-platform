@@ -169,6 +169,101 @@ must surface these stored values directly and must not invent its own
 summation logic — consistent with the user's explicit "no invented
 calculations" rule.
 
+This is true of `total_cost`/`total_direct_cost`/`total_indirect_cost`
+specifically — the selected Budget version's **own requested amount**.
+It does **not** extend to `Budget Total Cost Limit`/`Budget Change Total
+Cost Limit`, a genuinely different pair of concepts covered next.
+
+## Budget Total Cost Limit vs. Budget Change Total Cost Limit vs. Version Total Cost
+
+A live comparison against real Kuali (Award `105698-00002`) found that
+Kuali's Budget Overview screen displays **three different numbers**
+side by side, and the archive's first implementation of Budget Summary
+only exposed one of them (`total_cost`, mislabeled as if it were the
+complete picture). This section is the proven source-to-screen mapping
+that closed that gap — see `AwardBudgetVersions.jsp` (real Kuali JSP,
+lines 45–121) for the screen source.
+
+### Source-to-screen mapping
+
+| Screen label | JSP binding | Real Java source | Real Oracle column |
+|---|---|---|---|
+| Budget Start/End Date | `document.budgetVersionOverview.startDate/endDate` | selected Budget version's own dates | `AWARD_BUDGET.START_DATE`/`END_DATE` |
+| Budget Version Number | `document.budgetVersionOverview.budgetVersionNumber` | selected version | `AWARD_BUDGET.BUDGET_VERSION_NUMBER` |
+| **Budget Total Cost Limit** | `document.award.budgetTotalCostLimit` | `Award.getBudgetTotalCostLimit()` = `MIN(awardBudgetLimit[totalCost], obligatedDistributableTotal)` | **`AWARD_BUDGET.OBLIGATED_TOTAL`** — the archive-facing name is `awardBudgetTotalCostLimit` |
+| **Budget Change Total Cost Limit** | `document.budgetVersionOverview.totalCostLimit` | `AwardBudgetServiceImpl.getTotalCostLimit(award)` = `MIN(limit, obligatedTotal) − SUM(totalCost of that award's Posted budgets)` | **`AWARD_BUDGET.TOTAL_COST_LIMIT`** — the archive-facing name is `budgetChangeTotalCostLimit` |
+| Version Total Cost | `document.budget.totalCost` (Budget Versions table) | the version's own requested amount | `AWARD_BUDGET.TOTAL_COST` |
+
+### Both values are frozen, per-version snapshots — not live Award queries
+
+`AwardBudgetServiceImpl.setBudgetLimits()` (called once, from
+`createNewBudgetDocument()`, when a Budget version is first created)
+writes both:
+
+```java
+public void setBudgetLimits(AwardBudgetDocument awardBudgetDocument, Award award) {
+    AwardBudgetExt awardBudget = awardBudgetDocument.getAwardBudget();
+    awardBudget.setTotalCostLimit(getTotalCostLimit(award));
+    awardBudget.setObligatedTotal(new ScaleTwoDecimal(award.getBudgetTotalCostLimit().bigDecimalValue()));
+    ...
+}
+```
+
+Both `obligatedTotal` (→ `OBLIGATED_TOTAL`) and `totalCostLimit` (→
+`TOTAL_COST_LIMIT`) are real OJB-mapped columns on `AWARD_BUDGET`
+(`repository-budget.xml`), **not** transient/derived-at-render fields.
+So the screen is not summarizing the Award live on every view — it is
+displaying a value that was computed once, from the Award's state at
+that moment, and then frozen onto that specific Budget version's row.
+Answering the user's own suspicion directly: **the archive had
+correctly implemented "Selected Budget Version," but had labeled only
+its own `total_cost` as "Budget Summary."** The other two numbers on
+Kuali's real header are a different business object (an Award-level
+ceiling snapshot and a remaining-headroom snapshot), not the selected
+version's own total — and both were already archived, unexposed.
+
+### Live proof (Award `105698-00002`, budget_id 176666, version 5)
+
+Both archived columns match Kuali's live screen to the cent:
+
+```
+archive.award_budget: total_cost_limit = 0.01        → screen "Budget Change Total Cost Limit: 0.01"    ✓ exact
+archive.award_budget: obligated_total  = 699246.57    → screen "Budget Total Cost Limit: 699,246.57"      ✓ exact
+```
+
+And the `getTotalCostLimit` formula reproduces to the cent from
+already-archived data — this award's four prior Posted budgets
+(versions 1–4) total `585707.00 + 88902.00 + 52265.00 + (−27627.44) =
+699246.56`:
+
+```
+699246.57 − 699246.56 = 0.01   ✓ matches "Budget Change Total Cost Limit" exactly
+```
+
+### A real, honest archive gap: not every historical version has these snapshots
+
+For this same fixture, `obligated_total`/`total_cost_limit` are `NULL`
+on the award's own versions 1–4 (all "Converted Budget Document" — i.e.
+pre-migration/legacy versions) and only populated starting version 5.
+This is not a defect to hide: Kuali's live screen would also show
+nothing meaningful for a version whose `setBudgetLimits()` never ran.
+The API/UI must render these as `null`/`—`, never `$0.00`, and must
+**never recompute them** from `award_budget_limit`/`award_amount_info`
+— the columns already exist, verbatim, on `archive.award_budget`,
+population-independent of ETL/migration changes.
+
+### Implementation
+
+`AwardBudgetSummaryResponse`/`AwardBudgetVersionResponse` expose
+`awardBudgetTotalCostLimit` (← `award_budget.obligated_total`) and
+`budgetChangeTotalCostLimit` (← `award_budget.total_cost_limit`)
+alongside — never merged into — `totalDirectCost`/`totalIndirectCost`/
+`totalCost`. The UI's Budget Summary panel visually separates "Version
+Total Direct/Indirect/Cost" (this version's own requested amount) from
+"Budget Total Cost Limit"/"Budget Change Total Cost Limit" (Award-level
+snapshots), and the Budget Versions table carries both new columns per
+row.
+
 ## Budget ↔ SAP: related but not linked by any foreign key
 
 This is the second confirmed case in the Award domain (after Time &
@@ -345,8 +440,23 @@ with real transmission data should be located separately once a larger
 population sample is loaded, if SAP-Budget co-occurrence needs live
 verification later.
 
+**`award_number = "105698-00002"`**, 9 sequences (`award_id` 7388
+through 2280896), 5 budget versions — the fixture used to verify the
+Budget Total Cost Limit / Budget Change Total Cost Limit semantic fix
+above. Versions 1–4 (`award_id` 558547, sequence 8) are legacy
+"Converted Budget Document"/amendment versions with `obligated_total`/
+`total_cost_limit` both `NULL`; version 5 (`budget_id` 176666,
+`award_id` 2280896, sequence 9) is the "closeout" version with
+`total_cost = 0.01`, `obligated_total = 699246.57`,
+`total_cost_limit = 0.01` — proven against a live Kuali screenshot of
+this exact Award.
+
 ## Date last updated
 
-2026-08-04 (live Oracle/archive investigation completed before any
-Repository/Service/Controller/DTO/React code was written, per explicit
-instruction).
+2026-08-04 (Budget Total Cost Limit / Budget Change Total Cost Limit
+semantic fix: live comparison against real Kuali for Award
+105698-00002 found the original Budget Summary implementation exposed
+only the selected version's own `total_cost`, not the two Award-level
+snapshot fields Kuali's own header also displays — both were already
+archived on `archive.award_budget` and required no migration/ETL
+change, only DTO/repository/service/UI exposure).

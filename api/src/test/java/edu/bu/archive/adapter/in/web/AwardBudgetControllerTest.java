@@ -54,7 +54,8 @@ class AwardBudgetControllerTest {
                 3831872L, "103692-00002", 46,
                 213641L, 37, "9", "Posted", "1054966",
                 LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31),
-                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11)
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11),
+                new BigDecimal("699246.57"), new BigDecimal("0.01")
         );
         when(service.findBudgetSummary(3831872L)).thenReturn(summary);
 
@@ -62,7 +63,9 @@ class AwardBudgetControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.awardNumber").value("103692-00002"))
                 .andExpect(jsonPath("$.selectedBudgetVersionNumber").value(37))
-                .andExpect(jsonPath("$.statusDescription").value("Posted"));
+                .andExpect(jsonPath("$.statusDescription").value("Posted"))
+                .andExpect(jsonPath("$.awardBudgetTotalCostLimit").value(699246.57))
+                .andExpect(jsonPath("$.budgetChangeTotalCostLimit").value(0.01));
 
         verify(service).findBudgetSummary(3831872L);
     }
@@ -81,7 +84,8 @@ class AwardBudgetControllerTest {
         AwardBudgetVersionResponse version = new AwardBudgetVersionResponse(
                 213642L, 38, 3831872L, 46, "1130568",
                 "9", "Posted", LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31),
-                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11), true
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11),
+                new BigDecimal("699246.57"), new BigDecimal("0.01"), true
         );
         when(service.findBudgetVersions(3831872L, 0, 50)).thenReturn(
                 new PageResponse<>(List.of(version), 0, 50, 1, 1, true, true)

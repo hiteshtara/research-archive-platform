@@ -28,6 +28,8 @@ public record AwardBudgetVersionResponse(
         BigDecimal totalDirectCost,
         BigDecimal totalIndirectCost,
         BigDecimal totalCost,
+        BigDecimal awardBudgetTotalCostLimit,
+        BigDecimal budgetChangeTotalCostLimit,
         boolean selected
 ) {
 }

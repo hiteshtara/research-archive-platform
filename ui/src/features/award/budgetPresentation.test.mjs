@@ -91,3 +91,65 @@ test("hasAnyBudgetVersions treats a non-empty array as having versions", () => {
   assert.equal(hasAnyBudgetVersions(null), false);
   assert.equal(hasAnyBudgetVersions(undefined), false);
 });
+
+// Budget semantic fix (docs/kuali-business-rules/Budget.md): Award
+// Total Cost Limit and Budget Change Total Cost Limit are frozen,
+// per-version snapshots distinct from a version's own requested amount
+// - real fixture, live-verified against Kuali and the archive: Award
+// 105698-00002, budget version 5 (budget_id 176666).
+
+test("the shared currency formatter preserves cents for the real 105698-00002 limit snapshot fixture", () => {
+  // Kuali's own Budget Overview screen for this fixture shows all three
+  // numbers side by side under different labels - never one collapsed
+  // into another.
+  assert.equal(formatCurrencyAmount(0.01), "$0.01"); // this version's own Total Cost
+  assert.equal(formatCurrencyAmount(699246.57), "$699,246.57"); // Budget Total Cost Limit
+  assert.equal(formatCurrencyAmount(0.01), "$0.01"); // Budget Change Total Cost Limit
+});
+
+test("a converted Budget version's null limit snapshots render as —, never $0.00", () => {
+  // Real fixture: this award's own versions 1-4 ("Converted Budget
+  // Document") never had obligated_total/total_cost_limit populated -
+  // archived as null, distinct from a real $0.00 value.
+  assert.equal(formatCurrencyAmount(null), "—");
+  assert.notEqual(formatCurrencyAmount(null), "$0.00");
+  // That version's own Total Cost is a real, non-null persisted value
+  // and must render unchanged alongside the null limit snapshots.
+  assert.equal(formatCurrencyAmount(-27627.44), "-$27,627.44");
+});
+
+test("AwardBudgetSection renders both limit snapshots in the Summary panel and the Versions table, using the shared formatter", () => {
+  const sourcePath = fileURLToPath(
+    new URL(
+      "../../components/award/AwardBudgetSection.tsx",
+      import.meta.url,
+    ),
+  );
+  const source = readFileSync(sourcePath, "utf8");
+
+  assert.match(
+    source,
+    /formatCurrencyAmount\(summary\.awardBudgetTotalCostLimit\)/,
+    "Summary panel must render awardBudgetTotalCostLimit through the shared formatter",
+  );
+  assert.match(
+    source,
+    /formatCurrencyAmount\(summary\.budgetChangeTotalCostLimit\)/,
+    "Summary panel must render budgetChangeTotalCostLimit through the shared formatter",
+  );
+  assert.match(
+    source,
+    /formatCurrencyAmount\(version\.awardBudgetTotalCostLimit\)/,
+    "Versions table must render awardBudgetTotalCostLimit through the shared formatter",
+  );
+  assert.match(
+    source,
+    /formatCurrencyAmount\(version\.budgetChangeTotalCostLimit\)/,
+    "Versions table must render budgetChangeTotalCostLimit through the shared formatter",
+  );
+  // Both concepts must stay visually/textually distinct from the
+  // version's own requested amount - never relabeled as "Total Cost".
+  assert.match(source, /Version Total Cost/);
+  assert.match(source, /Budget Total Cost Limit/);
+  assert.match(source, /Budget Change Total Cost Limit/);
+});

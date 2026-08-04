@@ -443,7 +443,8 @@ class AwardV1ContractTest {
                 3831872L, "103692-00002", 46,
                 213641L, 37, "9", "Posted", "1054966",
                 LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31),
-                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11)
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11),
+                new BigDecimal("699246.57"), new BigDecimal("0.01")
         );
 
         assertFieldNames(summary, Set.of(
@@ -451,7 +452,8 @@ class AwardV1ContractTest {
                 "selectedBudgetId", "selectedBudgetVersionNumber",
                 "statusCode", "statusDescription", "workflowDocumentNumber",
                 "startDate", "endDate",
-                "totalDirectCost", "totalIndirectCost", "totalCost"
+                "totalDirectCost", "totalIndirectCost", "totalCost",
+                "awardBudgetTotalCostLimit", "budgetChangeTotalCostLimit"
         ));
 
         // "selected", never "current" - see
@@ -467,7 +469,8 @@ class AwardV1ContractTest {
         AwardBudgetVersionResponse version = new AwardBudgetVersionResponse(
                 213642L, 38, 3831872L, 46, "1130568",
                 "9", "Posted", LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31),
-                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11), true
+                BigDecimal.TEN, BigDecimal.ONE, BigDecimal.valueOf(11),
+                new BigDecimal("699246.57"), new BigDecimal("0.01"), true
         );
 
         assertFieldNames(version, Set.of(
@@ -476,6 +479,7 @@ class AwardV1ContractTest {
                 "workflowDocumentNumber", "statusCode", "statusDescription",
                 "startDate", "endDate",
                 "totalDirectCost", "totalIndirectCost", "totalCost",
+                "awardBudgetTotalCostLimit", "budgetChangeTotalCostLimit",
                 "selected"
         ));
     }

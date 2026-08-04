@@ -1860,7 +1860,9 @@ public class AwardArchiveRepository {
                     ab.end_date,
                     ab.total_direct_cost,
                     ab.total_indirect_cost,
-                    ab.total_cost
+                    ab.total_cost,
+                    ab.obligated_total AS award_budget_total_cost_limit,
+                    ab.total_cost_limit AS budget_change_total_cost_limit
                 FROM archive.award_budget ab
                 JOIN archive.award_version av ON av.award_id = ab.award_id
                 WHERE av.award_number = :awardNumber
