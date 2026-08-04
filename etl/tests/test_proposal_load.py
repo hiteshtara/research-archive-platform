@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 
 import pandas as pd
 
+import load_proposals_from_csv
 from load_proposals_from_csv import (
     AWARD_COLUMNS,
     VERSION_COLUMNS,
@@ -11,6 +13,38 @@ from load_proposals_from_csv import (
     prepare_awards,
     prepare_versions,
 )
+
+
+class ProjectRootResolutionTest(unittest.TestCase):
+    # Regression test for a real bug: main()/run_targeted_load() each
+    # called apply_migrations() with their own hardcoded
+    # Path(__file__).resolve().parents[1] instead of the module-level
+    # PROJECT_ROOT (itself resolved via _resolve_project_root() to
+    # support both a local checkout and the flat ECS container layout -
+    # see that function's own docstring). The hardcoded form only
+    # breaks inside the container, which is exactly why it went
+    # unnoticed - this loader had never actually run in ECS before.
+    # Every apply_migrations() call site must use PROJECT_ROOT, not a
+    # fresh Path(__file__) resolution of its own.
+    def test_no_call_site_recomputes_project_root_independently(self) -> None:
+        source = inspect.getsource(load_proposals_from_csv)
+        occurrences = source.count("Path(__file__).resolve()")
+        # Exactly two: both inside _resolve_project_root() itself.
+        self.assertEqual(
+            occurrences,
+            2,
+            "found a call site recomputing the project root independently "
+            "instead of using the module-level PROJECT_ROOT - see "
+            "_resolve_project_root()'s own docstring for why this matters "
+            "inside the ECS container",
+        )
+
+    def test_project_root_resolves_to_a_directory_containing_sql_extract_proposal(
+        self,
+    ) -> None:
+        self.assertTrue(
+            (load_proposals_from_csv.PROJECT_ROOT / "sql" / "extract" / "proposal").is_dir()
+        )
 
 
 class PrepareVersionsTest(unittest.TestCase):

@@ -727,7 +727,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
 
     apply_migrations(
         engine,
-        Path(__file__).resolve().parents[1] / "database" / "migrations",
+        PROJECT_ROOT / "database" / "migrations",
     )
 
     total_rows = len(versions) + len(awards)
@@ -804,9 +804,7 @@ def main() -> None:
 
     apply_migrations(
         engine,
-        Path(__file__).resolve().parents[1]
-        / "database"
-        / "migrations",
+        PROJECT_ROOT / "database" / "migrations",
     )
 
     total_rows = len(versions) + len(awards)
