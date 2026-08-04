@@ -14,7 +14,29 @@ from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def _resolve_project_root() -> Path:
+    """Locate the directory containing sql/extract/proposal/ and
+    database/migrations/ relative to this file. Two layouts are
+    supported, mirroring load_awards_from_csv.py's own
+    _resolve_project_root() exactly (not shared code - kept local to
+    each loader, same as _connect_oracle - but the same technique): the
+    local repo checkout (this file at
+    <repo>/etl/load_proposals_from_csv.py, so the project root is one
+    level up) and the ECS loader container image (this file copied
+    flatly to /app/load_proposals_from_csv.py alongside sql/ and
+    database/migrations/ copied directly under /app - see
+    etl/Dockerfile.loader), where the project root is this file's own
+    parent directory. This loader had never been run in a container
+    before this fix - the naive parents[1] resolution silently worked
+    locally (repo root really is one level up) and only broke inside
+    the ECS image, which is exactly why it went unnoticed."""
+    container_root = Path(__file__).resolve().parent
+    if (container_root / "sql").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 # Oracle extraction queries exist and match the loader's expected columns
 # for versions and awards. Proposal people had no verified Oracle extraction
