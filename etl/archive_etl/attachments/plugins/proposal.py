@@ -50,6 +50,21 @@ def _parse_manifest_timestamp(value: str | None):
     return parse_datetime(value)
 
 
+def _resolve_migrations_directory() -> Path:
+    """Same dual-layout technique as load_proposals_from_csv.py's own
+    _resolve_project_root(): a local checkout has this file at
+    <repo>/etl/archive_etl/attachments/plugins/proposal.py (database/
+    migrations four levels up), while the ECS loader image copies
+    archive_etl/ and database/migrations/ both directly under /app
+    (three levels up from this file) - see etl/Dockerfile.loader."""
+    container_candidate = (
+        Path(__file__).resolve().parents[3] / "database" / "migrations"
+    )
+    if container_candidate.is_dir():
+        return container_candidate
+    return Path(__file__).resolve().parents[4] / "database" / "migrations"
+
+
 class ProposalAttachmentPlugin(AttachmentPlugin):
     module_name = "proposal"
     # PROPOSAL_ATTACHMENTS.FILE_DATA_ID -> KCOEUS.FILE_DATA.ID, the same
@@ -257,12 +272,7 @@ class ProposalAttachmentPlugin(AttachmentPlugin):
         file_size/checksum/uploaded_at/error_message columns, never the
         metadata columns."""
         engine = create_postgres_engine()
-        apply_migrations(
-            engine,
-            Path(__file__).resolve().parents[4]
-            / "database"
-            / "migrations",
-        )
+        apply_migrations(engine, _resolve_migrations_directory())
 
         update_sql = text(
             """

@@ -12,6 +12,7 @@ from archive_etl.attachments.oracle_blob import FileDataBlobReader
 from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
 from archive_etl.attachments.plugins.proposal import (
     ProposalAttachmentPlugin,
+    _resolve_migrations_directory,
 )
 
 
@@ -146,6 +147,24 @@ class ArchivedAttachmentDestinationTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerow(row)
             return next(plugin.iter_records(path, None, None))
+
+
+class ProposalAttachmentMigrationsDirectoryTest(unittest.TestCase):
+    # Regression test for the same class of bug fixed in
+    # load_proposals_from_csv.py's own _resolve_project_root(): a
+    # hardcoded Path(__file__).resolve().parents[N] resolves correctly
+    # in a local checkout but silently breaks inside the ECS loader
+    # image, where archive_etl/ and database/migrations/ are copied
+    # flatly under /app instead of nested under etl/. Caught live via
+    # an ECS --sync-postgres run that raised FileNotFoundError for
+    # "/database/migrations".
+    def test_resolves_to_a_directory_containing_v060(self) -> None:
+        migrations_directory = _resolve_migrations_directory()
+        self.assertTrue(migrations_directory.is_dir())
+        matches = list(
+            migrations_directory.glob("V060__create_proposal_attachment.sql")
+        )
+        self.assertEqual(len(matches), 1)
 
 
 class ProposalAttachmentPluginSyncTest(unittest.TestCase):
