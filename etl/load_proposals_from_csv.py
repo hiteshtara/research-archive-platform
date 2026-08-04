@@ -51,6 +51,15 @@ VERSIONS_ORACLE_SQL = (
 AWARDS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "award" / "04_award_proposals.sql"
 )
+# PROPOSAL_ATTACHMENTS metadata only - the binary content behind
+# FILE_DATA_ID is loaded separately by the generic attachment pipeline
+# (archive_etl.attachments.runner + ProposalAttachmentPlugin), never by
+# this script. See docs/kuali-business-rules/InstitutionalProposal.md's
+# Attachments section for the proven FILE_DATA/FILE_DATA_ID shape
+# (Subaward-shaped, not Award-shaped).
+ATTACHMENTS_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "02_proposal_attachments.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "proposal_id",
@@ -61,6 +70,13 @@ VERSION_REQUIRED_COLUMNS = {
 AWARD_REQUIRED_COLUMNS = {
     "proposal_id",
     "award_id",
+}
+
+ATTACHMENT_REQUIRED_COLUMNS = {
+    "proposal_attachment_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
 }
 
 VERSION_COLUMNS = [
@@ -108,6 +124,29 @@ AWARD_COLUMNS = [
     "proposal_id",
     "award_id",
     "active",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
+# Metadata columns only - deliberately excludes the binary-archival
+# lifecycle columns (upload_status/s3_bucket/object_key/file_size/
+# checksum/uploaded_at/error_message), which this loader never writes -
+# those are owned exclusively by the generic attachment pipeline
+# (ProposalAttachmentPlugin). upsert_proposal_attachments() must never
+# touch them on a re-run, or it would silently wipe upload progress.
+ATTACHMENT_COLUMNS = [
+    "proposal_attachment_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+    "attachment_number",
+    "attachment_title",
+    "attachment_type_code",
+    "file_name",
+    "content_type",
+    "comments",
+    "document_status_code",
+    "file_data_id",
     "source_update_timestamp",
     "source_update_user",
 ]
@@ -387,6 +426,67 @@ def prepare_awards(
 
     available_columns = [
         column for column in AWARD_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
+
+
+def prepare_attachments(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        ATTACHMENT_REQUIRED_COLUMNS,
+        "proposal_attachments.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "proposal_attachment_id",
+            "proposal_id",
+            "sequence_number",
+            "attachment_number",
+            "attachment_type_code",
+        ],
+    )
+
+    convert_dates(dataframe, ["source_update_timestamp"])
+
+    require_values(
+        dataframe,
+        [
+            "proposal_attachment_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+        ],
+        "proposal_attachments.csv",
+    )
+
+    # PROPOSAL_ATTACHMENTS_ID is Oracle's own real PK - the correct
+    # UPSERT key. Never de-duplicate by file_data_id: multiple real,
+    # distinct historical attachment references legitimately share one
+    # underlying file (live-verified: 149,432 distinct file_data_id
+    # values across 405,779 total rows) - see
+    # docs/kuali-business-rules/InstitutionalProposal.md's Attachments
+    # section. Preserve every row.
+    duplicate_attachments = dataframe.duplicated(
+        subset=["proposal_attachment_id"],
+        keep="first",
+    )
+
+    if duplicate_attachments.any():
+        logger.warning(
+            "Removed {} duplicate PROPOSAL_ATTACHMENTS_ID rows",
+            int(duplicate_attachments.sum()),
+        )
+
+        dataframe = dataframe.loc[
+            ~duplicate_attachments
+        ].copy()
+
+    available_columns = [
+        column for column in ATTACHMENT_COLUMNS if column in dataframe.columns
     ]
     return dataframe[available_columns].copy()
 
@@ -696,6 +796,80 @@ def upsert_proposal_awards(
     return int(result.rowcount)
 
 
+def upsert_proposal_attachments(
+    connection: Connection,
+    attachments: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_attachment metadata,
+    keyed by proposal_attachment_id (PROPOSAL_ATTACHMENTS' own real
+    Oracle PK). Deliberately updates ONLY the metadata columns -
+    upload_status/s3_bucket/object_key/file_size/checksum/uploaded_at/
+    error_message are never touched here, since they are owned
+    exclusively by the binary-archival pipeline
+    (ProposalAttachmentPlugin) and re-running this metadata load must
+    never wipe upload progress."""
+    connection.execute(
+        text(
+            """
+            CREATE TEMPORARY TABLE proposal_attachment_stage (
+                proposal_attachment_id BIGINT NOT NULL,
+                proposal_id BIGINT NOT NULL,
+                proposal_number TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                attachment_number INTEGER,
+                attachment_title TEXT,
+                attachment_type_code INTEGER,
+                file_name TEXT,
+                content_type TEXT,
+                comments TEXT,
+                document_status_code TEXT,
+                file_data_id TEXT,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        "proposal_attachment_stage",
+        len(attachments),
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=attachments[ATTACHMENT_COLUMNS],
+        schema="pg_temp",
+        table="proposal_attachment_stage",
+    )
+
+    update_columns = [
+        column
+        for column in ATTACHMENT_COLUMNS
+        if column != "proposal_attachment_id"
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_attachment (
+                {", ".join(ATTACHMENT_COLUMNS)}
+            )
+            SELECT {", ".join(ATTACHMENT_COLUMNS)}
+            FROM proposal_attachment_stage
+            ON CONFLICT (proposal_attachment_id) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
 def resolve_target_proposal_numbers(max_families: int) -> list[str]:
     """--max-families: resolve the first N distinct PROPOSAL_NUMBERs
     from Oracle (ordered), for a real, bounded batch load - the same
@@ -745,10 +919,25 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
     )
     awards = prepare_awards(awards_raw) if not awards_raw.empty else awards_raw
 
+    attachments_source = OracleDataSource(ATTACHMENTS_ORACLE_SQL)
+    attachments_raw = (
+        attachments_source.read_filtered(
+            column="proposal_id", values=proposal_ids
+        )
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    attachments = (
+        prepare_attachments(attachments_raw)
+        if not attachments_raw.empty
+        else attachments_raw
+    )
+
     logger.info(
-        "Prepared Proposal rows: versions={:,} awards={:,}",
+        "Prepared Proposal rows: versions={:,} awards={:,} attachments={:,}",
         len(versions),
         len(awards),
+        len(attachments),
     )
 
     engine = create_postgres_engine()
@@ -758,7 +947,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         PROJECT_ROOT / "database" / "migrations",
     )
 
-    total_rows = len(versions) + len(awards)
+    total_rows = len(versions) + len(awards) + len(attachments)
 
     with engine.begin() as connection:
         load_id = create_load_run(connection, total_rows)
@@ -771,21 +960,27 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
                 if not awards.empty
                 else 0
             )
+            attachment_rows = (
+                upsert_proposal_attachments(connection, attachments)
+                if not attachments.empty
+                else 0
+            )
 
             mark_load_complete(
                 connection,
                 load_id,
-                version_rows + award_rows,
+                version_rows + award_rows + attachment_rows,
             )
 
         logger.success(
             "Proposal targeted load completed. "
-            "load_id={} families={} versions={} awards={} total={}",
+            "load_id={} families={} versions={} awards={} attachments={} total={}",
             load_id,
             len(proposal_numbers),
             version_rows,
             award_rows,
-            version_rows + award_rows,
+            attachment_rows,
+            version_rows + award_rows + attachment_rows,
         )
     except Exception as error:
         mark_load_failed(engine, load_id, str(error))

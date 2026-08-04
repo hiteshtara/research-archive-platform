@@ -17,9 +17,14 @@ from archive_etl.attachments.plugins.proposal import (
 
 class ArchivedAttachmentDestinationTest(unittest.TestCase):
     def test_proposal_maps_verified_file_data_contract(self) -> None:
+        # archive.proposal_attachment is a dedicated table (not the
+        # shared archive.archived_attachment AttachmentFilePlugin
+        # destination) - the CSV here mirrors
+        # export_proposal_attachments_csv.py's own column names, which
+        # in turn mirror archive.proposal_attachment's real columns.
         plugin = ProposalAttachmentPlugin()
         row = {
-            "proposal_attachments_id": "81",
+            "proposal_attachment_id": "81",
             "proposal_id": "91",
             "proposal_number": "0000091",
             "sequence_number": "2",
@@ -28,9 +33,9 @@ class ArchivedAttachmentDestinationTest(unittest.TestCase):
             "file_name": "scope.pdf",
             "file_data_id": "FD-81",
             "content_type": "application/pdf",
-            "update_timestamp": "2026-01-01 10:00:00",
-            "last_update_timestamp": "2026-01-02 10:00:00",
-            "document_status_code": "1",
+            "comments": "Reviewed by sponsor",
+            "document_status_code": "A",
+            "source_update_timestamp": "2026-01-01 10:00:00",
         }
         record = self._single_record(plugin, row)
 
@@ -42,8 +47,8 @@ class ArchivedAttachmentDestinationTest(unittest.TestCase):
         self.assertEqual(record.attributes["business_key"], "0000091")
         self.assertEqual(record.attributes["title"], "Statement of work")
         self.assertEqual(
-            plugin.s3_key("test/proposals", record),
-            "test/proposals/91/81/scope.pdf",
+            plugin.s3_key("proposal", record),
+            "proposal/0000091/2/81/scope.pdf",
         )
 
     @patch(
@@ -141,6 +146,94 @@ class ArchivedAttachmentDestinationTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerow(row)
             return next(plugin.iter_records(path, None, None))
+
+
+class ProposalAttachmentPluginSyncTest(unittest.TestCase):
+    # Unlike Award (INSERT into the shared archive.archived_attachment
+    # table), Proposal's sync_postgres UPDATEs the lifecycle columns
+    # already present on archive.proposal_attachment in place - the
+    # metadata row is written earlier by
+    # load_proposals_from_csv.py's upsert_proposal_attachments.
+    @patch("archive_etl.attachments.plugins.proposal.apply_migrations")
+    @patch(
+        "archive_etl.attachments.plugins.proposal.create_postgres_engine"
+    )
+    def test_sync_maps_runner_status_vocabulary_onto_upload_status(
+        self,
+        create_engine: Mock,
+        apply_migrations: Mock,
+    ) -> None:
+        plugin = ProposalAttachmentPlugin()
+        manifest = Mock()
+        manifest.rows.return_value = [
+            {
+                "attachment_id": 81,
+                "proposal_id": 91,
+                "s3_bucket": "documents",
+                "s3_key": "proposal/0000091/2/81/scope.pdf",
+                "byte_size": 100,
+                "sha256": "a" * 64,
+                "archive_status": "ARCHIVED",
+                "archived_timestamp": "2026-01-03T10:00:00+00:00",
+                "error_message": None,
+            },
+            {
+                "attachment_id": 82,
+                "proposal_id": 91,
+                "s3_bucket": None,
+                "s3_key": "proposal/0000091/2/82/missing.pdf",
+                "byte_size": None,
+                "sha256": None,
+                "archive_status": "MISSING",
+                "archived_timestamp": None,
+                "error_message": "FILE_DATA_ID is missing",
+            },
+        ]
+        connection = Mock()
+        engine = Mock()
+        engine.begin.return_value = nullcontext(connection)
+        create_engine.return_value = engine
+
+        synced = plugin.sync_postgres(manifest, 91)
+
+        self.assertEqual(synced, 2)
+        apply_migrations.assert_called_once()
+        statement, batch = connection.execute.call_args.args
+        self.assertIn("UPDATE archive.proposal_attachment", str(statement))
+        self.assertIn(
+            "WHERE proposal_attachment_id = :proposal_attachment_id",
+            str(statement),
+        )
+        by_id = {row["proposal_attachment_id"]: row for row in batch}
+        self.assertEqual(by_id[81]["upload_status"], "UPLOADED")
+        self.assertEqual(by_id[81]["checksum"], "a" * 64)
+        self.assertEqual(by_id[82]["upload_status"], "MISSING_SOURCE")
+        self.assertEqual(by_id[82]["error_message"], "FILE_DATA_ID is missing")
+
+    def test_validate_counts_enforces_the_five_attachment_fixture(
+        self,
+    ) -> None:
+        from archive_etl.attachments.models import ArchiveCounts
+
+        plugin = ProposalAttachmentPlugin()
+        counts = ArchiveCounts(
+            attachment_metadata_count=4,
+            file_data_match_count=4,
+        )
+        with self.assertRaises(RuntimeError):
+            plugin.validate_counts(1238613, counts)
+
+        counts.attachment_metadata_count = 5
+        counts.file_data_match_count = 5
+        plugin.validate_counts(1238613, counts)
+
+    def test_validate_sync_count_enforces_the_five_attachment_fixture(
+        self,
+    ) -> None:
+        plugin = ProposalAttachmentPlugin()
+        with self.assertRaises(RuntimeError):
+            plugin.validate_sync_count(1238613, 4)
+        plugin.validate_sync_count(1238613, 5)
 
 
 if __name__ == "__main__":

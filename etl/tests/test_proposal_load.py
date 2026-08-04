@@ -7,9 +7,11 @@ import pandas as pd
 
 import load_proposals_from_csv
 from load_proposals_from_csv import (
+    ATTACHMENT_COLUMNS,
     AWARD_COLUMNS,
     VERSION_COLUMNS,
     parse_args,
+    prepare_attachments,
     prepare_awards,
     prepare_versions,
 )
@@ -338,6 +340,125 @@ class PrepareAwardsTest(unittest.TestCase):
             "source_update_user",
         ):
             self.assertIn(column, AWARD_COLUMNS)
+
+
+class PrepareAttachmentsTest(unittest.TestCase):
+    def _fixture_row(self, **overrides):
+        # Real fixture, live-verified: Institutional Proposal 01157400,
+        # the "Guidelines" attachment on its ACTIVE version (proposal_id
+        # 1238613, sequence 7). The SAME file_data_id also appears on
+        # proposal_attachment_id 2395 (the ARCHIVED version 2's copy of
+        # the same reference) - proving one FILE_DATA_ID legitimately
+        # backs more than one real historical attachment row.
+        row = {
+            "proposal_attachment_id": 86484,
+            "proposal_id": 1238613,
+            "proposal_number": "01157400",
+            "sequence_number": 7,
+            "attachment_number": 4,
+            "attachment_title": "Ryan_NSF_1.11.17_Guidelines",
+            "attachment_type_code": 7,
+            "file_name": "Ryan_NSF_1.11.17_Guidelines.pdf",
+            "content_type": "application/pdf",
+            "comments": "Ryan_NSF_1.11.17_Guidelines NSF-12-8086 DEMS",
+            "document_status_code": "A",
+            "file_data_id": "d208062d-77ca-4a12-aa1f-0e69318a91ae",
+            "source_update_timestamp": "2019-04-11",
+            "source_update_user": "egibbs",
+        }
+        row.update(overrides)
+        return row
+
+    def test_preserves_the_real_fixture_row_verbatim(self) -> None:
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_attachments(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertEqual(row["proposal_attachment_id"], 86484)
+        self.assertEqual(row["proposal_id"], 1238613)
+        self.assertEqual(row["file_name"], "Ryan_NSF_1.11.17_Guidelines.pdf")
+        self.assertEqual(
+            row["file_data_id"], "d208062d-77ca-4a12-aa1f-0e69318a91ae"
+        )
+        self.assertEqual(row["document_status_code"], "A")
+
+    def test_two_rows_may_legitimately_share_one_file_data_id(self) -> None:
+        # proposal_attachment_id 2395 (ARCHIVED version 2) and 86484
+        # (ACTIVE version 7) are two REAL, distinct historical rows
+        # sharing one file_data_id - both must survive, never collapsed
+        # as if they were duplicates.
+        dataframe = pd.DataFrame([
+            self._fixture_row(
+                proposal_attachment_id=2395,
+                proposal_id=1179677,
+                sequence_number=2,
+            ),
+            self._fixture_row(
+                proposal_attachment_id=86484,
+                proposal_id=1238613,
+                sequence_number=7,
+            ),
+        ])
+
+        prepared = prepare_attachments(dataframe)
+
+        self.assertEqual(len(prepared), 2)
+        self.assertEqual(
+            prepared["file_data_id"].nunique(), 1,
+            "both rows should share the same real file_data_id",
+        )
+
+    def test_collapses_a_true_duplicate_proposal_attachment_id(self) -> None:
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(),
+        ])
+
+        prepared = prepare_attachments(dataframe)
+
+        self.assertEqual(len(prepared), 1)
+
+    def test_requires_identity_columns(self) -> None:
+        dataframe = pd.DataFrame([{"attachment_title": "no identity columns"}])
+
+        with self.assertRaises(RuntimeError):
+            prepare_attachments(dataframe)
+
+    def test_never_includes_binary_lifecycle_columns(self) -> None:
+        # upload_status/s3_bucket/object_key/file_size/checksum/
+        # uploaded_at/error_message are owned exclusively by the binary
+        # pipeline (ProposalAttachmentPlugin) - the metadata loader must
+        # never declare or write them.
+        for column in (
+            "upload_status",
+            "s3_bucket",
+            "object_key",
+            "file_size",
+            "checksum",
+            "uploaded_at",
+            "error_message",
+        ):
+            self.assertNotIn(column, ATTACHMENT_COLUMNS)
+
+    def test_all_expected_columns_are_declared(self) -> None:
+        for column in (
+            "proposal_attachment_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+            "attachment_number",
+            "attachment_title",
+            "attachment_type_code",
+            "file_name",
+            "content_type",
+            "comments",
+            "document_status_code",
+            "file_data_id",
+            "source_update_timestamp",
+            "source_update_user",
+        ):
+            self.assertIn(column, ATTACHMENT_COLUMNS)
 
 
 class ParseArgsTest(unittest.TestCase):
