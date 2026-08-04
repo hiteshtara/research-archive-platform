@@ -202,13 +202,17 @@ class PrepareVersionsTest(unittest.TestCase):
 
 class PrepareAwardsTest(unittest.TestCase):
     def _fixture_row(self, **overrides):
+        # Raw column names as 04_award_proposals.sql/normalize_columns
+        # actually produce them (update_timestamp/update_user, not yet
+        # renamed to source_update_*) - matches real extraction output,
+        # not the archive's own target column names.
         row = {
             "award_funding_proposal_id": 148183,
             "proposal_id": 2986,
             "award_id": 148155,
             "active": "Y",
-            "source_update_timestamp": "2020-01-01",
-            "source_update_user": "jsmith",
+            "update_timestamp": "2020-01-01",
+            "update_user": "jsmith",
         }
         row.update(overrides)
         return row
@@ -225,6 +229,20 @@ class PrepareAwardsTest(unittest.TestCase):
         self.assertEqual(row["award_id"], 148155)
         self.assertEqual(row["proposal_id"], 2986)
         self.assertEqual(row["award_funding_proposal_id"], 148183)
+
+    def test_renames_raw_oracle_columns_to_the_archive_target_names(self) -> None:
+        # 04_award_proposals.sql is shared with Award's own loader and
+        # must not be renamed itself - prepare_awards() does the
+        # rename, Proposal-side only.
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_awards(dataframe)
+
+        self.assertIn("source_update_timestamp", prepared.columns)
+        self.assertIn("source_update_user", prepared.columns)
+        self.assertNotIn("update_timestamp", prepared.columns)
+        self.assertNotIn("update_user", prepared.columns)
+        self.assertEqual(prepared.iloc[0]["source_update_user"], "jsmith")
 
     def test_preserves_the_row_level_active_flag_as_a_real_boolean(self) -> None:
         dataframe = pd.DataFrame([

@@ -332,6 +332,22 @@ def prepare_awards(
         "award_proposals.csv",
     )
 
+    # 04_award_proposals.sql is shared with Award's own
+    # archive.award_funding_proposal loader (already COMPLETE) and
+    # selects the raw Oracle column names UPDATE_TIMESTAMP/UPDATE_USER
+    # verbatim, normalized to update_timestamp/update_user - never
+    # renamed in the SQL file itself, since that file must not change
+    # shape out from under Award's own consumption of it. Renamed here,
+    # Proposal-side only, to match archive.proposal_award's real
+    # source_update_timestamp/source_update_user columns (the same
+    # target names Award's own archive.award_funding_proposal uses).
+    dataframe = dataframe.rename(
+        columns={
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+        }
+    )
+
     convert_numeric(
         dataframe,
         ["award_funding_proposal_id", "proposal_id", "award_id"],
