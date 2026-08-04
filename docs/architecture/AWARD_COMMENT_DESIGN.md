@@ -201,7 +201,34 @@ far.
    rerun, one-Oracle-read-per-table batch assertion, full-batch
    rollback on a bad row.
 
+## Implementation update: comment_type is now archived (2026-08-03)
+
+The "Decisions" and "Open questions" sections above, written during the
+initial investigation, said `COMMENT_TYPE` would be kept as a bare,
+unjoined lookup code. That was revisited and reversed before
+implementation: `COMMENT_TYPE` is now archived once as a shared
+reference entity (`archive.comment_type`, `V057__create_comment_type.sql`,
+`sql/extract/reference/06_comment_type.sql`), mirroring the existing
+`archive.unit`/`archive.unit_administrator`/
+`archive.unit_administrator_type` reference-table precedent, rather than
+denormalizing `comment_type_description`/`award_comment_screen_flag`
+onto every `award_comment` row. This resolves the "Open questions" entry
+about `AWARD_COMMENT_SCREEN_FLAG` — see [the Award Comments business
+rule](../kuali-business-rules/Award%20Comments.md) for what that flag
+actually controls, confirmed against real BU data (23 real
+`COMMENT_TYPE` rows, only 2 with `screen_flag='Y'`).
+
+The API/UI layer built on top of this (family-wide history query by
+`awardNumber`, grouped by comment type, current/history split with
+Kuali's own oldest-to-newest dedup) is documented as business-rule
+discoveries rather than schema decisions - see
+[`docs/kuali-business-rules/Award Comments.md`](../kuali-business-rules/Award%20Comments.md)
+and
+[`docs/kuali-business-rules/Comment History.md`](../kuali-business-rules/Comment%20History.md).
+
 ## Date last updated
 
-2026-07-31 (initial version - Award Comment; `AwardCgb`
-re-investigated and confirmed NOT reclassified).
+2026-08-03 (implementation complete: `archive.comment_type` reference
+table, family-wide Award Comments API/UI, live-verified against real
+Award 100330-00001 data). Initial version 2026-07-31 (investigation;
+`AwardCgb` re-investigated and confirmed NOT reclassified).

@@ -123,7 +123,14 @@ infer meaning from a table name or a bare `COUNT(*)`; inspect migrations,
 schema, and source mappings before deciding the grain. The Award
 implementation is the reference/mirror point for new domains (Proposal was
 built to mirror it) — when in doubt about how to structure a new domain,
-read Award's repository/service/controller first.
+read Award's repository/service/controller first. Before implementing
+scoping/aggregation/history behavior for any Award-adjacent feature,
+check [`docs/kuali-business-rules/`](docs/kuali-business-rules/README.md)
+for a real, source-verified Kuali behavioral rule that already applies —
+several plausible-looking scoping assumptions (family-wide vs.
+version-scoped queries, which occurrence survives a history collapse)
+have been implemented backwards at least once in this project before
+being caught against live data.
 
 - **Award**: business grain is `COUNT(DISTINCT award_number)`; `Historical
   Award Records` = every row in `archive.award_version`. Multiple rows may

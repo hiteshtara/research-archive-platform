@@ -37,6 +37,31 @@ Terraform as dead infrastructure (zero
 code references anywhere); `landing/`/`validation/` were kept because IRB's
 export pipeline actively uses those prefix namespaces.
 
+## Award Comments: archive COMMENT_TYPE as a shared reference table
+
+`AWARD_COMMENT.COMMENT_TYPE_CODE` is a real, Oracle-enforced FK into
+`COMMENT_TYPE`. The first Award Comments implementation planned to
+denormalize `comment_type_description`/`award_comment_screen_flag`
+directly onto every `archive.award_comment` row. That plan was reversed
+before implementation: `COMMENT_TYPE` is instead archived once as its
+own shared reference entity (`archive.comment_type`,
+`V057__create_comment_type.sql`), mirroring the existing
+`archive.unit`/`archive.unit_administrator`/
+`archive.unit_administrator_type` precedent, with the repository
+joining to it at query time. Real BU Oracle data (23 rows) confirmed
+only 2 of 23 comment types have `award_comment_screen_flag='Y'`
+("General Comments", "Fiscal Report Comments") - everything else is
+real archived data but excluded from the Award Comments screen, matching
+Kuali's own behavior. See
+[`docs/kuali-business-rules/Award Comments.md`](kuali-business-rules/Award%20Comments.md)
+and [`docs/architecture/AWARD_COMMENT_DESIGN.md`](architecture/AWARD_COMMENT_DESIGN.md).
+
+A second, independently significant finding from this same feature: the
+history-collapsing algorithm for repeated comment text must keep the
+**oldest** occurrence of a run of identical values, not the newest - see
+[`docs/kuali-business-rules/Comment History.md`](kuali-business-rules/Comment%20History.md)
+for why, with a real example spanning 2014-2021.
+
 ## Award identifiers: workflow document number vs. modification number
 
 `AWARD.MODIFICATION_NUMBER` is not the Kuali workflow document number —
