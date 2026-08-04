@@ -47,6 +47,27 @@ class ProjectRootResolutionTest(unittest.TestCase):
         )
 
 
+class UnresolvedAwardIdHandlingTest(unittest.TestCase):
+    # Regression test for a real, live-caught issue: this archive holds
+    # only a fraction of all Oracle Awards (loaded incrementally), so a
+    # Proposal batch will routinely reference an Award ID not yet
+    # loaded. upsert_proposal_awards() used to raise and abort the
+    # WHOLE transaction (rolling back every Proposal version in the
+    # same batch too) - "preserve every Proposal version" must not be
+    # blocked by an unrelated Award-population gap. Fixed to skip and
+    # log the specific unresolved rows instead (the INSERT's own JOIN
+    # to archive.award_version already filters them out naturally) -
+    # verified statically here since exercising the real SQL needs a
+    # live Postgres connection, covered instead by the live fixture/
+    # batch load itself.
+    def test_upsert_proposal_awards_does_not_raise_for_unresolved_award_ids(
+        self,
+    ) -> None:
+        source = inspect.getsource(load_proposals_from_csv.upsert_proposal_awards)
+        self.assertNotIn("raise RuntimeError", source)
+        self.assertIn("logger.warning", source)
+
+
 class PrepareVersionsTest(unittest.TestCase):
     def _fixture_row(self, **overrides):
         row = {

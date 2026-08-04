@@ -630,19 +630,31 @@ def upsert_proposal_awards(
     ).scalars().all()
 
     if unresolved_award_ids:
+        # A real, expected state, not an error: this archive currently
+        # holds only a fraction of all Oracle Awards (loaded
+        # incrementally, batch by batch - see docs/kuali-business-rules/
+        # InstitutionalProposal.md), so a Proposal batch will routinely
+        # reference Award IDs not yet loaded. "Preserve every Proposal
+        # version" takes priority over "every award link must resolve
+        # today" - these specific links are skipped (never fabricated,
+        # never silently dropped without a trace) and will UPSERT
+        # cleanly on a future re-run once their Award is loaded, since
+        # this whole loader is idempotent.
         preview = ", ".join(
             str(award_id)
             for award_id in unresolved_award_ids[:20]
         )
 
-        raise RuntimeError(
-            "award_proposals.csv contains Award IDs that do not "
-            "exist in archive.award_version: "
-            + preview
+        logger.warning(
+            "Skipping {} proposal_award row(s) whose Award ID is not "
+            "yet loaded in archive.award_version: {}{}",
+            len(unresolved_award_ids),
+            preview,
+            " ..." if len(unresolved_award_ids) > 20 else "",
         )
 
     logger.info(
-        "UPSERT {:<28} {:,} rows",
+        "UPSERT {:<28} attempting {:,} row(s), some may be skipped above",
         "proposal_award",
         len(awards),
     )
