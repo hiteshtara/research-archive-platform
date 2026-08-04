@@ -28,111 +28,28 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getDashboard } from "../api/client";
+import {
+  futureModuleCards,
+  historicalActivityCards,
+  primaryBusinessCards,
+} from "../features/dashboard/dashboardPresentation.mjs";
 import type { DashboardSummary } from "../types/api";
 
-const primaryBusinessCards: Array<{
-  key: keyof DashboardSummary;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  path: string;
-}> = [
-  {
-    key: "irb",
-    title: "Current IRB Records",
-    description: "Current curated IRB records available for search",
-    icon: <MenuBookOutlined />,
-    path: "/irb",
-  },
-  {
-    key: "awards",
-    title: "Awards",
-    description: "Distinct institutional award numbers",
-    icon: <ArchiveOutlined />,
-    path: "/awards",
-  },
-  {
-    key: "proposals",
-    title: "Proposals",
-    description: "Distinct institutional proposal numbers",
-    icon: <DescriptionOutlined />,
-    path: "/proposals",
-  },
-];
-
-const historicalActivityCards: Array<{
-  key: keyof DashboardSummary;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  path: string;
-}> = [
-  {
-    key: "awardHistoryRecords",
-    title: "Historical Award Records",
-    description: "All preserved Kuali Award source rows",
-    icon: <HistoryOutlined />,
-    path: "/awards",
-  },
-  {
-    key: "proposalHistoryRecords",
-    title: "Historical Proposal Records",
-    description: "All preserved Kuali Proposal history rows",
-    icon: <HistoryOutlined />,
-    path: "/proposals",
-  },
-  {
-    key: "submissions",
-    title: "Submissions",
-    description: "Initial applications, amendments, renewals and other submissions",
-    icon: <DescriptionOutlined />,
-    path: "/irb",
-  },
-  {
-    key: "fundingRecords",
-    title: "Funding Relationships",
-    description: "Archived IRB funding source relationships",
-    icon: <GavelOutlined />,
-    path: "/irb",
-  },
-  {
-    key: "timelineEvents",
-    title: "Timeline Events",
-    description: "Historical workflow and review events",
-    icon: <TimelineOutlined />,
-    path: "/irb",
-  },
-];
-
-const futureModuleCards: Array<{
-  key: keyof DashboardSummary;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  path: string;
-}> = [
-  {
-    key: "negotiations",
-    title: "Negotiations",
-    description: "Agreement and negotiation records",
-    icon: <HandshakeOutlined />,
-    path: "/negotiations",
-  },
-  {
-    key: "subawards",
-    title: "Subawards",
-    description: "Distinct institutional subaward codes",
-    icon: <GavelOutlined />,
-    path: "/subawards",
-  },
-  {
-    key: "documents",
-    title: "Documents",
-    description: "Legacy files and attachments",
-    icon: <FolderOutlined />,
-    path: "/documents",
-  },
-];
+// Icons are JSX and can't live in the plain-data presentation-helper
+// module, so each card's icon is looked up here by key instead.
+const CARD_ICONS: Record<string, React.ReactNode> = {
+  irb: <MenuBookOutlined />,
+  awards: <ArchiveOutlined />,
+  proposals: <DescriptionOutlined />,
+  awardHistoryRecords: <HistoryOutlined />,
+  proposalHistoryRecords: <HistoryOutlined />,
+  submissions: <DescriptionOutlined />,
+  fundingRecords: <GavelOutlined />,
+  timelineEvents: <TimelineOutlined />,
+  negotiations: <HandshakeOutlined />,
+  subawards: <GavelOutlined />,
+  documents: <FolderOutlined />,
+};
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -244,7 +161,7 @@ export function DashboardPage() {
 
         <Grid container spacing={2.5}>
           {primaryBusinessCards.map((card) => {
-            const value = dashboard[card.key];
+            const value = dashboard[card.key as keyof DashboardSummary];
 
             return (
               <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -279,7 +196,7 @@ export function DashboardPage() {
                           color: "primary.main",
                         }}
                       >
-                        {card.icon}
+                        {CARD_ICONS[card.key]}
                       </Box>
 
                       <Typography variant="h4">
@@ -318,7 +235,7 @@ export function DashboardPage() {
 
         <Grid container spacing={2.5}>
           {historicalActivityCards.map((card) => {
-            const value = dashboard[card.key];
+            const value = dashboard[card.key as keyof DashboardSummary];
 
             return (
               <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -354,7 +271,7 @@ export function DashboardPage() {
                           color: "text.secondary",
                         }}
                       >
-                        {card.icon}
+                        {CARD_ICONS[card.key]}
                       </Box>
 
                       <Typography variant="h4">
@@ -390,7 +307,7 @@ export function DashboardPage() {
 
         <Grid container spacing={2.5}>
           {futureModuleCards.map((card) => {
-            const value = dashboard[card.key];
+            const value = dashboard[card.key as keyof DashboardSummary];
 
             return (
               <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -421,7 +338,7 @@ export function DashboardPage() {
                           color: "text.secondary",
                         }}
                       >
-                        {card.icon}
+                        {CARD_ICONS[card.key]}
                       </Box>
 
                       <Typography variant="h4">

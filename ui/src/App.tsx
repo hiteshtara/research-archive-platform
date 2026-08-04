@@ -2,8 +2,6 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./layout/AppLayout";
 
-import { AwardFamiliesPage } from "./pages/AwardFamiliesPage";
-import { AwardHistoryPage } from "./pages/AwardHistoryPage";
 import { AwardDashboardPage } from "./pages/award/AwardDashboardPage";
 import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
 import { AwardSearchPage } from "./pages/award/AwardSearchPage";
@@ -57,14 +55,21 @@ export default function App() {
           element={<Navigate to="/irb" replace />}
         />
 
+        {/* Retired: the legacy Award Families/History pages predated
+            the current Award Search/Dashboard experience and bypassed
+            it entirely (raw award_number grouping mislabeled as
+            "families", no hierarchy/comments/contacts/Time & Money).
+            Redirected rather than 404ing so no old bookmark/link
+            strands a user - see docs/kuali-business-rules for the
+            current Award object model these routes now lead into. */}
         <Route
           path="awards"
-          element={<AwardFamiliesPage />}
+          element={<Navigate to="/awards/search" replace />}
         />
 
         <Route
           path="awards/history/:awardNumber"
-          element={<AwardHistoryPage />}
+          element={<Navigate to="/awards/search" replace />}
         />
 
         <Route
