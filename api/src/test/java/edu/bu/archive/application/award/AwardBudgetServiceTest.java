@@ -168,22 +168,28 @@ class AwardBudgetServiceTest {
     }
 
     @Test
-    void findBudgetSummaryLeavesLimitSnapshotsNullForConvertedVersionsWhereTheyWereNeverSet() {
-        // Real fixture: this award's own versions 1-4 ("Converted Budget
-        // Document"/pre-snapshot amendments) never had obligated_total/
-        // total_cost_limit populated in Kuali - archived as null, not 0.
+    void findBudgetSummaryLeavesOnlyTheAwardLevelCeilingNullForAConvertedVersionWhereItWasNeverSet() {
+        // Real fixture, live-verified against the deployed API: this
+        // award's own version 4 ("Converted Budget Document"/pre-snapshot
+        // amendment) never had obligated_total (awardBudgetTotalCostLimit)
+        // populated in Kuali - archived as null, not 0. total_cost_limit
+        // (budgetChangeTotalCostLimit) is a SEPARATE column and WAS
+        // populated on this same version (-27627.44, equal to its own
+        // total_cost since no prior Posted budget existed yet to
+        // subtract) - the two snapshots must never be assumed to be
+        // null/non-null together.
         when(repository.findFamilyPositionForId(558547L))
                 .thenReturn(Optional.of(new AwardFamilyPositionRow(LIMIT_FIXTURE_AWARD_NUMBER, 8)));
         when(repository.findBudgetsInScope(LIMIT_FIXTURE_AWARD_NUMBER, 8)).thenReturn(List.of(
                 row(126808L, 558547L, 8, 4, "9", "Posted",
-                        new BigDecimal("-27627.44"), null, null)
+                        new BigDecimal("-27627.44"), null, new BigDecimal("-27627.44"))
         ));
 
         AwardBudgetSummaryResponse summary = service.findBudgetSummary(558547L);
 
         assertThat(summary.totalCost()).isEqualByComparingTo("-27627.44");
         assertThat(summary.awardBudgetTotalCostLimit()).isNull();
-        assertThat(summary.budgetChangeTotalCostLimit()).isNull();
+        assertThat(summary.budgetChangeTotalCostLimit()).isEqualByComparingTo("-27627.44");
     }
 
     @Test
@@ -194,7 +200,7 @@ class AwardBudgetServiceTest {
                 row(176666L, 2280896L, 9, 5, "9", "Posted",
                         new BigDecimal("0.01"), new BigDecimal("699246.57"), new BigDecimal("0.01")),
                 row(126808L, 558547L, 8, 4, "9", "Posted",
-                        new BigDecimal("-27627.44"), null, null)
+                        new BigDecimal("-27627.44"), null, new BigDecimal("-27627.44"))
         );
         when(repository.findBudgetsInScope(LIMIT_FIXTURE_AWARD_NUMBER, 9)).thenReturn(rows);
 
@@ -210,7 +216,7 @@ class AwardBudgetServiceTest {
         AwardBudgetVersionResponse v4 = page.content().stream()
                 .filter(v -> v.budgetVersionNumber() == 4).findFirst().orElseThrow();
         assertThat(v4.awardBudgetTotalCostLimit()).isNull();
-        assertThat(v4.budgetChangeTotalCostLimit()).isNull();
+        assertThat(v4.budgetChangeTotalCostLimit()).isEqualByComparingTo("-27627.44");
     }
 
     @Test

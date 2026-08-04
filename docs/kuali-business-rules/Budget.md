@@ -242,15 +242,29 @@ already-archived data — this award's four prior Posted budgets
 
 ### A real, honest archive gap: not every historical version has these snapshots
 
-For this same fixture, `obligated_total`/`total_cost_limit` are `NULL`
-on the award's own versions 1–4 (all "Converted Budget Document" — i.e.
-pre-migration/legacy versions) and only populated starting version 5.
-This is not a defect to hide: Kuali's live screen would also show
-nothing meaningful for a version whose `setBudgetLimits()` never ran.
-The API/UI must render these as `null`/`—`, never `$0.00`, and must
-**never recompute them** from `award_budget_limit`/`award_amount_info`
-— the columns already exist, verbatim, on `archive.award_budget`,
-population-independent of ETL/migration changes.
+For this same fixture, `obligated_total` (`awardBudgetTotalCostLimit`)
+is `NULL` on the award's own versions 1–4 (all "Converted Budget
+Document" — i.e. pre-migration/legacy versions created before Kuali's
+`OBLIGATED_TOTAL` snapshot existed) and only populated starting version
+5 — live-verified: `GET .../budget/versions` for this family returns
+`awardBudgetTotalCostLimit: null` for versions 1–4 and `699246.57` for
+version 5. `total_cost_limit` (`budgetChangeTotalCostLimit`) is a
+*separate* column and is **not** null for those same versions — it was
+populated on every version (585707.00 / 88902.00 / 52265.00 /
+−27627.44 for versions 1–4 respectively, each exactly equal to that
+version's own `total_cost` since no prior Posted budget existed yet to
+subtract). The two snapshot columns were evidently introduced into
+Kuali's `setBudgetLimits()` at different points, or one was
+value-equal-to-zero-headroom by coincidence on early versions — do not
+assume both are null or both are populated together; each must be
+rendered independently. This is not a defect to hide: Kuali's live
+screen would also show nothing meaningful for `Budget Total Cost Limit`
+on a version whose Award-level ceiling was never snapshotted. The
+API/UI must render a missing value as `null`/`—`, never `$0.00`, and
+must **never recompute either field** from `award_budget_limit`/
+`award_amount_info` — both columns already exist, verbatim, on
+`archive.award_budget`, population-independent of ETL/migration
+changes.
 
 ### Implementation
 
@@ -443,13 +457,20 @@ verification later.
 **`award_number = "105698-00002"`**, 9 sequences (`award_id` 7388
 through 2280896), 5 budget versions — the fixture used to verify the
 Budget Total Cost Limit / Budget Change Total Cost Limit semantic fix
-above. Versions 1–4 (`award_id` 558547, sequence 8) are legacy
-"Converted Budget Document"/amendment versions with `obligated_total`/
-`total_cost_limit` both `NULL`; version 5 (`budget_id` 176666,
-`award_id` 2280896, sequence 9) is the "closeout" version with
-`total_cost = 0.01`, `obligated_total = 699246.57`,
-`total_cost_limit = 0.01` — proven against a live Kuali screenshot of
-this exact Award.
+above, and live-verified end to end against the deployed API
+(`GET /api/v1/awards/{awardId}/budget/summary|versions`) after
+deployment. Versions 1–4 (`award_id` 558547, sequence 8) are legacy
+"Converted Budget Document"/amendment versions with `obligated_total`
+(`awardBudgetTotalCostLimit`) `NULL` but `total_cost_limit`
+(`budgetChangeTotalCostLimit`) populated (585707.00 / 88902.00 /
+52265.00 / −27627.44 respectively — each equal to that version's own
+`total_cost`, since no prior Posted budget existed yet to subtract);
+version 5 (`budget_id` 176666, `award_id` 2280896, sequence 9) is the
+"closeout" version with `total_cost = 0.01`,
+`awardBudgetTotalCostLimit = 699246.57`,
+`budgetChangeTotalCostLimit = 0.01` — proven against a live Kuali
+screenshot of this exact Award, and matched to the cent by the live
+deployed API.
 
 ## Date last updated
 

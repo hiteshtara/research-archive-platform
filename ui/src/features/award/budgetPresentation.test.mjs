@@ -107,14 +107,18 @@ test("the shared currency formatter preserves cents for the real 105698-00002 li
   assert.equal(formatCurrencyAmount(0.01), "$0.01"); // Budget Change Total Cost Limit
 });
 
-test("a converted Budget version's null limit snapshots render as —, never $0.00", () => {
-  // Real fixture: this award's own versions 1-4 ("Converted Budget
-  // Document") never had obligated_total/total_cost_limit populated -
-  // archived as null, distinct from a real $0.00 value.
+test("a converted Budget version's null awardBudgetTotalCostLimit renders as —, never $0.00", () => {
+  // Real fixture, live-verified: this award's own version 4 ("Converted
+  // Budget Document") never had obligated_total (awardBudgetTotalCostLimit)
+  // populated - archived as null, distinct from a real $0.00 value.
+  // budgetChangeTotalCostLimit (total_cost_limit) is a SEPARATE column
+  // that WAS populated on this same version - the two must never be
+  // assumed null together.
   assert.equal(formatCurrencyAmount(null), "—");
   assert.notEqual(formatCurrencyAmount(null), "$0.00");
-  // That version's own Total Cost is a real, non-null persisted value
-  // and must render unchanged alongside the null limit snapshots.
+  // That version's own Total Cost and budgetChangeTotalCostLimit are
+  // both real, non-null persisted values (equal to each other here)
+  // and must render unchanged alongside the null awardBudgetTotalCostLimit.
   assert.equal(formatCurrencyAmount(-27627.44), "-$27,627.44");
 });
 
