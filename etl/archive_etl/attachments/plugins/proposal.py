@@ -193,6 +193,7 @@ class ProposalAttachmentPlugin(AttachmentPlugin):
     ) -> dict[str, Any]:
         return {
             "attachment_id": record.attachment_id,
+            "record_id": record.record_id,
             "proposal_id": record.record_id,
             "proposal_number": record.attributes["business_key"],
             "sequence_number": record.attributes["sequence_number"],
