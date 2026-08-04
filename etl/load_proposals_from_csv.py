@@ -19,7 +19,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Oracle extraction queries exist and match the loader's expected columns
 # for versions and awards. Proposal people had no verified Oracle extraction
 # query and has been removed entirely (API, UI, ETL, and the
-# archive.proposal_person table) - see docs/DECISIONS.md.
+# archive.proposal_person table) - see docs/DECISIONS.md. That decision is
+# about the Person/PersonUnit/UnitContact feature specifically, not about
+# Proposal as a whole - see docs/kuali-business-rules/InstitutionalProposal.md
+# for the live-verified People relationship this loader does not yet cover.
 VERSIONS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "01_proposal_versions.sql"
 )
@@ -42,8 +45,11 @@ VERSION_COLUMNS = [
     "proposal_id",
     "proposal_number",
     "version_number",
+    "document_number",
     "title",
     "proposal_sequence_status",
+    "status_code",
+    "status_description",
     "proposal_type_code",
     "proposal_type",
     "activity_type_code",
@@ -65,7 +71,25 @@ VERSION_COLUMNS = [
     "total_indirect_cost",
     "total_cost",
     "source_update_timestamp",
+    "source_update_user",
 ]
+
+# AWARD_FUNDING_PROPOSALS is loaded as exact awardId<->proposalId rows,
+# including its own real PK and row-level active flag - never reduced to
+# an award_number/proposal_number family relationship here (that
+# resolution belongs in the application layer - see
+# docs/kuali-business-rules/InstitutionalProposal.md's Award relationship
+# section, which proved Kuali itself only does that reduction at query
+# time, never at storage time).
+AWARD_COLUMNS = [
+    "award_funding_proposal_id",
+    "proposal_id",
+    "award_id",
+    "active",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
 
 def parse_args(
     arguments: list[str] | None = None,
@@ -87,7 +111,36 @@ def parse_args(
             "connectivity/transform logic - not a partial load)."
         ),
     )
-    return parser.parse_args(arguments)
+    parser.add_argument(
+        "--proposal-number",
+        action="append",
+        default=None,
+        help=(
+            "Load only the given PROPOSAL_NUMBER family/families "
+            "(repeatable). A real, bounded, idempotent UPSERT - never a "
+            "dry run. Every version in scope is loaded regardless of "
+            "proposal_sequence_status (preserve every version - see "
+            "docs/kuali-business-rules/InstitutionalProposal.md)."
+        ),
+    )
+    parser.add_argument(
+        "--max-families",
+        type=int,
+        default=None,
+        help=(
+            "Resolve the first N distinct PROPOSAL_NUMBERs from Oracle "
+            "(ordered by proposal_number) and load exactly those "
+            "families for real - a bounded batch, same idempotent "
+            "UPSERT path as --proposal-number. Mutually exclusive with "
+            "--proposal-number."
+        ),
+    )
+    args = parser.parse_args(arguments)
+
+    if args.proposal_number and args.max_families is not None:
+        parser.error("--proposal-number and --max-families are mutually exclusive")
+
+    return args
 
 
 def require_columns(
@@ -130,6 +183,24 @@ def convert_dates(
             )
 
 
+def convert_booleans(
+    dataframe: pd.DataFrame,
+    columns: list[str],
+) -> None:
+    # Oracle's ACTIVE column is a real CHAR('Y'/'N') flag (see
+    # AwardFundingProposal's own OjbCharBooleanConversion) - preserved
+    # here as an actual boolean, never dropped or reinterpreted.
+    for column in columns:
+        if column in dataframe.columns:
+            dataframe[column] = (
+                dataframe[column]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+                .map({"Y": True, "N": False})
+            )
+
+
 def require_values(
     dataframe: pd.DataFrame,
     columns: list[str],
@@ -155,11 +226,22 @@ def prepare_versions(
         "proposal_versions.csv",
     )
 
+    # proposal_type_code and activity_type_code are both real Oracle
+    # VARCHAR2 columns (confirmed via ALL_TAB_COLUMNS - the OJB
+    # mapping's "INTEGER" jdbc-type label for proposal_type_code does
+    # not match live DDL, the same kind of mapping-vs-reality gap this
+    # project has hit before). Their real value domains are proven
+    # 100% numeric-string across the whole table (live-verified: zero
+    # non-numeric PROPOSAL_TYPE_CODE/ACTIVITY_TYPE_CODE rows in Oracle),
+    # matching archive.proposal_version's existing INTEGER columns for
+    # both - safe to convert numerically in practice, unlike a
+    # genuinely alphanumeric code would be.
     convert_numeric(
         dataframe,
         [
             "proposal_id",
             "version_number",
+            "status_code",
             "proposal_type_code",
             "activity_type_code",
             "initial_direct_cost",
@@ -230,8 +312,12 @@ def prepare_awards(
 
     convert_numeric(
         dataframe,
-        ["proposal_id", "award_id"],
+        ["award_funding_proposal_id", "proposal_id", "award_id"],
     )
+
+    convert_booleans(dataframe, ["active"])
+
+    convert_dates(dataframe, ["source_update_timestamp"])
 
     require_values(
         dataframe,
@@ -239,14 +325,21 @@ def prepare_awards(
         "award_proposals.csv",
     )
 
+    # AWARD_FUNDING_PROPOSAL_ID is AWARD_FUNDING_PROPOSALS' own real
+    # Oracle PK - the correct de-duplication/UPSERT key. proposal_id +
+    # award_id alone is not guaranteed unique in Oracle (a relationship
+    # could in principle be recorded, deactivated, and re-recorded as a
+    # new row) and must never be silently collapsed - see
+    # docs/kuali-business-rules/InstitutionalProposal.md's explicit
+    # "preserve the row-level active flag, do not reduce it" rule.
     duplicate_links = dataframe.duplicated(
-        subset=["proposal_id", "award_id"],
+        subset=["award_funding_proposal_id"],
         keep="first",
     )
 
     if duplicate_links.any():
         logger.warning(
-            "Removed {} duplicate Proposal/Award relationships",
+            "Removed {} duplicate AWARD_FUNDING_PROPOSAL_ID rows",
             int(duplicate_links.sum()),
         )
 
@@ -254,7 +347,10 @@ def prepare_awards(
             ~duplicate_links
         ].copy()
 
-    return dataframe[["proposal_id", "award_id"]].copy()
+    available_columns = [
+        column for column in AWARD_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
 
 
 def load_dataframe(
@@ -376,16 +472,94 @@ def clear_existing_proposal_data(
     )
 
 
-def load_proposal_awards(
+def upsert_proposal_versions(
+    connection: Connection,
+    versions: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_version, keyed by
+    (proposal_id, version_number) - preserves every version regardless
+    of proposal_sequence_status (never filters CANCELED/ARCHIVED/PENDING
+    out), safe to re-run for the same families without truncating
+    unrelated data. Mirrors the UPSERT pattern established for Award/
+    Budget (see load_awards_from_csv.py's upsert_award_budget)."""
+    connection.execute(
+        text(
+            f"""
+            CREATE TEMPORARY TABLE proposal_version_stage (
+                {", ".join(
+                    f"{column} TIMESTAMP" if column == "source_update_timestamp"
+                    else f"{column} DATE" if column in (
+                        "initial_start_date", "initial_end_date",
+                        "total_start_date", "total_end_date",
+                    )
+                    else f"{column} NUMERIC" if column in (
+                        "proposal_id", "version_number", "status_code",
+                        "proposal_type_code", "activity_type_code",
+                        "initial_direct_cost", "initial_indirect_cost",
+                        "initial_total_cost", "total_direct_cost",
+                        "total_indirect_cost", "total_cost",
+                    )
+                    else f"{column} TEXT"
+                    for column in VERSION_COLUMNS
+                )}
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=versions[VERSION_COLUMNS],
+        schema="pg_temp",
+        table="proposal_version_stage",
+    )
+
+    update_columns = [
+        column
+        for column in VERSION_COLUMNS
+        if column not in ("proposal_id", "version_number")
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_version (
+                {", ".join(VERSION_COLUMNS)}
+            )
+            SELECT {", ".join(VERSION_COLUMNS)}
+            FROM proposal_version_stage
+            ON CONFLICT (proposal_id, version_number) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
+def upsert_proposal_awards(
     connection: Connection,
     awards: pd.DataFrame,
 ) -> int:
+    """Idempotent UPSERT of archive.proposal_award, keyed by
+    award_funding_proposal_id (AWARD_FUNDING_PROPOSALS' own real Oracle
+    PK) - exact awardId<->proposalId rows, row-level active flag
+    preserved verbatim, never reduced to an award_number/proposal_number
+    family relationship (see
+    docs/kuali-business-rules/InstitutionalProposal.md)."""
     connection.execute(
         text(
             """
             CREATE TEMPORARY TABLE proposal_award_stage (
+                award_funding_proposal_id BIGINT NOT NULL,
                 proposal_id BIGINT NOT NULL,
-                award_id BIGINT NOT NULL
+                award_id BIGINT NOT NULL,
+                active BOOLEAN,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
             ) ON COMMIT DROP
             """
         )
@@ -399,7 +573,7 @@ def load_proposal_awards(
 
     bulk_copy_dataframe(
         connection=connection,
-        dataframe=awards,
+        dataframe=awards[AWARD_COLUMNS],
         schema="pg_temp",
         table="proposal_award_stage",
     )
@@ -430,7 +604,7 @@ def load_proposal_awards(
         )
 
     logger.info(
-        "INSERT {:<28} {:,} rows",
+        "UPSERT {:<28} {:,} rows",
         "proposal_award",
         len(awards),
     )
@@ -439,17 +613,32 @@ def load_proposal_awards(
         text(
             """
             INSERT INTO archive.proposal_award (
+                award_funding_proposal_id,
                 proposal_id,
                 award_id,
-                award_number
+                award_number,
+                active,
+                source_update_timestamp,
+                source_update_user
             )
             SELECT
+                stage.award_funding_proposal_id,
                 stage.proposal_id,
                 stage.award_id,
-                award.award_number
+                award.award_number,
+                stage.active,
+                stage.source_update_timestamp,
+                stage.source_update_user
             FROM proposal_award_stage stage
             JOIN archive.award_version award
                 ON award.award_id = stage.award_id
+            ON CONFLICT (award_funding_proposal_id) DO UPDATE SET
+                proposal_id = EXCLUDED.proposal_id,
+                award_id = EXCLUDED.award_id,
+                award_number = EXCLUDED.award_number,
+                active = EXCLUDED.active,
+                source_update_timestamp = EXCLUDED.source_update_timestamp,
+                source_update_user = EXCLUDED.source_update_user
             """
         )
     )
@@ -457,12 +646,119 @@ def load_proposal_awards(
     return int(result.rowcount)
 
 
+def resolve_target_proposal_numbers(max_families: int) -> list[str]:
+    """--max-families: resolve the first N distinct PROPOSAL_NUMBERs
+    from Oracle (ordered), for a real, bounded batch load - the same
+    "small, bounded, verify, then proceed" discipline used for Award's
+    own batch population work, without building a persistent
+    batch-tracking framework in this first Proposal loading pass."""
+    source = OracleDataSource(VERSIONS_ORACLE_SQL)
+    all_versions = source.read()
+    distinct_numbers = (
+        all_versions["proposal_number"]
+        .drop_duplicates()
+        .sort_values()
+        .head(max_families)
+        .tolist()
+    )
+    return distinct_numbers
+
+
+def run_targeted_load(proposal_numbers: list[str]) -> None:
+    logger.info(
+        "Loading {} Proposal family/families: {}",
+        len(proposal_numbers),
+        ", ".join(proposal_numbers),
+    )
+
+    versions_source = OracleDataSource(VERSIONS_ORACLE_SQL)
+    versions_raw = versions_source.read_filtered(
+        column="proposal_number",
+        values=proposal_numbers,
+    )
+    versions = prepare_versions(versions_raw)
+
+    if versions.empty:
+        logger.warning(
+            "No PROPOSAL rows found for the requested "
+            "proposal_number(s): {}",
+            ", ".join(proposal_numbers),
+        )
+
+    proposal_ids = versions["proposal_id"].dropna().astype("int64").tolist()
+
+    awards_source = OracleDataSource(AWARDS_ORACLE_SQL)
+    awards_raw = (
+        awards_source.read_filtered(column="proposal_id", values=proposal_ids)
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    awards = prepare_awards(awards_raw) if not awards_raw.empty else awards_raw
+
+    logger.info(
+        "Prepared Proposal rows: versions={:,} awards={:,}",
+        len(versions),
+        len(awards),
+    )
+
+    engine = create_postgres_engine()
+
+    apply_migrations(
+        engine,
+        Path(__file__).resolve().parents[1] / "database" / "migrations",
+    )
+
+    total_rows = len(versions) + len(awards)
+
+    with engine.begin() as connection:
+        load_id = create_load_run(connection, total_rows)
+
+    try:
+        with engine.begin() as connection:
+            version_rows = upsert_proposal_versions(connection, versions)
+            award_rows = (
+                upsert_proposal_awards(connection, awards)
+                if not awards.empty
+                else 0
+            )
+
+            mark_load_complete(
+                connection,
+                load_id,
+                version_rows + award_rows,
+            )
+
+        logger.success(
+            "Proposal targeted load completed. "
+            "load_id={} families={} versions={} awards={} total={}",
+            load_id,
+            len(proposal_numbers),
+            version_rows,
+            award_rows,
+            version_rows + award_rows,
+        )
+    except Exception as error:
+        mark_load_failed(engine, load_id, str(error))
+        logger.exception("Proposal targeted load failed")
+        raise
+
+
 def main() -> None:
     arguments = parse_args()
 
+    if arguments.max_families is not None:
+        proposal_numbers = resolve_target_proposal_numbers(arguments.max_families)
+        run_targeted_load(proposal_numbers)
+        return
+
+    if arguments.proposal_number:
+        run_targeted_load(arguments.proposal_number)
+        return
+
     logger.info("Reading Proposal versions/awards from Oracle")
     versions = prepare_versions(OracleDataSource(VERSIONS_ORACLE_SQL).read())
-    awards = prepare_awards(OracleDataSource(AWARDS_ORACLE_SQL).read())
+    awards_raw = OracleDataSource(AWARDS_ORACLE_SQL).read()
+    awards = prepare_awards(awards_raw) if not awards_raw.empty else awards_raw
 
     if arguments.limit is not None:
         versions = versions.head(arguments.limit)
@@ -511,9 +807,10 @@ def main() -> None:
                 VERSION_COLUMNS,
             )
 
-            award_rows = load_proposal_awards(
-                connection,
-                awards,
+            award_rows = (
+                upsert_proposal_awards(connection, awards)
+                if not awards.empty
+                else 0
             )
 
             mark_load_complete(

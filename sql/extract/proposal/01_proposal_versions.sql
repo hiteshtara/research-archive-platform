@@ -2,8 +2,12 @@ SELECT
     p.proposal_id,
     p.proposal_number,
     p.sequence_number AS version_number,
+    p.document_number,
     p.title,
     p.proposal_sequence_status,
+
+    p.status_code,
+    ps.description AS status_description,
 
     p.proposal_type_code,
     pt.description AS proposal_type,
@@ -46,9 +50,13 @@ SELECT
            + NVL(p.total_indirect_cost_total, 0)
     END AS total_cost,
 
-    p.update_timestamp AS source_update_timestamp
+    p.update_timestamp AS source_update_timestamp,
+    p.update_user AS source_update_user
 
 FROM proposal p
+
+LEFT JOIN proposal_status ps
+    ON ps.proposal_status_code = p.status_code
 
 LEFT JOIN proposal_type pt
     ON pt.proposal_type_code = p.proposal_type_code
