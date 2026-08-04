@@ -123,9 +123,7 @@ export function ProposalFamiliesPage() {
                         sx={{ cursor: "pointer" }}
                         onClick={() =>
                           navigate(
-                            `/proposals/${encodeURIComponent(
-                              proposal.proposalNumber,
-                            )}`,
+                            `/proposals/dashboard/${proposal.currentProposalId}`,
                           )
                         }
                       >

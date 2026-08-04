@@ -1,14 +1,25 @@
-import { Box, CircularProgress, List, ListItemButton, ListItemText, Stack, Typography } from "@mui/material";
+import {
+  Box,
+  Chip,
+  CircularProgress,
+  List,
+  ListItemButton,
+  ListItemText,
+  Stack,
+  Typography,
+} from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { getProposalSummaryV1 } from "../../api/client";
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
+import { ComingSoonSection } from "../../components/award/ComingSoonSection";
 import { ProposalAttachmentsSection } from "../../components/proposal/ProposalAttachmentsSection";
 import { ProposalCommentsSection } from "../../components/proposal/ProposalCommentsSection";
 import { ProposalFundedAwardsSection } from "../../components/proposal/ProposalFundedAwardsSection";
 import { ProposalPeopleUnitsSection } from "../../components/proposal/ProposalPeopleUnitsSection";
+import { ProposalSponsorProgramSection } from "../../components/proposal/ProposalSponsorProgramSection";
 import { ProposalSummarySection } from "../../components/proposal/ProposalSummarySection";
 import { ProposalVersionsSection } from "../../components/proposal/ProposalVersionsSection";
 
@@ -16,18 +27,49 @@ const SECTIONS = [
   { key: "summary", label: "Summary" },
   { key: "versions", label: "Versions" },
   { key: "fundedAwards", label: "Funded Awards" },
-  { key: "attachments", label: "Attachments" },
   { key: "peopleUnits", label: "People and Units" },
+  { key: "attachments", label: "Attachments" },
   { key: "comments", label: "Comments" },
+  { key: "sponsorProgram", label: "Sponsor and Program" },
+  { key: "customData", label: "Custom Data" },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
+const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
+  "summary",
+  "versions",
+  "fundedAwards",
+  "peopleUnits",
+  "attachments",
+  "comments",
+  "sponsorProgram",
+]);
+
+function InfoRow({ label, value }: { label: string; value: string | null }) {
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ width: 64, flexShrink: 0, textTransform: "uppercase", letterSpacing: "0.04em" }}
+      >
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        {value ?? "—"}
+      </Typography>
+    </Stack>
+  );
+}
+
 // Institutional Proposal Dashboard - keyed by the exact surrogate
-// proposalId (one specific version), mirroring AwardDashboardPage's
-// own structure. proposalNumber, sequenceNumber, and
-// workflowDocumentNumber are shown as distinct identifiers - never
-// inferred one from another.
+// proposalId (one specific version), following the same visual
+// language as AwardDashboardPage: a left-nav section switcher, a
+// header that surfaces the identifiers/people that matter most at a
+// glance, and card-based summary stats rather than a long key-value
+// table. proposalNumber, sequenceNumber, and workflowDocumentNumber
+// are shown as distinct identifiers - never inferred one from another.
 export function ProposalDashboardPage() {
   const { proposalId: proposalIdParameter } = useParams<{
     proposalId: string;
@@ -64,41 +106,59 @@ export function ProposalDashboardPage() {
     <Stack spacing={3}>
       <Box
         sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
           pb: 2.25,
           borderBottom: "1px solid",
           borderColor: "divider",
         }}
       >
-        <Box>
-          <Typography sx={{ fontSize: 20, fontWeight: 700 }}>
-            {summary.proposalNumber}
-          </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 2,
+          }}
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ fontSize: 20, fontWeight: 700 }}>
+              Institutional Proposal {summary.proposalNumber}
+            </Typography>
 
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ mt: 0.5, maxWidth: 640 }}
-          >
-            {summary.title ?? "Untitled proposal"}
-          </Typography>
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 0.5, maxWidth: 640 }}
+            >
+              {summary.title ?? "Untitled proposal"}
+            </Typography>
 
-          <Typography
-            variant="caption"
-            color="text.disabled"
-            sx={{ display: "block", mt: 0.75, fontFamily: "monospace" }}
-          >
-            proposal_id {summary.proposalId} &middot; sequence{" "}
-            {summary.sequenceNumber}
-            {summary.workflowDocumentNumber
-              ? ` · workflow document ${summary.workflowDocumentNumber}`
-              : ""}
-          </Typography>
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ mt: 1.25, flexWrap: "wrap", alignItems: "center" }}
+            >
+              <AwardStatusPill status={summary.proposalSequenceStatus} />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`Version ${summary.sequenceNumber}`}
+              />
+              {summary.workflowDocumentNumber && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`Workflow ${summary.workflowDocumentNumber}`}
+                />
+              )}
+            </Stack>
+          </Box>
         </Box>
 
-        <AwardStatusPill status={summary.status} />
+        <Stack spacing={0.5} sx={{ mt: 2 }}>
+          <InfoRow label="PI" value={summary.principalInvestigatorName} />
+          <InfoRow label="Sponsor" value={summary.sponsorName} />
+          <InfoRow label="Lead Unit" value={summary.leadUnitName} />
+        </Stack>
       </Box>
 
       <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
@@ -159,16 +219,29 @@ export function ProposalDashboardPage() {
             <ProposalFundedAwardsSection proposalId={proposalId} />
           )}
 
-          {activeSection === "attachments" && (
-            <ProposalAttachmentsSection proposalId={proposalId} />
-          )}
-
           {activeSection === "peopleUnits" && (
             <ProposalPeopleUnitsSection proposalId={proposalId} />
           )}
 
+          {activeSection === "attachments" && (
+            <ProposalAttachmentsSection proposalId={proposalId} />
+          )}
+
           {activeSection === "comments" && (
             <ProposalCommentsSection proposalId={proposalId} />
+          )}
+
+          {activeSection === "sponsorProgram" && (
+            <ProposalSponsorProgramSection proposalId={proposalId} />
+          )}
+
+          {!IMPLEMENTED_SECTIONS.has(activeSection) && (
+            <ComingSoonSection
+              label={
+                SECTIONS.find((section) => section.key === activeSection)
+                  ?.label ?? ""
+              }
+            />
           )}
         </Box>
       </Box>
