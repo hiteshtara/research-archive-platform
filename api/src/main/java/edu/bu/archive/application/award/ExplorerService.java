@@ -16,6 +16,7 @@ import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -149,8 +150,14 @@ public class ExplorerService {
             Boolean hasFundedAward,
             BigDecimal minimumAwardAmount,
             String sponsorCode,
+            String sponsorName,
             String leadUnitNumber,
             String proposalStatus,
+            String personName,
+            String proposalType,
+            String activityType,
+            LocalDate dateFrom,
+            LocalDate dateTo,
             int page,
             int size
     ) {
@@ -162,8 +169,14 @@ public class ExplorerService {
                 hasFundedAward,
                 minimumAwardAmount,
                 sponsorCode,
+                sponsorName,
                 leadUnitNumber,
                 proposalStatus,
+                personName,
+                proposalType,
+                activityType,
+                dateFrom,
+                dateTo,
                 safeSize,
                 safePage * safeSize
         );

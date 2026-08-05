@@ -22,6 +22,8 @@ public record ExplorerProposalDiscoveryResponse(
         String proposalNumber,
         String proposalTitle,
         String workflowDocumentNumber,
+        String sponsorName,
+        String principalInvestigatorName,
         int attachmentCount,
         String linkedAwardNumber,
         Long navigableCurrentAwardId,

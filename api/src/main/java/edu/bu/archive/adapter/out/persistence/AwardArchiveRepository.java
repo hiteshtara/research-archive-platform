@@ -49,6 +49,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -2113,6 +2114,26 @@ public class AwardArchiveRepository {
      * COALESCE(obligated, anticipated) - obligated is authoritative once
      * an Award has real obligation activity; anticipated is the
      * pre-obligation estimate used before that.
+     *
+     * principal_investigator: LATERAL-picks archive.proposal_person
+     * where contact_role_code = 'PI' - live-verified zero proposal_ids
+     * have more than one PI row (a plain LEFT JOIN would already be
+     * safe), but LATERAL + LIMIT 1 is kept for defense in depth against
+     * that invariant ever being violated by a future load. sponsorName
+     * is denormalized directly on proposal_version, no join needed.
+     * sponsorName/personName filters are ILIKE substring matches (not
+     * exact), because sponsor identity in this Oracle data is genuinely
+     * fragmented - live-verified NIH alone spans ~15 distinct
+     * institute-specific sponsor_codes (NCI, NHLBI, NIAID, ...), so a
+     * caller searching "NIH" needs a name-substring match, not a single
+     * exact code; NSF by contrast is a single real code (301573).
+     * dateFrom/dateTo filter by overlap with the proposal's own project
+     * period (initial_start_date/total_end_date), not by
+     * source_update_timestamp - see
+     * docs/kuali-business-rules/HISTORICAL_PERSON_PARTICIPATION.md §6
+     * for why "recorded" vs. "project period" are different questions;
+     * this endpoint answers the project-period question, matching what
+     * a research administrator actually means by a date range here.
      */
     private static final String PROPOSAL_DISCOVERY_SELECT = """
             SELECT
@@ -2120,6 +2141,8 @@ public class AwardArchiveRepository {
                 pv.proposal_number,
                 pv.title AS proposal_title,
                 pv.document_number AS workflow_document_number,
+                pv.sponsor_name AS sponsor_name,
+                pi.full_name AS principal_investigator_name,
                 CAST(COALESCE(att.attachment_count, 0) AS INTEGER) AS attachment_count,
                 linked_award.award_number AS linked_award_number,
                 current_award.award_id AS navigable_current_award_id,
@@ -2133,6 +2156,14 @@ public class AwardArchiveRepository {
                 FROM archive.proposal_attachment pat
                 WHERE pat.proposal_id = pv.proposal_id
             ) att ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT pp.full_name
+                FROM archive.proposal_person pp
+                WHERE pp.proposal_id = pv.proposal_id
+                  AND pp.contact_role_code = 'PI'
+                ORDER BY pp.proposal_person_id
+                LIMIT 1
+            ) pi ON TRUE
             LEFT JOIN LATERAL (
                 SELECT pa.award_id, pa.award_number
                 FROM archive.proposal_award pa
@@ -2188,12 +2219,38 @@ public class AwardArchiveRepository {
                     OR pv.sponsor_code = CAST(:sponsorCode AS varchar)
               )
               AND (
+                    CAST(:sponsorName AS varchar) IS NULL
+                    OR pv.sponsor_name ILIKE '%' || CAST(:sponsorName AS varchar) || '%'
+              )
+              AND (
                     CAST(:leadUnitNumber AS varchar) IS NULL
                     OR pv.lead_unit_number = CAST(:leadUnitNumber AS varchar)
               )
               AND (
                     CAST(:proposalStatus AS varchar) IS NULL
                     OR pv.status_description = CAST(:proposalStatus AS varchar)
+              )
+              AND (
+                    CAST(:personName AS varchar) IS NULL
+                    OR pi.full_name ILIKE '%' || CAST(:personName AS varchar) || '%'
+              )
+              AND (
+                    CAST(:proposalType AS varchar) IS NULL
+                    OR pv.proposal_type = CAST(:proposalType AS varchar)
+              )
+              AND (
+                    CAST(:activityType AS varchar) IS NULL
+                    OR pv.activity_type = CAST(:activityType AS varchar)
+              )
+              AND (
+                    CAST(:dateFrom AS date) IS NULL
+                    OR pv.total_end_date IS NULL
+                    OR pv.total_end_date >= CAST(:dateFrom AS date)
+              )
+              AND (
+                    CAST(:dateTo AS date) IS NULL
+                    OR pv.initial_start_date IS NULL
+                    OR pv.initial_start_date <= CAST(:dateTo AS date)
               )
             ORDER BY pv.proposal_number
             LIMIT :limit OFFSET :offset
@@ -2204,8 +2261,14 @@ public class AwardArchiveRepository {
             Boolean hasFundedAward,
             BigDecimal minimumAwardAmount,
             String sponsorCode,
+            String sponsorName,
             String leadUnitNumber,
             String proposalStatus,
+            String personName,
+            String proposalType,
+            String activityType,
+            LocalDate dateFrom,
+            LocalDate dateTo,
             int limit,
             int offset
     ) {
@@ -2214,8 +2277,14 @@ public class AwardArchiveRepository {
                 .param("hasFundedAward", hasFundedAward)
                 .param("minimumAwardAmount", minimumAwardAmount)
                 .param("sponsorCode", sponsorCode)
+                .param("sponsorName", sponsorName)
                 .param("leadUnitNumber", leadUnitNumber)
                 .param("proposalStatus", proposalStatus)
+                .param("personName", personName)
+                .param("proposalType", proposalType)
+                .param("activityType", activityType)
+                .param("dateFrom", dateFrom)
+                .param("dateTo", dateTo)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(ExplorerProposalDiscoveryResponse.class)

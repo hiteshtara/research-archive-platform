@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -252,19 +253,24 @@ class ExplorerServiceTest {
     @Test
     void findProposalDiscoveryClampsPagingAndDelegatesEveryFilter() {
         ExplorerProposalDiscoveryResponse row = new ExplorerProposalDiscoveryResponse(
-                1238613L, "01157400", "Title", "125761", 3,
+                1238613L, "01157400", "Title", "125761",
+                "National Science Foundation", "Jane Q Investigator", 3,
                 "200268-00001", 605555L, "Award Title",
                 new BigDecimal("1500000.00"), new BigDecimal("1200000.00"),
                 148155L
         );
+        LocalDate from = LocalDate.of(2020, 1, 1);
+        LocalDate to = LocalDate.of(2025, 12, 31);
         when(repository.findProposalDiscoveryRows(
                 true, true, new BigDecimal("1000000"),
-                "NIH", "1203250000", "Funded", 50, 0
+                "301573", "National Science", "1203250000", "Funded",
+                "Investigator", "New", "Research", from, to, 50, 0
         )).thenReturn(List.of(row));
 
         List<ExplorerProposalDiscoveryResponse> result = service.findProposalDiscovery(
                 true, true, new BigDecimal("1000000"),
-                "NIH", "1203250000", "Funded", 0, 50
+                "301573", "National Science", "1203250000", "Funded",
+                "Investigator", "New", "Research", from, to, 0, 50
         );
 
         assertThat(result).containsExactly(row);
@@ -273,15 +279,18 @@ class ExplorerServiceTest {
     @Test
     void findProposalDiscoveryClampsAnOversizedPageRequest() {
         when(repository.findProposalDiscoveryRows(
-                null, null, null, null, null, null, 100, 0
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, 100, 0
         )).thenReturn(List.of());
 
         service.findProposalDiscovery(
-                null, null, null, null, null, null, 0, 5000
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, 0, 5000
         );
 
         org.mockito.Mockito.verify(repository).findProposalDiscoveryRows(
-                null, null, null, null, null, null, 100, 0
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, 100, 0
         );
     }
 }

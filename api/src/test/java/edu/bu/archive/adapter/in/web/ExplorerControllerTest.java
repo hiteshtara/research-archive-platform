@@ -245,7 +245,8 @@ class ExplorerControllerTest {
     @Test
     void proposalsIsRoutedUnderTheExplorerPrefixWithAllFilters() throws Exception {
         ExplorerProposalDiscoveryResponse row = new ExplorerProposalDiscoveryResponse(
-                1238613L, "01157400", "Title", "125761", 3,
+                1238613L, "01157400", "Title", "125761",
+                "National Science Foundation", "Jane Q Investigator", 3,
                 "200268-00001", 605555L, "Award Title",
                 new java.math.BigDecimal("1500000.00"),
                 new java.math.BigDecimal("1200000.00"),
@@ -253,7 +254,11 @@ class ExplorerControllerTest {
         );
         when(service.findProposalDiscovery(
                 true, true, new java.math.BigDecimal("1000000"),
-                "NIH", "1203250000", "Funded", 0, 50
+                "301573", "National Science", "1203250000", "Funded",
+                "Investigator", "New", "Research",
+                java.time.LocalDate.of(2020, 1, 1),
+                java.time.LocalDate.of(2025, 12, 31),
+                0, 50
         )).thenReturn(List.of(row));
 
         mockMvc.perform(
@@ -261,28 +266,41 @@ class ExplorerControllerTest {
                                 .param("hasAttachments", "true")
                                 .param("hasFundedAward", "true")
                                 .param("minimumAwardAmount", "1000000")
-                                .param("sponsorCode", "NIH")
+                                .param("sponsorCode", "301573")
+                                .param("sponsorName", "National Science")
                                 .param("leadUnitNumber", "1203250000")
                                 .param("proposalStatus", "Funded")
+                                .param("personName", "Investigator")
+                                .param("proposalType", "New")
+                                .param("activityType", "Research")
+                                .param("dateFrom", "2020-01-01")
+                                .param("dateTo", "2025-12-31")
                                 .param("page", "0")
                                 .param("size", "50")
                 )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].proposalNumber").value("01157400"))
+                .andExpect(jsonPath("$[0].principalInvestigatorName").value("Jane Q Investigator"))
+                .andExpect(jsonPath("$[0].sponsorName").value("National Science Foundation"))
                 .andExpect(jsonPath("$[0].navigableCurrentAwardId").value(605555))
                 .andExpect(jsonPath("$[0].exactLinkedAwardId").value(148155))
                 .andExpect(jsonPath("$[0].obligatedAmount").value(1500000.00));
 
         verify(service).findProposalDiscovery(
                 true, true, new java.math.BigDecimal("1000000"),
-                "NIH", "1203250000", "Funded", 0, 50
+                "301573", "National Science", "1203250000", "Funded",
+                "Investigator", "New", "Research",
+                java.time.LocalDate.of(2020, 1, 1),
+                java.time.LocalDate.of(2025, 12, 31),
+                0, 50
         );
     }
 
     @Test
     void proposalsAppliesDefaultsWhenNoFiltersAreGiven() throws Exception {
         when(service.findProposalDiscovery(
-                null, null, null, null, null, null, 0, 50
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, 0, 50
         )).thenReturn(List.of());
 
         mockMvc.perform(get("/api/v1/explorer/proposals"))
@@ -290,7 +308,8 @@ class ExplorerControllerTest {
                 .andExpect(jsonPath("$").isArray());
 
         verify(service).findProposalDiscovery(
-                null, null, null, null, null, null, 0, 50
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, 0, 50
         );
     }
 }

@@ -76,7 +76,7 @@ const navigation = [
           badge: "Dev",
         },
         {
-          label: "Proposal Discovery",
+          label: "Proposal Explorer",
           icon: <TravelExploreOutlined />,
           path: "/explorer/proposals",
           badge: "Dev",

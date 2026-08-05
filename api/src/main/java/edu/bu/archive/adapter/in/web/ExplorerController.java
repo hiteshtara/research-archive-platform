@@ -20,6 +20,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 /*
@@ -199,8 +201,17 @@ public class ExplorerController {
             @RequestParam(required = false)
             BigDecimal minimumAwardAmount,
 
+            @Parameter(description = "Exact sponsor_code match.")
             @RequestParam(required = false)
             String sponsorCode,
+
+            @Parameter(description = "Case-insensitive substring match "
+                    + "against sponsor_name - use this (not "
+                    + "sponsorCode) for a sponsor like \"NIH\", which "
+                    + "spans many institute-specific codes in the "
+                    + "source data.")
+            @RequestParam(required = false)
+            String sponsorName,
 
             @RequestParam(required = false)
             String leadUnitNumber,
@@ -209,6 +220,32 @@ public class ExplorerController {
                     + "status_description exactly (e.g. \"Funded\").")
             @RequestParam(required = false)
             String proposalStatus,
+
+            @Parameter(description = "Case-insensitive substring match "
+                    + "against the Proposal's PI full name.")
+            @RequestParam(required = false)
+            String personName,
+
+            @Parameter(description = "Exact match, e.g. \"New\", "
+                    + "\"Renewal\", \"Continuation\", \"Resubmission\".")
+            @RequestParam(required = false)
+            String proposalType,
+
+            @Parameter(description = "Exact match, e.g. \"Research\", "
+                    + "\"Training\", \"Research Training\".")
+            @RequestParam(required = false)
+            String activityType,
+
+            @Parameter(description = "Only Proposals whose project "
+                    + "period (initial_start_date..total_end_date) "
+                    + "overlaps [dateFrom, dateTo].")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate dateFrom,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate dateTo,
 
             @Parameter(description = "Zero-based page index.")
             @RequestParam(defaultValue = "0")
@@ -226,8 +263,14 @@ public class ExplorerController {
                         hasFundedAward,
                         minimumAwardAmount,
                         sponsorCode,
+                        sponsorName,
                         leadUnitNumber,
                         proposalStatus,
+                        personName,
+                        proposalType,
+                        activityType,
+                        dateFrom,
+                        dateTo,
                         page,
                         size
                 )

@@ -1497,6 +1497,8 @@ export interface ExplorerProposalDiscovery {
   proposalNumber: string;
   proposalTitle: string | null;
   workflowDocumentNumber: string | null;
+  sponsorName: string | null;
+  principalInvestigatorName: string | null;
   attachmentCount: number;
   linkedAwardNumber: string | null;
   navigableCurrentAwardId: number | null;
@@ -1511,8 +1513,14 @@ export interface ExplorerProposalDiscoveryFilters {
   hasFundedAward?: boolean;
   minimumAwardAmount?: number;
   sponsorCode?: string;
+  sponsorName?: string;
   leadUnitNumber?: string;
   proposalStatus?: string;
+  personName?: string;
+  proposalType?: string;
+  activityType?: string;
+  dateFrom?: string;
+  dateTo?: string;
   page?: number;
   size?: number;
 }

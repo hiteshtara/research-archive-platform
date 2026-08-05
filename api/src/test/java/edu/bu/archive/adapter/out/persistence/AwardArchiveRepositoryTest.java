@@ -691,7 +691,8 @@ class AwardArchiveRepositoryTest {
         when(query.list()).thenReturn(List.of());
 
         new AwardArchiveRepository(jdbc).findProposalDiscoveryRows(
-                null, null, null, null, null, null, 50, 0
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, 50, 0
         );
 
         String sql = firstSql(jdbc);
@@ -702,6 +703,10 @@ class AwardArchiveRepositoryTest {
                 // that could multiply the Proposal's own row
                 .contains("LEFT JOIN LATERAL")
                 .contains("SELECT COUNT(*) AS attachment_count")
+                // PI via a LATERAL pick of archive.proposal_person,
+                // never a join that could fan out the Proposal's row
+                .contains("FROM archive.proposal_person pp")
+                .contains("pp.contact_role_code = 'PI'")
                 // current amount is a single LATERAL-picked row (ORDER
                 // BY ... LIMIT 1) off award_amount_info, never an
                 // unbounded join across that table's full history

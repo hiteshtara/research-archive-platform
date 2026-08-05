@@ -10,7 +10,7 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 
 import { getProposalSummaryV1 } from "../../api/client";
 import { AwardStatusPill } from "../../components/award/AwardStatusPill";
@@ -36,6 +36,12 @@ const SECTIONS = [
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
+
+const SECTION_KEYS = new Set<string>(SECTIONS.map((section) => section.key));
+
+function isSectionKey(value: string | null): value is SectionKey {
+  return value !== null && SECTION_KEYS.has(value);
+}
 
 const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "summary",
@@ -78,7 +84,15 @@ export function ProposalDashboardPage() {
   }>();
   const proposalId = Number(proposalIdParameter);
 
-  const [activeSection, setActiveSection] = useState<SectionKey>("summary");
+  // Supports deep-linking directly into a section (e.g. Proposal
+  // Explorer's attachment-count click-through: /proposals/dashboard/
+  // {id}?section=attachments) - read once on mount, not kept in sync
+  // with later section clicks, matching how a normal in-page nav works.
+  const [searchParams] = useSearchParams();
+  const requestedSection = searchParams.get("section");
+  const [activeSection, setActiveSection] = useState<SectionKey>(
+    isSectionKey(requestedSection) ? requestedSection : "summary",
+  );
 
   const summaryQuery = useQuery({
     queryKey: ["proposal-summary-v1", proposalId],

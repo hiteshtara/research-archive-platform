@@ -1192,11 +1192,29 @@ export function getExplorerProposalDiscovery(
   if (filters.sponsorCode) {
     parameters.set("sponsorCode", filters.sponsorCode.trim());
   }
+  if (filters.sponsorName) {
+    parameters.set("sponsorName", filters.sponsorName.trim());
+  }
   if (filters.leadUnitNumber) {
     parameters.set("leadUnitNumber", filters.leadUnitNumber.trim());
   }
   if (filters.proposalStatus) {
     parameters.set("proposalStatus", filters.proposalStatus.trim());
+  }
+  if (filters.personName) {
+    parameters.set("personName", filters.personName.trim());
+  }
+  if (filters.proposalType) {
+    parameters.set("proposalType", filters.proposalType.trim());
+  }
+  if (filters.activityType) {
+    parameters.set("activityType", filters.activityType.trim());
+  }
+  if (filters.dateFrom) {
+    parameters.set("dateFrom", filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    parameters.set("dateTo", filters.dateTo);
   }
   parameters.set("page", String(filters.page ?? 0));
   parameters.set("size", String(filters.size ?? 50));
