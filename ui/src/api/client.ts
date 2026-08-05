@@ -1171,3 +1171,38 @@ export function getExplorerAttachments(
     signal,
   );
 }
+
+export function getExplorerProposalDiscovery(
+  filters: import("../types/api").ExplorerProposalDiscoveryFilters,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ExplorerProposalDiscovery[]> {
+  const parameters = new URLSearchParams();
+  if (filters.hasAttachments !== undefined) {
+    parameters.set("hasAttachments", String(filters.hasAttachments));
+  }
+  if (filters.hasFundedAward !== undefined) {
+    parameters.set("hasFundedAward", String(filters.hasFundedAward));
+  }
+  if (filters.minimumAwardAmount !== undefined) {
+    parameters.set(
+      "minimumAwardAmount",
+      String(filters.minimumAwardAmount),
+    );
+  }
+  if (filters.sponsorCode) {
+    parameters.set("sponsorCode", filters.sponsorCode.trim());
+  }
+  if (filters.leadUnitNumber) {
+    parameters.set("leadUnitNumber", filters.leadUnitNumber.trim());
+  }
+  if (filters.proposalStatus) {
+    parameters.set("proposalStatus", filters.proposalStatus.trim());
+  }
+  parameters.set("page", String(filters.page ?? 0));
+  parameters.set("size", String(filters.size ?? 50));
+
+  return request(
+    `/api/v1/explorer/proposals?${parameters.toString()}`,
+    signal,
+  );
+}

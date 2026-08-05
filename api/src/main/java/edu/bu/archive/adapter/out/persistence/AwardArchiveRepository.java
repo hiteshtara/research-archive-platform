@@ -14,6 +14,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitRow;
@@ -47,6 +48,7 @@ import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionHeaderRow;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -2059,6 +2061,164 @@ public class AwardArchiveRepository {
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(AwardBudgetPersonnelResponse.class)
+                .list();
+    }
+
+    /*
+     * --- Proposal Discovery (Explorer) --------------------------------
+     *
+     * Multi-filter, relational-only (no embeddings/vector search, no
+     * arbitrary SQL) discovery query rooted at the ACTIVE version of
+     * every Institutional Proposal family (pv.proposal_sequence_status
+     * = 'ACTIVE' - the same grain ProposalV1Repository/
+     * AwardArchiveRepository already treat as "the" current Proposal
+     * version elsewhere in this codebase). One row per Proposal, never
+     * fanned out:
+     *
+     *   - attachment_count: a LATERAL COUNT(*), not a join, so a
+     *     Proposal with N attachments doesn't multiply its own row.
+     *   - linked_award: LATERAL-picks at most one active
+     *     archive.proposal_award relationship per Proposal (ORDER BY
+     *     source_update_timestamp DESC, award_funding_proposal_id DESC)
+     *     - a deliberate discovery-tool simplification; a Proposal can
+     *       genuinely have multiple simultaneously-active funded-Award
+     *       relationships (live-verified: Proposal 01109910 has 3), but
+     *       this endpoint surfaces one representative link per row, not
+     *       the full relationship list (see
+     *       ProposalV1Controller's /funded-awards for that).
+     *   - current_award: resolves linked_award.award_number to that
+     *       family's CURRENT version (is_primary_current = TRUE) -
+     *       exactLinkedAwardId (linked_award.award_id) is kept for
+     *       audit only, never itself navigated to.
+     *   - current_amount: a LATERAL pick of current_award's own latest
+     *       archive.award_amount_info row (ORDER BY
+     *       award_amount_info_id DESC LIMIT 1) - the same "authoritative
+     *       single snapshot, never join every historical amount row"
+     *       technique already proven in findTimeAndMoneySummary, so a
+     *       multi-row amount history can never duplicate a Proposal's
+     *       own result row.
+     *
+     * Every filter parameter is nullable and short-circuits via
+     * "(CAST(:param AS type) IS NULL OR ...)" - omitting a filter means
+     * "don't filter on it", never "match nothing". The explicit CAST on
+     * every one of these (including the plain String filters, not just
+     * the Boolean/numeric ones) is required, not decorative - live-
+     * verified against real Postgres that a bare ":sponsorCode IS NULL
+     * OR pv.sponsor_code = :sponsorCode" throws
+     * psycopg.errors.AmbiguousParameter ("could not determine data type
+     * of parameter") when the value is null, even though the same
+     * parameter is also compared against a VARCHAR column elsewhere in
+     * the same statement - Postgres does not reliably infer the type
+     * from that second usage. minimumAwardAmount compares against
+     * COALESCE(obligated, anticipated) - obligated is authoritative once
+     * an Award has real obligation activity; anticipated is the
+     * pre-obligation estimate used before that.
+     */
+    private static final String PROPOSAL_DISCOVERY_SELECT = """
+            SELECT
+                pv.proposal_id,
+                pv.proposal_number,
+                pv.title AS proposal_title,
+                pv.document_number AS workflow_document_number,
+                CAST(COALESCE(att.attachment_count, 0) AS INTEGER) AS attachment_count,
+                linked_award.award_number AS linked_award_number,
+                current_award.award_id AS navigable_current_award_id,
+                current_award.title AS award_title,
+                current_amount.obligated_total_amount AS obligated_amount,
+                current_amount.anticipated_total_amount AS anticipated_amount,
+                linked_award.award_id AS exact_linked_award_id
+            FROM archive.proposal_version pv
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS attachment_count
+                FROM archive.proposal_attachment pat
+                WHERE pat.proposal_id = pv.proposal_id
+            ) att ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT pa.award_id, pa.award_number
+                FROM archive.proposal_award pa
+                WHERE pa.proposal_id = pv.proposal_id
+                  AND pa.active = TRUE
+                ORDER BY
+                    pa.source_update_timestamp DESC NULLS LAST,
+                    pa.award_funding_proposal_id DESC NULLS LAST
+                LIMIT 1
+            ) linked_award ON TRUE
+            LEFT JOIN archive.award_version current_award
+                ON current_award.award_number = linked_award.award_number
+                AND current_award.is_primary_current = TRUE
+            LEFT JOIN LATERAL (
+                SELECT amount.obligated_total_amount, amount.anticipated_total_amount
+                FROM archive.award_amount_info amount
+                WHERE amount.award_id = current_award.award_id
+                ORDER BY amount.award_amount_info_id DESC
+                LIMIT 1
+            ) current_amount ON TRUE
+            WHERE pv.proposal_sequence_status = 'ACTIVE'
+              AND (
+                    CAST(:hasAttachments AS boolean) IS NULL
+                    OR (
+                        CAST(:hasAttachments AS boolean) = TRUE
+                        AND COALESCE(att.attachment_count, 0) > 0
+                    )
+                    OR (
+                        CAST(:hasAttachments AS boolean) = FALSE
+                        AND COALESCE(att.attachment_count, 0) = 0
+                    )
+              )
+              AND (
+                    CAST(:hasFundedAward AS boolean) IS NULL
+                    OR (
+                        CAST(:hasFundedAward AS boolean) = TRUE
+                        AND linked_award.award_number IS NOT NULL
+                    )
+                    OR (
+                        CAST(:hasFundedAward AS boolean) = FALSE
+                        AND linked_award.award_number IS NULL
+                    )
+              )
+              AND (
+                    CAST(:minimumAwardAmount AS numeric) IS NULL
+                    OR COALESCE(
+                        current_amount.obligated_total_amount,
+                        current_amount.anticipated_total_amount
+                    ) > CAST(:minimumAwardAmount AS numeric)
+              )
+              AND (
+                    CAST(:sponsorCode AS varchar) IS NULL
+                    OR pv.sponsor_code = CAST(:sponsorCode AS varchar)
+              )
+              AND (
+                    CAST(:leadUnitNumber AS varchar) IS NULL
+                    OR pv.lead_unit_number = CAST(:leadUnitNumber AS varchar)
+              )
+              AND (
+                    CAST(:proposalStatus AS varchar) IS NULL
+                    OR pv.status_description = CAST(:proposalStatus AS varchar)
+              )
+            ORDER BY pv.proposal_number
+            LIMIT :limit OFFSET :offset
+            """;
+
+    public List<ExplorerProposalDiscoveryResponse> findProposalDiscoveryRows(
+            Boolean hasAttachments,
+            Boolean hasFundedAward,
+            BigDecimal minimumAwardAmount,
+            String sponsorCode,
+            String leadUnitNumber,
+            String proposalStatus,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql(PROPOSAL_DISCOVERY_SELECT)
+                .param("hasAttachments", hasAttachments)
+                .param("hasFundedAward", hasFundedAward)
+                .param("minimumAwardAmount", minimumAwardAmount)
+                .param("sponsorCode", sponsorCode)
+                .param("leadUnitNumber", leadUnitNumber)
+                .param("proposalStatus", proposalStatus)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(ExplorerProposalDiscoveryResponse.class)
                 .list();
     }
 

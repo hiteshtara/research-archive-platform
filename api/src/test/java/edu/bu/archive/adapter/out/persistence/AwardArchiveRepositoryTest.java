@@ -674,6 +674,46 @@ class AwardArchiveRepositoryTest {
                 .doesNotContain("archive.rolodex");
     }
 
+    @Test
+    void findProposalDiscoveryRowsScopesToActiveVersionAndNeverDuplicatesViaAmountHistory() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(
+                edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse.class
+        )).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findProposalDiscoveryRows(
+                null, null, null, null, null, null, 50, 0
+        );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("FROM archive.proposal_version pv")
+                .contains("pv.proposal_sequence_status = 'ACTIVE'")
+                // attachment count via a LATERAL COUNT(*), never a join
+                // that could multiply the Proposal's own row
+                .contains("LEFT JOIN LATERAL")
+                .contains("SELECT COUNT(*) AS attachment_count")
+                // current amount is a single LATERAL-picked row (ORDER
+                // BY ... LIMIT 1) off award_amount_info, never an
+                // unbounded join across that table's full history
+                .contains("FROM archive.award_amount_info amount")
+                .contains("ORDER BY amount.award_amount_info_id DESC")
+                .contains("LIMIT 1")
+                .contains("current_award.is_primary_current = TRUE")
+                .doesNotContain("pgvector")
+                .doesNotContain("embedding")
+                .doesNotContain("<->");
+    }
+
     private String firstSql(JdbcClient jdbc) {
         return org.mockito.Mockito
                 .mockingDetails(jdbc)

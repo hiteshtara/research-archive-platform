@@ -75,6 +75,12 @@ const navigation = [
           path: "/explorer",
           badge: "Dev",
         },
+        {
+          label: "Proposal Discovery",
+          icon: <TravelExploreOutlined />,
+          path: "/explorer/proposals",
+          badge: "Dev",
+        },
       ]
     : []),
 ];

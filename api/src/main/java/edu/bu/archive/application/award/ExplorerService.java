@@ -1,10 +1,12 @@
 package edu.bu.archive.application.award;
 
+import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardContactsResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitResponse;
@@ -13,6 +15,7 @@ import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -139,5 +142,30 @@ public class ExplorerService {
         return awardArchiveService
                 .findAttachments(awardId, 0, ATTACHMENT_PAGE_SIZE)
                 .content();
+    }
+
+    public List<ExplorerProposalDiscoveryResponse> findProposalDiscovery(
+            Boolean hasAttachments,
+            Boolean hasFundedAward,
+            BigDecimal minimumAwardAmount,
+            String sponsorCode,
+            String leadUnitNumber,
+            String proposalStatus,
+            int page,
+            int size
+    ) {
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        return repository.findProposalDiscoveryRows(
+                hasAttachments,
+                hasFundedAward,
+                minimumAwardAmount,
+                sponsorCode,
+                leadUnitNumber,
+                proposalStatus,
+                safeSize,
+                safePage * safeSize
+        );
     }
 }

@@ -1485,6 +1485,38 @@ export interface ExplorerAward {
   primaryCurrent: boolean;
 }
 
+// GET /api/v1/explorer/proposals - one row per ACTIVE Proposal version
+// family. exactLinkedAwardId is the database relationship's own
+// award_id (audit only, never navigated to directly - it may be a
+// long-superseded version); navigableCurrentAwardId is that Award
+// family's current version, resolved server-side. obligatedAmount/
+// anticipatedAmount are null whenever there's no active funded-Award
+// relationship, or that Award has no amount snapshot yet.
+export interface ExplorerProposalDiscovery {
+  proposalId: number;
+  proposalNumber: string;
+  proposalTitle: string | null;
+  workflowDocumentNumber: string | null;
+  attachmentCount: number;
+  linkedAwardNumber: string | null;
+  navigableCurrentAwardId: number | null;
+  awardTitle: string | null;
+  obligatedAmount: number | null;
+  anticipatedAmount: number | null;
+  exactLinkedAwardId: number | null;
+}
+
+export interface ExplorerProposalDiscoveryFilters {
+  hasAttachments?: boolean;
+  hasFundedAward?: boolean;
+  minimumAwardAmount?: number;
+  sponsorCode?: string;
+  leadUnitNumber?: string;
+  proposalStatus?: string;
+  page?: number;
+  size?: number;
+}
+
 export interface ExplorerUnitAdministrator {
   personId: string | null;
   fullName: string | null;

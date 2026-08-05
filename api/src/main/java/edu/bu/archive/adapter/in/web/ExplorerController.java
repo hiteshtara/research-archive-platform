@@ -5,14 +5,17 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardContactsResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitResponse;
 import edu.bu.archive.application.award.ExplorerService;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /*
@@ -160,5 +164,73 @@ public class ExplorerController {
             @RequestParam @Positive long awardId
     ) {
         return ResponseEntity.ok(service.findAttachments(awardId));
+    }
+
+    @Operation(
+            summary = "Discover Institutional Proposals by attachment/"
+                    + "funded-Award/amount/sponsor/unit/status filters",
+            description = "One row per ACTIVE Proposal version family, "
+                    + "relational joins only (no embeddings/vector "
+                    + "search, no arbitrary SQL). Resolves any linked "
+                    + "Award to its CURRENT version and that version's "
+                    + "latest amount snapshot - never joins the full "
+                    + "amount history, so a Proposal's own result row is "
+                    + "never duplicated. Every filter is optional; "
+                    + "omitting one means \"don't filter on it\"."
+    )
+    @GetMapping("/proposals")
+    public ResponseEntity<List<ExplorerProposalDiscoveryResponse>> proposals(
+            @Parameter(description = "true = only Proposals with at "
+                    + "least one persisted attachment; false = only "
+                    + "those with none; omitted = no filter.")
+            @RequestParam(required = false)
+            Boolean hasAttachments,
+
+            @Parameter(description = "true = only Proposals with at "
+                    + "least one active AWARD_FUNDING_PROPOSALS "
+                    + "relationship; false = only those with none; "
+                    + "omitted = no filter.")
+            @RequestParam(required = false)
+            Boolean hasFundedAward,
+
+            @Parameter(description = "Only Proposals whose linked "
+                    + "Award's current amount (obligated, falling back "
+                    + "to anticipated) exceeds this threshold.")
+            @RequestParam(required = false)
+            BigDecimal minimumAwardAmount,
+
+            @RequestParam(required = false)
+            String sponsorCode,
+
+            @RequestParam(required = false)
+            String leadUnitNumber,
+
+            @Parameter(description = "Matches proposal_version."
+                    + "status_description exactly (e.g. \"Funded\").")
+            @RequestParam(required = false)
+            String proposalStatus,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "50")
+            @Min(1)
+            int size
+    ) {
+        return ResponseEntity.ok(
+                service.findProposalDiscovery(
+                        hasAttachments,
+                        hasFundedAward,
+                        minimumAwardAmount,
+                        sponsorCode,
+                        leadUnitNumber,
+                        proposalStatus,
+                        page,
+                        size
+                )
+        );
     }
 }

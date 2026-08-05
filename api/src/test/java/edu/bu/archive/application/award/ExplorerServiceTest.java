@@ -9,6 +9,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardContactsResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitRow;
@@ -19,6 +20,7 @@ import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -245,5 +247,41 @@ class ExplorerServiceTest {
                 service.findAttachments(1833767L);
 
         assertThat(result).containsExactly(attachment);
+    }
+
+    @Test
+    void findProposalDiscoveryClampsPagingAndDelegatesEveryFilter() {
+        ExplorerProposalDiscoveryResponse row = new ExplorerProposalDiscoveryResponse(
+                1238613L, "01157400", "Title", "125761", 3,
+                "200268-00001", 605555L, "Award Title",
+                new BigDecimal("1500000.00"), new BigDecimal("1200000.00"),
+                148155L
+        );
+        when(repository.findProposalDiscoveryRows(
+                true, true, new BigDecimal("1000000"),
+                "NIH", "1203250000", "Funded", 50, 0
+        )).thenReturn(List.of(row));
+
+        List<ExplorerProposalDiscoveryResponse> result = service.findProposalDiscovery(
+                true, true, new BigDecimal("1000000"),
+                "NIH", "1203250000", "Funded", 0, 50
+        );
+
+        assertThat(result).containsExactly(row);
+    }
+
+    @Test
+    void findProposalDiscoveryClampsAnOversizedPageRequest() {
+        when(repository.findProposalDiscoveryRows(
+                null, null, null, null, null, null, 100, 0
+        )).thenReturn(List.of());
+
+        service.findProposalDiscovery(
+                null, null, null, null, null, null, 0, 5000
+        );
+
+        org.mockito.Mockito.verify(repository).findProposalDiscoveryRows(
+                null, null, null, null, null, null, 100, 0
+        );
     }
 }

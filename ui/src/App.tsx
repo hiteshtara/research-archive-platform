@@ -16,6 +16,7 @@ import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
 import { IrbPage } from "./pages/IrbPage";
 import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
 import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
+import { ProposalDiscoveryPage } from "./pages/ProposalDiscoveryPage";
 import { ProposalFamiliesPage } from "./pages/ProposalFamiliesPage";
 import { ProposalDashboardPage } from "./pages/proposal/ProposalDashboardPage";
 import { ProposalWorkspacePage } from "./pages/ProposalWorkspacePage";
@@ -133,6 +134,17 @@ export default function App() {
           element={
             import.meta.env.VITE_EXPLORER_ENABLED === "true" ? (
               <ExplorerPage />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+
+        <Route
+          path="explorer/proposals"
+          element={
+            import.meta.env.VITE_EXPLORER_ENABLED === "true" ? (
+              <ProposalDiscoveryPage />
             ) : (
               <Navigate to="/" replace />
             )

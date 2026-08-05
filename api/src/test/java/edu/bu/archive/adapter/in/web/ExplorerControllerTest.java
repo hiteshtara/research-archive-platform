@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardContactsResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
+import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerProposalDiscoveryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitResponse;
@@ -239,5 +240,57 @@ class ExplorerControllerTest {
                 )
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].fileName").value("agreement.pdf"));
+    }
+
+    @Test
+    void proposalsIsRoutedUnderTheExplorerPrefixWithAllFilters() throws Exception {
+        ExplorerProposalDiscoveryResponse row = new ExplorerProposalDiscoveryResponse(
+                1238613L, "01157400", "Title", "125761", 3,
+                "200268-00001", 605555L, "Award Title",
+                new java.math.BigDecimal("1500000.00"),
+                new java.math.BigDecimal("1200000.00"),
+                148155L
+        );
+        when(service.findProposalDiscovery(
+                true, true, new java.math.BigDecimal("1000000"),
+                "NIH", "1203250000", "Funded", 0, 50
+        )).thenReturn(List.of(row));
+
+        mockMvc.perform(
+                        get("/api/v1/explorer/proposals")
+                                .param("hasAttachments", "true")
+                                .param("hasFundedAward", "true")
+                                .param("minimumAwardAmount", "1000000")
+                                .param("sponsorCode", "NIH")
+                                .param("leadUnitNumber", "1203250000")
+                                .param("proposalStatus", "Funded")
+                                .param("page", "0")
+                                .param("size", "50")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].proposalNumber").value("01157400"))
+                .andExpect(jsonPath("$[0].navigableCurrentAwardId").value(605555))
+                .andExpect(jsonPath("$[0].exactLinkedAwardId").value(148155))
+                .andExpect(jsonPath("$[0].obligatedAmount").value(1500000.00));
+
+        verify(service).findProposalDiscovery(
+                true, true, new java.math.BigDecimal("1000000"),
+                "NIH", "1203250000", "Funded", 0, 50
+        );
+    }
+
+    @Test
+    void proposalsAppliesDefaultsWhenNoFiltersAreGiven() throws Exception {
+        when(service.findProposalDiscovery(
+                null, null, null, null, null, null, 0, 50
+        )).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/explorer/proposals"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        verify(service).findProposalDiscovery(
+                null, null, null, null, null, null, 0, 50
+        );
     }
 }
