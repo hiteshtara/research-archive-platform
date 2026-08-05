@@ -148,11 +148,16 @@ class ProposalV1ControllerTest {
     }
 
     @Test
-    void fundedAwardsIsRoutedUnderTheV1PrefixAndNeverExposesAnAwardId()
+    void fundedAwardsIsRoutedUnderTheV1PrefixAndCarriesTheNavigableAwardId()
             throws Exception {
+        // The database relationship's exact historical award_id
+        // (148155, a long-superseded version) is preserved for audit,
+        // but navigableCurrentAwardId (605555) is what a client
+        // navigates to - resolved server-side, never guessed by the UI.
         ProposalFundedAwardResponse fundedAward =
                 new ProposalFundedAwardResponse(
-                        "200268-00001", 1, "Active"
+                        "200268-00001", "Title", "Closed", 2, 1, 5, true,
+                        148155L, 605555L
                 );
         when(service.findFundedAwards(2986L))
                 .thenReturn(List.of(fundedAward));
@@ -162,7 +167,10 @@ class ProposalV1ControllerTest {
                 .andExpect(
                         jsonPath("$[0].awardNumber").value("200268-00001")
                 )
-                .andExpect(jsonPath("$[0].awardId").doesNotExist());
+                .andExpect(
+                        jsonPath("$[0].navigableCurrentAwardId").value(605555)
+                )
+                .andExpect(jsonPath("$[0].relationshipActive").value(true));
 
         verify(service).findFundedAwards(2986L);
     }

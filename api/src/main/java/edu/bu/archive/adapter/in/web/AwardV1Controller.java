@@ -10,10 +10,10 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
-import edu.bu.archive.adapter.in.web.dto.award.AwardProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
@@ -163,7 +163,7 @@ public class AwardV1Controller {
     @ApiResponse(responseCode = "200", description = "The Award's linked Proposal(s).")
     @ApiResponse(responseCode = "404", description = "No such award_id.")
     @GetMapping("/{awardId}/funding-proposals")
-    public ResponseEntity<List<AwardProposalResponse>> fundingProposals(
+    public ResponseEntity<List<AwardFundingProposalResponse>> fundingProposals(
             @PathVariable
             long awardId
     ) {

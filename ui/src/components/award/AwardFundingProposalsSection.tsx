@@ -14,18 +14,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { getAwardFundingProposalsV1 } from "../../api/client";
-
-function isActive(activeFlag: string | null): boolean {
-  return ["Y", "YES", "TRUE", "1"].includes(
-    (activeFlag ?? "").trim().toUpperCase(),
-  );
-}
+import { formatCurrencyAmount as formatAmount } from "../../features/award/awardSectionsPresentation.mjs";
+import { AwardStatusPill } from "./AwardStatusPill";
 
 // Funding Proposal(s) - the bidirectional counterpart to Institutional
-// Proposal's own Funded Awards section. Fed from GET
-// /api/v1/awards/{awardId}/funding-proposals. proposalId links
-// directly to the Institutional Proposal dashboard - a real Proposal
-// identifier, not an Award one.
+// Proposal's own Funded Awards section. One card per real
+// archive.award_funding_proposal relationship row (family-wide - every
+// award_id in this Award's whole award_number family), including
+// inactive relationships (shown, labeled Inactive, never hidden). Fed
+// from GET /api/v1/awards/{awardId}/funding-proposals, which already
+// resolves the linked Proposal's ACTIVE version server-side
+// (navigableActiveProposalId) - "Open Proposal" navigates directly.
 export function AwardFundingProposalsSection({
   awardId,
 }: {
@@ -50,9 +49,9 @@ export function AwardFundingProposalsSection({
     return <Alert severity="error">Unable to load Funding Proposals.</Alert>;
   }
 
-  const links = fundingProposalsQuery.data ?? [];
+  const fundingProposals = fundingProposalsQuery.data ?? [];
 
-  if (links.length === 0) {
+  if (fundingProposals.length === 0) {
     return (
       <Typography color="text.secondary">
         No Funding Proposal is recorded for this Award.
@@ -62,8 +61,12 @@ export function AwardFundingProposalsSection({
 
   return (
     <Stack spacing={1.5}>
-      {links.map((link) => (
-        <Card key={link.awardFundingProposalId ?? link.proposalId} variant="outlined">
+      {fundingProposals.map((link, index) => (
+        <Card
+          key={`${link.proposalNumber}-${index}`}
+          variant="outlined"
+          sx={{ opacity: link.relationshipActive ? 1 : 0.6 }}
+        >
           <CardContent
             sx={{
               display: "flex",
@@ -73,18 +76,39 @@ export function AwardFundingProposalsSection({
             }}
           >
             <Box>
-              <Typography sx={{ fontWeight: 700 }}>
-                Institutional Proposal
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <Typography sx={{ fontWeight: 700 }}>
+                  Institutional Proposal {link.proposalNumber}
+                </Typography>
+                {!link.relationshipActive && (
+                  <Chip size="small" variant="outlined" label="Inactive" />
+                )}
+              </Stack>
+
+              <Typography variant="body2" color="text.secondary">
+                {link.proposalTitle ?? "Untitled proposal"}
               </Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 0.5, alignItems: "center" }}>
-                {isActive(link.activeFlag) && (
-                  <Chip size="small" color="success" label="Active" />
+
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ mt: 0.5, alignItems: "center", flexWrap: "wrap" }}
+              >
+                <AwardStatusPill status={link.proposalStatus} />
+                {link.workflowDocumentNumber && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`Workflow ${link.workflowDocumentNumber}`}
+                  />
                 )}
-                {link.sourceUpdateTimestamp && (
-                  <Typography variant="body2" color="text.secondary">
-                    Updated {link.sourceUpdateTimestamp}
-                  </Typography>
-                )}
+                <Typography variant="caption" color="text.secondary">
+                  {link.principalInvestigatorName ?? "—"}
+                  {link.sponsorName ? ` · ${link.sponsorName}` : ""}
+                  {link.requestedTotalCost !== null
+                    ? ` · Requested ${formatAmount(link.requestedTotalCost)}`
+                    : ""}
+                </Typography>
               </Stack>
             </Box>
 
@@ -92,10 +116,10 @@ export function AwardFundingProposalsSection({
               variant="outlined"
               size="small"
               endIcon={<ArrowForwardOutlined fontSize="small" />}
-              disabled={link.proposalId === null}
+              disabled={link.navigableActiveProposalId === null}
               onClick={() =>
-                link.proposalId !== null &&
-                navigate(`/proposals/dashboard/${link.proposalId}`)
+                link.navigableActiveProposalId !== null &&
+                navigate(`/proposals/dashboard/${link.navigableActiveProposalId}`)
               }
             >
               Open Proposal

@@ -281,7 +281,7 @@ export function getAwardSummaryV1(
 export function getAwardFundingProposalsV1(
   awardId: number,
   signal?: AbortSignal,
-): Promise<import("../types/api").AwardProposalLink[]> {
+): Promise<import("../types/api").AwardFundingProposalV1[]> {
   return request(
     `/api/v1/awards/${encodeURIComponent(awardId)}/funding-proposals`,
     signal,

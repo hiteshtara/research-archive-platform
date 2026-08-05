@@ -324,45 +324,56 @@ public class ProposalV1Repository {
     /*
      * --- Funded Awards ------------------------------------------------
      *
-     * Family-wide (every proposal_id in this Proposal's whole
+     * One row per real archive.proposal_award relationship row -
+     * family-wide (every proposal_id in this Proposal's whole
      * proposal_number family), matching Kuali's own
      * AllFundingProposalQueryCustomizer business logic - see
      * docs/kuali-business-rules/InstitutionalProposal.md's Award
-     * relationship section. active = TRUE excludes deactivated links.
+     * relationship section. Inactive relationships (active = FALSE)
+     * are still returned - never silently dropped - so the UI can
+     * label them rather than hide them.
      *
-     * Deliberately does NOT join archive.award_version on
-     * pa.award_id: that column is the EXACT Award version that was
-     * linked at extraction time (often years-old and long since
-     * superseded - real fixture: family 205 links award_id 148155,
-     * award_number 200268-00001's sequence 1 of 5, is_primary_current
-     * = FALSE), so filtering that same joined row by
-     * is_primary_current = TRUE would silently return zero rows for
-     * every Award whose linked version isn't itself the current one.
-     * Instead resolves through pa.award_number (already denormalized
-     * on archive.proposal_award) to that Award family's own current
-     * version, the same "always resolve to current for display"
-     * convention used throughout this codebase (e.g.
-     * AwardArchiveRepository.findCurrent). Never selects award_id -
-     * internal Award IDs are resolved separately, only at click-time,
-     * via AwardV1Controller.resolveByNumber.
+     * linked_award resolves pa.award_id directly: the EXACT Award
+     * version stored in the relationship, often years-old and long
+     * since superseded (real fixture: family 205 links award_id
+     * 148155, award_number 200268-00001's sequence 1 of 5,
+     * is_primary_current = FALSE) - kept only for
+     * exactLinkedAwardId/linkedAwardVersion (audit/history). Display
+     * fields (title/status) and the navigation target instead resolve
+     * through pa.award_number (already denormalized on
+     * archive.proposal_award) to that Award family's CURRENT version -
+     * the same "always resolve to current for display" convention
+     * used throughout this codebase (e.g. AwardArchiveRepository.
+     * findCurrent) - so the API response carries the ID a client
+     * navigates to directly, never requiring a second resolve call.
      */
     public List<ProposalFundedAwardResponse> findFundedAwardRows(
             String proposalNumber
     ) {
         return jdbc.sql("""
-                SELECT DISTINCT
-                    current_award.award_number,
-                    current_award.sequence_number,
-                    current_award.status_description AS status
+                SELECT
+                    pa.award_number,
+                    current_award.title AS award_title,
+                    current_award.status_description AS award_status,
+                    pv.version_number AS proposal_version,
+                    linked_award.sequence_number AS linked_award_version,
+                    current_award.sequence_number AS current_award_version,
+                    pa.active AS relationship_active,
+                    pa.award_id AS exact_linked_award_id,
+                    current_award.award_id AS navigable_current_award_id
                 FROM archive.proposal_version pv
                 JOIN archive.proposal_award pa
                     ON pa.proposal_id = pv.proposal_id
+                JOIN archive.award_version linked_award
+                    ON linked_award.award_id = pa.award_id
                 JOIN archive.award_version current_award
                     ON current_award.award_number = pa.award_number
                     AND current_award.is_primary_current = TRUE
                 WHERE pv.proposal_number = :proposalNumber
-                  AND pa.active = TRUE
-                ORDER BY current_award.award_number
+                ORDER BY
+                    pa.active DESC,
+                    pa.award_number,
+                    pa.proposal_id
                 """)
                 .param("proposalNumber", proposalNumber)
                 .query(ProposalFundedAwardResponse.class)

@@ -16,6 +16,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
@@ -27,7 +28,6 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardPersonRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitCreditSplitRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonUnitRow;
-import edu.bu.archive.adapter.in.web.dto.award.AwardProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermResponse;
@@ -139,18 +139,19 @@ public class AwardArchiveService {
     /*
      * The Funding Proposal(s) behind this Award - family-wide (every
      * award_id in this Award's whole award_number family), from
-     * archive.award_funding_proposal. Keyed by awardId to match the V1
-     * API's own convention; delegates to the same repository query the
-     * older unversioned AwardArchiveController.proposals() endpoint
-     * already uses. proposalId is a real, exact
-     * archive.proposal_version.proposal_id a client can navigate to
-     * directly - a Proposal identifier, not an Award one, so this does
-     * not conflict with "never expose internal Award IDs" (that rule
-     * concerns Award's own IDs leaking into OTHER domains' payloads).
+     * archive.award_funding_proposal - the bidirectional counterpart
+     * to Institutional Proposal's own Funded Awards. One row per real
+     * relationship, including inactive ones (never silently dropped -
+     * see AwardFundingProposalResponse). navigableActiveProposalId
+     * resolves each linked Proposal family to its own ACTIVE version,
+     * server-side, so the API response carries the ID a client
+     * navigates to directly.
      */
-    public List<AwardProposalResponse> findFundingProposals(long awardId) {
+    public List<AwardFundingProposalResponse> findFundingProposals(
+            long awardId
+    ) {
         String awardNumber = requireAwardNumberForId(awardId);
-        return repository.findCurrentProposals(awardNumber);
+        return repository.findFundingProposalRows(awardNumber);
     }
 
     public PageResponse<AwardSequenceSummaryResponse> findSequencePage(

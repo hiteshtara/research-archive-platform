@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
@@ -408,6 +409,66 @@ public class AwardArchiveRepository {
                         edu.bu.archive.adapter.in.web.dto.award
                                 .AwardProposalResponse.class
                 )
+                .list();
+    }
+
+    /*
+     * The bidirectional counterpart to
+     * ProposalV1Repository.findFundedAwardRows - one row per real
+     * archive.award_funding_proposal relationship row, family-wide
+     * (every award_id in this Award's whole award_number family).
+     * Inactive relationships are still returned - never silently
+     * dropped. linked_proposal resolves proposal.proposal_id directly
+     * (the EXACT historical Proposal version stored in the
+     * relationship - kept only for exactLinkedProposalId/
+     * linkedProposalVersion); display fields and the navigation target
+     * instead resolve through linked_proposal.proposal_number to that
+     * family's ACTIVE version (PROPOSAL_SEQUENCE_STATUS = 'ACTIVE' -
+     * never the highest sequence number) - a LEFT JOIN since a
+     * malformed family could in principle have no row marked ACTIVE.
+     */
+    public List<AwardFundingProposalResponse> findFundingProposalRows(
+            String awardNumber
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    linked_proposal.proposal_number,
+                    active_proposal.title AS proposal_title,
+                    active_proposal.status_description AS proposal_status,
+                    active_proposal.document_number AS workflow_document_number,
+                    active_proposal.principal_investigator_name,
+                    active_proposal.sponsor_name,
+                    active_proposal.initial_total_cost AS requested_total_cost,
+                    linked_proposal.version_number AS linked_proposal_version,
+                    active_proposal.version_number AS active_proposal_version,
+                    (
+                        UPPER(TRIM(proposal.active_flag))
+                        IN ('Y', 'YES', 'TRUE', '1')
+                    ) AS relationship_active,
+                    proposal.proposal_id AS exact_linked_proposal_id,
+                    active_proposal.proposal_id AS navigable_active_proposal_id
+                FROM archive.award_funding_proposal proposal
+                INNER JOIN archive.award_version award
+                    ON award.award_id = proposal.award_id
+                JOIN archive.proposal_version linked_proposal
+                    ON linked_proposal.proposal_id = proposal.proposal_id
+                LEFT JOIN archive.proposal_version active_proposal
+                    ON active_proposal.proposal_number
+                        = linked_proposal.proposal_number
+                    AND active_proposal.proposal_sequence_status = 'ACTIVE'
+                WHERE award.award_number = :awardNumber
+                ORDER BY
+                    CASE
+                        WHEN UPPER(TRIM(proposal.active_flag))
+                            IN ('Y', 'YES', 'TRUE', '1')
+                        THEN 0
+                        ELSE 1
+                    END,
+                    linked_proposal.proposal_number,
+                    proposal.proposal_id
+                """)
+                .param("awardNumber", awardNumber)
+                .query(AwardFundingProposalResponse.class)
                 .list();
     }
 

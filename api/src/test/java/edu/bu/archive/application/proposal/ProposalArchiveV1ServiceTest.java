@@ -238,7 +238,7 @@ class ProposalArchiveV1ServiceTest {
     }
 
     @Test
-    void findFundedAwardsResolvesTheWholeFamilyAndNeverExposesAnAwardId() {
+    void findFundedAwardsResolvesTheWholeFamilyAndCarriesBothAwardIds() {
         when(repository.findProposalNumber(2986L))
                 .thenReturn(Optional.of("205"));
         // Real fixture: the link (archive.proposal_award) points at
@@ -246,9 +246,14 @@ class ProposalArchiveV1ServiceTest {
         // 5, is_primary_current = FALSE - a long-superseded version),
         // but the repository resolves through award_number to that
         // family's CURRENT version (sequence 5, "Closed") - never the
-        // stale linked version's own status.
+        // stale linked version's own status. Both IDs are carried:
+        // exactLinkedAwardId (148155) for audit, navigableCurrentAwardId
+        // (605555) for navigation.
         ProposalFundedAwardResponse fundedAward =
-                new ProposalFundedAwardResponse("200268-00001", 5, "Closed");
+                new ProposalFundedAwardResponse(
+                        "200268-00001", "Title", "Closed", 2, 1, 5, true,
+                        148155L, 605555L
+                );
         when(repository.findFundedAwardRows("205"))
                 .thenReturn(List.of(fundedAward));
 
@@ -256,5 +261,48 @@ class ProposalArchiveV1ServiceTest {
                 service.findFundedAwards(2986L);
 
         assertThat(result).containsExactly(fundedAward);
+    }
+
+    @Test
+    void findFundedAwardsReturnsEveryLinkedAwardWhenAProposalFundsMultipleAwards() {
+        // Real fixture: Institutional Proposal 01109910 has three real,
+        // distinct AWARD_FUNDING_PROPOSALS rows, all active - every
+        // one must be returned, not just the first.
+        when(repository.findProposalNumber(1L))
+                .thenReturn(Optional.of("01109910"));
+        ProposalFundedAwardResponse first = new ProposalFundedAwardResponse(
+                "100100-00001", "First", "Active", 1, 1, 1, true, 10L, 10L
+        );
+        ProposalFundedAwardResponse second = new ProposalFundedAwardResponse(
+                "100200-00001", "Second", "Active", 1, 1, 1, true, 20L, 20L
+        );
+        ProposalFundedAwardResponse third = new ProposalFundedAwardResponse(
+                "100300-00001", "Third", "Active", 1, 1, 1, true, 30L, 30L
+        );
+        when(repository.findFundedAwardRows("01109910"))
+                .thenReturn(List.of(first, second, third));
+
+        List<ProposalFundedAwardResponse> result =
+                service.findFundedAwards(1L);
+
+        assertThat(result).containsExactly(first, second, third);
+    }
+
+    @Test
+    void findFundedAwardsPreservesInactiveRelationshipsRatherThanDroppingThem() {
+        when(repository.findProposalNumber(2986L))
+                .thenReturn(Optional.of("205"));
+        ProposalFundedAwardResponse inactive = new ProposalFundedAwardResponse(
+                "200268-00001", "Title", "Closed", 2, 1, 5, false,
+                148155L, 605555L
+        );
+        when(repository.findFundedAwardRows("205"))
+                .thenReturn(List.of(inactive));
+
+        List<ProposalFundedAwardResponse> result =
+                service.findFundedAwards(2986L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).relationshipActive()).isFalse();
     }
 }

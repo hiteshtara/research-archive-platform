@@ -307,20 +307,30 @@ export interface AwardHierarchy {
   selectedAwardPath: string[];
 }
 
-// The Funding Proposal(s) behind this Award - family-wide (every
+// The Funding Proposal(s) behind this Award - one row per real
+// archive.award_funding_proposal relationship row, family-wide (every
 // award_id in this Award's whole award_number family), from
-// archive.award_funding_proposal (GET /api/awards/{awardNumber}/proposals).
-// proposalId links directly to the Institutional Proposal dashboard -
-// a real, exact archive.proposal_version.proposal_id, distinct from
-// any Award identifier.
-export interface AwardProposalLink {
-  awardFundingProposalId: number | null;
-  awardId: number | null;
-  proposalId: number | null;
-  activeFlag: string | null;
-  sourceUpdateTimestamp: string | null;
-  sourceUpdateUser: string | null;
-  sourceVersionNumber: number | null;
+// GET /api/v1/awards/{awardId}/funding-proposals - the bidirectional
+// counterpart to ProposalFundedAwardV1. exactLinkedProposalId is the
+// database relationship's own historical proposal_id (audit only,
+// never rendered); navigableActiveProposalId is that Proposal
+// family's ACTIVE version, resolved server-side, and is what a client
+// navigates to. relationshipActive mirrors
+// AWARD_FUNDING_PROPOSALS.ACTIVE - inactive relationships are still
+// returned, never dropped.
+export interface AwardFundingProposalV1 {
+  proposalNumber: string;
+  proposalTitle: string | null;
+  proposalStatus: string | null;
+  workflowDocumentNumber: string | null;
+  principalInvestigatorName: string | null;
+  sponsorName: string | null;
+  requestedTotalCost: number | null;
+  linkedProposalVersion: number | null;
+  activeProposalVersion: number | null;
+  relationshipActive: boolean;
+  exactLinkedProposalId: number | null;
+  navigableActiveProposalId: number | null;
 }
 
 export interface AwardSummaryV1 {
@@ -1018,12 +1028,24 @@ export interface ProposalCommentsV1 {
   commentCategories: ProposalCommentCategoryV1[];
 }
 
-// Deliberately carries no internal awardId - see AwardIdentifierV1 for
-// how a client resolves one, only at click-time.
+// One row per real archive.proposal_award relationship row (this
+// Proposal's whole proposalNumber family). exactLinkedAwardId is the
+// database relationship's own historical award_id (audit only, never
+// rendered); navigableCurrentAwardId is that Award family's CURRENT
+// version, resolved server-side, and is what a client navigates to -
+// no separate resolve-by-number call needed. relationshipActive
+// mirrors AWARD_FUNDING_PROPOSALS.ACTIVE - inactive relationships are
+// still returned, never dropped.
 export interface ProposalFundedAwardV1 {
   awardNumber: string;
-  sequenceNumber: number | null;
-  status: string | null;
+  awardTitle: string | null;
+  awardStatus: string | null;
+  proposalVersion: number | null;
+  linkedAwardVersion: number | null;
+  currentAwardVersion: number | null;
+  relationshipActive: boolean;
+  exactLinkedAwardId: number | null;
+  navigableCurrentAwardId: number | null;
 }
 
 // Resolve-only: a caller supplies a stable awardNumber and gets back

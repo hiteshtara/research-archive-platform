@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardRowResponse;
@@ -76,16 +77,63 @@ class AwardArchiveServiceTest {
     void findFundingProposalsResolvesAwardIdToNumberAndDelegates() {
         when(repository.findAwardNumberForId(148155L))
                 .thenReturn(Optional.of("200268-00001"));
-        AwardProposalResponse link = new AwardProposalResponse(
-                148183L, 148155L, 2986L, "Y", null, null, null
+        AwardFundingProposalResponse link = new AwardFundingProposalResponse(
+                "205", "Title", "Funded", "125761", "PI", "Sponsor",
+                BigDecimal.TEN, 1, 2, true, 212L, 2986L
         );
-        when(repository.findCurrentProposals("200268-00001"))
+        when(repository.findFundingProposalRows("200268-00001"))
                 .thenReturn(List.of(link));
 
-        List<AwardProposalResponse> result =
+        List<AwardFundingProposalResponse> result =
                 service.findFundingProposals(148155L);
 
         assertThat(result).containsExactly(link);
+    }
+
+    @Test
+    void findFundingProposalsReturnsEveryLinkedProposalWhenAnAwardHasMultipleProposals() {
+        // Real fixture: Award 100072-00001 has three real, distinct
+        // AWARD_FUNDING_PROPOSALS rows, all active - every one must be
+        // returned, not just the first.
+        when(repository.findAwardNumberForId(1L))
+                .thenReturn(Optional.of("100072-00001"));
+        AwardFundingProposalResponse first = new AwardFundingProposalResponse(
+                "01100001", "First", "Funded", "111", "PI1", "Sponsor",
+                BigDecimal.TEN, 1, 1, true, 10L, 10L
+        );
+        AwardFundingProposalResponse second = new AwardFundingProposalResponse(
+                "01100002", "Second", "Funded", "112", "PI2", "Sponsor",
+                BigDecimal.TEN, 1, 1, true, 20L, 20L
+        );
+        AwardFundingProposalResponse third = new AwardFundingProposalResponse(
+                "01100003", "Third", "Funded", "113", "PI3", "Sponsor",
+                BigDecimal.TEN, 1, 1, true, 30L, 30L
+        );
+        when(repository.findFundingProposalRows("100072-00001"))
+                .thenReturn(List.of(first, second, third));
+
+        List<AwardFundingProposalResponse> result =
+                service.findFundingProposals(1L);
+
+        assertThat(result).containsExactly(first, second, third);
+    }
+
+    @Test
+    void findFundingProposalsPreservesInactiveRelationshipsRatherThanDroppingThem() {
+        when(repository.findAwardNumberForId(148155L))
+                .thenReturn(Optional.of("200268-00001"));
+        AwardFundingProposalResponse inactive = new AwardFundingProposalResponse(
+                "205", "Title", "Funded", "125761", "PI", "Sponsor",
+                BigDecimal.TEN, 1, 2, false, 212L, 2986L
+        );
+        when(repository.findFundingProposalRows("200268-00001"))
+                .thenReturn(List.of(inactive));
+
+        List<AwardFundingProposalResponse> result =
+                service.findFundingProposals(148155L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).relationshipActive()).isFalse();
     }
 
     @Test
