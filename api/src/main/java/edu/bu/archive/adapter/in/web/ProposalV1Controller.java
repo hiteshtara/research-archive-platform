@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAttachmentsResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFundedAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
@@ -247,5 +248,24 @@ public class ProposalV1Controller {
             long proposalId
     ) {
         return ResponseEntity.ok(service.findFundedAwards(proposalId));
+    }
+
+    @Operation(
+            summary = "List a Proposal's Custom Data",
+            description = "archive.proposal_custom_data for this exact "
+                    + "proposalId - version-scoped, never combined with "
+                    + "a sibling version's rows. label/name/dataType "
+                    + "resolve via the shared archive.custom_attribute "
+                    + "lookup and are null when Oracle has since added "
+                    + "an attribute this archive hasn't loaded yet."
+    )
+    @ApiResponse(responseCode = "200", description = "The Proposal's custom data.")
+    @ApiResponse(responseCode = "404", description = "No such proposal_id.")
+    @GetMapping("/{proposalId}/custom-data")
+    public ResponseEntity<List<ProposalCustomDataResponse>> customData(
+            @PathVariable
+            long proposalId
+    ) {
+        return ResponseEntity.ok(service.findCustomData(proposalId));
     }
 }

@@ -1048,6 +1048,26 @@ export interface ProposalFundedAwardV1 {
   navigableCurrentAwardId: number | null;
 }
 
+// archive.proposal_custom_data LEFT JOINed to the shared
+// archive.custom_attribute lookup, scoped to this exact proposalId
+// (version-scoped - never combined with a sibling version's rows).
+// label/name/dataType/groupName are null when custom_attribute_id has
+// no matching lookup row yet (the column is deliberately not a foreign
+// key - Oracle can add new attributes over time); value being null is
+// a real persisted blank, distinct from the attribute having no row at
+// all (which simply never appears in this list).
+export interface ProposalCustomDataV1 {
+  proposalCustomDataId: number;
+  customAttributeId: number | null;
+  label: string | null;
+  name: string | null;
+  dataType: string | null;
+  groupName: string | null;
+  value: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+}
+
 // Resolve-only: a caller supplies a stable awardNumber and gets back
 // the current version's internal awardId, immediately before
 // navigating - never stored, never rendered as visible text.

@@ -4,6 +4,7 @@ import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAssociatedUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAttachmentsResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFundedAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
@@ -173,5 +174,32 @@ class ProposalV1ControllerTest {
                 .andExpect(jsonPath("$[0].relationshipActive").value(true));
 
         verify(service).findFundedAwards(2986L);
+    }
+
+    @Test
+    void customDataIsRoutedUnderTheV1PrefixAndCarriesTheResolvedLabel()
+            throws Exception {
+        ProposalCustomDataResponse row = new ProposalCustomDataResponse(
+                477845L, 480L, "Submitted Date", "ip_submission_date",
+                "Date", null, "08/09/2011", null, "dhaywood"
+        );
+        when(service.findCustomData(2986L)).thenReturn(List.of(row));
+
+        mockMvc.perform(get("/api/v1/proposals/2986/custom-data"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].label").value("Submitted Date"))
+                .andExpect(jsonPath("$[0].value").value("08/09/2011"))
+                .andExpect(jsonPath("$[0].customAttributeId").value(480));
+
+        verify(service).findCustomData(2986L);
+    }
+
+    @Test
+    void customDataReturns404WhenTheProposalDoesNotExist() throws Exception {
+        when(service.findCustomData(999L))
+                .thenThrow(new NoSuchElementException("Proposal not found: 999"));
+
+        mockMvc.perform(get("/api/v1/proposals/999/custom-data"))
+                .andExpect(status().isNotFound());
     }
 }

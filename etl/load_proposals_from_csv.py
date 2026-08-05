@@ -77,6 +77,9 @@ UNIT_CONTACTS_ORACLE_SQL = (
 COMMENTS_ORACLE_SQL = (
     PROJECT_ROOT / "sql" / "extract" / "proposal" / "06_proposal_comments.sql"
 )
+CUSTOM_DATA_ORACLE_SQL = (
+    PROJECT_ROOT / "sql" / "extract" / "proposal" / "07_proposal_custom_data.sql"
+)
 
 VERSION_REQUIRED_COLUMNS = {
     "proposal_id",
@@ -118,6 +121,11 @@ UNIT_CONTACT_REQUIRED_COLUMNS = {
 
 COMMENT_REQUIRED_COLUMNS = {
     "proposal_comment_id",
+    "proposal_id",
+}
+
+CUSTOM_DATA_REQUIRED_COLUMNS = {
+    "proposal_custom_data_id",
     "proposal_id",
 }
 
@@ -260,6 +268,24 @@ COMMENT_COLUMNS = [
     "sequence_number",
     "comment_type_code",
     "comments",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
+# PROPOSAL_CUSTOM_DATA - version-scoped (its own real sequence_number
+# per row, never family-wide - live-verified: fixture 01157400 has 161
+# rows across only 30 distinct custom_attribute_ids spread over 6
+# different sequence_numbers). custom_attribute_id is kept unjoined -
+# the shared archive.custom_attribute/custom_attribute_document
+# reference tables (loaded independently, see
+# archive_etl/reference_data.py) resolve the label at query time.
+CUSTOM_DATA_COLUMNS = [
+    "proposal_custom_data_id",
+    "proposal_id",
+    "proposal_number",
+    "sequence_number",
+    "custom_attribute_id",
+    "value",
     "source_update_timestamp",
     "source_update_user",
 ]
@@ -815,6 +841,54 @@ def prepare_comments(
 
     available_columns = [
         column for column in COMMENT_COLUMNS if column in dataframe.columns
+    ]
+    return dataframe[available_columns].copy()
+
+
+def prepare_custom_data(
+    dataframe: pd.DataFrame,
+) -> pd.DataFrame:
+    require_columns(
+        dataframe,
+        CUSTOM_DATA_REQUIRED_COLUMNS,
+        "proposal_custom_data.csv",
+    )
+
+    convert_numeric(
+        dataframe,
+        [
+            "proposal_custom_data_id",
+            "proposal_id",
+            "sequence_number",
+            "custom_attribute_id",
+        ],
+    )
+
+    convert_dates(dataframe, ["source_update_timestamp"])
+
+    require_values(
+        dataframe,
+        ["proposal_custom_data_id", "proposal_id"],
+        "proposal_custom_data.csv",
+    )
+
+    # PROPOSAL_CUSTOM_DATA_ID is PROPOSAL_CUSTOM_DATA's own real Oracle
+    # PK - the correct UPSERT key.
+    duplicate_custom_data = dataframe.duplicated(
+        subset=["proposal_custom_data_id"],
+        keep="first",
+    )
+
+    if duplicate_custom_data.any():
+        logger.warning(
+            "Removed {} duplicate PROPOSAL_CUSTOM_DATA_ID rows",
+            int(duplicate_custom_data.sum()),
+        )
+
+        dataframe = dataframe.loc[~duplicate_custom_data].copy()
+
+    available_columns = [
+        column for column in CUSTOM_DATA_COLUMNS if column in dataframe.columns
     ]
     return dataframe[available_columns].copy()
 
@@ -1487,6 +1561,70 @@ def upsert_proposal_comments(
     return int(result.rowcount)
 
 
+def upsert_proposal_custom_data(
+    connection: Connection,
+    custom_data: pd.DataFrame,
+) -> int:
+    """Idempotent UPSERT of archive.proposal_custom_data, keyed by
+    proposal_custom_data_id (PROPOSAL_CUSTOM_DATA's own real Oracle
+    PK). custom_attribute_id is not FK-checked here - see V064's
+    migration comment."""
+    connection.execute(
+        text(
+            """
+            CREATE TEMPORARY TABLE proposal_custom_data_stage (
+                proposal_custom_data_id BIGINT NOT NULL,
+                proposal_id BIGINT NOT NULL,
+                proposal_number TEXT NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                custom_attribute_id BIGINT,
+                value TEXT,
+                source_update_timestamp TIMESTAMP,
+                source_update_user TEXT
+            ) ON COMMIT DROP
+            """
+        )
+    )
+
+    logger.info(
+        "COPY {:<30} {:,} rows",
+        "proposal_custom_data_stage",
+        len(custom_data),
+    )
+
+    bulk_copy_dataframe(
+        connection=connection,
+        dataframe=custom_data[CUSTOM_DATA_COLUMNS],
+        schema="pg_temp",
+        table="proposal_custom_data_stage",
+    )
+
+    update_columns = [
+        column
+        for column in CUSTOM_DATA_COLUMNS
+        if column != "proposal_custom_data_id"
+    ]
+
+    result = connection.execute(
+        text(
+            f"""
+            INSERT INTO archive.proposal_custom_data (
+                {", ".join(CUSTOM_DATA_COLUMNS)}
+            )
+            SELECT {", ".join(CUSTOM_DATA_COLUMNS)}
+            FROM proposal_custom_data_stage
+            ON CONFLICT (proposal_custom_data_id) DO UPDATE SET
+                {", ".join(
+                    f"{column} = EXCLUDED.{column}"
+                    for column in update_columns
+                )}
+            """
+        )
+    )
+
+    return int(result.rowcount)
+
+
 def resolve_target_proposal_numbers(max_families: int) -> list[str]:
     """--max-families: resolve the first N distinct PROPOSAL_NUMBERs
     from Oracle (ordered), for a real, bounded batch load - the same
@@ -1598,9 +1736,22 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         else comments_raw
     )
 
+    custom_data_source = OracleDataSource(CUSTOM_DATA_ORACLE_SQL)
+    custom_data_raw = (
+        custom_data_source.read_filtered(column="proposal_id", values=proposal_ids)
+        if proposal_ids
+        else pd.DataFrame()
+    )
+    custom_data = (
+        prepare_custom_data(custom_data_raw)
+        if not custom_data_raw.empty
+        else custom_data_raw
+    )
+
     logger.info(
         "Prepared Proposal rows: versions={:,} awards={:,} attachments={:,} "
-        "persons={:,} person_units={:,} unit_contacts={:,} comments={:,}",
+        "persons={:,} person_units={:,} unit_contacts={:,} comments={:,} "
+        "custom_data={:,}",
         len(versions),
         len(awards),
         len(attachments),
@@ -1608,6 +1759,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         len(person_units),
         len(unit_contacts),
         len(comments),
+        len(custom_data),
     )
 
     engine = create_postgres_engine()
@@ -1625,6 +1777,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         + len(person_units)
         + len(unit_contacts)
         + len(comments)
+        + len(custom_data)
     )
 
     with engine.begin() as connection:
@@ -1667,6 +1820,11 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
                 if not comments.empty
                 else 0
             )
+            custom_data_rows = (
+                upsert_proposal_custom_data(connection, custom_data)
+                if not custom_data.empty
+                else 0
+            )
 
             total_written = (
                 version_rows
@@ -1676,6 +1834,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
                 + person_unit_rows
                 + unit_contact_rows
                 + comment_rows
+                + custom_data_rows
             )
 
             mark_load_complete(
@@ -1687,7 +1846,8 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
         logger.success(
             "Proposal targeted load completed. "
             "load_id={} families={} versions={} awards={} attachments={} "
-            "persons={} person_units={} unit_contacts={} comments={} total={}",
+            "persons={} person_units={} unit_contacts={} comments={} "
+            "custom_data={} total={}",
             load_id,
             len(proposal_numbers),
             version_rows,
@@ -1697,6 +1857,7 @@ def run_targeted_load(proposal_numbers: list[str]) -> None:
             person_unit_rows,
             unit_contact_rows,
             comment_rows,
+            custom_data_rows,
             total_written,
         )
     except Exception as error:

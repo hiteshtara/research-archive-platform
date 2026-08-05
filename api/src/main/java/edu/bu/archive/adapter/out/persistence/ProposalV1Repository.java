@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAssociatedUnitResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentRow;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFundedAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
@@ -377,6 +378,45 @@ public class ProposalV1Repository {
                 """)
                 .param("proposalNumber", proposalNumber)
                 .query(ProposalFundedAwardResponse.class)
+                .list();
+    }
+
+    /*
+     * --- Custom Data ---------------------------------------------------
+     *
+     * Scoped to this exact proposal_id (version-scoped, never
+     * family-wide - live-verified: fixture 01157400's 161 rows are only
+     * 30 distinct custom_attribute_ids spread across 6 different
+     * sequence_numbers/proposal_ids, so combining sibling versions'
+     * rows would silently merge unrelated data). custom_attribute_id
+     * has no foreign key (see V064's migration comment), so this is a
+     * LEFT JOIN - label/name/dataType/groupName come back null when
+     * the shared lookup has no matching row yet, never a load or query
+     * failure.
+     */
+    public List<ProposalCustomDataResponse> findCustomDataRows(long proposalId) {
+        return jdbc.sql("""
+                SELECT
+                    pcd.proposal_custom_data_id,
+                    pcd.custom_attribute_id,
+                    ca.label,
+                    ca.name,
+                    ca.data_type_description AS data_type,
+                    ca.group_name,
+                    pcd.value,
+                    pcd.source_update_timestamp,
+                    pcd.source_update_user
+                FROM archive.proposal_custom_data pcd
+                LEFT JOIN archive.custom_attribute ca
+                    ON ca.custom_attribute_id = pcd.custom_attribute_id
+                WHERE pcd.proposal_id = :proposalId
+                ORDER BY
+                    ca.group_name NULLS LAST,
+                    pcd.custom_attribute_id,
+                    pcd.proposal_custom_data_id
+                """)
+                .param("proposalId", proposalId)
+                .query(ProposalCustomDataResponse.class)
                 .list();
     }
 }

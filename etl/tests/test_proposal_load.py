@@ -10,6 +10,7 @@ from load_proposals_from_csv import (
     ATTACHMENT_COLUMNS,
     AWARD_COLUMNS,
     COMMENT_COLUMNS,
+    CUSTOM_DATA_COLUMNS,
     PERSON_COLUMNS,
     PERSON_UNIT_COLUMNS,
     UNIT_CONTACT_COLUMNS,
@@ -18,6 +19,7 @@ from load_proposals_from_csv import (
     prepare_attachments,
     prepare_awards,
     prepare_comments,
+    prepare_custom_data,
     prepare_person_units,
     prepare_persons,
     prepare_unit_contacts,
@@ -806,6 +808,82 @@ class PrepareCommentsTest(unittest.TestCase):
             "source_update_user",
         ):
             self.assertIn(column, COMMENT_COLUMNS)
+
+
+class PrepareCustomDataTest(unittest.TestCase):
+    def _fixture_row(self, **overrides):
+        # Real fixture: family 205, proposal_id 2986 (sequence 2) -
+        # PROPOSAL_CUSTOM_DATA_ID 477845, custom_attribute_id 480
+        # ("Submitted Date"), value "08/09/2011".
+        row = {
+            "proposal_custom_data_id": 477845,
+            "proposal_id": 2986,
+            "proposal_number": "205",
+            "sequence_number": 2,
+            "custom_attribute_id": 480,
+            "value": "08/09/2011",
+            "source_update_timestamp": "2017-05-03",
+            "source_update_user": "dhaywood",
+        }
+        row.update(overrides)
+        return row
+
+    def test_preserves_the_real_fixture_row_verbatim(self) -> None:
+        dataframe = pd.DataFrame([self._fixture_row()])
+
+        prepared = prepare_custom_data(dataframe)
+
+        row = prepared.iloc[0]
+        self.assertEqual(row["proposal_custom_data_id"], 477845)
+        self.assertEqual(row["proposal_id"], 2986)
+        self.assertEqual(row["custom_attribute_id"], 480)
+        self.assertEqual(row["value"], "08/09/2011")
+
+    def test_a_blank_persisted_value_is_a_real_distinct_row(self) -> None:
+        # Real fixture: proposal_custom_data_id 1495997 (attribute 1209,
+        # "Opportunity Title") has a NULL value - still a real row, a
+        # blank persisted value, never dropped for having no text.
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(
+                proposal_custom_data_id=1495997,
+                custom_attribute_id=1209,
+                value=None,
+            ),
+        ])
+
+        prepared = prepare_custom_data(dataframe)
+
+        self.assertEqual(len(prepared), 2)
+
+    def test_collapses_a_true_duplicate_proposal_custom_data_id(self) -> None:
+        dataframe = pd.DataFrame([
+            self._fixture_row(),
+            self._fixture_row(),
+        ])
+
+        prepared = prepare_custom_data(dataframe)
+
+        self.assertEqual(len(prepared), 1)
+
+    def test_requires_identity_columns(self) -> None:
+        dataframe = pd.DataFrame([{"value": "no identity columns"}])
+
+        with self.assertRaises(RuntimeError):
+            prepare_custom_data(dataframe)
+
+    def test_all_expected_columns_are_declared(self) -> None:
+        for column in (
+            "proposal_custom_data_id",
+            "proposal_id",
+            "proposal_number",
+            "sequence_number",
+            "custom_attribute_id",
+            "value",
+            "source_update_timestamp",
+            "source_update_user",
+        ):
+            self.assertIn(column, CUSTOM_DATA_COLUMNS)
 
 
 class ParseArgsTest(unittest.TestCase):

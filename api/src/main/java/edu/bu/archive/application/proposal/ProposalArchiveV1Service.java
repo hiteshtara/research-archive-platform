@@ -10,6 +10,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentCategoryRespons
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentRow;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFundedAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
@@ -291,6 +292,11 @@ public class ProposalArchiveV1Service {
     public List<ProposalFundedAwardResponse> findFundedAwards(long proposalId) {
         String proposalNumber = requireProposalNumberForId(proposalId);
         return repository.findFundedAwardRows(proposalNumber);
+    }
+
+    public List<ProposalCustomDataResponse> findCustomData(long proposalId) {
+        requireProposalNumberForId(proposalId);
+        return repository.findCustomDataRows(proposalId);
     }
 
     private String requireProposalNumberForId(long proposalId) {

@@ -27,6 +27,7 @@ from archive_etl.config.startup_validation import (
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.reference_data import (
     run_load_comment_type_reference_data,
+    run_load_custom_attribute_reference_data,
     run_load_unit_reference_data,
 )
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
@@ -10580,6 +10581,21 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--load-custom-attribute-reference-data",
+        action="store_true",
+        help=(
+            "Loads archive.custom_attribute -> archive.custom_attribute_document "
+            "- Oracle's shared CUSTOM_ATTRIBUTE/CUSTOM_ATTRIBUTE_DOCUMENT "
+            "lookup, the real FK target of "
+            "archive.proposal_custom_data.custom_attribute_id (and, "
+            "later, Award/Negotiation/Subaward's own custom-data). Small, "
+            "bounded full reference-data loads (105/146 rows on BU's "
+            "real Oracle), independent of the Unit/Person and Comment "
+            "Type reference bundles. Idempotent - combine with --dry-run "
+            "to roll back."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -10706,6 +10722,13 @@ def main() -> None:
         if not arguments.ecs:
             apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         run_load_comment_type_reference_data(engine, dry_run=arguments.dry_run)
+        return
+
+    if arguments.load_custom_attribute_reference_data:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        run_load_custom_attribute_reference_data(engine, dry_run=arguments.dry_run)
         return
 
     if arguments.load_award_id is not None:

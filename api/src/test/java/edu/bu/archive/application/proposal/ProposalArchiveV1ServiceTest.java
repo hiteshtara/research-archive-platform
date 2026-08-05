@@ -6,6 +6,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAttachmentsResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentRow;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFundedAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
@@ -28,6 +29,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProposalArchiveV1ServiceTest {
@@ -304,5 +307,118 @@ class ProposalArchiveV1ServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).relationshipActive()).isFalse();
+    }
+
+    @Test
+    void findCustomDataResolvesTheLabelViaTheSharedLookup() {
+        // Real fixture: proposal_id 2986 (family 205), custom_attribute_id
+        // 480 ("ip_submission_date" / "Submitted Date", data type "Date").
+        when(repository.findProposalNumber(2986L))
+                .thenReturn(Optional.of("205"));
+        ProposalCustomDataResponse row = new ProposalCustomDataResponse(
+                477845L, 480L, "Submitted Date", "ip_submission_date",
+                "Date", null, "08/09/2011",
+                LocalDateTime.of(2017, 5, 3, 11, 31, 39), "dhaywood"
+        );
+        when(repository.findCustomDataRows(2986L)).thenReturn(List.of(row));
+
+        List<ProposalCustomDataResponse> result = service.findCustomData(2986L);
+
+        assertThat(result).containsExactly(row);
+        assertThat(result.get(0).label()).isEqualTo("Submitted Date");
+    }
+
+    @Test
+    void findCustomDataThrowsNotFoundWhenTheProposalDoesNotExist() {
+        when(repository.findProposalNumber(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.findCustomData(999L))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void findCustomDataPreservesARowWithNoMatchingLookupRatherThanDroppingIt() {
+        // custom_attribute_id has no foreign key (V064) - Oracle can add
+        // an attribute this archive hasn't loaded into
+        // archive.custom_attribute yet. The row must still come back,
+        // with label/name/dataType null, never silently filtered out.
+        when(repository.findProposalNumber(2986L))
+                .thenReturn(Optional.of("205"));
+        ProposalCustomDataResponse unresolvedRow = new ProposalCustomDataResponse(
+                999999L, 424242L, null, null, null, null, "some value",
+                LocalDateTime.now(), "dhaywood"
+        );
+        when(repository.findCustomDataRows(2986L))
+                .thenReturn(List.of(unresolvedRow));
+
+        List<ProposalCustomDataResponse> result = service.findCustomData(2986L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).label()).isNull();
+        assertThat(result.get(0).value()).isEqualTo("some value");
+    }
+
+    @Test
+    void findCustomDataPreservesARealBlankValueDistinctFromNoRowAtAll() {
+        // Real fixture: proposal_custom_data_id 1495997 (attribute 1209,
+        // "Opportunity Title") has a NULL value - a genuine, persisted
+        // blank, not the absence of a row.
+        when(repository.findProposalNumber(2986L))
+                .thenReturn(Optional.of("205"));
+        ProposalCustomDataResponse blankRow = new ProposalCustomDataResponse(
+                1495997L, 1209L, "Opportunity Title", "OppTitle",
+                "String", null, null,
+                LocalDateTime.of(2020, 3, 6, 15, 40, 37), "dhaywood"
+        );
+        when(repository.findCustomDataRows(2986L))
+                .thenReturn(List.of(blankRow));
+
+        List<ProposalCustomDataResponse> result = service.findCustomData(2986L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).value()).isNull();
+        assertThat(result.get(0).label()).isEqualTo("Opportunity Title");
+    }
+
+    @Test
+    void findCustomDataNeverCombinesRowsAcrossSiblingVersions() {
+        // Version scoping proof: the service must query by the exact
+        // proposalId only - never resolve to proposalNumber and fan out
+        // across the whole family the way findFundedAwards does. Real
+        // fixture 01157400 spans 6 different proposal_ids/sequence_numbers
+        // - combining them would silently merge unrelated versions' data.
+        when(repository.findProposalNumber(1L)).thenReturn(Optional.of("01157400"));
+        ProposalCustomDataResponse thisVersionOnly = new ProposalCustomDataResponse(
+                1L, 100L, "Label", "name", "String", null, "v1 value",
+                LocalDateTime.now(), "dhaywood"
+        );
+        when(repository.findCustomDataRows(1L)).thenReturn(List.of(thisVersionOnly));
+
+        List<ProposalCustomDataResponse> result = service.findCustomData(1L);
+
+        assertThat(result).containsExactly(thisVersionOnly);
+        verify(repository).findCustomDataRows(1L);
+        verify(repository, never()).findCustomDataRows(2L);
+    }
+
+    @Test
+    void findCustomDataReturnsALargeSetWithoutTruncation() {
+        // Real fixture 01157400 has 161 rows for a single proposal_id -
+        // the service must not cap or drop any of them.
+        when(repository.findProposalNumber(1238613L))
+                .thenReturn(Optional.of("01157400"));
+        List<ProposalCustomDataResponse> rows = new java.util.ArrayList<>();
+        for (long i = 0; i < 161; i++) {
+            rows.add(new ProposalCustomDataResponse(
+                    i, i, "Label " + i, "name" + i, "String", null,
+                    "value " + i, LocalDateTime.now(), "dhaywood"
+            ));
+        }
+        when(repository.findCustomDataRows(1238613L)).thenReturn(rows);
+
+        List<ProposalCustomDataResponse> result =
+                service.findCustomData(1238613L);
+
+        assertThat(result).hasSize(161);
     }
 }

@@ -838,6 +838,16 @@ export function getProposalFundedAwardsV1(
   );
 }
 
+export function getProposalCustomDataV1(
+  proposalId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").ProposalCustomDataV1[]> {
+  return request(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/custom-data`,
+    signal,
+  );
+}
+
 // Resolve-only: never exposes an internal awardId from the Proposal
 // domain's own payload - a caller (Funded Awards' "Open Award" link)
 // calls this immediately before navigating to /awards/{awardId}.

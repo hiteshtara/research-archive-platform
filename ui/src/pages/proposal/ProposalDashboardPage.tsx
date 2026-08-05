@@ -17,6 +17,7 @@ import { AwardStatusPill } from "../../components/award/AwardStatusPill";
 import { ComingSoonSection } from "../../components/award/ComingSoonSection";
 import { ProposalAttachmentsSection } from "../../components/proposal/ProposalAttachmentsSection";
 import { ProposalCommentsSection } from "../../components/proposal/ProposalCommentsSection";
+import { ProposalCustomDataSection } from "../../components/proposal/ProposalCustomDataSection";
 import { ProposalFundedAwardsSection } from "../../components/proposal/ProposalFundedAwardsSection";
 import { ProposalPeopleUnitsSection } from "../../components/proposal/ProposalPeopleUnitsSection";
 import { ProposalSponsorProgramSection } from "../../components/proposal/ProposalSponsorProgramSection";
@@ -44,6 +45,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "attachments",
   "comments",
   "sponsorProgram",
+  "customData",
 ]);
 
 function InfoRow({ label, value }: { label: string; value: string | null }) {
@@ -233,6 +235,10 @@ export function ProposalDashboardPage() {
 
           {activeSection === "sponsorProgram" && (
             <ProposalSponsorProgramSection proposalId={proposalId} />
+          )}
+
+          {activeSection === "customData" && (
+            <ProposalCustomDataSection proposalId={proposalId} />
           )}
 
           {!IMPLEMENTED_SECTIONS.has(activeSection) && (

@@ -51,6 +51,8 @@ UNIT_ADMINISTRATOR_SQL = REFERENCE_SQL_DIR / "03_unit_administrator.sql"
 ROLODEX_SQL = REFERENCE_SQL_DIR / "04_rolodex.sql"
 PERSON_SQL = REFERENCE_SQL_DIR / "05_person.sql"
 COMMENT_TYPE_SQL = REFERENCE_SQL_DIR / "06_comment_type.sql"
+CUSTOM_ATTRIBUTE_SQL = REFERENCE_SQL_DIR / "07_custom_attribute.sql"
+CUSTOM_ATTRIBUTE_DOCUMENT_SQL = REFERENCE_SQL_DIR / "08_custom_attribute_document.sql"
 
 
 def _sql_value(value: Any) -> Any:
@@ -197,6 +199,28 @@ _COMMENT_TYPE_COLUMNS = [
     "source_update_timestamp",
     "source_update_user",
     "source_version_number",
+]
+
+_CUSTOM_ATTRIBUTE_COLUMNS = [
+    "custom_attribute_id",
+    "name",
+    "label",
+    "data_type_code",
+    "data_type_description",
+    "group_name",
+    "source_update_timestamp",
+    "source_update_user",
+]
+
+_CUSTOM_ATTRIBUTE_DOCUMENT_COLUMNS = [
+    "document_type_code",
+    "custom_attribute_id",
+    "type_name",
+    "is_required",
+    "active_flag",
+    "sort_id",
+    "source_update_timestamp",
+    "source_update_user",
 ]
 
 
@@ -374,6 +398,113 @@ def load_comment_types(connection: Connection, load_id: int) -> dict[str, int]:
         rows=frame,
         load_id=load_id,
     )
+
+
+def load_custom_attributes(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(CUSTOM_ATTRIBUTE_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="custom_attribute",
+        pk_columns=["custom_attribute_id"],
+        columns=_CUSTOM_ATTRIBUTE_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_custom_attribute_documents(
+    connection: Connection, load_id: int
+) -> dict[str, int]:
+    frame = OracleDataSource(CUSTOM_ATTRIBUTE_DOCUMENT_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="custom_attribute_document",
+        pk_columns=["document_type_code", "custom_attribute_id"],
+        columns=_CUSTOM_ATTRIBUTE_DOCUMENT_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def run_load_custom_attribute_reference_data(
+    engine: Engine, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """Loads archive.custom_attribute -> archive.custom_attribute_document,
+    in that FK-safe order, in one transaction - independent of the
+    Unit/Person reference bundle and of comment_type (no FK relationship
+    to either). Shared across domains: not owned by Proposal, Award,
+    Negotiation, or Subaward specifically - see V064's migration
+    comment."""
+    started = time.perf_counter()
+    report: dict[str, Any] = {}
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = connection.execute(
+                text(
+                    """
+                    INSERT INTO archive.load_run (
+                        domain, source_system, source_file_name,
+                        rows_read, status
+                    ) VALUES (
+                        'CUSTOM_ATTRIBUTE_REFERENCE_DATA', 'KUALI',
+                        'Oracle KCOEUS export', 0, 'STARTED'
+                    )
+                    RETURNING load_id
+                    """
+                )
+            ).scalar_one()
+
+            report["custom_attribute"] = load_custom_attributes(
+                connection, load_id
+            )
+            report["custom_attribute_document"] = (
+                load_custom_attribute_documents(connection, load_id)
+            )
+
+            connection.execute(
+                text(
+                    """
+                    UPDATE archive.load_run
+                       SET status = 'LOADED', completed_at = CURRENT_TIMESTAMP
+                     WHERE load_id = :load_id
+                    """
+                ),
+                {"load_id": load_id},
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    report["elapsed_ms"] = (time.perf_counter() - started) * 1000
+    logger.bind(stage="load_custom_attribute_reference_data").info(
+        "Custom attribute reference data load{}: {}",
+        " [DRY RUN - not persisted]" if dry_run else "",
+        report,
+    )
+    return report
 
 
 def run_load_comment_type_reference_data(
