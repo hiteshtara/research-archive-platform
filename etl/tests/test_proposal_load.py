@@ -891,19 +891,38 @@ class ParseArgsTest(unittest.TestCase):
         args = parse_args(["--proposal-number", "205", "--proposal-number", "999"])
         self.assertEqual(args.proposal_number, ["205", "999"])
 
-    def test_max_families_accepts_an_integer(self) -> None:
-        args = parse_args(["--max-families", "10"])
-        self.assertEqual(args.max_families, 10)
+    def test_load_proposal_number_is_an_alias_for_proposal_number(self) -> None:
+        args = parse_args(["--load-proposal-number", "205"])
+        self.assertEqual(args.proposal_number, ["205"])
 
-    def test_proposal_number_and_max_families_are_mutually_exclusive(self) -> None:
+    def test_create_batch_accepts_an_integer(self) -> None:
+        args = parse_args(["--create-batch", "25"])
+        self.assertEqual(args.create_batch, 25)
+
+    def test_load_batch_accepts_an_integer(self) -> None:
+        args = parse_args(["--load-batch", "7"])
+        self.assertEqual(args.load_batch, 7)
+
+    def test_show_batch_accepts_an_integer(self) -> None:
+        args = parse_args(["--show-batch", "7"])
+        self.assertEqual(args.show_batch, 7)
+
+    def test_proposal_number_and_create_batch_are_mutually_exclusive(self) -> None:
         with self.assertRaises(SystemExit):
-            parse_args(["--proposal-number", "205", "--max-families", "10"])
+            parse_args(["--proposal-number", "205", "--create-batch", "10"])
+
+    def test_create_batch_and_load_batch_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--create-batch", "10", "--load-batch", "1"])
 
     def test_defaults_to_no_targeting(self) -> None:
         args = parse_args([])
         self.assertIsNone(args.proposal_number)
-        self.assertIsNone(args.max_families)
+        self.assertIsNone(args.create_batch)
+        self.assertIsNone(args.load_batch)
+        self.assertIsNone(args.show_batch)
         self.assertIsNone(args.limit)
+        self.assertFalse(args.dry_run)
 
 
 if __name__ == "__main__":
