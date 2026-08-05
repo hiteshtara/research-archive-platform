@@ -78,7 +78,7 @@ the package layout departs from strict hexagonal architecture.
 | `terraform/` | AWS infrastructure as code (VPC, RDS, ECS, ECR, S3, Secrets Manager) |
 | `ops/` | Operational scripts and the AWS operations manual |
 | `docs/` | Architecture, AI feature design, and per-domain ETL data-contract/reconciliation docs |
-| `scripts/` | Local development helper scripts |
+| [`scripts/`](scripts/) | Local development, deployment, AWS access, and ETL operator scripts |
 
 ## Getting started
 
@@ -129,6 +129,8 @@ Run the relevant suite before every commit; see
 | [`docs/architecture/DATABASE_SCHEMA.md`](docs/architecture/DATABASE_SCHEMA.md) | Reference map of every table/view in `database/migrations/`, organized by domain |
 | [`docs/architecture/INFRASTRUCTURE.md`](docs/architecture/INFRASTRUCTURE.md) | What each Terraform module provisions and how environments wire them together |
 | [`terraform/README.md`](terraform/README.md) | Terraform deployment runbook: bootstrap, `init`/`plan`/`apply`, account safety, destroy procedure |
+| [`scripts/README.md`](scripts/README.md) | Script catalog with local, deployment, AWS access, and ETL entry points |
+| [`docs/scripts/`](docs/scripts/) | Script tutorials, operations, complete reference, and safety architecture |
 | [`docs/development/MASTER_ROADMAP.md`](docs/development/MASTER_ROADMAP.md) | Current status and planned phases |
 | [`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md), [`docs/AI_OPENAI_PROVIDER.md`](docs/AI_OPENAI_PROVIDER.md) | AI feature design and provider integration |
 | [`docs/AI_TROUBLESHOOTING.md`](docs/AI_TROUBLESHOOTING.md), [`docs/runbooks/ecs-ai-deployment.md`](docs/runbooks/ecs-ai-deployment.md) | AI feature deployment and incident postmortems |

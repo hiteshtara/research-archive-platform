@@ -20,7 +20,17 @@ terraform/
 - AWS CLI v2, configured with credentials for the target account (SSO
   recommended: `aws sso login --profile <profile>`)
 - An IAM principal with permission to create the resources below (an
-  account admin/power-user role is the simplest starting point)
+  account admin/power-user role is the simplest starting point). If scoping
+  narrower than admin/power-user, the principal needs at minimum: VPC/EC2
+  networking, RDS, S3, ECR, ECS, IAM role creation (for task/execution
+  roles), Secrets Manager, and - only if `manage_cognito`/`manage_amplify`
+  are used - Cognito and Amplify/GitHub App access. Prod additionally needs
+  Route 53 and ACM access for `api_certificate_arn`/`api_route53_zone_id`.
+  VPC peering to Oracle (`enable_oracle_peering`, dev only) needs peering
+  permissions on both sides of the connection, which usually means
+  coordinating with whoever owns the Oracle-side AWS account.
+- Write access to the S3 bucket created by [bootstrap](#2-bootstrap-the-state-backend-once-per-aws-account)
+  (or permission to create it, if bootstrapping for the first time).
 
 ## 1. Verify which account you're about to touch
 
@@ -109,18 +119,40 @@ machine ran the first apply.
 cd terraform/environments/dev   # or test, or prod
 
 cp backend.hcl.example backend.hcl   # fill in the bucket from step 2
-cp terraform.tfvars.example terraform.tfvars   # dev already has a real terraform.tfvars checked in - see note below
+cp terraform.tfvars.example terraform.tfvars   # fill in real values - see note below
 
 terraform init -backend-config=backend.hcl
 ```
 
-**Note on dev's `terraform.tfvars`**: unlike `test`/`prod`, `environments/dev/terraform.tfvars`
-is already checked into the repository with real (non-secret) values for
-the existing BU dev account, since none of its values are sensitive. If
-you're standing up a *new* dev-equivalent environment for a different
-account, treat `terraform.tfvars.example` as the starting point instead.
+**Note on dev's `terraform.tfvars`**: `terraform.tvars` matches a blanket
+`.gitignore` rule (`terraform.tfvars`) and is **not** checked into the
+repository for any environment, including dev - only `terraform.tfvars.example`
+is tracked (verify yourself with `git ls-files environments/dev/`). A local,
+already-filled-in `terraform.tfvars` with real (non-secret) values for the
+existing BU dev account may already exist on a machine that's previously run
+this, but it is not part of a fresh clone. Copy `terraform.tfvars.example`
+and fill in real values for whichever account you're standing up.
 
 ## 4. Plan and apply
+
+**First deployment in a brand-new environment only**: ECS is provisioned in
+the same configuration as ECR, and the API/loader task definitions reference
+image tags that don't exist until you've built and pushed at least one
+image - a full `apply` against an empty ECR will create the ECS service
+successfully but it will fail to reach a stable running state (tasks stuck
+pulling a nonexistent image). Provision just the registries first, push
+images, then apply everything:
+
+```bash
+terraform apply -target=module.ecr -target=module.api_ecr
+# then, from repo root: build + push at least one API and one loader image
+# (see ops/deploy-api.sh for the API image; the loader image is built the
+# same way against terraform/modules/ecr's repository URL)
+cd terraform/environments/<env>   # back in the environment directory
+terraform apply                  # full apply, ECS can now pull a real image
+```
+
+On every later, non-first apply, the plain two-command form is enough:
 
 ```bash
 terraform plan
@@ -180,13 +212,37 @@ After `apply`, `terraform output` shows (among others): `api_url`, `ui_url`
 `enable_openai_secret = true`). Run `terraform output <name>` for a single
 value, or `terraform output -raw <name>` to strip the quotes for scripting.
 
+### Verifying the deployment actually works
+
+A clean `terraform output` only proves Terraform thinks it created the
+resources - not that the running system works end to end. After a first
+apply (and especially after the two-step image bring-up in step 4), check:
+
+- **ECS service health**: `aws ecs describe-services --cluster <cluster> --services <service> --query 'services[0].{status:status,running:runningCount,desired:desiredCount}'` - `running` should equal `desired`, not just `status: ACTIVE`.
+- **ALB target health**: `aws elbv2 describe-target-health --target-group-arn <arn>` - targets should be `healthy`, not `unhealthy`/`draining`.
+- **API reachability**: `curl -sf $(terraform output -raw api_url)/actuator/health`.
+- **DNS/HTTPS** (prod, or wherever `api_certificate_arn` is set): confirm `api_url` resolves and serves HTTPS with a valid cert, not just that the ALIAS record exists.
+- **RDS connectivity**: from an ECS task (`aws ecs execute-command`) or a bastion, confirm the API can actually reach `database_endpoint` - a security-group or route-table gap won't show up in `terraform output`.
+- **Cognito login** (if `manage_cognito = true` or newly wired to an existing pool): actually complete a login/logout round-trip against `ui_url`, not just confirm the pool exists.
+- **Amplify build status** (if `manage_amplify = true`): `aws amplify get-job --app-id <id> --branch-name main --job-id <id>` should show `SUCCEED`, not just that the app resource exists.
+- **Loader task execution**: run the loader once (`scripts/run-award-loader.sh --dry-run` or equivalent) to confirm its task role can actually reach Postgres/Oracle/S3, not just that the task definition registered.
+- **Document bucket access**: confirm the API's task role can actually `s3:GetObject` from `documents_bucket_name`, not just that the bucket exists.
+- **Account/region**: `aws sts get-caller-identity` one more time after apply, to confirm you ended up where you meant to.
+
 ## Account safety
 
-Every environment's `provider.tf` sets `allowed_account_ids = [var.expected_account_id]`.
+Every environment's `providers.tf` sets `allowed_account_ids = [var.expected_account_id]`.
 If your active AWS credentials resolve to any other account, the AWS
 provider refuses to do anything at all - `plan` and `apply` both fail
 immediately, before touching a single resource. There is no default for
 `expected_account_id`; you must set it explicitly per environment.
+
+**This protection only applies once the provider evaluates** - which
+happens *after* `terraform init` has already selected a state backend (see
+[Bootstrap the state backend](#2-bootstrap-the-state-backend-once-per-aws-account)).
+`allowed_account_ids` cannot stop you from `init`-ing against the wrong
+account's state bucket in the first place; that's what step 1's
+`aws sts get-caller-identity` check is actually for.
 
 ## Environment separation
 
@@ -208,7 +264,7 @@ via Transit Gateway later without a CIDR collision.
 Both are controlled by `manage_cognito` / `manage_amplify` (both default
 `false`):
 
-- **`false`** (dev's current setting): you supply `cognito_issuer_uri`,
+- **`false`**: you supply `cognito_issuer_uri`,
   `cognito_client_id`, and `cognito_user_pool_id` for an existing User Pool
   (plus `cognito_hosted_ui_domain` if `manage_amplify = true`), and don't
   set `manage_amplify` at all - your UI is hosted some other way.
@@ -331,7 +387,12 @@ The two S3 buckets (`data`, `documents`) and the Cognito User Pool (when
 driven by a variable, so this applies to every environment, including dev.
 If you genuinely need to destroy a dev environment's buckets or pool,
 either comment out that block for the run or `terraform state rm` the
-resource first; see the comment directly above each resource.
+resource first; see the comment directly above each resource. **`terraform
+state rm` does not delete anything in AWS** - it only removes the resource
+from Terraform's tracking, leaving it orphaned but still live. You must
+still delete the actual bucket/pool yourself (console or `aws s3
+rb`/`aws cognito-idp delete-user-pool`) if the goal is to actually remove it,
+not just stop Terraform from managing it.
 
 Cognito also supports its own native `deletion_protection` (`ACTIVE`/
 `INACTIVE`, independent of the lifecycle block above - `INACTIVE` in
@@ -387,4 +448,9 @@ terraform validate   # run inside each environment directory, after init
 
 Also run `tflint` and/or `checkov`/`tfsec` if available in your environment
 - they were not installed when this configuration was last audited; add
-  them to CI if possible.
+  them to CI if possible. Quick local install: `brew install tflint`
+  (or see https://github.com/terraform-linters/tflint#installation) and
+  `pip install checkov` / `brew install tfsec`. No CI integration or repo
+  config (`.tflint.hcl`, `.checkov.yaml`) exists yet for any of the three -
+  running them today means picking up their tool-default rule sets, not a
+  project-tuned one.

@@ -113,6 +113,25 @@ Service before Controller.
 
 Controller before React.
 
+A doc's prose description of a `lifecycle`/`ignore_changes` block, a backend
+config, or "is checked into the repository" is not proof — verify against
+the actual `.tf` file and `git ls-files`/`git log` before trusting it. Found
+2026-08-04: `terraform/README.md` described `terraform/modules/amplify/main.tf`'s
+`ignore_changes` as covering `repository` when the code didn't (fixed by
+adding `repository` to `ignore_changes`, since the README's Recommended
+console-connect flow was the one worth preserving), and separately claimed
+dev's `terraform.tfvars` is git-tracked when `git ls-files` shows only
+`terraform.tfvars.example` is. Full review and fix details in
+`docs/operations/AWS_TROUBLESHOOTING_RUNBOOK.md` section 31.
+
+`terraform/bootstrap/backend.tf` must stay untracked/gitignored, like every
+environment's `backend.hcl` — unlike `environments/*/backend.tf` (generic,
+safe to commit), bootstrap's `backend.tf` is a complete backend block with
+the real state bucket name hardcoded inline. A committed copy silently
+defeats the documented "start on local state, create the bucket, then
+migrate" fresh-account bootstrap flow, since Terraform auto-loads any
+backend block already on disk. Fixed 2026-08-04.
+
 -------------------------------------------------------------------------------
 FUTURE MODULES
 -------------------------------------------------------------------------------

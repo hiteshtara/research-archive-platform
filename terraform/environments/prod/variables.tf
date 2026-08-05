@@ -357,13 +357,13 @@ variable "manage_amplify" {
 }
 
 variable "amplify_repository_url" {
-  description = "HTTPS URL of the GitHub repository Amplify builds from. Required when manage_amplify = true."
+  description = "HTTPS URL of the GitHub repository Amplify builds from. Only used when manage_amplify = true. Recommended: leave unset (with amplify_github_access_token also unset) - Terraform creates the app with no repository connected, then connect it manually via the AWS Console's GitHub App-based flow after the first apply (see terraform/README.md's 'Amplify repository connection' section). Only set both this and the token together for the legacy PAT-based flow."
   type        = string
   default     = null
 }
 
 variable "amplify_github_access_token" {
-  description = "GitHub personal access token (repo scope) for Amplify's repository connection. Required when manage_amplify = true. Never set this in a tfvars file - pass it via TF_VAR_amplify_github_access_token or a secret manager."
+  description = "GitHub personal access token (repo scope) for Amplify's repository connection, for the legacy PAT-based flow only - see amplify_repository_url. Only used when manage_amplify = true and amplify_repository_url is set. Never set this in a tfvars file - pass it via TF_VAR_amplify_github_access_token or a secret manager."
   type        = string
   default     = null
   sensitive   = true

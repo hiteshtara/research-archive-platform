@@ -5,6 +5,22 @@ Python pipeline that extracts approved data from BU's Kuali Oracle database
 the Research Archive's PostgreSQL database. See the
 [repository root README](../README.md) for the overall architecture.
 
+## Documentation map
+
+This README is the quick entry point. The deeper documentation is organized
+by what you are trying to do:
+
+- [Getting started](../docs/etl/getting-started.md) — install the environment
+  and run a read-only end-to-end smoke test.
+- [Operations guide](../docs/etl/operations.md) — run, verify, recover, batch,
+  or deploy a load.
+- [Command and configuration reference](../docs/etl/reference.md) — exact
+  commands, environment variables, scripts, and package responsibilities.
+- [Architecture](../docs/etl/architecture.md) — data flows, transaction
+  boundaries, migrations, batching, attachments, and security boundaries.
+- [ETL documentation index](../docs/etl/README.md) — links to domain-specific
+  runbooks and design documents.
+
 ## Prerequisites
 
 - Python 3.12+

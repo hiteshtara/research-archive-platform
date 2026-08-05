@@ -30,24 +30,33 @@ resource "aws_amplify_app" "ui" {
   }
 
   lifecycle {
-    # repository is tracked (not ignored) - Terraform attaches/updates it
-    # via the same AWS UpdateApp API call either way, in place, no
-    # replacement (verified against the provider's own resource schema:
-    # repository/access_token/oauth_token have no ForceNew). The
-    # one-time interactive step AWS actually requires is installing the
-    # Amplify GitHub App itself against the target repo
-    # (https://github.com/apps/aws-amplify-<region>/installations/new) -
-    # that's a GitHub-side action with no Terraform equivalent, done
-    # once per account/region, not per app. After that, attaching this
-    # specific app to a specific repo/branch is a normal Terraform
-    # change: set repository_url and supply github_access_token (a
-    # narrowly-scoped admin:repo_hook-only PAT - see variables.tf) via
-    # TF_VAR_amplify_github_access_token, then apply. AWS uses that
-    # token once, to create a webhook and read-only deploy key, and
-    # does not store it - which is exactly why access_token/oauth_token
-    # stay in ignore_changes below: AWS never returns them on read, so
-    # tracking them would show a permanent phantom diff every plan.
-    ignore_changes = [access_token, oauth_token]
+    # repository is in ignore_changes alongside access_token/oauth_token so
+    # that terraform/README.md's Recommended flow is actually safe: leave
+    # repository_url null, apply, then connect the repo manually via AWS
+    # Console > Amplify > App settings > General > Connect a repository
+    # (the GitHub App-based flow - a one-time interactive step AWS
+    # requires: installing the Amplify GitHub App itself against the
+    # target repo, https://github.com/apps/aws-amplify-<region>/installations/new,
+    # done once per account/region, not per app, with no Terraform
+    # equivalent). Without repository in ignore_changes, the next
+    # "terraform apply" would see actual repository != desired
+    # repository_url (null) and revert/detach the manual connection,
+    # since repository/access_token/oauth_token have no ForceNew and
+    # would otherwise be reconciled in place via the same AWS UpdateApp
+    # call. access_token/oauth_token are ignored for a different reason:
+    # AWS never returns them on read (write-only, used once to create a
+    # webhook/deploy key and not stored), so tracking them would show a
+    # permanent phantom diff every plan regardless of which repository
+    # flow is in use.
+    #
+    # The legacy PAT-based flow (set repository_url and
+    # github_access_token via TF_VAR_amplify_github_access_token, then
+    # apply) still works for *initial creation* - ignore_changes only
+    # suppresses drift detection on later applies, not the values used
+    # when the resource is first created. Changing repository_url after
+    # that first apply will not be picked up automatically; reconnect it
+    # via the console, or remove it from ignore_changes for one apply.
+    ignore_changes = [repository, access_token, oauth_token]
   }
 }
 

@@ -1794,3 +1794,110 @@ The exact secret name may have a generated suffix. Discover it with `list-secret
 12. Use Reachability Analyzer only when the normal evidence is insufficient.
 
 For an Oracle/Kuali connection failure, focus first on the exact Oracle destination IP. Only `10.58.33.0/25` and `10.58.33.128/25` are shown as peered. An address elsewhere in `10.58.32.0/22` will not follow those two routes. Then verify the Oracle-side return route to `10.30.0.0/16`, Oracle security rules, both NACLs, and whether the application is using the expected hostname/IP.
+
+## 31. Terraform documentation review: bootstrap backend and Amplify repository drift (2026-08-04)
+
+### What we were trying to accomplish
+
+An operator pasted a third-party review of `terraform/README.md` and the modules it documents, claiming (among other things) two critical defects: that the bootstrap instructions cannot work from a fresh AWS account, and that the Amplify module's `lifecycle.ignore_changes` does not match what the README says it does. The task was to independently verify each claim against the actual repository content (not just trust the review), then fix whichever critical issues were confirmed.
+
+### Symptoms and exact error messages
+
+No live error was reproduced - no `terraform` binary was available in this session's sandbox (`which terraform` found nothing; `terraform version` did not run), and network access to `https://apt.releases.hashicorp.com/gpg` returned `curl: (22) The requested URL returned error: 403`, with `apt-get update` also failing (`E: Could not open lock file /var/lib/apt/lists/lock - open (13: Permission denied)`). All verification was therefore done by reading source files and git metadata directly, not by running `terraform init`/`plan`/`fmt` against the repo.
+
+### Environment involved
+
+Local sandbox working copy of the `research-archive-platform` repository (no AWS account, no live Terraform state, no Oracle/PostgreSQL/ECS/Cognito access). This was a static documentation-and-source-code review, not a live infrastructure incident.
+
+### Diagnostic commands used
+
+```bash
+git ls-files terraform/bootstrap/
+git log --oneline -3 -- terraform/bootstrap/backend.tf
+cat -n terraform/bootstrap/backend.tf
+cat terraform/bootstrap/backend.tf.example
+
+grep -n "lifecycle\|ignore_changes\|repository\|access_token\|oauth_token" \
+  terraform/modules/amplify/main.tf
+
+git ls-files terraform/environments/dev/ | grep -i tfvars
+git status --short terraform/environments/dev/
+
+grep -rn "770203350335\|expected_account_id\|allowed_account_ids" \
+  terraform/environments/*/main.tf terraform/environments/*/terraform.tfvars* \
+  terraform/environments/*/variables.tf terraform/README.md
+
+grep -rn "manage_cognito" terraform/
+grep -rn "use_lockfile" terraform/
+grep -n "provider\.tf\b" terraform/README.md; find terraform -name "provider*.tf"
+grep -n -i "tflint\|checkov\|tfsec\|terraform validate\|terraform fmt" terraform/README.md
+grep -n -B2 -A5 "state rm" terraform/README.md
+grep -n -i "docker\|ECR\|:latest\|image tag" terraform/README.md
+```
+
+Plus targeted `sed -n '<range>p' terraform/README.md` reads of the bootstrap section (lines 1-70), the environment-configuration section (95-145), the Cognito/Amplify-ownership section (195-215), and the S3/Cognito `prevent_destroy` section (320-340).
+
+### What each command proved
+
+- `git ls-files terraform/bootstrap/` listed `backend.tf` as tracked, and `git log` showed it was committed in `50ecb68 feat(terraform): bootstrap remote state for BU AWS account`. `cat -n` showed it is a *complete* S3 backend block (not a partial one needing `-backend-config`) hardcoding `bucket = "research-archive-platform-tfstate-770203350335"`. Terraform auto-loads any backend block present in the working directory, so a fresh clone's `terraform init` in `terraform/bootstrap/` would use that real bucket immediately - it can never reach the "start on local state" step the README's own step 2 describes, because the file that step assumes doesn't exist yet is already committed.
+- The `ignore_changes` grep showed `terraform/modules/amplify/main.tf` (before the fix) contained `ignore_changes = [access_token, oauth_token]`, with a comment directly above stating "repository is tracked (not ignored)". `terraform/README.md` (lines 266-268, read separately) claimed the ignored set was `[repository, access_token, oauth_token]`. The code and the doc's own quoted list did not match.
+- `git ls-files terraform/environments/dev/ | grep -i tfvars` returned only `terraform.tfvars.example`, confirming `terraform.tfvars` itself is untracked (it matches the blanket `terraform.tfvars` line in `.gitignore`), contradicting the README's claim that dev's real file "is already checked into the repository."
+- The `manage_cognito` grep, combined with the `sed` read of lines 195-215, showed the README states `false` is "dev's current setting" while `environments/dev/terraform.tfvars.example` (line 116) and the real local `environments/dev/terraform.tfvars` (line 68) both set `manage_cognito = true`.
+- The `770203350335`/`expected_account_id` grep showed `environments/prod/terraform.tfvars.example:8` hardcodes the same account ID as dev's real account, while `environments/test/terraform.tfvars.example` correctly uses a `REPLACE_WITH_YOUR_12_DIGIT_ACCOUNT_ID` placeholder.
+- The `use_lockfile` grep showed the setting present in `environments/{dev,test,prod}/backend.tf` but absent from `terraform/bootstrap/backend.tf`, with no note in the README explaining the difference.
+- The `provider.tf` grep against actual filenames showed the README (line 185) refers to `provider.tf`, but the real files are `providers.tf` (plural) in all three environments.
+- The `state rm` grep (lines 331-334) showed the README offers `terraform state rm` as a way to "destroy" `prevent_destroy`-protected resources, with no mention that this only removes the resource from Terraform's tracking - it stays alive, orphaned, in AWS.
+- The `docker`/`ECR`/image grep across the full 390-line README returned no step describing building or pushing container images before the first `terraform apply` of a fresh environment, even though ECS is provisioned in the same configuration and references image tags that won't exist yet.
+
+### Approaches that failed and why
+
+Attempted to install `terraform` to run `terraform fmt -check -recursive` and independently confirm one of the review's High-severity claims (formatting drift in `environments/dev/main.tf`). Both installation paths failed in this sandbox: HashiCorp's apt repository returned HTTP 403 on the GPG key fetch, and the sandbox's own `apt-get` is permission-locked (`Could not open lock file /var/lib/apt/lists/lock`). This claim was left unverified rather than guessed at - see Remaining risks below.
+
+### Confirmed root cause
+
+Two independent, unrelated defects, both a mismatch between documentation and the actual repository state:
+
+1. `terraform/bootstrap/backend.tf` was committed to git as a complete backend block with BU's real state bucket hardcoded in it, instead of being generated locally from `backend.tf.example` as the README's own instructions assume. This breaks the documented fresh-account bootstrap flow and weakens account portability.
+2. `terraform/modules/amplify/main.tf`'s `lifecycle.ignore_changes` omitted `repository`, so the README's own "Recommended" flow (leave `repository_url` null, connect the repo manually via the AWS Console after the first apply) was undocumented-unsafe: a later `terraform apply` would see the manually-attached repository as drift and revert/detach it, since `repository` has no `ForceNew` and was being actively reconciled.
+
+### Exact resolution
+
+1. Added `terraform/bootstrap/backend.tf` to `.gitignore` (with an explanatory comment distinguishing it from `environments/*/backend.tf`, which are intentionally generic and safe to commit), then ran `git rm --cached terraform/bootstrap/backend.tf` to untrack it while leaving the working-copy file in place, so BU's existing, already-bootstrapped setup keeps working locally.
+2. Changed `ignore_changes = [access_token, oauth_token]` to `ignore_changes = [repository, access_token, oauth_token]` in `terraform/modules/amplify/main.tf`, and rewrote the surrounding comment to explain why `repository` is now ignored (matches the README's published Recommended flow) and to note that the legacy PAT-based flow (`repository_url` + `github_access_token` set from the start) still works for *initial* creation - `ignore_changes` only suppresses drift detection on later applies, not the values used when the resource is first created.
+
+Neither change touches live AWS resources or state; both are source/config edits only. Nothing was committed or pushed.
+
+### Validation commands and results
+
+```bash
+git status --short terraform/ .gitignore
+#  M .gitignore
+# D  terraform/bootstrap/backend.tf
+#  M terraform/modules/amplify/main.tf
+
+git diff .gitignore
+git diff terraform/modules/amplify/main.tf
+git diff --cached terraform/bootstrap/backend.tf
+
+test -f terraform/bootstrap/backend.tf && echo "yes, still present locally"
+# yes, still present locally
+```
+
+Confirmed: the working-copy `backend.tf` still exists on disk (so BU's own bootstrap continues to function), git no longer tracks it, the new `.gitignore` rule matches it (`git check-ignore -v` against it and files under `bu/` both resolved correctly earlier in the session), and the Amplify module diff is limited to the `ignore_changes` list and its comment - no resource arguments changed.
+
+### Prevention and faster diagnosis next time
+
+- Before trusting a README's description of a `lifecycle` block, `grep` the actual resource block - a stale comment or doc update that didn't keep pace with a later code change is cheap to miss otherwise.
+- For any `terraform/**/backend.tf`, check `git ls-files` before assuming a "starts on local state" narrative is actually possible from a fresh clone - a backend block committed with a real bucket name silently defeats it.
+- When a doc claims a file "is checked into the repository," verify with `git ls-files <path>`, not by reading the file's presence on disk (a locally-generated, gitignored copy looks identical to a tracked one until you check).
+- Keep a `terraform` binary (or `tfenv`) available in any environment expected to validate Terraform docs/config end-to-end; this session could not run `fmt`, `validate`, or `plan` at all, which left one review claim unverifiable.
+
+### Remaining risks or unresolved work
+
+Not fixed in this session - confirmed accurate by the same review but left open, tracked in the Obsidian vault (`08 Problems and Solutions/Open Problems.md`) and summarized here for repo-side visibility:
+
+- **High**: `terraform/README.md` still claims dev's `terraform.tfvars` is checked into git (it isn't); still has no explicit "provision ECR, build/push images, then apply" sequence for a first deployment; `environments/prod/terraform.tfvars.example` still hardcodes the existing dev account ID (`770203350335`) instead of a placeholder, unlike `test`'s example.
+- **High, unverified**: the claim that `terraform fmt -check -recursive terraform` currently reports drift in `environments/dev/main.tf` - could not be run in this environment; needs confirming with a real `terraform` install.
+- **Medium**: the README's Cognito section still says `manage_cognito = false` is "dev's current setting" when dev's actual config sets it `true`; `environments/test|prod/variables.tf` still describe `amplify_repository_url`/`amplify_github_access_token` as "Required when manage_amplify = true," contradicting the README's Recommended (leave-both-null) flow; `terraform/bootstrap/backend.tf` still lacks `use_lockfile = true` with no note explaining why it differs from every environment's backend; the README's `terraform state rm` guidance still doesn't clarify that it orphans rather than deletes the live resource; no operator prerequisites checklist beyond "admin/power-user role"; post-apply verification guidance still stops at `terraform output` rather than checking ECS/ALB health, DNS/HTTPS, RDS connectivity, Cognito login, or Amplify build status.
+- **Low**: README still says `provider.tf` where the real files are `providers.tf`; the `tflint`/`checkov`/`tfsec` mention still has no install/config/CI guidance; no explicit warning that backend/account selection happens before `allowed_account_ids` can protect anything.
+- None of the above required a source-code change to fix (they're all `terraform/README.md` prose corrections) - they were left for a follow-up pass rather than bundled into this one, since only the two Critical, code-level issues had been explicitly approved for fixing in this session.

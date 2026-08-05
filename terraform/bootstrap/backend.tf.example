@@ -14,9 +14,10 @@
 # Fill in the same bucket name terraform.tfvars uses for state_bucket_name.
 terraform {
   backend "s3" {
-    bucket  = "REPLACE_WITH_STATE_BUCKET_NAME"
-    key     = "bootstrap/terraform.tfstate"
-    region  = "us-east-1"
-    encrypt = true
+    bucket       = "REPLACE_WITH_STATE_BUCKET_NAME"
+    key          = "bootstrap/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true # matches every environment's own backend.tf - S3-native locking, no DynamoDB table needed
   }
 }

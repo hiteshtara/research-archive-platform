@@ -3,7 +3,12 @@
 # TF_VAR_amplify_github_access_token instead.
 
 # BU's target account for this platform, per the deployment request this
-# environment was built for. Confirm with `aws sts get-caller-identity`
+# environment was built for - NOTE: this is the same account ID as the
+# existing dev environment (see environments/dev/terraform.tfvars). If BU
+# genuinely intends prod to live in a separate AWS account (the norm this
+# repo's environment-separation docs otherwise assume), replace this with
+# that account's ID before ever applying - don't copy this value assuming
+# it's a safe placeholder. Confirm with `aws sts get-caller-identity`
 # before every apply regardless.
 expected_account_id = "770203350335"
 

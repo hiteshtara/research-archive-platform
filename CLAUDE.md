@@ -7,7 +7,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Boston University Research Archive Platform: a **read-only** historical archive of
 Kuali Research Administration data, preserved after the legacy Kuali system's
 retirement. It is not a system of record and never writes back to source data.
+## Session continuity
 
+At the beginning of each session:
+
+1. Read `07 AI Sessions/Next Session.md` if it exists.
+2. Run `git status --short`.
+3. Review recent commits.
+4. Summarize the current state before changing code.
+
+Before ending a substantial session, update
+`07 AI Sessions/Next Session.md` with:
+
+- work completed
+- files changed
+- tests run and results
+- unresolved problems
+- exact next step
 Monorepo: `api/` (Spring Boot backend), `ui/` (React frontend), `etl/` (Python
 extraction/load pipeline), `database/migrations/` (schema), `terraform/` (AWS
 infra), `ops/` (deployment scripts).
@@ -203,3 +219,11 @@ which is how local dev and most controller-level `@WebMvcTest`s run.
   `information_schema` or existing extraction SQL first.
 - Use `JdbcClient` for repository-layer queries (not Spring Data JPA query
   derivation), consistent with the rest of the codebase.
+- The same rule applies to Terraform and other infra docs: never trust a
+  README's description of a `lifecycle`/`ignore_changes` block, backend
+  config, or "is checked into the repository" claim — verify against the
+  actual `.tf` file and `git ls-files`/`git log` first. A 2026-08-04 review
+  found `terraform/README.md` had drifted from `terraform/modules/amplify/main.tf`'s
+  actual `ignore_changes` list and from git's actual tracking of
+  `environments/dev/terraform.tfvars` (see `docs/operations/AWS_TROUBLESHOOTING_RUNBOOK.md`
+  section 31 and `PROJECT_MEMORY.md`'s Known Lessons for details).

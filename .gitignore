@@ -34,6 +34,18 @@ terraform.tfvars
 *.auto.tfvars
 backend.hcl
 
+# terraform/bootstrap/backend.tf is NOT like environments/*/backend.tf: it's
+# a *complete* S3 backend block with the account's real bucket name hardcoded
+# inline (bootstrap can't use a partial backend.tf + backend-config the way
+# environments do, since bootstrapping is what creates that bucket in the
+# first place). Committing it breaks terraform/README.md's documented
+# fresh-account flow: "terraform init" in bootstrap/ auto-loads any backend
+# block already on disk, so a fresh clone would try to init against BU's
+# existing bucket instead of starting on local state. Keep it local-only,
+# created from backend.tf.example per the README's step 2, same as every
+# environment's gitignored backend.hcl.
+terraform/bootstrap/backend.tf
+
 # Local data exports
 data/
 exports/
@@ -83,3 +95,15 @@ taskdef*.json
 screenshots/
 *-policy.json
 ui/.env.local
+.gstack/
+
+# Obsidian vault (personal notes, decisions, session handoffs — not source;
+# see vault boundaries note: GitHub = code, Obsidian = notes).
+# Anchored to the repo root (/bu/, not bu/) - an unanchored "bu/" pattern
+# also matches any directory literally named "bu" at any depth, which
+# silently swallowed the entire edu.bu Java package tree
+# (api/src/{main,test}/java/edu/bu/...) until this was caught and fixed
+# 2026-08-04. Same reasoning applies to .obsidian/ even though no
+# api/src/**/.obsidian/ collision currently exists - anchor defensively.
+/bu/
+/.obsidian/
