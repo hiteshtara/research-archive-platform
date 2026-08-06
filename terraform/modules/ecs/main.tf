@@ -230,6 +230,32 @@ data "aws_iam_policy_document" "task_documents_s3" {
       "${var.documents_bucket_arn}/proposal/*"
     ]
   }
+
+  # Negotiation Activity Attachments (NegotiationAttachmentPlugin,
+  # archive_etl.attachments.runner --module negotiation) - its own
+  # prefix, mirroring UploadProposalAttachmentObjects above exactly.
+  # NegotiationAttachmentPlugin has no s3_key() override, so it uses the
+  # shared AttachmentFilePlugin base implementation
+  # (etl/archive_etl/attachments/plugins/attachment_file.py:39):
+  # "{prefix}/{record_id}/{attachment_id}/{filename}" -
+  # scripts/run-negotiation-loader.sh passes --s3-prefix negotiations
+  # (overriding the plugin's own test/negotiations default), so the real
+  # key shape is negotiations/<negotiation_id>/<attachment_id>/<file>.
+  statement {
+    sid    = "UploadNegotiationAttachmentObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts"
+    ]
+
+    resources = [
+      "${var.documents_bucket_arn}/negotiations/*"
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "task_documents_s3" {
