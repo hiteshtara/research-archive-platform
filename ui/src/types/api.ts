@@ -1145,6 +1145,8 @@ export interface NegotiationCustomData {
   negotiationId: number;
   negotiationNumber: string | null;
   customAttributeId: number | null;
+  label: string | null;
+  name: string | null;
   value: string | null;
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
@@ -1164,6 +1166,28 @@ export interface NegotiationNotification {
   sourceUpdateUser: string | null;
   sourceVersionNumber: number | null;
   sourceObjectId: string | null;
+}
+
+export interface NegotiationAttachment {
+  attachmentId: number;
+  activityId: number | null;
+  fileName: string | null;
+  contentType: string | null;
+  fileSize: number | null;
+  checksum: string | null;
+  archiveStatus: string;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  downloadable: boolean;
+}
+
+export interface NegotiationAssociatedRecord {
+  associationTypeCode: string | null;
+  associationTypeDescription: string | null;
+  associatedDocumentId: string | null;
+  kind: "AWARD" | "PROPOSAL" | "SUBAWARD" | "NONE" | "UNSUPPORTED";
+  navigableId: number | null;
+  clickable: boolean;
 }
 
 export interface NegotiationUnassociatedDetail {

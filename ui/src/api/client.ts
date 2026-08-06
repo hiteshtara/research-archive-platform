@@ -921,6 +921,85 @@ export function getNegotiationUnassociatedDetails(
   );
 }
 
+export function getNegotiationAttachments(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationAttachment[]> {
+  return request(
+    `/api/negotiations/${encodeURIComponent(negotiationId)}/attachments`,
+  );
+}
+
+export function getNegotiationAssociatedRecord(
+  negotiationId: number,
+): Promise<import("../types/api").NegotiationAssociatedRecord> {
+  return request(
+    `/api/negotiations/${encodeURIComponent(
+      negotiationId,
+    )}/associated-record`,
+  );
+}
+
+async function fetchNegotiationAttachment(
+  negotiationId: number,
+  attachmentId: number,
+): Promise<Response> {
+  const token = await accessToken();
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const path =
+    `/api/negotiations/${encodeURIComponent(negotiationId)}` +
+    `/attachments/${encodeURIComponent(attachmentId)}/download`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This attachment is not available for download.");
+    }
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  return response;
+}
+
+export async function downloadNegotiationAttachment(
+  negotiationId: number,
+  attachmentId: number,
+  fallbackFileName: string,
+): Promise<void> {
+  const response = await fetchNegotiationAttachment(
+    negotiationId,
+    attachmentId,
+  );
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = parseDownloadFilename(
+    response.headers.get("Content-Disposition"),
+    fallbackFileName,
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+export async function previewNegotiationAttachment(
+  negotiationId: number,
+  attachmentId: number,
+): Promise<void> {
+  const response = await fetchNegotiationAttachment(
+    negotiationId,
+    attachmentId,
+  );
+  const blobUrl = URL.createObjectURL(await response.blob());
+  window.open(blobUrl, "_blank", "noopener,noreferrer");
+}
+
 export function getSubawards(
   parameters: {
     query?: string;

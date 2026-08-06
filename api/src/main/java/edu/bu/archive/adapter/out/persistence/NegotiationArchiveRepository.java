@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationActivityResponse;
+import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationNotificationResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
@@ -195,18 +196,22 @@ public class NegotiationArchiveRepository {
     ) {
         return jdbc.sql("""
                 SELECT
-                    negotiation_custom_data_id,
-                    negotiation_id,
-                    negotiation_number,
-                    custom_attribute_id,
-                    value,
-                    source_update_timestamp,
-                    source_update_user,
-                    source_version_number,
-                    source_object_id
-                FROM archive.negotiation_custom_data
-                WHERE negotiation_id = :negotiationId
-                ORDER BY negotiation_custom_data_id
+                    ncd.negotiation_custom_data_id,
+                    ncd.negotiation_id,
+                    ncd.negotiation_number,
+                    ncd.custom_attribute_id,
+                    ca.label AS label,
+                    ca.name AS name,
+                    ncd.value,
+                    ncd.source_update_timestamp,
+                    ncd.source_update_user,
+                    ncd.source_version_number,
+                    ncd.source_object_id
+                FROM archive.negotiation_custom_data ncd
+                LEFT JOIN archive.custom_attribute ca
+                    ON ca.custom_attribute_id = ncd.custom_attribute_id
+                WHERE ncd.negotiation_id = :negotiationId
+                ORDER BY ncd.negotiation_custom_data_id
                 """)
                 .param("negotiationId", negotiationId)
                 .query(NegotiationCustomDataResponse.class)
@@ -269,6 +274,143 @@ public class NegotiationArchiveRepository {
                 .param("negotiationId", negotiationId)
                 .query(NegotiationUnassociatedDetailResponse.class)
                 .list();
+    }
+
+    /*
+     * --- Attachments ---------------------------------------------------
+     *
+     * Negotiation has no domain-specific attachment table (unlike Award/
+     * Subaward/Proposal) - it still uses the original generic V020
+     * archive.archived_attachment destination, scoped by
+     * module_code = 'NEGOTIATION'. activityId/sourceUpdateUser are
+     * pulled from source_metadata JSONB, since the generic table's own
+     * typed columns don't carry them (see NegotiationAttachmentPlugin).
+     * downloadable mirrors the exact ARCHIVED + non-blank bucket/key
+     * check downloadAttachment() enforces server-side.
+     */
+    public List<NegotiationAttachmentResponse> findAttachments(
+            long negotiationId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    archived_attachment_id,
+                    CAST(source_metadata->>'activity_id' AS BIGINT)
+                        AS activity_id,
+                    original_file_name,
+                    content_type,
+                    byte_size,
+                    sha256,
+                    archive_status,
+                    source_update_timestamp,
+                    source_metadata->>'source_update_user'
+                        AS source_update_user,
+                    (
+                        archive_status = 'ARCHIVED'
+                        AND s3_bucket IS NOT NULL AND s3_bucket <> ''
+                        AND s3_key IS NOT NULL AND s3_key <> ''
+                    ) AS downloadable
+                FROM archive.archived_attachment
+                WHERE module_code = 'NEGOTIATION'
+                  AND parent_record_id = :negotiationId
+                ORDER BY
+                    CAST(source_metadata->>'activity_id' AS BIGINT),
+                    archived_attachment_id
+                """)
+                .param("negotiationId", negotiationId)
+                .query(NegotiationAttachmentResponse.class)
+                .list();
+    }
+
+    public Optional<Long> findAttachmentNegotiationId(long attachmentId) {
+        return jdbc.sql("""
+                SELECT parent_record_id
+                FROM archive.archived_attachment
+                WHERE module_code = 'NEGOTIATION'
+                  AND archived_attachment_id = :attachmentId
+                """)
+                .param("attachmentId", attachmentId)
+                .query(Long.class)
+                .optional();
+    }
+
+    public Optional<NegotiationArchivedAttachment> findArchivedAttachment(
+            long negotiationId,
+            long attachmentId
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    archived_attachment_id,
+                    parent_record_id,
+                    original_file_name,
+                    content_type,
+                    s3_bucket,
+                    s3_key,
+                    byte_size,
+                    archive_status
+                FROM archive.archived_attachment
+                WHERE module_code = 'NEGOTIATION'
+                  AND archived_attachment_id = :attachmentId
+                  AND parent_record_id = :negotiationId
+                """)
+                .param("attachmentId", attachmentId)
+                .param("negotiationId", negotiationId)
+                .query((rs, rowNum) -> new NegotiationArchivedAttachment(
+                        rs.getLong("archived_attachment_id"),
+                        rs.getLong("parent_record_id"),
+                        rs.getString("original_file_name"),
+                        rs.getString("content_type"),
+                        rs.getString("s3_bucket"),
+                        rs.getString("s3_key"),
+                        (Long) rs.getObject("byte_size"),
+                        rs.getString("archive_status")
+                ))
+                .optional();
+    }
+
+    /*
+     * --- Association navigation -----------------------------------------
+     *
+     * Identifier semantics proven live against real Oracle data
+     * 2026-08-06 (see NegotiationAssociatedRecordResponse) - never
+     * guessed. AWD/IP resolve a business identifier to the current
+     * archive version's internal id; SWD's associated_document_id is
+     * already the internal subaward_id, so this only confirms it exists.
+     */
+    public Optional<Long> resolveCurrentAwardId(String awardNumber) {
+        return jdbc.sql("""
+                SELECT award_id
+                FROM archive.award_version
+                WHERE award_number = :awardNumber
+                  AND is_primary_current = TRUE
+                """)
+                .param("awardNumber", awardNumber)
+                .query(Long.class)
+                .optional();
+    }
+
+    public Optional<Long> resolveCurrentProposalId(String proposalNumber) {
+        return jdbc.sql("""
+                SELECT proposal_id
+                FROM archive.proposal_version
+                WHERE proposal_number = :proposalNumber
+                  AND proposal_sequence_status = 'ACTIVE'
+                """)
+                .param("proposalNumber", proposalNumber)
+                .query(Long.class)
+                .optional();
+    }
+
+    public boolean subawardExists(long subawardId) {
+        Long id = jdbc.sql("""
+                SELECT subaward_id
+                FROM archive.subaward
+                WHERE subaward_id = :subawardId
+                """)
+                .param("subawardId", subawardId)
+                .query(Long.class)
+                .optional()
+                .orElse(null);
+        return id != null;
     }
 
     private String normalizeQuery(String query) {
