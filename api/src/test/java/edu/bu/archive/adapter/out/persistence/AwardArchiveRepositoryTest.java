@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
@@ -474,6 +475,43 @@ class AwardArchiveRepositoryTest {
                                 + "=\\s*av\\.lead_unit_number,\\s*FALSE\\s*\\)\\s*AS lead_unit"
                 );
         verify(statement).param("awardId", 985585L);
+    }
+
+    @Test
+    void findFundingSubawardRowsMatchesByAwardNumberFamilyWideAndResolvesTheActiveSubawardVersion() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardFundingSubawardResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardFundingSubawardResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        List<AwardFundingSubawardResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findFundingSubawardRows("202505-00002");
+
+        assertThat(result).isEmpty();
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.subaward_funding funding")
+                .contains("JOIN archive.subaward linked_subaward")
+                .contains("linked_subaward.subaward_id = funding.subaward_id")
+                .contains("LEFT JOIN archive.subaward current_subaward")
+                .contains(
+                        "current_subaward.subaward_code = linked_subaward.subaward_code"
+                )
+                .contains("current_subaward.subaward_sequence_status = 'ACTIVE'")
+                .contains("funding.award_number = :awardNumber")
+                .contains("funding.subaward_id AS exact_linked_subaward_id")
+                .contains(
+                        "current_subaward.subaward_id AS navigable_current_subaward_id"
+                );
+        verify(statement).param("awardNumber", "202505-00002");
     }
 
     @Test

@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardIdentifierResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
@@ -168,6 +169,25 @@ public class AwardV1Controller {
             long awardId
     ) {
         return ResponseEntity.ok(service.findFundingProposals(awardId));
+    }
+
+    @Operation(
+            summary = "Get an Award's linked Subaward(s)",
+            description = "The bidirectional counterpart to "
+                    + "GET /api/subawards/{subawardId}/funding - "
+                    + "every archive.subaward_funding relationship "
+                    + "row across this Award's whole award_number "
+                    + "family, resolved to each Subaward family's "
+                    + "current (ACTIVE) version."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's linked Subaward(s).")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/funding-subawards")
+    public ResponseEntity<List<AwardFundingSubawardResponse>> fundingSubawards(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findFundingSubawards(awardId));
     }
 
     @Operation(

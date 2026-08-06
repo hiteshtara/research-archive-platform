@@ -333,6 +333,18 @@ export interface AwardFundingProposalV1 {
   navigableActiveProposalId: number | null;
 }
 
+export interface AwardFundingSubaward {
+  subawardCode: string;
+  organizationId: string | null;
+  subawardStatus: string | null;
+  workflowDocumentNumber: string | null;
+  subawardAmount: number | null;
+  linkedSubawardVersion: number | null;
+  currentSubawardVersion: number | null;
+  exactLinkedSubawardId: number | null;
+  navigableCurrentSubawardId: number | null;
+}
+
 export interface AwardSummaryV1 {
   awardId: number;
   awardNumber: string;

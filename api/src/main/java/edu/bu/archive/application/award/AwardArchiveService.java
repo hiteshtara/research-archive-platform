@@ -17,6 +17,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
@@ -152,6 +153,20 @@ public class AwardArchiveService {
     ) {
         String awardNumber = requireAwardNumberForId(awardId);
         return repository.findFundingProposalRows(awardNumber);
+    }
+
+    /*
+     * The Subaward(s) funded by this Award - family-wide, from
+     * archive.subaward_funding - the bidirectional counterpart to
+     * SubawardArchiveService.findFunding. See
+     * AwardArchiveRepository.findFundingSubawardRows for the
+     * resolution rules.
+     */
+    public List<AwardFundingSubawardResponse> findFundingSubawards(
+            long awardId
+    ) {
+        String awardNumber = requireAwardNumberForId(awardId);
+        return repository.findFundingSubawardRows(awardNumber);
     }
 
     public PageResponse<AwardSequenceSummaryResponse> findSequencePage(

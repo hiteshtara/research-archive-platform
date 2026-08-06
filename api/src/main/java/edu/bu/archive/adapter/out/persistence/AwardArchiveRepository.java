@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
@@ -472,6 +473,62 @@ public class AwardArchiveRepository {
                 """)
                 .param("awardNumber", awardNumber)
                 .query(AwardFundingProposalResponse.class)
+                .list();
+    }
+
+    /*
+     * The bidirectional counterpart to
+     * SubawardArchiveRepository.findFunding - one row per real
+     * archive.subaward_funding relationship row, family-wide (matched
+     * on the award_number denormalized onto subaward_funding at ETL
+     * time, not by joining through a specific award_id - see
+     * oracle/subaward/export_subaward_funding.sql). A Subaward funding
+     * source has no active/inactive flag in the source schema (unlike
+     * award_funding_proposal), so every row here is a real, standing
+     * relationship - never filtered. linked_subaward resolves
+     * funding.subaward_id directly (the EXACT historical Subaward
+     * version stored in the relationship); display fields and the
+     * navigation target instead resolve through
+     * linked_subaward.subaward_code to that family's ACTIVE version
+     * (subaward_sequence_status = 'ACTIVE' - never the highest
+     * sequence number) - a LEFT JOIN since a malformed family could in
+     * principle have no row marked ACTIVE. subaward_amount mirrors the
+     * Amounts tab's History of Changes total (sum of
+     * archive.subaward_amount.obligated_change for the resolved
+     * current version).
+     */
+    public List<AwardFundingSubawardResponse> findFundingSubawardRows(
+            String awardNumber
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    linked_subaward.subaward_code,
+                    current_subaward.organization_id,
+                    current_subaward.status_description AS subaward_status,
+                    current_subaward.document_number AS workflow_document_number,
+                    amt.total_obligated_change AS subaward_amount,
+                    linked_subaward.sequence_number AS linked_subaward_version,
+                    current_subaward.sequence_number AS current_subaward_version,
+                    funding.subaward_id AS exact_linked_subaward_id,
+                    current_subaward.subaward_id AS navigable_current_subaward_id
+                FROM archive.subaward_funding funding
+                JOIN archive.subaward linked_subaward
+                    ON linked_subaward.subaward_id = funding.subaward_id
+                LEFT JOIN archive.subaward current_subaward
+                    ON current_subaward.subaward_code
+                        = linked_subaward.subaward_code
+                    AND current_subaward.subaward_sequence_status = 'ACTIVE'
+                LEFT JOIN LATERAL (
+                    SELECT SUM(sa.obligated_change) AS total_obligated_change
+                    FROM archive.subaward_amount sa
+                    WHERE sa.subaward_id = current_subaward.subaward_id
+                ) amt ON TRUE
+                WHERE funding.award_number = :awardNumber
+                ORDER BY linked_subaward.subaward_code,
+                    funding.subaward_funding_source_id
+                """)
+                .param("awardNumber", awardNumber)
+                .query(AwardFundingSubawardResponse.class)
                 .list();
     }
 
