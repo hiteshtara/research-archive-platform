@@ -313,6 +313,17 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--load-all",
+        action="store_true",
+        help=(
+            "Load every Negotiation in Oracle, one negotiation_id at a "
+            "time, each in its own transaction - a bad row on one "
+            "Negotiation is logged and skipped, not a whole-run abort. "
+            "Mutually exclusive with --load-negotiation-id/"
+            "--max-negotiations."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -327,6 +338,14 @@ def parse_args(
         parser.error(
             "--negotiation-id and --max-negotiations are mutually "
             "exclusive"
+        )
+
+    if arguments.load_all and (
+        arguments.negotiation_id or arguments.max_negotiations is not None
+    ):
+        parser.error(
+            "--load-all cannot be combined with --load-negotiation-id "
+            "or --max-negotiations"
         )
 
     return arguments
@@ -954,11 +973,180 @@ def run_targeted_load(target_ids: list[int]) -> dict[str, dict[str, int]]:
     return results
 
 
+def run_full_load() -> dict[str, object]:
+    """Loads every Negotiation in Oracle, one negotiation_id at a time,
+    each in its own Postgres transaction - unlike run_targeted_load's
+    single whole-batch transaction (fine for a bounded/proving load, not
+    safe at ~11K negotiations: one bad row would roll back everything).
+    A failure on one negotiation_id is logged and skipped; every other
+    negotiation_id still loads. Reads each Oracle table once
+    (unfiltered), then groups children by their parent id in memory -
+    much cheaper than read_filtered's chunked round trips at this scale.
+    Returns a summary dict for reporting."""
+    logger.info("Reading the full Negotiation population from Oracle")
+
+    negotiations = prepare_negotiations(
+        OracleDataSource(ORACLE_SQL["negotiations"]).read()
+    )
+    activities = prepare_activities(
+        OracleDataSource(ORACLE_SQL["activities"]).read()
+    )
+    custom_data = prepare_custom_data(
+        OracleDataSource(ORACLE_SQL["custom_data"]).read()
+    )
+    notifications = prepare_notifications(
+        OracleDataSource(ORACLE_SQL["notifications"]).read()
+    )
+    unassociated = prepare_unassociated(
+        OracleDataSource(ORACLE_SQL["unassociated"]).read()
+    )
+
+    logger.info(
+        "Read full Negotiation population: negotiations={:,} "
+        "activities={:,} custom_data={:,} notifications={:,} "
+        "unassociated={:,}",
+        len(negotiations),
+        len(activities),
+        len(custom_data),
+        len(notifications),
+        len(unassociated),
+    )
+
+    activities_by_id = {
+        key: group
+        for key, group in activities.groupby("negotiation_id")
+    }
+    custom_data_by_id = {
+        key: group
+        for key, group in custom_data.groupby("negotiation_id")
+    }
+    notifications_by_id = {
+        key: group
+        for key, group in notifications.groupby("owning_document_id_fk")
+    }
+    unassociated_by_id = {
+        key: group
+        for key, group in unassociated.groupby("negotiation_id")
+    }
+
+    engine = create_postgres_engine()
+    apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+
+    empty_activities = activities.iloc[0:0]
+    empty_custom_data = custom_data.iloc[0:0]
+    empty_notifications = notifications.iloc[0:0]
+    empty_unassociated = unassociated.iloc[0:0]
+
+    totals = {
+        table: {"inserted": 0, "updated": 0, "unchanged": 0}
+        for table in ARCHIVE_TABLES
+    }
+    completed = 0
+    failed_ids: list[int] = []
+
+    negotiation_ids = (
+        negotiations["negotiation_id"].astype("int64").sort_values().tolist()
+    )
+
+    for index, negotiation_id in enumerate(negotiation_ids, start=1):
+        datasets = {
+            "negotiation": negotiations[
+                negotiations["negotiation_id"] == negotiation_id
+            ],
+            "negotiation_activity": activities_by_id.get(
+                negotiation_id, empty_activities
+            ),
+            "negotiation_custom_data": custom_data_by_id.get(
+                negotiation_id, empty_custom_data
+            ),
+            "negotiation_notification": notifications_by_id.get(
+                negotiation_id, empty_notifications
+            ),
+            "negotiation_unassociated_detail": unassociated_by_id.get(
+                negotiation_id, empty_unassociated
+            ),
+        }
+
+        try:
+            with engine.begin() as connection:
+                load_id = create_load_run(connection, sum(
+                    len(dataframe) for dataframe in datasets.values()
+                ))
+                for table_name, dataframe in datasets.items():
+                    pk_columns, columns = ARCHIVE_TABLES[table_name]
+                    renamed = dataframe.rename(columns=SOURCE_COLUMN_RENAMES)
+                    result = _upsert_rows(
+                        connection,
+                        table=table_name,
+                        pk_columns=pk_columns,
+                        columns=columns,
+                        rows=renamed,
+                        load_id=load_id,
+                    )
+                    for key in ("inserted", "updated", "unchanged"):
+                        totals[table_name][key] += result[key]
+                mark_load_complete(connection, load_id, sum(
+                    len(dataframe) for dataframe in datasets.values()
+                ))
+            completed += 1
+        except Exception as error:
+            failed_ids.append(negotiation_id)
+            logger.error(
+                "Negotiation {} failed to load: {}",
+                negotiation_id,
+                redact_error_message(str(error)),
+            )
+
+        if index % 500 == 0 or index == len(negotiation_ids):
+            logger.info(
+                "Progress: {:,}/{:,} Negotiations processed "
+                "({:,} completed, {:,} failed)",
+                index,
+                len(negotiation_ids),
+                completed,
+                len(failed_ids),
+            )
+
+    logger.success(
+        "Full Negotiation load finished: {:,} requested, {:,} completed, "
+        "{:,} failed",
+        len(negotiation_ids),
+        completed,
+        len(failed_ids),
+    )
+    for table_name, result in totals.items():
+        logger.info(
+            "TOTAL {:<33} inserted={:,} updated={:,} unchanged={:,}",
+            table_name,
+            result["inserted"],
+            result["updated"],
+            result["unchanged"],
+        )
+    if failed_ids:
+        logger.warning(
+            "Failed Negotiation IDs ({:,}): {}",
+            len(failed_ids),
+            failed_ids[:50],
+        )
+
+    return {
+        "requested": len(negotiation_ids),
+        "completed": completed,
+        "failed": len(failed_ids),
+        "failed_ids": failed_ids,
+        "totals": totals,
+    }
+
+
 def main() -> None:
     arguments = parse_args()
 
     if arguments.ecs:
         _run_ecs_setup()
+
+    if arguments.load_all:
+        run_full_load()
+        return
 
     target_ids = resolve_target_negotiation_ids(arguments)
     if target_ids is not None:

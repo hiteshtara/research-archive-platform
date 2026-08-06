@@ -77,6 +77,7 @@ CONTAINER_NAME="loader"
 
 NEGOTIATION_IDS=()
 MAX_NEGOTIATIONS=""
+LOAD_ALL=false
 ATTACHMENTS=false
 IMAGE_URI_OVERRIDE=""
 
@@ -84,26 +85,31 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --load-negotiation-id) NEGOTIATION_IDS+=("$2"); shift 2 ;;
     --max-negotiations) MAX_NEGOTIATIONS="$2"; shift 2 ;;
+    --load-all) LOAD_ALL=true; shift ;;
     --attachments) ATTACHMENTS=true; shift ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
-if [[ "${#NEGOTIATION_IDS[@]}" -eq 0 && -z "$MAX_NEGOTIATIONS" ]]; then
-  echo "ERROR: one of --load-negotiation-id or --max-negotiations is required" >&2
+SELECTORS=0
+[[ "${#NEGOTIATION_IDS[@]}" -gt 0 ]] && SELECTORS=$((SELECTORS + 1))
+[[ -n "$MAX_NEGOTIATIONS" ]] && SELECTORS=$((SELECTORS + 1))
+[[ "$LOAD_ALL" == true ]] && SELECTORS=$((SELECTORS + 1))
+
+if [[ "$SELECTORS" -eq 0 && "$ATTACHMENTS" == false ]]; then
+  echo "ERROR: one of --load-negotiation-id, --max-negotiations, --load-all, or --attachments (alone, for every archived Negotiation) is required" >&2
   exit 1
 fi
 
-if [[ "${#NEGOTIATION_IDS[@]}" -gt 0 && -n "$MAX_NEGOTIATIONS" ]]; then
-  echo "ERROR: --load-negotiation-id and --max-negotiations cannot be combined" >&2
+if [[ "$SELECTORS" -gt 1 ]]; then
+  echo "ERROR: --load-negotiation-id, --max-negotiations, and --load-all cannot be combined" >&2
   exit 1
 fi
 
-if [[ "$ATTACHMENTS" == true && "${#NEGOTIATION_IDS[@]}" -eq 0 ]]; then
-  echo "ERROR: --attachments requires at least one --load-negotiation-id" >&2
-  exit 1
-fi
+# --attachments alone (no ID selector) means "every archived Negotiation's
+# attachments" - fetch/upload/sync below already default to unfiltered
+# when no --negotiation-id is passed.
 
 if [[ -z "$IMAGE_URI_OVERRIDE" ]]; then
   : "${ECR_REPOSITORY_URI:?ECR_REPOSITORY_URI is not set - set it to the loader image\'s ECR repository URI, or pass --image-uri to reuse an already-pushed image}"
@@ -183,9 +189,32 @@ for id in "${NEGOTIATION_IDS[@]:-}"; do
   [[ -n "$id" ]] && LOAD_ARGS+=(--load-negotiation-id "$id")
 done
 [[ -n "$MAX_NEGOTIATIONS" ]] && LOAD_ARGS+=(--max-negotiations "$MAX_NEGOTIATIONS")
+[[ "$LOAD_ALL" == true ]] && LOAD_ARGS+=(--load-all)
 
 if [[ "$ATTACHMENTS" == false ]]; then
   COMMAND_ARGS=("${LOAD_ARGS[@]}")
+elif [[ "$SELECTORS" -eq 0 ]]; then
+  # --attachments alone: every archived Negotiation's attachments, no
+  # main metadata load step.
+  FETCH_ARGS=(python3 fetch_negotiation_attachment_metadata.py --ecs --output /tmp/negotiation_attachments.csv)
+  UPLOAD_ARGS=(python3 archive_attachments.py --module negotiation --ecs --metadata-csv /tmp/negotiation_attachments.csv --s3-bucket "$ATTACHMENT_BUCKET_NAME" --s3-prefix negotiations)
+  SYNC_ARGS=(python3 archive_attachments.py --module negotiation --ecs --metadata-csv /tmp/negotiation_attachments.csv --sync-postgres)
+
+  join_shell_quoted() {
+    local out=""
+    for arg in "$@"; do
+      out+=" $(printf '%q' "$arg")"
+    done
+    echo "$out"
+  }
+
+  # ; (not &&) between upload and sync: the upload step exits non-zero
+  # whenever ANY attachment has a missing/failed blob (a real, expected
+  # outcome at full-population scale - most NEGOTIATION_ATTACHMENT rows
+  # have no matching ATTACHMENT_FILE blob in Oracle), which must never
+  # prevent syncing the attachments that DID upload successfully.
+  SHELL_COMMAND="$(join_shell_quoted "${FETCH_ARGS[@]}") &&$(join_shell_quoted "${UPLOAD_ARGS[@]}");$(join_shell_quoted "${SYNC_ARGS[@]}")"
+  COMMAND_ARGS=(sh -c "$SHELL_COMMAND")
 else
   # One container filesystem across all three steps - the attachment
   # plugin's manifest sqlite3 (written by the upload step, read by
@@ -206,7 +235,11 @@ else
     echo "$out"
   }
 
-  SHELL_COMMAND="$(join_shell_quoted "${LOAD_ARGS[@]}") &&$(join_shell_quoted "${FETCH_ARGS[@]}") &&$(join_shell_quoted "${UPLOAD_ARGS[@]}") &&$(join_shell_quoted "${SYNC_ARGS[@]}")"
+  # ; (not &&) between upload and sync - see the attachments-only branch
+  # above for why: a non-zero upload exit (expected whenever any
+  # attachment has a missing/failed blob) must never skip syncing the
+  # attachments that DID upload successfully.
+  SHELL_COMMAND="$(join_shell_quoted "${LOAD_ARGS[@]}") &&$(join_shell_quoted "${FETCH_ARGS[@]}") &&$(join_shell_quoted "${UPLOAD_ARGS[@]}");$(join_shell_quoted "${SYNC_ARGS[@]}")"
   COMMAND_ARGS=(sh -c "$SHELL_COMMAND")
 fi
 
