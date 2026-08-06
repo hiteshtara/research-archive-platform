@@ -6,6 +6,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+import boto3
 from loguru import logger
 
 from archive_etl.attachments.manifest import FlexibleManifestStore, ManifestStore
@@ -17,6 +18,7 @@ from archive_etl.attachments.models import (
     utc_now,
 )
 from archive_etl.attachments.oracle_blob import OracleBlobReader
+from archive_etl.config.ecs import configure_ecs_environment
 from archive_etl.attachments.plugins.award import AwardAttachmentPlugin
 from archive_etl.attachments.plugins.base import AttachmentPlugin
 from archive_etl.attachments.plugins.negotiation import (
@@ -299,6 +301,19 @@ def build_parser(plugin: AttachmentPlugin) -> argparse.ArgumentParser:
         "--kms-key-id",
         default=os.getenv(plugin.kms_environment_variable),
     )
+    parser.add_argument(
+        "--ecs",
+        action="store_true",
+        help=(
+            "Resolve PostgreSQL/Oracle credentials from Secrets "
+            "Manager via the ECS task's environment instead of "
+            "requiring them to already be exported - see "
+            "archive_etl.config.ecs. Each invocation of this script is "
+            "its own process, so this must be passed on every "
+            "invocation in a chained run (fetch/upload/--sync-postgres "
+            "alike), not just the first."
+        ),
+    )
     plugin.add_arguments(parser)
     return parser
 
@@ -353,6 +368,12 @@ def run(argv: Sequence[str] | None = None) -> ArchiveCounts | None:
     plugin = selected_plugin(argv)
     args = build_parser(plugin).parse_args(argv)
     record_id = plugin.selected_record_id(args)
+
+    if args.ecs:
+        configure_ecs_environment(
+            boto3.client("secretsmanager"),
+            include_oracle=not args.sync_postgres,
+        )
 
     if args.limit is not None and args.limit < 1:
         raise RuntimeError("--limit must be positive")

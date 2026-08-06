@@ -56,6 +56,23 @@ def parse_manifest_timestamp(value: str | None) -> datetime | None:
     return parse_datetime(value)
 
 
+def _resolve_migrations_directory() -> Path:
+    """Same dual-layout technique as proposal.py's own
+    _resolve_migrations_directory(): a local checkout has this file at
+    <repo>/etl/archive_etl/attachments/plugins/subaward.py (database/
+    migrations four levels up), while the ECS loader image copies
+    archive_etl/ and database/migrations/ both directly under /app
+    (three levels up from this file) - see etl/Dockerfile.loader. Fixes
+    the same bug ProposalAttachmentPlugin.sync_postgres already had
+    fixed - this override had never been run in a container before."""
+    container_candidate = (
+        Path(__file__).resolve().parents[3] / "database" / "migrations"
+    )
+    if container_candidate.is_dir():
+        return container_candidate
+    return Path(__file__).resolve().parents[4] / "database" / "migrations"
+
+
 class SubawardAttachmentPlugin(AttachmentPlugin):
     module_name = "subaward"
     default_metadata_csv = (
@@ -254,12 +271,7 @@ class SubawardAttachmentPlugin(AttachmentPlugin):
         record_id: int | None,
     ) -> int:
         engine = create_postgres_engine()
-        apply_migrations(
-            engine,
-            Path(__file__).resolve().parents[4]
-            / "database"
-            / "migrations",
-        )
+        apply_migrations(engine, _resolve_migrations_directory())
         upsert_sql = text(
             """
             INSERT INTO archive.subaward_attachment_archive (

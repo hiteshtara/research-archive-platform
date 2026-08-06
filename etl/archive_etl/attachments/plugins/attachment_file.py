@@ -21,6 +21,25 @@ from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 
 
+def _resolve_project_root() -> Path:
+    """Locate the directory containing database/migrations/ relative to
+    this file. Two layouts, mirroring load_negotiations_from_csv.py's
+    own _resolve_project_root(): the local repo checkout (this file at
+    <repo>/etl/archive_etl/attachments/plugins/attachment_file.py, so
+    the project root is four levels up) and the ECS loader container
+    image (archive_etl/ copied flatly to /app/archive_etl, with
+    database/migrations/ directly under /app - see
+    etl/Dockerfile.loader), where the project root is three levels up
+    instead. --sync-postgres had never been run in a container before
+    this fix - the naive parents[4] resolution silently worked locally
+    and only broke inside the ECS image, for every module (Award,
+    Subaward, Proposal, Negotiation) that reaches this shared method."""
+    container_root = Path(__file__).resolve().parents[3]
+    if (container_root / "database").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[4]
+
+
 class AttachmentFilePlugin(AttachmentPlugin):
     file_reference_label = "FILE_ID"
     postgres_module_code: str
@@ -139,9 +158,7 @@ class AttachmentFilePlugin(AttachmentPlugin):
         engine = create_postgres_engine()
         apply_migrations(
             engine,
-            Path(__file__).resolve().parents[4]
-            / "database"
-            / "migrations",
+            _resolve_project_root() / "database" / "migrations",
         )
         upsert_sql = text(
             """

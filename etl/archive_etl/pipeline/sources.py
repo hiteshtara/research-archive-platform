@@ -250,6 +250,7 @@ class OracleDataSource:
         ]
 
         collected: list[pd.DataFrame] = []
+        last_columns: list[str] = []
         with self.connect(
             user=credentials["ORACLE_USER"],
             password=credentials["ORACLE_PASSWORD"],
@@ -294,13 +295,22 @@ class OracleDataSource:
                         elapsed_ms,
                     )
 
+                    last_columns = columns
                     if rows:
                         frame = pd.DataFrame(rows, columns=columns)
                         normalize_columns(frame)
                         collected.append(frame)
 
         if not collected:
-            return pd.DataFrame()
+            # Zero matching rows is a legitimate outcome (e.g. a child
+            # table with no rows yet for the requested parent IDs), not
+            # an error - but the caller (require_columns et al.) still
+            # needs real column names, not an empty-columns DataFrame,
+            # so build one from the last-executed query's own
+            # cursor.description rather than returning pd.DataFrame().
+            empty = pd.DataFrame(columns=last_columns)
+            normalize_columns(empty)
+            return empty
         return pd.concat(collected, ignore_index=True)
 
     def read_filtered_any_column(
@@ -352,6 +362,7 @@ class OracleDataSource:
         ]
 
         collected: list[pd.DataFrame] = []
+        last_columns: list[str] = []
         with self.connect(
             user=credentials["ORACLE_USER"],
             password=credentials["ORACLE_PASSWORD"],
@@ -410,11 +421,14 @@ class OracleDataSource:
                         elapsed_ms,
                     )
 
+                    last_columns = result_columns
                     if rows:
                         frame = pd.DataFrame(rows, columns=result_columns)
                         normalize_columns(frame)
                         collected.append(frame)
 
         if not collected:
-            return pd.DataFrame()
+            empty = pd.DataFrame(columns=last_columns)
+            normalize_columns(empty)
+            return empty
         return pd.concat(collected, ignore_index=True)
