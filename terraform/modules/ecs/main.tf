@@ -256,6 +256,36 @@ data "aws_iam_policy_document" "task_documents_s3" {
       "${var.documents_bucket_arn}/negotiations/*"
     ]
   }
+
+  # Subaward Attachments (SubawardAttachmentPlugin,
+  # archive_etl.attachments.runner --module subaward) - its own prefix,
+  # mirroring UploadNegotiationAttachmentObjects above. SubawardAttachmentPlugin
+  # has its own s3_key() override (etl/archive_etl/attachments/plugins/subaward.py),
+  # but it produces the same shape as the shared base:
+  # "{prefix}/{subaward_id}/{attachment_id}/{filename}" - unlike Negotiation/
+  # Proposal, Subaward's default_s3_prefix is already "subawards" (not
+  # test/subawards), and scripts/run-subaward-loader.sh passes
+  # --s3-prefix subawards explicitly to match, so the real key shape is
+  # subawards/<subaward_id>/<attachment_id>/<file>. SUBAWARD_ATTACHMENT_S3_BUCKET
+  # (the plugin's bucket_environment_variable) is deliberately not added to
+  # this task definition's environment below - run-subaward-loader.sh always
+  # passes --s3-bucket explicitly, which archive_etl.attachments.runner
+  # prefers over the env var, so the env var would never be read.
+  statement {
+    sid    = "UploadSubawardAttachmentObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts"
+    ]
+
+    resources = [
+      "${var.documents_bucket_arn}/subawards/*"
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "task_documents_s3" {
