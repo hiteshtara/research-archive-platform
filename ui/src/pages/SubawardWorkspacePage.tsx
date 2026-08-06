@@ -1,3 +1,4 @@
+import { ArrowForwardOutlined } from "@mui/icons-material";
 import {
   Alert,
   Box,
@@ -20,7 +21,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link as RouterLink, useParams } from "react-router-dom";
 
 import {
   downloadSubawardAttachment,
@@ -36,6 +37,7 @@ import {
   getSubawardTemplateInfo,
   getSubawardWorkspace,
 } from "../api/client";
+import { resolveAssociatedAwardCardState } from "../features/subaward/subawardFundingPresentation.mjs";
 
 const tabs = [
   "General",
@@ -442,22 +444,78 @@ function SubawardWorkspaceContent({
           )}
 
           {activeTab === 3 && (
-            <TableSection
-              data={fundingQuery.data}
-              isLoading={fundingQuery.isLoading}
-              isError={fundingQuery.isError}
-              errorMessage="Unable to load Subaward funding."
-              emptyMessage="No funding associations are archived for this Subaward record."
-              rowKey={(row) => row.subawardFundingSourceId}
-              columns={[
-                { label: "Funding Source ID", render: (row) => row.subawardFundingSourceId },
-                { label: "Award ID", render: (row) => display(row.awardId) },
-                { label: "Subaward Code", render: (row) => row.subawardCode },
-                { label: "Sequence", render: (row) => row.sequenceNumber },
-                { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
-                { label: "Source Version", render: (row) => display(row.sourceVersionNumber) },
-              ]}
-            />
+            <Stack spacing={2}>
+              {fundingQuery.data?.map((funding) => {
+                const cardState = resolveAssociatedAwardCardState(funding);
+                if (cardState.kind === "NONE") {
+                  return null;
+                }
+                return (
+                  <Card
+                    key={funding.subawardFundingSourceId}
+                    variant="outlined"
+                  >
+                    <CardContent>
+                      <Typography variant="overline" color="text.secondary">
+                        Associated Award
+                      </Typography>
+                      <Typography variant="h6">
+                        {cardState.awardNumber}
+                      </Typography>
+                      {cardState.kind === "LOADED" ? (
+                        <>
+                          {cardState.awardTitle && (
+                            <Typography variant="body2">
+                              {cardState.awardTitle}
+                            </Typography>
+                          )}
+                          {cardState.awardStatus && (
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                            >
+                              {cardState.awardStatus}
+                            </Typography>
+                          )}
+                          <Button
+                            sx={{ mt: 1 }}
+                            variant="outlined"
+                            size="small"
+                            endIcon={<ArrowForwardOutlined />}
+                            component={RouterLink}
+                            to={`/awards/${cardState.navigableCurrentAwardId}`}
+                          >
+                            Open Award
+                          </Button>
+                        </>
+                      ) : (
+                        <Chip
+                          sx={{ mt: 1 }}
+                          size="small"
+                          variant="outlined"
+                          label="Not currently archived"
+                        />
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              <TableSection
+                data={fundingQuery.data}
+                isLoading={fundingQuery.isLoading}
+                isError={fundingQuery.isError}
+                errorMessage="Unable to load Subaward funding."
+                emptyMessage="No funding associations are archived for this Subaward record."
+                rowKey={(row) => row.subawardFundingSourceId}
+                columns={[
+                  { label: "Funding Source ID", render: (row) => row.subawardFundingSourceId },
+                  { label: "Subaward Code", render: (row) => row.subawardCode },
+                  { label: "Sequence", render: (row) => row.sequenceNumber },
+                  { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
+                  { label: "Source Version", render: (row) => display(row.sourceVersionNumber) },
+                ]}
+              />
+            </Stack>
           )}
 
           {activeTab === 4 && (

@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardNotificationResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
@@ -189,6 +190,99 @@ class SubawardArchiveRepositoryTest {
                 .contains("FROM archive.subaward_attachment_archive")
                 .contains("attachment_id = :attachmentId")
                 .contains("subaward_id = :subawardId");
+    }
+
+    /*
+     * Association navigation tests - see
+     * SubawardArchiveRepository.findFunding's own comment for the
+     * resolution rules being locked in here. JdbcClient is mocked (this
+     * repository layer is unit-tested against SQL shape + response
+     * pass-through only, never a real database), so the actual
+     * award_number/is_primary_current JOIN semantics are proven
+     * separately, live, against real dev data (fixtures 1363/1414 for
+     * the unresolved case, Award family 202505-00002 for the resolved
+     * case) - not re-asserted here.
+     */
+    @Test
+    void findFundingResolvesTheCurrentAwardVersionByAwardNumberNotByTheStaleExactLinkedId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<SubawardFundingResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("subawardId", 17206L)).thenReturn(statement);
+        when(statement.query(SubawardFundingResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new SubawardArchiveRepository(jdbc).findFunding(17206L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.subaward_funding funding")
+                .contains("LEFT JOIN archive.award_version current_award")
+                .contains(
+                        "current_award.award_number = funding.award_number"
+                )
+                .contains("current_award.is_primary_current = TRUE")
+                .contains("funding.award_id AS exact_linked_award_id")
+                .contains(
+                        "current_award.award_id AS navigable_current_award_id"
+                )
+                .contains(
+                        "current_award.award_id IS NOT NULL AS archived"
+                );
+    }
+
+    @Test
+    void findFundingPreservesEveryRealFundingSourceRowIncludingBothResolvedAndUnresolvedLinks() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<SubawardFundingResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        // Row 1: exactLinkedAwardId points at a stale (non-current)
+        // Award version (834149, sequence 1 of 202505-00002), but the
+        // family's real current version (2036323) was resolved and
+        // archived - clickable.
+        SubawardFundingResponse resolved = new SubawardFundingResponse(
+                501L, 17206L, "1363", 8,
+                834149L, "202505-00002",
+                "Neuroimaging Genetics of PTSD", "03. Pending",
+                2036323L, true,
+                null, null, null, null
+        );
+        // Row 2: linked, but the family's current version has not been
+        // archived at all - visible, honestly non-clickable, never
+        // hidden.
+        SubawardFundingResponse unresolved = new SubawardFundingResponse(
+                777L, 17206L, "1363", 8,
+                9999999L, "203161-00002",
+                null, null,
+                null, false,
+                null, null, null, null
+        );
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("subawardId", 17206L)).thenReturn(statement);
+        when(statement.query(SubawardFundingResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of(resolved, unresolved));
+
+        List<SubawardFundingResponse> result =
+                new SubawardArchiveRepository(jdbc).findFunding(17206L);
+
+        assertThat(result).containsExactly(resolved, unresolved);
+        assertThat(result.get(0).exactLinkedAwardId()).isEqualTo(834149L);
+        assertThat(result.get(0).navigableCurrentAwardId())
+                .isEqualTo(2036323L);
+        assertThat(result.get(0).archived()).isTrue();
+        assertThat(result.get(1).navigableCurrentAwardId()).isNull();
+        assertThat(result.get(1).archived()).isFalse();
     }
 
     private String firstSql(JdbcClient jdbc) {

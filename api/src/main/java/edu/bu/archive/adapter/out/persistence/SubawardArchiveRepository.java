@@ -255,21 +255,49 @@ public class SubawardArchiveRepository {
                 .list();
     }
 
+    /*
+     * Award linkage resolution - proven live against real dev data
+     * 2026-08-06 (fixtures 1363/1414, both currently unresolved; Award
+     * family 202505-00002 loaded to prove the resolved case), same
+     * "prove, don't guess" discipline as
+     * NegotiationArchiveRepository.resolveCurrentAwardId. funding.award_id
+     * is the exact, authoritative link
+     * (SubAwardFundingSource.awardId -> Award, from
+     * repository-subAward.xml) but is only ever a raw internal Award
+     * version id - never assumed current. award_number is denormalized
+     * onto subaward_funding at ETL time (see
+     * oracle/subaward/export_subaward_funding.sql) precisely so this
+     * query can still report "Associated Award <number>" even when
+     * neither the exact linked version nor any other version of that
+     * Award family has been archived. current_award resolves the
+     * family's actual current version by award_number against
+     * is_primary_current, independently of whichever version
+     * award_id happened to point at.
+     */
     public List<SubawardFundingResponse> findFunding(long subawardId) {
         return jdbc.sql("""
                 SELECT
-                    subaward_funding_source_id,
-                    subaward_id,
-                    subaward_code,
-                    sequence_number,
-                    award_id,
-                    source_update_timestamp,
-                    source_update_user,
-                    source_version_number,
-                    source_object_id
-                FROM archive.subaward_funding
-                WHERE subaward_id = :subawardId
-                ORDER BY award_id NULLS LAST, subaward_funding_source_id
+                    funding.subaward_funding_source_id,
+                    funding.subaward_id,
+                    funding.subaward_code,
+                    funding.sequence_number,
+                    funding.award_id AS exact_linked_award_id,
+                    funding.award_number,
+                    current_award.title AS award_title,
+                    current_award.status_description AS award_status,
+                    current_award.award_id AS navigable_current_award_id,
+                    current_award.award_id IS NOT NULL AS archived,
+                    funding.source_update_timestamp,
+                    funding.source_update_user,
+                    funding.source_version_number,
+                    funding.source_object_id
+                FROM archive.subaward_funding funding
+                LEFT JOIN archive.award_version current_award
+                  ON current_award.award_number = funding.award_number
+                 AND current_award.is_primary_current = TRUE
+                WHERE funding.subaward_id = :subawardId
+                ORDER BY funding.award_id NULLS LAST,
+                    funding.subaward_funding_source_id
                 """)
                 .param("subawardId", subawardId)
                 .query(SubawardFundingResponse.class)

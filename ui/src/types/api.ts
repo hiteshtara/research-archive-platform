@@ -1339,7 +1339,12 @@ export interface SubawardFunding {
   subawardId: number;
   subawardCode: string;
   sequenceNumber: number;
-  awardId: number | null;
+  exactLinkedAwardId: number | null;
+  awardNumber: string | null;
+  awardTitle: string | null;
+  awardStatus: string | null;
+  navigableCurrentAwardId: number | null;
+  archived: boolean;
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
   sourceVersionNumber: number | null;

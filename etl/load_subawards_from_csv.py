@@ -198,8 +198,8 @@ DATASETS = (
         table_name="subaward_funding",
         columns=(
             "subaward_funding_source_id", "subaward_id", "subaward_code",
-            "sequence_number", "award_id", "update_timestamp",
-            "update_user", "ver_nbr", "obj_id",
+            "sequence_number", "award_id", "award_number",
+            "update_timestamp", "update_user", "ver_nbr", "obj_id",
         ),
         primary_key="subaward_funding_source_id",
         required_values=(
