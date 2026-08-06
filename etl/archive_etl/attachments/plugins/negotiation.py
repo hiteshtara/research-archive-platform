@@ -104,6 +104,8 @@ class NegotiationAttachmentPlugin(AttachmentFilePlugin):
                         "restricted": row["restricted"].strip() or None,
                         "source_update_timestamp":
                             row["update_timestamp"].strip() or None,
+                        "source_update_user":
+                            row.get("update_user", "").strip() or None,
                         "attachment_file_data_id":
                             row.get(
                                 "attachment_file_data_id",

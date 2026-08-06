@@ -50,6 +50,7 @@ REQUIRED_COLUMNS = [
     "description",
     "restricted",
     "update_timestamp",
+    "update_user",
 ]
 
 

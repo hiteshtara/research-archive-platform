@@ -19,7 +19,8 @@ SELECT
     af.content_type AS content_type,
     att.description AS description,
     att.restricted AS restricted,
-    att.update_timestamp AS update_timestamp
+    att.update_timestamp AS update_timestamp,
+    att.update_user AS update_user
 FROM KCOEUS.NEGOTIATION_ATTACHMENT att
 JOIN KCOEUS.NEGOTIATION_ACTIVITY a
     ON a.negotiation_activity_id = att.activity_id
