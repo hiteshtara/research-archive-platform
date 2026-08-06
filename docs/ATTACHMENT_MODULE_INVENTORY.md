@@ -57,7 +57,7 @@ plugins did the same (see "Protocol (historical)" below).
 | Subaward | Verified | Direct `FILE_DATA_ID` verified | Verified | Implemented |
 | Proposal | Verified | Direct `FILE_DATA_ID` verified | Generic V020 destination | Implemented |
 | Award | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
-| Negotiation | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified | Generic V020 destination | Implemented |
+| Negotiation | Verified | Direct `ATTACHMENT_FILE.FILE_ID` verified — but see "BLOB retention gap" below: only 8.1% of rows have retrievable content | Generic V020 destination | Implemented, full population loaded 2026-08-06 |
 | Protocol (historical) | Protocol and personnel sources verified | Direct `ATTACHMENT_FILE.FILE_ID` verified for both | Generic V020 destination | Removed — rows retained, no new ingestion |
 
 V020 adds `archive.archived_attachment` for Award, Proposal, and Negotiation
@@ -202,21 +202,59 @@ The Award plugin is implemented using `AWARD_ATTACHMENT.FILE_ID` to read
 
 ### Repository evidence
 
-- The OJB descriptor also identifies `NEGOTIATION_ATTACHMENT`, but direct BU
-  `DESCRIBE` output now confirms its physical existence.
-- Existing Negotiation extraction and V017 omit attachments.
-- Negotiation ETL, repository, DTOs, and UI have no attachment contract.
+- The OJB descriptor also identifies `NEGOTIATION_ATTACHMENT` (nested under
+  `NegotiationActivity`, not `Negotiation` itself — see
+  `repository-negotiation.xml`), confirmed physically present.
+- `oracle/negotiation/export_negotiation_attachments.sql` (added 2026-08-06)
+  is the extraction query, joined through `NEGOTIATION_ACTIVITY` to resolve
+  the owning `negotiation_id` (the attachment row has no `negotiation_id` of
+  its own). `etl/fetch_negotiation_attachment_metadata.py` runs it into the
+  CSV shape the generic plugin expects — Negotiation never had a manual
+  SQL*Plus export step; this automates it.
+- Negotiation ETL, repository (`NegotiationArchiveRepository.findAttachments`),
+  DTO (`NegotiationAttachmentResponse`), and UI (attachments grouped by
+  Activity in `NegotiationWorkspacePage`) all have a working attachment
+  contract as of 2026-08-06.
 
-### Status and missing information
+### Status
 
-The Negotiation plugin uses the existing verified activity relationship to
-resolve the owning Negotiation and reads `ATTACHMENT_FILE.FILE_DATA` through
+The Negotiation plugin uses the verified activity relationship to resolve
+the owning Negotiation and reads `ATTACHMENT_FILE.FILE_DATA` through
 `FILE_ID`. Filename and MIME type come from `FILE_NAME` and `CONTENT_TYPE`.
-Manifest synchronization uses the generic V020 destination. The activity and
-restriction identifiers remain in `source_metadata`.
+Manifest synchronization uses the generic V020 destination. The activity ID,
+restriction flag, and `UPDATE_USER` remain in `source_metadata` (added
+`UPDATE_USER`/`sourceUpdateUser` 2026-08-06 — it exists in Oracle but had
+never been extracted before).
 
-The inventory must not describe `NEGOTIATION_ATTACHMENT` as physically
-unverified.
+### BLOB retention gap (found during the 2026-08-06 full-population load)
+
+A full load of all 28,923 `NEGOTIATION_ATTACHMENT` rows found that **only
+2,342 (8.1%) have retrievable binary content** — the other 26,581 have a
+real `ATTACHMENT_FILE` row (confirmed: 0 dangling `FILE_ID` references) but
+`FILE_DATA IS NULL`. This is a source-side Oracle fact, not an ETL bug:
+verified with `SELECT COUNT(*) FROM NEGOTIATION_ATTACHMENT att JOIN
+ATTACHMENT_FILE af ON af.FILE_ID = att.FILE_ID WHERE af.FILE_DATA IS NOT
+NULL` (2,342) vs. `WHERE af.FILE_DATA IS NULL` (26,581), and by confirming
+zero rows have no `ATTACHMENT_FILE` row at all. The 2,342 rows with real
+content cluster at the high end of the `FILE_ID` range (24046–39280,
+i.e. the most recent negotiations) — consistent with an Oracle-side
+retention/cleanup policy that strips old BLOB content while keeping the
+metadata row. `archive.archived_attachment` reflects this honestly:
+`archive_status = 'ARCHIVED'` for the 2,342 with content, `'MISSING'` for
+the other 26,581 (0 `'FAILED'` — every upload attempt that had real content
+succeeded, 0 checksum mismatches). The API's `downloadable` flag on
+`NegotiationAttachmentResponse` is derived from `archive_status = 'ARCHIVED'`,
+so the UI correctly shows "Not available" rather than a broken download link
+for the 92% with no content.
+
+A related orchestration bug was found and fixed in the same load:
+`scripts/run-negotiation-loader.sh` originally chained the upload and
+`--sync-postgres` steps with `&&`, and the upload step's exit code is
+non-zero whenever any attachment has a missing/failed blob (true for
+this domain by design, not just at the margins) — so `--sync-postgres`
+never ran, silently discarding metadata for every attachment that *did*
+upload successfully. Fixed to chain with `;` instead, so sync always runs
+regardless of how many blobs were missing.
 
 ## Protocol (historical)
 
