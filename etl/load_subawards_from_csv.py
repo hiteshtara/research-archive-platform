@@ -4,18 +4,40 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+import boto3
 import pandas as pd
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.config.ecs import configure_ecs_environment
 from archive_etl.pipeline.sources import OracleDataSource
+from archive_etl.reference_data import _upsert_rows
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+def _resolve_project_root() -> Path:
+    """Locate the directory containing oracle/subaward/ and
+    database/migrations/ relative to this file - mirrors
+    load_negotiations_from_csv.py's own _resolve_project_root(): the
+    local repo checkout (this file at <repo>/etl/load_subawards_from_csv.py,
+    project root one level up) vs. the ECS loader container image (this
+    file copied flatly to /app/load_subawards_from_csv.py alongside
+    oracle/ and database/migrations/ copied directly under /app - see
+    etl/Dockerfile.loader), where the project root is this file's own
+    parent directory. This loader had never been run in a container
+    before this fix - the naive parents[1] resolution silently worked
+    locally and only broke inside the ECS image."""
+    container_root = Path(__file__).resolve().parent
+    if (container_root / "oracle").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 SOURCE_COLUMN_RENAMES = {
     "update_timestamp": "source_update_timestamp",
@@ -45,6 +67,13 @@ class DatasetSpec:
     @property
     def oracle_path(self) -> Path:
         return PROJECT_ROOT / "oracle" / "subaward" / self.oracle_sql_file
+
+    @property
+    def archive_columns(self) -> list[str]:
+        """self.columns (raw Oracle names) with SOURCE_COLUMN_RENAMES
+        applied - the real archive.<table_name> column list, used by
+        the targeted per-family UPSERT path."""
+        return [SOURCE_COLUMN_RENAMES.get(c, c) for c in self.columns]
 
 
 DATASETS = (
@@ -355,7 +384,65 @@ def parse_args(
             "connectivity/transform logic - not a partial load)."
         ),
     )
-    return parser.parse_args(arguments)
+    parser.add_argument(
+        "--load-subaward-code",
+        dest="subaward_code",
+        action="append",
+        default=None,
+        help=(
+            "Load only this Subaward family (repeatable) - every "
+            "version and all child rows sharing this SUBAWARD_CODE. "
+            "Idempotent per-family UPSERT, never TRUNCATE. Mutually "
+            "exclusive with --load-subaward-id/--max-families."
+        ),
+    )
+    parser.add_argument(
+        "--load-subaward-id",
+        dest="subaward_id",
+        type=int,
+        action="append",
+        default=None,
+        help=(
+            "Load the whole family that this physical version belongs "
+            "to (repeatable) - resolved to its SUBAWARD_CODE first, "
+            "then loaded exactly like --load-subaward-code. Mutually "
+            "exclusive with --load-subaward-code/--max-families."
+        ),
+    )
+    parser.add_argument(
+        "--max-families",
+        type=int,
+        default=None,
+        help=(
+            "Load only the first N Subaward families, ordered ascending "
+            "by SUBAWARD_CODE. Same idempotent per-family UPSERT. "
+            "Mutually exclusive with --load-subaward-code/"
+            "--load-subaward-id."
+        ),
+    )
+    parser.add_argument(
+        "--ecs",
+        action="store_true",
+        help=(
+            "Resolve PostgreSQL/Oracle credentials from Secrets Manager "
+            "via the ECS task's environment instead of requiring local "
+            "exports - see archive_etl.config.ecs."
+        ),
+    )
+    arguments = parser.parse_args(arguments)
+
+    selectors = sum((
+        bool(arguments.subaward_code),
+        bool(arguments.subaward_id),
+        arguments.max_families is not None,
+    ))
+    if selectors > 1:
+        parser.error(
+            "--load-subaward-code, --load-subaward-id, and "
+            "--max-families are mutually exclusive"
+        )
+
+    return arguments
 
 
 def read_oracle(spec: DatasetSpec) -> pd.DataFrame:
@@ -584,8 +671,185 @@ def mark_load_complete(
     )
 
 
+def _run_ecs_setup() -> None:
+    """Minimal --ecs credential setup, mirroring
+    load_negotiations_from_csv.py's own (deliberately lean, not the
+    fuller startup-validation ceremony load_proposals_from_csv.py uses -
+    out of scope for a targeted/proving load)."""
+    configure_ecs_environment(boto3.client("secretsmanager"))
+
+
+def _dataset_by_key(key: str) -> DatasetSpec:
+    return next(spec for spec in DATASETS if spec.key == key)
+
+
+def resolve_target_subaward_codes(
+    arguments: argparse.Namespace,
+) -> list[str] | None:
+    """Returns the explicit list of SUBAWARD_CODE families to load for
+    --load-subaward-code/--load-subaward-id/--max-families, or None if
+    none of the three were given (the untargeted full-refresh path)."""
+    if arguments.subaward_code:
+        return sorted(set(arguments.subaward_code))
+
+    if arguments.subaward_id:
+        subawards_spec = _dataset_by_key("subawards")
+        matched = OracleDataSource(subawards_spec.oracle_path).read_filtered(
+            column="subaward_id",
+            values=arguments.subaward_id,
+        )
+        codes = (
+            matched["subaward_code"].dropna().astype(str).unique().tolist()
+        )
+        return sorted(set(codes))
+
+    if arguments.max_families is not None:
+        subawards_spec = _dataset_by_key("subawards")
+        all_codes = (
+            OracleDataSource(subawards_spec.oracle_path)
+            .read()["subaward_code"]
+            .dropna()
+            .astype(str)
+            .drop_duplicates()
+            .sort_values()
+            .tolist()
+        )
+        return all_codes[: arguments.max_families]
+
+    return None
+
+
+def run_targeted_load(target_codes: list[str]) -> dict[str, object]:
+    """Loads exactly the given Subaward families (every version and all
+    child rows sharing each SUBAWARD_CODE) via an idempotent per-row
+    UPSERT (archive_etl.reference_data._upsert_rows), one Postgres
+    transaction PER FAMILY - a bad row on one family is logged and
+    skipped, every other family still loads. Mirrors
+    load_negotiations_from_csv.py's run_full_load in shape, generalized
+    over the DATASETS spec table instead of hardcoding five tables."""
+    logger.info(
+        "Reading {} targeted Subaward famil{} from Oracle",
+        len(target_codes),
+        "y" if len(target_codes) == 1 else "ies",
+    )
+
+    datasets = {
+        spec.key: prepare_dataset(
+            spec,
+            OracleDataSource(spec.oracle_path).read_filtered(
+                column="subaward_code",
+                values=target_codes,
+            ),
+        )
+        for spec in DATASETS
+    }
+
+    subawards = datasets["subawards"]
+    validate_parent_relationships(subawards, datasets)
+
+    logger.info(
+        "Prepared targeted Subaward rows: {}",
+        " ".join(
+            f"{spec.key}={len(datasets[spec.key]):,}" for spec in DATASETS
+        ),
+    )
+
+    engine = create_postgres_engine()
+    apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+
+    totals = {
+        spec.table_name: {"inserted": 0, "updated": 0, "unchanged": 0}
+        for spec in DATASETS
+    }
+    completed = 0
+    failed_codes: list[str] = []
+
+    for code in target_codes:
+        family_datasets = {
+            spec.key: datasets[spec.key][
+                datasets[spec.key]["subaward_code"] == code
+            ]
+            for spec in DATASETS
+        }
+
+        try:
+            with engine.begin() as connection:
+                total_rows = sum(
+                    len(dataframe) for dataframe in family_datasets.values()
+                )
+                load_id = create_load_run(connection, total_rows)
+
+                for spec in DATASETS:
+                    renamed = family_datasets[spec.key].rename(
+                        columns=SOURCE_COLUMN_RENAMES
+                    )
+                    result = _upsert_rows(
+                        connection,
+                        table=spec.table_name,
+                        pk_columns=[spec.primary_key],
+                        columns=spec.archive_columns,
+                        rows=renamed,
+                        load_id=load_id,
+                    )
+                    for key in ("inserted", "updated", "unchanged"):
+                        totals[spec.table_name][key] += result[key]
+
+                mark_load_complete(connection, load_id, total_rows)
+            completed += 1
+        except Exception as error:
+            failed_codes.append(code)
+            logger.error(
+                "Subaward family {} failed to load: {}",
+                code,
+                redact_error_message(str(error)),
+            )
+
+    logger.success(
+        "Targeted Subaward load finished: {:,} requested, {:,} completed, "
+        "{:,} failed",
+        len(target_codes),
+        completed,
+        len(failed_codes),
+    )
+    for table_name, result in totals.items():
+        logger.info(
+            "TOTAL {:<35} inserted={:,} updated={:,} unchanged={:,}",
+            table_name,
+            result["inserted"],
+            result["updated"],
+            result["unchanged"],
+        )
+    if failed_codes:
+        logger.warning(
+            "Failed Subaward codes ({:,}): {}",
+            len(failed_codes),
+            failed_codes[:50],
+        )
+
+    return {
+        "requested": len(target_codes),
+        "completed": completed,
+        "failed": len(failed_codes),
+        "failed_codes": failed_codes,
+        "totals": totals,
+    }
+
+
 def main() -> None:
     arguments = parse_args()
+
+    if arguments.ecs:
+        _run_ecs_setup()
+
+    target_codes = resolve_target_subaward_codes(arguments)
+    if target_codes is not None:
+        if not target_codes:
+            logger.warning(
+                "No target Subaward families resolved - nothing to load"
+            )
+            return
+        run_targeted_load(target_codes)
+        return
 
     logger.info("Reading Subaward data from Oracle")
     datasets = {
@@ -626,7 +890,7 @@ def main() -> None:
     engine = create_postgres_engine()
     apply_migrations(
         engine,
-        Path(__file__).resolve().parents[1] / "database" / "migrations",
+        PROJECT_ROOT / "database" / "migrations",
     )
 
     # The STARTED load_run row is committed in its own transaction, before
