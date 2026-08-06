@@ -59,6 +59,12 @@ const ASSOCIATION_ROUTE: Record<string, (id: number) => string> = {
   SUBAWARD: (id) => `/subawards/${id}`,
 };
 
+const ASSOCIATION_LABEL: Record<string, string> = {
+  AWARD: "Award",
+  PROPOSAL: "Proposal",
+  SUBAWARD: "Subaward",
+};
+
 function display(value: string | number | null | undefined) {
   return value ?? "—";
 }
@@ -301,7 +307,15 @@ function NegotiationWorkspaceContent({
                   association.navigableId,
                 )}
                 clickable
-                label={`${association.kind === "AWARD" ? "Award" : association.kind === "PROPOSAL" ? "Proposal" : "Subaward"} ${association.associatedDocumentId}`}
+                label={`${ASSOCIATION_LABEL[association.kind]} ${association.associatedDocumentId}`}
+              />
+            ) : association &&
+              ASSOCIATION_LABEL[association.kind] &&
+              association.associatedDocumentId ? (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`${ASSOCIATION_LABEL[association.kind]} ${association.associatedDocumentId} · Not yet archived`}
               />
             ) : (
               <Chip
@@ -348,7 +362,7 @@ function NegotiationWorkspaceContent({
                     <Card variant="outlined">
                       <CardContent>
                         <Typography variant="overline" color="text.secondary">
-                          {association.associationTypeDescription}
+                          {ASSOCIATION_LABEL[association.kind] ?? "Record"}
                         </Typography>
                         <Typography variant="h6">
                           {association.associatedDocumentId}
@@ -363,13 +377,7 @@ function NegotiationWorkspaceContent({
                             association.navigableId,
                           )}
                         >
-                          Open{" "}
-                          {association.kind === "AWARD"
-                            ? "Award"
-                            : association.kind === "PROPOSAL"
-                              ? "Proposal"
-                              : "Subaward"}{" "}
-                          dashboard
+                          Open {ASSOCIATION_LABEL[association.kind]} dashboard
                         </Button>
                       </CardContent>
                     </Card>
@@ -378,14 +386,30 @@ function NegotiationWorkspaceContent({
                       This Negotiation is not associated with a Proposal,
                       Award, or Subaward.
                     </Alert>
-                  ) : (
-                    <Alert severity="warning">
-                      Association type &quot;
+                  ) : association.kind === "UNSUPPORTED" ? (
+                    <Alert severity="info">
+                      This Negotiation&apos;s association type (
                       {association.associationTypeDescription ??
                         association.associationTypeCode}
-                      &quot; (document {display(association.associatedDocumentId)})
-                      is not yet supported for navigation.
+                      ) is not one the archive recognizes yet.
                     </Alert>
+                  ) : (
+                    <Card variant="outlined">
+                      <CardContent>
+                        <Typography variant="overline" color="text.secondary">
+                          {ASSOCIATION_LABEL[association.kind] ?? "Record"}
+                        </Typography>
+                        <Typography variant="h6">
+                          {association.associatedDocumentId}
+                        </Typography>
+                        <Chip
+                          sx={{ mt: 1 }}
+                          size="small"
+                          variant="outlined"
+                          label="Not yet archived"
+                        />
+                      </CardContent>
+                    </Card>
                   )}
 
                   {association.kind === "NONE" && (
