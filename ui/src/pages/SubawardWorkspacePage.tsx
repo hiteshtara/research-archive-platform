@@ -16,6 +16,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
@@ -37,7 +39,17 @@ import {
   getSubawardTemplateInfo,
   getSubawardWorkspace,
 } from "../api/client";
-import { resolveAssociatedAwardCardState } from "../features/subaward/subawardFundingPresentation.mjs";
+import { formatCurrencyAmount } from "../features/award/awardSectionsPresentation.mjs";
+import { resolveContactDisplay } from "../features/subaward/subawardContactsPresentation.mjs";
+import {
+  resolveAssociatedAwardCardState,
+  resolveAssociatedAwardsSectionLabel,
+} from "../features/subaward/subawardFundingPresentation.mjs";
+import {
+  buildAmendmentTimeline,
+  resolveAttachmentLabel,
+  sumAmendmentTotals,
+} from "../features/subaward/subawardAmountsPresentation.mjs";
 
 const tabs = [
   "General",
@@ -165,6 +177,9 @@ function SubawardWorkspaceContent({
   subawardId: string | undefined;
 }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [amountsViewMode, setAmountsViewMode] = useState<
+    "timeline" | "technical"
+  >("timeline");
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -367,18 +382,23 @@ function SubawardWorkspaceContent({
           >
             <Chip
               size="small"
+              variant="outlined"
+              label={`Subaward Code ${current.subawardCode}`}
+            />
+            <Chip
+              size="small"
               color="primary"
               label={current.statusDescription ?? "Unknown status"}
             />
             <Chip
               size="small"
               variant="outlined"
-              label={`Sequence ${current.sequenceNumber}`}
+              label={`Version ${current.sequenceNumber}`}
             />
             <Chip
               size="small"
               variant="outlined"
-              label={`Document ${current.documentNumber ?? "—"}`}
+              label={`Workflow ${current.documentNumber ?? "—"}`}
             />
           </Stack>
         </CardContent>
@@ -401,27 +421,170 @@ function SubawardWorkspaceContent({
           {activeTab === 0 && <DetailTable rows={generalRows} />}
 
           {activeTab === 1 && (
-            <TableSection
-              data={amountsQuery.data}
-              isLoading={amountsQuery.isLoading}
-              isError={amountsQuery.isError}
-              errorMessage="Unable to load Subaward amounts."
-              emptyMessage="No amount rows are archived for this Subaward record."
-              rowKey={(row) => row.subawardAmountInfoId}
-              columns={[
-                { label: "Amount ID", render: (row) => row.subawardAmountInfoId },
-                { label: "Effective Date", render: (row) => display(row.effectiveDate) },
-                { label: "Modification", render: (row) => display(row.modificationNumber) },
-                { label: "Modification Type", render: (row) => display(row.modificationTypeDescription ?? row.modificationTypeCode) },
-                { label: "Obligated", render: (row) => display(row.obligatedAmount) },
-                { label: "Obligated Change", render: (row) => display(row.obligatedChange) },
-                { label: "Anticipated", render: (row) => display(row.anticipatedAmount) },
-                { label: "Anticipated Change", render: (row) => display(row.anticipatedChange) },
-                { label: "Performance Period", render: (row) => `${display(row.performanceStartDate)} – ${display(row.performanceEndDate)}` },
-                { label: "File Metadata", render: (row) => row.fileName ? `${row.fileName} (${display(row.mimeType)})` : "—" },
-                { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
-              ]}
-            />
+            <Stack spacing={2}>
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={amountsViewMode}
+                onChange={(_, next) => next && setAmountsViewMode(next)}
+              >
+                <ToggleButton value="timeline">
+                  History of Changes
+                </ToggleButton>
+                <ToggleButton value="technical">Technical View</ToggleButton>
+              </ToggleButtonGroup>
+
+              {amountsQuery.isLoading && <LoadingState />}
+              {amountsQuery.isError && (
+                <Alert severity="error">
+                  Unable to load Subaward amounts.
+                </Alert>
+              )}
+              {!amountsQuery.isLoading &&
+                !amountsQuery.isError &&
+                (amountsQuery.data?.length ?? 0) === 0 && (
+                  <Typography color="text.secondary">
+                    No amount rows are archived for this Subaward record.
+                  </Typography>
+                )}
+
+              {amountsViewMode === "timeline" &&
+                amountsQuery.data &&
+                amountsQuery.data.length > 0 && (
+                  <Stack spacing={2}>
+                    {(() => {
+                      const totals = sumAmendmentTotals(amountsQuery.data);
+                      return (
+                        <Card variant="outlined">
+                          <CardContent>
+                            <Stack
+                              direction="row"
+                              spacing={4}
+                              sx={{ flexWrap: "wrap" }}
+                            >
+                              <Box>
+                                <Typography
+                                  variant="overline"
+                                  color="text.secondary"
+                                >
+                                  Total Obligated
+                                </Typography>
+                                <Typography variant="h6">
+                                  {display(totals.totalObligatedChange)}
+                                </Typography>
+                              </Box>
+                              <Box>
+                                <Typography
+                                  variant="overline"
+                                  color="text.secondary"
+                                >
+                                  Total Anticipated
+                                </Typography>
+                                <Typography variant="h6">
+                                  {display(totals.totalAnticipatedChange)}
+                                </Typography>
+                              </Box>
+                            </Stack>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ mt: 1, display: "block" }}
+                            >
+                              Amount Released and Available Amount require
+                              SUBAWARD_AMOUNT_RELEASED, not yet archived by
+                              this platform.
+                            </Typography>
+                          </CardContent>
+                        </Card>
+                      );
+                    })()}
+
+                    {buildAmendmentTimeline(amountsQuery.data).map((card) => (
+                      <Card key={card.subawardAmountInfoId} variant="outlined">
+                        <CardContent>
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            sx={{ alignItems: "center", flexWrap: "wrap" }}
+                          >
+                            <Typography sx={{ fontWeight: 700 }}>
+                              Amendment {card.amendmentNumber ?? "—"}
+                            </Typography>
+                            {card.modificationType && (
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                label={card.modificationType}
+                              />
+                            )}
+                          </Stack>
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ mt: 0.5 }}
+                          >
+                            Effective {display(card.effectiveDate)}
+                            {" · Budget period "}
+                            {display(card.budgetPeriodStart)} –{" "}
+                            {display(card.budgetPeriodEnd)}
+                          </Typography>
+                          <Stack
+                            direction="row"
+                            spacing={3}
+                            sx={{ mt: 1, flexWrap: "wrap" }}
+                          >
+                            <Typography variant="body2">
+                              Obligated change:{" "}
+                              {display(card.obligatedChange)}
+                            </Typography>
+                            <Typography variant="body2">
+                              Anticipated change:{" "}
+                              {display(card.anticipatedChange)}
+                            </Typography>
+                          </Stack>
+                          {card.comments && (
+                            <Typography variant="body2" sx={{ mt: 1 }}>
+                              {card.comments}
+                            </Typography>
+                          )}
+                          {card.attachmentLabel && (
+                            <Chip
+                              sx={{ mt: 1 }}
+                              size="small"
+                              variant="outlined"
+                              label={card.attachmentLabel}
+                            />
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Stack>
+                )}
+
+              {amountsViewMode === "technical" && (
+                <TableSection
+                  data={amountsQuery.data}
+                  isLoading={amountsQuery.isLoading}
+                  isError={amountsQuery.isError}
+                  errorMessage="Unable to load Subaward amounts."
+                  emptyMessage="No amount rows are archived for this Subaward record."
+                  rowKey={(row) => row.subawardAmountInfoId}
+                  columns={[
+                    { label: "Amount ID", render: (row) => row.subawardAmountInfoId },
+                    { label: "Effective Date", render: (row) => display(row.effectiveDate) },
+                    { label: "Modification", render: (row) => display(row.modificationNumber) },
+                    { label: "Modification Type", render: (row) => display(row.modificationTypeDescription ?? row.modificationTypeCode) },
+                    { label: "Obligated", render: (row) => display(row.obligatedAmount) },
+                    { label: "Obligated Change", render: (row) => display(row.obligatedChange) },
+                    { label: "Anticipated", render: (row) => display(row.anticipatedAmount) },
+                    { label: "Anticipated Change", render: (row) => display(row.anticipatedChange) },
+                    { label: "Performance Period", render: (row) => `${display(row.performanceStartDate)} – ${display(row.performanceEndDate)}` },
+                    { label: "File Metadata", render: (row) => resolveAttachmentLabel(row) ?? "—" },
+                    { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
+                  ]}
+                />
+              )}
+            </Stack>
           )}
 
           {activeTab === 2 && (
@@ -433,18 +596,53 @@ function SubawardWorkspaceContent({
               emptyMessage="No contacts are archived for this Subaward record."
               rowKey={(row) => row.subawardContactId}
               columns={[
-                { label: "Contact ID", render: (row) => row.subawardContactId },
-                { label: "Contact Type", render: (row) => display(row.contactTypeCode) },
-                { label: "Rolodex ID", render: (row) => display(row.rolodexId) },
-                { label: "Requisitioner ID", render: (row) => display(row.requisitionerId) },
-                { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
-                { label: "Update User", render: (row) => display(row.sourceUpdateUser) },
+                {
+                  label: "Name",
+                  render: (row) => {
+                    const contactDisplay = resolveContactDisplay(row);
+                    return contactDisplay.hasIdentity
+                      ? contactDisplay.name
+                      : "Contact not archived";
+                  },
+                },
+                {
+                  label: "Role",
+                  render: (row) => display(resolveContactDisplay(row).role),
+                },
+                {
+                  label: "Organization",
+                  render: (row) => display(resolveContactDisplay(row).organization),
+                },
+                {
+                  label: "Phone",
+                  render: (row) => display(resolveContactDisplay(row).phone),
+                },
+                {
+                  label: "Email",
+                  render: (row) => display(resolveContactDisplay(row).email),
+                },
+                {
+                  label: "ID",
+                  render: (row) => (
+                    <Typography variant="caption" color="text.secondary">
+                      {row.rolodexId
+                        ? `Rolodex ${row.rolodexId}`
+                        : row.requisitionerId
+                          ? `Person ${row.requisitionerId}`
+                          : "—"}
+                    </Typography>
+                  ),
+                },
               ]}
             />
           )}
 
           {activeTab === 3 && (
             <Stack spacing={2}>
+              <Typography variant="h6">
+                {resolveAssociatedAwardsSectionLabel(fundingQuery.data ?? [])}
+              </Typography>
+
               {fundingQuery.data?.map((funding) => {
                 const cardState = resolveAssociatedAwardCardState(funding);
                 if (cardState.kind === "NONE") {
@@ -456,11 +654,8 @@ function SubawardWorkspaceContent({
                     variant="outlined"
                   >
                     <CardContent>
-                      <Typography variant="overline" color="text.secondary">
-                        Associated Award
-                      </Typography>
-                      <Typography variant="h6">
-                        {cardState.awardNumber}
+                      <Typography sx={{ fontWeight: 700 }}>
+                        Award {cardState.awardNumber}
                       </Typography>
                       {cardState.kind === "LOADED" ? (
                         <>
@@ -469,14 +664,35 @@ function SubawardWorkspaceContent({
                               {cardState.awardTitle}
                             </Typography>
                           )}
-                          {cardState.awardStatus && (
-                            <Typography
-                              variant="body2"
-                              color="text.secondary"
-                            >
-                              {cardState.awardStatus}
-                            </Typography>
-                          )}
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            sx={{ mt: 0.5, alignItems: "center", flexWrap: "wrap" }}
+                          >
+                            {cardState.awardStatus && (
+                              <Chip
+                                size="small"
+                                color="primary"
+                                label={cardState.awardStatus}
+                              />
+                            )}
+                            {cardState.awardSponsor && (
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                              >
+                                {cardState.awardSponsor}
+                              </Typography>
+                            )}
+                            {cardState.awardAmount !== null && (
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                              >
+                                {formatCurrencyAmount(cardState.awardAmount)}
+                              </Typography>
+                            )}
+                          </Stack>
                           <Button
                             sx={{ mt: 1 }}
                             variant="outlined"

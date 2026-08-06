@@ -209,23 +209,55 @@ public class SubawardArchiveRepository {
                 .list();
     }
 
+    /*
+     * A contact row is linked to EITHER archive.rolodex OR
+     * archive.person, never both (proven from
+     * SubAwardContact.setRolodex()/setKcPerson(), which are mutually
+     * exclusive) - COALESCE across both LEFT JOINs is therefore safe,
+     * never double-matching. Mirrors
+     * AwardArchiveRepository.findSponsorContacts's rolodex-resolution
+     * pattern. archive.person is deliberately scoped only to
+     * person_ids already referenced elsewhere (see
+     * archive.person's own table comment) - a requisitioner_id outside
+     * that scope resolves to null full_name/email/phone here, not a
+     * guess. organization has no equivalent on archive.person, so it
+     * only ever resolves through the rolodex path.
+     */
     public List<SubawardContactResponse> findContacts(long subawardId) {
         return jdbc.sql("""
                 SELECT
-                    subaward_contact_id,
-                    subaward_id,
-                    subaward_code,
-                    sequence_number,
-                    contact_type_code,
-                    rolodex_id,
-                    requisitioner_id,
-                    source_update_timestamp,
-                    source_update_user,
-                    source_version_number,
-                    source_object_id
-                FROM archive.subaward_contact
-                WHERE subaward_id = :subawardId
-                ORDER BY contact_type_code NULLS LAST, subaward_contact_id
+                    contact.subaward_contact_id,
+                    contact.subaward_id,
+                    contact.subaward_code,
+                    contact.sequence_number,
+                    contact.contact_type_code,
+                    contact.contact_type_description,
+                    COALESCE(
+                        person.full_name,
+                        CASE
+                            WHEN rolodex.last_name IS NOT NULL
+                                AND rolodex.first_name IS NOT NULL
+                            THEN rolodex.last_name || ', ' || rolodex.first_name
+                            ELSE COALESCE(rolodex.last_name, rolodex.first_name)
+                        END
+                    ) AS full_name,
+                    rolodex.organization,
+                    COALESCE(person.email_address, rolodex.email_address) AS email,
+                    COALESCE(person.phone_number, rolodex.phone_number) AS phone,
+                    contact.rolodex_id,
+                    contact.requisitioner_id,
+                    contact.source_update_timestamp,
+                    contact.source_update_user,
+                    contact.source_version_number,
+                    contact.source_object_id
+                FROM archive.subaward_contact contact
+                LEFT JOIN archive.rolodex rolodex
+                    ON rolodex.rolodex_id = contact.rolodex_id
+                LEFT JOIN archive.person person
+                    ON person.person_id = contact.requisitioner_id
+                WHERE contact.subaward_id = :subawardId
+                ORDER BY contact.contact_type_code NULLS LAST,
+                    contact.subaward_contact_id
                 """)
                 .param("subawardId", subawardId)
                 .query(SubawardContactResponse.class)
@@ -273,6 +305,14 @@ public class SubawardArchiveRepository {
      * family's actual current version by award_number against
      * is_primary_current, independently of whichever version
      * award_id happened to point at.
+     *
+     * One row per real archive.subaward_funding row - a Subaward can
+     * have MULTIPLE, each to a different Award family (proven via
+     * Kuali's own duplicate-award-number business rule and confirmed
+     * in real archived data), never collapsed to "the" one. amount
+     * mirrors findSummaryCards's currentObligatedAmount LATERAL JOIN
+     * pattern exactly (most recent archive.award_amount_info row by
+     * source_version_number for the resolved current Award version).
      */
     public List<SubawardFundingResponse> findFunding(long subawardId) {
         return jdbc.sql("""
@@ -285,6 +325,8 @@ public class SubawardArchiveRepository {
                     funding.award_number,
                     current_award.title AS award_title,
                     current_award.status_description AS award_status,
+                    current_award.sponsor_name AS award_sponsor,
+                    amt.obligated_total_amount AS award_amount,
                     current_award.award_id AS navigable_current_award_id,
                     current_award.award_id IS NOT NULL AS archived,
                     funding.source_update_timestamp,
@@ -295,6 +337,15 @@ public class SubawardArchiveRepository {
                 LEFT JOIN archive.award_version current_award
                   ON current_award.award_number = funding.award_number
                  AND current_award.is_primary_current = TRUE
+                LEFT JOIN LATERAL (
+                    SELECT ai.obligated_total_amount
+                    FROM archive.award_amount_info ai
+                    WHERE ai.award_id = current_award.award_id
+                    ORDER BY
+                        ai.source_version_number DESC NULLS LAST,
+                        ai.award_amount_info_id DESC
+                    LIMIT 1
+                ) amt ON TRUE
                 WHERE funding.subaward_id = :subawardId
                 ORDER BY funding.award_id NULLS LAST,
                     funding.subaward_funding_source_id

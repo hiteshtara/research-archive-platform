@@ -1313,6 +1313,11 @@ export interface SubawardContact {
   subawardCode: string;
   sequenceNumber: number;
   contactTypeCode: string | null;
+  contactTypeDescription: string | null;
+  fullName: string | null;
+  organization: string | null;
+  email: string | null;
+  phone: string | null;
   rolodexId: number | null;
   requisitionerId: string | null;
   sourceUpdateTimestamp: string | null;
@@ -1343,6 +1348,8 @@ export interface SubawardFunding {
   awardNumber: string | null;
   awardTitle: string | null;
   awardStatus: string | null;
+  awardSponsor: string | null;
+  awardAmount: number | null;
   navigableCurrentAwardId: number | null;
   archived: boolean;
   sourceUpdateTimestamp: string | null;

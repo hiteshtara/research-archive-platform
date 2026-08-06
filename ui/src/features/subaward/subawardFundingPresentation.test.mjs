@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   resolveAssociatedAwardCardState,
+  resolveAssociatedAwardsSectionLabel,
   resolveFundingAssociationCards,
 } from "./subawardFundingPresentation.mjs";
 
@@ -16,6 +17,8 @@ function fundingRow(overrides = {}) {
     awardNumber: "202505-00002",
     awardTitle: null,
     awardStatus: null,
+    awardSponsor: null,
+    awardAmount: null,
     navigableCurrentAwardId: null,
     archived: false,
     sourceUpdateTimestamp: null,
@@ -58,11 +61,13 @@ test("a stale exactLinkedAwardId (pointing at a non-current version) still resol
   assert.equal(state.awardNumber, "202505-00002");
 });
 
-test("a loaded (archived) current Award version renders a clickable state", () => {
+test("a loaded (archived) current Award version renders a clickable state including sponsor and amount", () => {
   const funding = fundingRow({
     awardNumber: "202505-00002",
     awardTitle: "Neuroimaging Genetics of PTSD",
     awardStatus: "03. Pending",
+    awardSponsor: "Department of Energy",
+    awardAmount: 1934613.43,
     navigableCurrentAwardId: 2036323,
     archived: true,
   });
@@ -74,6 +79,8 @@ test("a loaded (archived) current Award version renders a clickable state", () =
     awardNumber: "202505-00002",
     awardTitle: "Neuroimaging Genetics of PTSD",
     awardStatus: "03. Pending",
+    awardSponsor: "Department of Energy",
+    awardAmount: 1934613.43,
     navigableCurrentAwardId: 2036323,
   });
 });
@@ -136,4 +143,36 @@ test("resolveFundingAssociationCards returns an empty list (an honest empty stat
   const cards = resolveFundingAssociationCards([]);
 
   assert.deepEqual(cards, []);
+});
+
+test("resolveAssociatedAwardsSectionLabel is singular for exactly one real Award link", () => {
+  assert.equal(
+    resolveAssociatedAwardsSectionLabel([fundingRow()]),
+    "Associated Award",
+  );
+});
+
+test("resolveAssociatedAwardsSectionLabel is plural with a real count for multiple concurrent Award relationships", () => {
+  // Real live data: subaward_id 33247 has 3 distinct concurrent Award
+  // relationships (proven via SubAwardDocumentRule's duplicate-
+  // award-number business rule + confirmed in the archived data).
+  const rows = [
+    fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 }),
+    fundingRow({ subawardFundingSourceId: 2, exactLinkedAwardId: 222 }),
+    fundingRow({ subawardFundingSourceId: 3, exactLinkedAwardId: 333 }),
+  ];
+
+  assert.equal(
+    resolveAssociatedAwardsSectionLabel(rows),
+    "Associated Awards (3)",
+  );
+});
+
+test("resolveAssociatedAwardsSectionLabel counts only rows with a real Award link, and is plural for zero", () => {
+  assert.equal(
+    resolveAssociatedAwardsSectionLabel([
+      fundingRow({ exactLinkedAwardId: null, awardNumber: null }),
+    ]),
+    "Associated Awards (0)",
+  );
 });

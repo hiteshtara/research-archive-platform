@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardContactResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardNotificationResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
@@ -192,6 +193,40 @@ class SubawardArchiveRepositoryTest {
                 .contains("subaward_id = :subawardId");
     }
 
+    @Test
+    void findContactsResolvesFullNameEitherThroughRolodexOrPersonNeverBoth() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<SubawardContactResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("subawardId", 17206L)).thenReturn(statement);
+        when(statement.query(SubawardContactResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new SubawardArchiveRepository(jdbc).findContacts(17206L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.subaward_contact contact")
+                .contains("LEFT JOIN archive.rolodex rolodex")
+                .contains("rolodex.rolodex_id = contact.rolodex_id")
+                .contains("LEFT JOIN archive.person person")
+                .contains("person.person_id = contact.requisitioner_id")
+                .contains("COALESCE( person.full_name,")
+                .contains("rolodex.organization")
+                .contains(
+                        "COALESCE(person.email_address, rolodex.email_address) AS email"
+                )
+                .contains(
+                        "COALESCE(person.phone_number, rolodex.phone_number) AS phone"
+                )
+                .contains("contact.contact_type_description");
+    }
+
     /*
      * Association navigation tests - see
      * SubawardArchiveRepository.findFunding's own comment for the
@@ -233,7 +268,11 @@ class SubawardArchiveRepositoryTest {
                 )
                 .contains(
                         "current_award.award_id IS NOT NULL AS archived"
-                );
+                )
+                .contains("current_award.sponsor_name AS award_sponsor")
+                .contains("LEFT JOIN LATERAL")
+                .contains("ai.award_id = current_award.award_id")
+                .contains("amt.obligated_total_amount AS award_amount");
     }
 
     @Test
@@ -253,6 +292,7 @@ class SubawardArchiveRepositoryTest {
                 501L, 17206L, "1363", 8,
                 834149L, "202505-00002",
                 "Neuroimaging Genetics of PTSD", "03. Pending",
+                "National Institutes of Health", new java.math.BigDecimal("50000.00"),
                 2036323L, true,
                 null, null, null, null
         );
@@ -262,6 +302,7 @@ class SubawardArchiveRepositoryTest {
         SubawardFundingResponse unresolved = new SubawardFundingResponse(
                 777L, 17206L, "1363", 8,
                 9999999L, "203161-00002",
+                null, null,
                 null, null,
                 null, false,
                 null, null, null, null

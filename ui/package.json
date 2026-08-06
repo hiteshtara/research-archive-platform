@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --test src/features/ai/*.test.mjs src/features/award/*.test.mjs src/features/dashboard/*.test.mjs src/features/explorer/*.test.mjs src/features/proposal/*.test.mjs",
+    "test": "node --test src/features/ai/*.test.mjs src/features/award/*.test.mjs src/features/dashboard/*.test.mjs src/features/explorer/*.test.mjs src/features/proposal/*.test.mjs src/features/subaward/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

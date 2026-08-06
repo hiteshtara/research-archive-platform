@@ -155,7 +155,8 @@ DATASETS = (
         table_name="subaward_contact",
         columns=(
             "subaward_contact_id", "subaward_id", "subaward_code",
-            "sequence_number", "contact_type_code", "rolodex_id",
+            "sequence_number", "contact_type_code",
+            "contact_type_description", "rolodex_id",
             "requisitioner_id", "update_timestamp", "update_user",
             "ver_nbr", "obj_id",
         ),
