@@ -25,6 +25,9 @@ COPY etl/load_composite_from_s3.py .
 COPY etl/load_award_attachments.py .
 COPY etl/load_awards_from_csv.py .
 COPY etl/load_proposals_from_csv.py .
+COPY etl/load_negotiations_from_csv.py .
+COPY etl/fetch_negotiation_attachment_metadata.py .
+COPY etl/archive_attachments.py .
 COPY etl/export_proposal_attachments_csv.py .
 COPY oracle oracle
 COPY sql/extract/award sql/extract/award

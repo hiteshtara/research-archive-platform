@@ -3,18 +3,40 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import boto3
 import pandas as pd
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from archive_etl.config.ecs import configure_ecs_environment
 from archive_etl.pipeline.sources import OracleDataSource
+from archive_etl.reference_data import _upsert_rows
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def _resolve_project_root() -> Path:
+    """Locate the directory containing oracle/negotiation/ and
+    database/migrations/ relative to this file - mirrors
+    load_proposals_from_csv.py's own _resolve_project_root() exactly
+    (same technique, kept local to each loader): the local repo checkout
+    (this file at <repo>/etl/load_negotiations_from_csv.py, project root
+    one level up) vs. the ECS loader container image (this file copied
+    flatly to /app/load_negotiations_from_csv.py alongside oracle/ and
+    database/migrations/ copied directly under /app - see
+    etl/Dockerfile.loader), where the project root is this file's own
+    parent directory. This loader had never been run in a container
+    before this fix - the naive parents[1] resolution silently worked
+    locally and only broke inside the ECS image."""
+    container_root = Path(__file__).resolve().parent
+    if (container_root / "oracle").is_dir():
+        return container_root
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 # All five datasets have a verified, column-matching Oracle extraction query.
 _ORACLE_DIR = PROJECT_ROOT / "oracle" / "negotiation"
@@ -134,6 +156,121 @@ SOURCE_COLUMN_RENAMES = {
     "document_obj_id": "document_source_object_id",
 }
 
+# (archive.<table> primary key columns, full archive.<table> column list
+# post-SOURCE_COLUMN_RENAMES) - used only by the targeted/bounded UPSERT
+# path (--negotiation-id / --max-negotiations), which loads_dataframe's
+# TRUNCATE-and-reload path never needs. Column lists mirror
+# V017__create_negotiation_archive_tables.sql exactly.
+ARCHIVE_TABLES: dict[str, tuple[list[str], list[str]]] = {
+    "negotiation": (
+        ["negotiation_id"],
+        [
+            "negotiation_id",
+            "document_number",
+            "negotiation_status_id",
+            "negotiation_status_code",
+            "negotiation_status_description",
+            "negotiation_agreement_type_id",
+            "negotiation_agreement_type_code",
+            "negotiation_agreement_type_description",
+            "negotiation_association_type_id",
+            "negotiation_association_type_code",
+            "negotiation_association_type_description",
+            "negotiator_person_id",
+            "negotiator_full_name",
+            "negotiation_start_date",
+            "negotiation_end_date",
+            "anticipated_award_date",
+            "document_folder",
+            "associated_document_id",
+            "source_update_timestamp",
+            "source_update_user",
+            "source_version_number",
+            "source_object_id",
+            "document_source_update_timestamp",
+            "document_source_update_user",
+            "document_source_version_number",
+            "document_source_object_id",
+        ],
+    ),
+    "negotiation_activity": (
+        ["negotiation_activity_id"],
+        [
+            "negotiation_activity_id",
+            "negotiation_id",
+            "activity_type_id",
+            "activity_type_code",
+            "activity_type_description",
+            "location_id",
+            "location_code",
+            "location_description",
+            "start_date",
+            "end_date",
+            "create_date",
+            "followup_date",
+            "last_modified_user",
+            "last_modified_date",
+            "description",
+            "restricted",
+            "source_update_timestamp",
+            "source_update_user",
+            "source_version_number",
+            "source_object_id",
+        ],
+    ),
+    "negotiation_custom_data": (
+        ["negotiation_custom_data_id"],
+        [
+            "negotiation_custom_data_id",
+            "negotiation_id",
+            "negotiation_number",
+            "custom_attribute_id",
+            "value",
+            "source_update_timestamp",
+            "source_update_user",
+            "source_version_number",
+            "source_object_id",
+        ],
+    ),
+    "negotiation_notification": (
+        ["notification_id"],
+        [
+            "notification_id",
+            "notification_type_id",
+            "document_number",
+            "owning_document_id_fk",
+            "recipients",
+            "subject",
+            "message",
+            "source_update_timestamp",
+            "source_update_user",
+            "source_version_number",
+            "source_object_id",
+        ],
+    ),
+    "negotiation_unassociated_detail": (
+        ["negotiation_unassoc_detail_id"],
+        [
+            "negotiation_unassoc_detail_id",
+            "negotiation_id",
+            "title",
+            "pi_person_id",
+            "pi_rolodex_id",
+            "lead_unit",
+            "sponsor_code",
+            "pi_name",
+            "prime_sponsor_code",
+            "sponsor_award_number",
+            "contact_admin_person_id",
+            "subaward_org",
+            "source_update_timestamp",
+            "source_update_user",
+            "source_version_number",
+            "source_object_id",
+        ],
+    ),
+}
+
 
 def parse_args(
     arguments: list[str] | None = None,
@@ -152,7 +289,47 @@ def parse_args(
             "connectivity/transform logic - not a partial load)."
         ),
     )
-    return parser.parse_args(arguments)
+    parser.add_argument(
+        "--load-negotiation-id",
+        dest="negotiation_id",
+        type=int,
+        action="append",
+        default=None,
+        help=(
+            "Load only this Negotiation ID (repeatable). Uses an "
+            "idempotent per-row UPSERT, never TRUNCATE - safe to "
+            "re-run and safe to combine with an already-loaded "
+            "database. Mutually exclusive with --max-negotiations."
+        ),
+    )
+    parser.add_argument(
+        "--max-negotiations",
+        type=int,
+        default=None,
+        help=(
+            "Load only the first N Negotiations, ordered ascending by "
+            "negotiation_id. Same idempotent UPSERT as --negotiation-id. "
+            "Mutually exclusive with --negotiation-id."
+        ),
+    )
+    parser.add_argument(
+        "--ecs",
+        action="store_true",
+        help=(
+            "Resolve PostgreSQL/Oracle credentials from Secrets Manager "
+            "via the ECS task's environment instead of requiring local "
+            "exports - see archive_etl.config.ecs."
+        ),
+    )
+    arguments = parser.parse_args(arguments)
+
+    if arguments.negotiation_id and arguments.max_negotiations is not None:
+        parser.error(
+            "--negotiation-id and --max-negotiations are mutually "
+            "exclusive"
+        )
+
+    return arguments
 
 
 def require_columns(
@@ -621,8 +798,175 @@ def mark_load_complete(
     )
 
 
+def _run_ecs_setup() -> None:
+    """Minimal --ecs credential setup: resolves PostgreSQL/Oracle
+    credentials from Secrets Manager into os.environ so
+    create_postgres_engine()/OracleDataSource keep working unchanged -
+    see load_proposals_from_csv.py's own (larger) _run_ecs_setup for the
+    fuller startup-validation ceremony this intentionally skips, per the
+    "do not build a full batch framework yet" scope for this loader."""
+    configure_ecs_environment(boto3.client("secretsmanager"))
+
+
+def resolve_target_negotiation_ids(
+    arguments: argparse.Namespace,
+) -> list[int] | None:
+    """Returns the explicit list of Negotiation IDs to load for
+    --negotiation-id/--max-negotiations, or None if neither flag was
+    given (the untargeted full-refresh path)."""
+    if arguments.negotiation_id:
+        return sorted(set(arguments.negotiation_id))
+
+    if arguments.max_negotiations is not None:
+        all_ids = (
+            OracleDataSource(ORACLE_SQL["negotiations"])
+            .read()["negotiation_id"]
+            .dropna()
+            .astype("int64")
+            .sort_values()
+            .tolist()
+        )
+        return all_ids[: arguments.max_negotiations]
+
+    return None
+
+
+def run_targeted_load(target_ids: list[int]) -> dict[str, dict[str, int]]:
+    """Loads exactly the given Negotiation IDs (and their children) via
+    an idempotent per-row UPSERT (archive_etl.reference_data._upsert_rows)
+    instead of clear_existing_negotiation_data's TRUNCATE - safe to
+    re-run, and safe to run repeatedly against a database that already
+    has other Negotiations loaded. Returns
+    {table_name: {"inserted": n, "updated": n, "unchanged": n}}."""
+    logger.info(
+        "Reading {} targeted Negotiation ID(s) from Oracle",
+        len(target_ids),
+    )
+
+    negotiations = prepare_negotiations(
+        OracleDataSource(ORACLE_SQL["negotiations"]).read_filtered(
+            column="negotiation_id",
+            values=target_ids,
+        )
+    )
+    activities = prepare_activities(
+        OracleDataSource(ORACLE_SQL["activities"]).read_filtered(
+            column="negotiation_id",
+            values=target_ids,
+        )
+    )
+    custom_data = prepare_custom_data(
+        OracleDataSource(ORACLE_SQL["custom_data"]).read_filtered(
+            column="negotiation_id",
+            values=target_ids,
+        )
+    )
+    notifications = prepare_notifications(
+        OracleDataSource(ORACLE_SQL["notifications"]).read_filtered(
+            column="owning_document_id_fk",
+            values=target_ids,
+        )
+    )
+    unassociated = prepare_unassociated(
+        OracleDataSource(ORACLE_SQL["unassociated"]).read_filtered(
+            column="negotiation_id",
+            values=target_ids,
+        )
+    )
+
+    validate_parent_ids(
+        negotiations, activities, "negotiation_id", "negotiation_activities.csv"
+    )
+    validate_parent_ids(
+        negotiations, custom_data, "negotiation_id", "negotiation_custom_data.csv"
+    )
+    validate_parent_ids(
+        negotiations,
+        notifications,
+        "owning_document_id_fk",
+        "negotiation_notifications.csv",
+    )
+    validate_parent_ids(
+        negotiations, unassociated, "negotiation_id", "negotiation_unassociated.csv"
+    )
+
+    datasets = {
+        "negotiation": negotiations,
+        "negotiation_activity": activities,
+        "negotiation_custom_data": custom_data,
+        "negotiation_notification": notifications,
+        "negotiation_unassociated_detail": unassociated,
+    }
+    total_rows = sum(len(dataframe) for dataframe in datasets.values())
+
+    logger.info(
+        "Prepared targeted Negotiation rows: negotiations={:,} "
+        "activities={:,} custom_data={:,} notifications={:,} "
+        "unassociated={:,}",
+        len(negotiations),
+        len(activities),
+        len(custom_data),
+        len(notifications),
+        len(unassociated),
+    )
+
+    engine = create_postgres_engine()
+    apply_migrations(
+        engine, PROJECT_ROOT / "database" / "migrations"
+    )
+
+    with engine.begin() as connection:
+        load_id = create_load_run(connection, total_rows)
+
+    results: dict[str, dict[str, int]] = {}
+    try:
+        with engine.begin() as connection:
+            for table_name, dataframe in datasets.items():
+                pk_columns, columns = ARCHIVE_TABLES[table_name]
+                renamed = dataframe.rename(columns=SOURCE_COLUMN_RENAMES)
+                results[table_name] = _upsert_rows(
+                    connection,
+                    table=table_name,
+                    pk_columns=pk_columns,
+                    columns=columns,
+                    rows=renamed,
+                    load_id=load_id,
+                )
+                logger.info(
+                    "UPSERT {:<33} inserted={:,} updated={:,} unchanged={:,}",
+                    table_name,
+                    results[table_name]["inserted"],
+                    results[table_name]["updated"],
+                    results[table_name]["unchanged"],
+                )
+
+            mark_load_complete(connection, load_id, total_rows)
+
+        logger.success(
+            "Targeted Negotiation load completed: {} Negotiation ID(s)",
+            len(target_ids),
+        )
+    except Exception as error:
+        mark_load_failed(engine, load_id, str(error))
+        logger.exception("Targeted Negotiation load failed")
+        raise
+
+    return results
+
+
 def main() -> None:
     arguments = parse_args()
+
+    if arguments.ecs:
+        _run_ecs_setup()
+
+    target_ids = resolve_target_negotiation_ids(arguments)
+    if target_ids is not None:
+        if not target_ids:
+            logger.warning("No target Negotiation IDs resolved - nothing to load")
+            return
+        run_targeted_load(target_ids)
+        return
 
     logger.info("Reading Negotiation data from Oracle")
     negotiations = prepare_negotiations(
@@ -708,9 +1052,7 @@ def main() -> None:
 
     apply_migrations(
         engine,
-        Path(__file__).resolve().parents[1]
-        / "database"
-        / "migrations",
+        PROJECT_ROOT / "database" / "migrations",
     )
 
     # The STARTED load_run row is committed in its own transaction, before
