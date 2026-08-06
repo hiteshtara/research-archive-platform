@@ -129,7 +129,11 @@ controller in the app, not just Award's).
 Proposal is the backbone of the archive — every major object should
 eventually connect to it. Conceptual chain: Proposal → Award → Funding →
 Negotiation → Investigator (Subaward hangs off Award/Proposal). IRB is a
-separate, self-contained domain, not part of this chain.
+separate, self-contained domain, not part of this chain. For the shared
+Header → Relationships → Business History → Supporting Data *page shape*
+each implemented module's workspace UI follows (a different concern from
+the grain rules below), see
+[`docs/architecture/RESEARCH_OBJECT_MODEL.md`](docs/architecture/RESEARCH_OBJECT_MODEL.md).
 
 **Never treat a raw archive row count as a business-object count.** Identify
 the business grain (the real-world entity count) and the historical grain

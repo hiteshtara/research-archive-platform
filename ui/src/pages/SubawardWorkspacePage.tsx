@@ -33,13 +33,10 @@ import {
   getSubawardContacts,
   getSubawardCustomData,
   getSubawardFunding,
-  getSubawardNotepad,
-  getSubawardNotifications,
-  getSubawardReports,
-  getSubawardTemplateInfo,
   getSubawardWorkspace,
 } from "../api/client";
 import { formatCurrencyAmount } from "../features/award/awardSectionsPresentation.mjs";
+import { groupAttachmentsByType } from "../features/subaward/subawardAttachmentsPresentation.mjs";
 import { resolveContactDisplay } from "../features/subaward/subawardContactsPresentation.mjs";
 import {
   resolveAssociatedAwardCardState,
@@ -51,18 +48,18 @@ import {
   sumAmendmentTotals,
 } from "../features/subaward/subawardAmountsPresentation.mjs";
 
+// Template Info, Reports, Notepad, and Notifications are intentionally not
+// in the primary tab bar (Subaward v1 scope decision) - their ETL/API/DTOs
+// remain fully intact and reachable directly, ready to back a future
+// secondary "More" menu without further backend work.
 const tabs = [
   "General",
-  "Amounts",
-  "Contacts",
+  "History of Changes",
   "Funding",
+  "Contacts",
   "Attachments",
   "Custom Data",
-  "Template Info",
   "Closeout",
-  "Reports",
-  "Notepad",
-  "Notifications",
 ];
 
 type DisplayValue = string | number | null;
@@ -197,15 +194,15 @@ function SubawardWorkspaceContent({
     enabled: validSubawardId && activeTab === 1,
     queryFn: () => getSubawardAmounts(parsedSubawardId),
   });
-  const contactsQuery = useQuery({
-    queryKey: ["subaward-contacts", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 2,
-    queryFn: () => getSubawardContacts(parsedSubawardId),
-  });
   const fundingQuery = useQuery({
     queryKey: ["subaward-funding", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 3,
+    enabled: validSubawardId && activeTab === 2,
     queryFn: () => getSubawardFunding(parsedSubawardId),
+  });
+  const contactsQuery = useQuery({
+    queryKey: ["subaward-contacts", parsedSubawardId],
+    enabled: validSubawardId && activeTab === 3,
+    queryFn: () => getSubawardContacts(parsedSubawardId),
   });
   const attachmentsQuery = useQuery({
     queryKey: ["subaward-attachments", parsedSubawardId],
@@ -217,30 +214,10 @@ function SubawardWorkspaceContent({
     enabled: validSubawardId && activeTab === 5,
     queryFn: () => getSubawardCustomData(parsedSubawardId),
   });
-  const templateInfoQuery = useQuery({
-    queryKey: ["subaward-template-info", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 6,
-    queryFn: () => getSubawardTemplateInfo(parsedSubawardId),
-  });
   const closeoutQuery = useQuery({
     queryKey: ["subaward-closeout", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 7,
+    enabled: validSubawardId && activeTab === 6,
     queryFn: () => getSubawardCloseout(parsedSubawardId),
-  });
-  const reportsQuery = useQuery({
-    queryKey: ["subaward-reports", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 8,
-    queryFn: () => getSubawardReports(parsedSubawardId),
-  });
-  const notepadQuery = useQuery({
-    queryKey: ["subaward-notepad", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 9,
-    queryFn: () => getSubawardNotepad(parsedSubawardId),
-  });
-  const notificationsQuery = useQuery({
-    queryKey: ["subaward-notifications", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 10,
-    queryFn: () => getSubawardNotifications(parsedSubawardId),
   });
 
   if (!validSubawardId) {
@@ -298,65 +275,6 @@ function SubawardWorkspaceContent({
     ["Document Version Number", current.documentSourceVersionNumber],
     ["Document Object ID", current.documentSourceObjectId],
   ];
-
-  const template = templateInfoQuery.data;
-  const templateRows: Array<[string, DisplayValue]> = template
-    ? [
-        ["Subaward ID", template.subawardId],
-        ["Subaward Code", template.subawardCode],
-        ["Sequence Number", template.sequenceNumber],
-        ["SOW or Sub-proposal Budget", template.sowOrSubProposalBudget],
-        ["Sub-proposal Date", template.subProposalDate],
-        ["Invoice or Payment Contact", template.invoiceOrPaymentContact],
-        ["IRB/IACUC Contact", template.irbIacucContact],
-        ["Final Statement of Costs Contact", template.finalStmtOfCostsContact],
-        ["Change Requests Contact", template.changeRequestsContact],
-        ["Sub Change Requests Contact", template.subChangeRequestsContact],
-        ["Termination Contact", template.terminationContact],
-        ["Sub Termination Contact", template.subTerminationContact],
-        ["No-cost Extension Contact", template.noCostExtensionContact],
-        ["Performance Site Differs from Organization", template.perfSiteDiffFromOrgAddr],
-        ["Performance Site Same as Sub PI", template.perfSiteSameAsSubPiAddr],
-        ["Registered in CCR", template.subRegisteredInCcr],
-        ["Exempt from Reporting Compensation", template.subExemptFromReportingComp],
-        ["Parent DUNS Number", template.parentDunsNumber],
-        ["Parent Congressional District", template.parentCongressionalDistrict],
-        ["Exempt from Executive Compensation Reporting", template.exemptFromRprtgExecComp],
-        ["Copyright Type", template.copyrightType],
-        ["Automatic Carry Forward", template.automaticCarryForward],
-        ["Carry Forward Requests Sent To", template.carryForwardRequestsSentTo],
-        ["Program Income Additive", template.treatmentPrgmIncomeAdditive],
-        ["Applicable Program Regulations", template.applicableProgramRegulations],
-        ["Applicable Program Regulations Date", template.applicableProgramRegsDate],
-        ["MPI Award", template.mpiAward],
-        ["MPI Leadership Plan", template.mpiLeadershipPlan],
-        ["R&D", template.rAndD],
-        ["Includes Cost Sharing", template.includesCostSharing],
-        ["FCIO", template.fcio],
-        ["Invoices Emailed", template.invoicesEmailed],
-        ["Invoice Address Different", template.invoiceAddressDiff],
-        ["Invoice Email Different", template.invoiceEmailDiff],
-        ["FCIO Subrecipient Policy Code", template.fcioSubrecPolicyCd],
-        ["Animal Flag", template.animalFlag],
-        ["Animal PTE Send Code", template.animalPteSendCd],
-        ["Animal PTE Not Required Code", template.animalPteNrCd],
-        ["Human Flag", template.humanFlag],
-        ["Human Subjects", template.humanSubjects],
-        ["Human Exempt Documentation", template.humanExemptDocs],
-        ["Human PTE Send Code", template.humanPteSendCd],
-        ["Human PTE Not Required Code", template.humanPteNrCd],
-        ["Human Data Exchange Agreement Code", template.humanDataExchangeAgreeCd],
-        ["Human Data Exchange Terms Code", template.humanDataExchangeTermsCd],
-        ["Includes Clinical Trials", template.humanIncludesClinicalTrials],
-        ["Additional Terms", template.additionalTerms],
-        ["Treatment of Income", template.treatmentOfIncome],
-        ["Data Sharing Attachment", template.dataSharingAttachment],
-        ["Data Sharing Code", template.dataSharingCd],
-        ["Final Statement Due Code", template.finalStatementDueCd],
-        ["Source Update Timestamp", template.sourceUpdateTimestamp],
-        ["Source Update User", template.sourceUpdateUser],
-      ]
-    : [];
 
   return (
     <Stack spacing={3}>
@@ -428,9 +346,7 @@ function SubawardWorkspaceContent({
                 value={amountsViewMode}
                 onChange={(_, next) => next && setAmountsViewMode(next)}
               >
-                <ToggleButton value="timeline">
-                  History of Changes
-                </ToggleButton>
+                <ToggleButton value="timeline">Timeline</ToggleButton>
                 <ToggleButton value="technical">Technical View</ToggleButton>
               </ToggleButtonGroup>
 
@@ -588,56 +504,6 @@ function SubawardWorkspaceContent({
           )}
 
           {activeTab === 2 && (
-            <TableSection
-              data={contactsQuery.data}
-              isLoading={contactsQuery.isLoading}
-              isError={contactsQuery.isError}
-              errorMessage="Unable to load Subaward contacts."
-              emptyMessage="No contacts are archived for this Subaward record."
-              rowKey={(row) => row.subawardContactId}
-              columns={[
-                {
-                  label: "Name",
-                  render: (row) => {
-                    const contactDisplay = resolveContactDisplay(row);
-                    return contactDisplay.hasIdentity
-                      ? contactDisplay.name
-                      : "Contact not archived";
-                  },
-                },
-                {
-                  label: "Role",
-                  render: (row) => display(resolveContactDisplay(row).role),
-                },
-                {
-                  label: "Organization",
-                  render: (row) => display(resolveContactDisplay(row).organization),
-                },
-                {
-                  label: "Phone",
-                  render: (row) => display(resolveContactDisplay(row).phone),
-                },
-                {
-                  label: "Email",
-                  render: (row) => display(resolveContactDisplay(row).email),
-                },
-                {
-                  label: "ID",
-                  render: (row) => (
-                    <Typography variant="caption" color="text.secondary">
-                      {row.rolodexId
-                        ? `Rolodex ${row.rolodexId}`
-                        : row.requisitionerId
-                          ? `Person ${row.requisitionerId}`
-                          : "—"}
-                    </Typography>
-                  ),
-                },
-              ]}
-            />
-          )}
-
-          {activeTab === 3 && (
             <Stack spacing={2}>
               <Typography variant="h6">
                 {resolveAssociatedAwardsSectionLabel(fundingQuery.data ?? [])}
@@ -734,67 +600,149 @@ function SubawardWorkspaceContent({
             </Stack>
           )}
 
+          {activeTab === 3 && (
+            <TableSection
+              data={contactsQuery.data}
+              isLoading={contactsQuery.isLoading}
+              isError={contactsQuery.isError}
+              errorMessage="Unable to load Subaward contacts."
+              emptyMessage="No contacts are archived for this Subaward record."
+              rowKey={(row) => row.subawardContactId}
+              columns={[
+                {
+                  label: "Name",
+                  render: (row) => {
+                    const contactDisplay = resolveContactDisplay(row);
+                    return contactDisplay.hasIdentity
+                      ? contactDisplay.name
+                      : "Contact not archived";
+                  },
+                },
+                {
+                  label: "Role",
+                  render: (row) => display(resolveContactDisplay(row).role),
+                },
+                {
+                  label: "Organization",
+                  render: (row) => display(resolveContactDisplay(row).organization),
+                },
+                {
+                  label: "Phone",
+                  render: (row) => display(resolveContactDisplay(row).phone),
+                },
+                {
+                  label: "Email",
+                  render: (row) => display(resolveContactDisplay(row).email),
+                },
+                {
+                  label: "ID",
+                  render: (row) => (
+                    <Typography variant="caption" color="text.secondary">
+                      {row.rolodexId
+                        ? `Rolodex ${row.rolodexId}`
+                        : row.requisitionerId
+                          ? `Person ${row.requisitionerId}`
+                          : "—"}
+                    </Typography>
+                  ),
+                },
+              ]}
+            />
+          )}
+
           {activeTab === 4 && (
-            <Stack spacing={2}>
+            <Stack spacing={3}>
               {downloadError && (
                 <Alert severity="error" onClose={() => setDownloadError(null)}>
                   {downloadError}
                 </Alert>
               )}
-              <TableSection
-                data={attachmentsQuery.data}
-                isLoading={attachmentsQuery.isLoading}
-                isError={attachmentsQuery.isError}
-                errorMessage="Unable to load Subaward attachment metadata."
-                emptyMessage="No attachment metadata is archived for this Subaward record."
-                rowKey={(row) => row.attachmentId}
-                columns={[
-                  { label: "Attachment ID", render: (row) => row.attachmentId },
-                  { label: "Type", render: (row) => display(row.attachmentTypeDescription ?? row.attachmentTypeCode) },
-                  { label: "File Name", render: (row) => display(row.fileName) },
-                  { label: "MIME Type", render: (row) => display(row.mimeType) },
-                  { label: "Description", render: (row) => display(row.description) },
-                  { label: "Date", render: (row) => display(row.lastUpdateTimestamp) },
-                  { label: "User", render: (row) => display(row.lastUpdateUser) },
-                  {
-                    label: "Action",
-                    render: (row) =>
-                      row.archived ? (
-                        <Button
-                          size="small"
-                          disabled={downloadingAttachmentId === row.attachmentId}
-                          onClick={async () => {
-                            setDownloadError(null);
-                            setDownloadingAttachmentId(row.attachmentId);
-                            try {
-                              await downloadSubawardAttachment(
-                                parsedSubawardId,
-                                row.attachmentId,
-                                row.fileName ?? `attachment-${row.attachmentId}`,
-                              );
-                            } catch (error) {
-                              setDownloadError(
-                                error instanceof Error
-                                  ? error.message
-                                  : "Unable to download this attachment.",
-                              );
-                            } finally {
-                              setDownloadingAttachmentId(null);
-                            }
-                          }}
-                        >
-                          {downloadingAttachmentId === row.attachmentId
-                            ? "Downloading…"
-                            : "Download"}
-                        </Button>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          Not archived
-                        </Typography>
-                      ),
-                  },
-                ]}
-              />
+              {attachmentsQuery.isLoading && <LoadingState />}
+              {attachmentsQuery.isError && (
+                <Alert severity="error">
+                  Unable to load Subaward attachment metadata.
+                </Alert>
+              )}
+              {!attachmentsQuery.isLoading &&
+                !attachmentsQuery.isError &&
+                (attachmentsQuery.data?.length ?? 0) === 0 && (
+                  <Alert severity="info">
+                    No attachment metadata is archived for this Subaward
+                    record.
+                  </Alert>
+                )}
+
+              {attachmentsQuery.data &&
+                attachmentsQuery.data.length > 0 &&
+                groupAttachmentsByType(attachmentsQuery.data).map((group) => (
+                  <Box key={group.typeLabel}>
+                    <Typography variant="h6" sx={{ mb: 1 }}>
+                      {group.typeLabel}
+                    </Typography>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>File Name</TableCell>
+                            <TableCell>Description</TableCell>
+                            <TableCell>Updated</TableCell>
+                            <TableCell>Updated By</TableCell>
+                            <TableCell>Download</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {group.attachments.map((row) => (
+                            <TableRow key={row.attachmentId} hover>
+                              <TableCell sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                                {display(row.fileName)}
+                              </TableCell>
+                              <TableCell sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                                {display(row.description)}
+                              </TableCell>
+                              <TableCell>{display(row.lastUpdateTimestamp)}</TableCell>
+                              <TableCell>{display(row.lastUpdateUser)}</TableCell>
+                              <TableCell>
+                                {row.archived ? (
+                                  <Button
+                                    size="small"
+                                    disabled={downloadingAttachmentId === row.attachmentId}
+                                    onClick={async () => {
+                                      setDownloadError(null);
+                                      setDownloadingAttachmentId(row.attachmentId);
+                                      try {
+                                        await downloadSubawardAttachment(
+                                          parsedSubawardId,
+                                          row.attachmentId,
+                                          row.fileName ?? `attachment-${row.attachmentId}`,
+                                        );
+                                      } catch (error) {
+                                        setDownloadError(
+                                          error instanceof Error
+                                            ? error.message
+                                            : "Unable to download this attachment.",
+                                        );
+                                      } finally {
+                                        setDownloadingAttachmentId(null);
+                                      }
+                                    }}
+                                  >
+                                    {downloadingAttachmentId === row.attachmentId
+                                      ? "Downloading…"
+                                      : "Download"}
+                                  </Button>
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary">
+                                    Not archived
+                                  </Typography>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                ))}
             </Stack>
           )}
 
@@ -818,18 +766,6 @@ function SubawardWorkspaceContent({
           )}
 
           {activeTab === 6 && (
-            <>
-              {templateInfoQuery.isLoading && <LoadingState />}
-              {templateInfoQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Subaward template information.
-                </Alert>
-              )}
-              {templateInfoQuery.data && <DetailTable rows={templateRows} />}
-            </>
-          )}
-
-          {activeTab === 7 && (
             <TableSection
               data={closeoutQuery.data}
               isLoading={closeoutQuery.isLoading}
@@ -838,71 +774,21 @@ function SubawardWorkspaceContent({
               emptyMessage="No closeout records are archived for this Subaward. The current source dataset is empty."
               rowKey={(row) => row.subawardCloseoutId}
               columns={[
-                { label: "Closeout ID", render: (row) => row.subawardCloseoutId },
                 { label: "Number", render: (row) => display(row.closeoutNumber) },
-                { label: "Type Code", render: (row) => display(row.closeoutTypeCode) },
+                {
+                  label: "Type",
+                  render: (row) =>
+                    // CLOSEOUT_TYPE's live-Oracle presence is unconfirmed
+                    // (docs/SUBAWARD_ORACLE_VALIDATION.md) - show a neutral
+                    // label, never a fabricated description, until verified.
+                    row.closeoutTypeCode !== null
+                      ? `Closeout Type ${row.closeoutTypeCode}`
+                      : "—",
+                },
                 { label: "Requested", render: (row) => display(row.dateRequested) },
                 { label: "Follow-up", render: (row) => display(row.dateFollowup) },
                 { label: "Received", render: (row) => display(row.dateReceived) },
                 { label: "Comments", render: (row) => display(row.comments) },
-              ]}
-            />
-          )}
-
-          {activeTab === 8 && (
-            <TableSection
-              data={reportsQuery.data}
-              isLoading={reportsQuery.isLoading}
-              isError={reportsQuery.isError}
-              errorMessage="Unable to load Subaward reports."
-              emptyMessage="No reports are archived for this Subaward. The current source dataset is empty."
-              rowKey={(row) => row.subawardReportId}
-              columns={[
-                { label: "Report ID", render: (row) => row.subawardReportId },
-                { label: "Type Code", render: (row) => display(row.reportTypeCode) },
-                { label: "Report Type", render: (row) => display(row.reportTypeDescription) },
-                { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
-                { label: "Update User", render: (row) => display(row.sourceUpdateUser) },
-              ]}
-            />
-          )}
-
-          {activeTab === 9 && (
-            <TableSection
-              data={notepadQuery.data}
-              isLoading={notepadQuery.isLoading}
-              isError={notepadQuery.isError}
-              errorMessage="Unable to load Subaward notepad records."
-              emptyMessage="No notepad records are archived for this Subaward. The current source dataset is empty."
-              rowKey={(row) => row.subawardNotepadId}
-              columns={[
-                { label: "Notepad ID", render: (row) => row.subawardNotepadId },
-                { label: "Entry", render: (row) => display(row.entryNumber) },
-                { label: "Topic", render: (row) => display(row.noteTopic) },
-                { label: "Comments", render: (row) => display(row.comments) },
-                { label: "Restricted", render: (row) => display(row.restrictedView) },
-                { label: "Created", render: (row) => display(row.createTimestamp) },
-                { label: "Create User", render: (row) => display(row.createUser) },
-              ]}
-            />
-          )}
-
-          {activeTab === 10 && (
-            <TableSection
-              data={notificationsQuery.data}
-              isLoading={notificationsQuery.isLoading}
-              isError={notificationsQuery.isError}
-              errorMessage="Unable to load Subaward notifications."
-              emptyMessage="No notifications are archived for this Subaward. The current source dataset is empty."
-              rowKey={(row) => row.notificationId}
-              columns={[
-                { label: "Notification ID", render: (row) => row.notificationId },
-                { label: "Type ID", render: (row) => display(row.notificationTypeId) },
-                { label: "Document Number", render: (row) => display(row.documentNumber) },
-                { label: "Recipients", render: (row) => display(row.recipients) },
-                { label: "Subject", render: (row) => display(row.subject) },
-                { label: "Message", render: (row) => display(row.message) },
-                { label: "Created", render: (row) => display(row.createTimestamp) },
               ]}
             />
           )}
