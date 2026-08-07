@@ -126,3 +126,43 @@ rebuild a second Protocol domain without a fresh decision to do so.
   archived person, and the unit inherited that person's resolved
   `protocol_id`. Unit protocol number and sequence were audit evidence, not
   independent parent keys.
+
+## Global Search: minimal semantic search as a strictly-supplemental 6th input
+
+Added `archive.search_embedding` (`V070`) and a 6th `GlobalSearchService`
+fan-out branch (pgvector cosine search over Bedrock
+`amazon.titan-embed-text-v2:0` embeddings), behind `app.search.semantic.enabled`
+(default off everywhere). This followed a PoC (`archive.search_embedding_poc`,
+`V069`, kept permanently as the regression benchmark — never reused or
+repurposed for production) and a threshold experiment that found no single
+global similarity cutoff works across heterogeneous queries, but a hard
+Top-5 cutoff gives zero irrelevant results.
+
+Structured search remains strictly authoritative: a semantic result can
+never outrank a structured one (`RANK_SEMANTIC` sorts after every
+structured tier), and a semantic hit for the same canonical record a
+structured branch already returned is dropped, never duplicated.
+`GlobalSearchService.deduplicate()`'s key was simplified from
+`module:id:sequenceNumber` to `module:id` to make this collapse work —
+the embedding table has no live "current sequence number" to report, so
+requiring an exact match would silently defeat deduplication whenever the
+index lags a reload. Verified safe against the existing dedup tests: within
+one domain's own dual lookup paths, both occurrences already resolved to
+the same sequence number, so dropping it changed no prior behavior.
+
+An identifier-shape heuristic (`LikelyIdentifierDetector`: pure-numeric or
+Award-number-shaped queries) skips the Bedrock call entirely for obvious
+exact-identifier searches, since structured search alone is already
+sufficient for those. Population (`etl/build_search_embedding.py`) runs
+asynchronously as a one-off ECS task, never synchronously with a user's
+search request. The API's own ECS task role needed a separate
+`bedrock:InvokeModel` IAM grant (`terraform/modules/api_service/main.tf`) —
+the loader's existing grant only covers the loader's task role, though the
+VPC-wide `bedrock-runtime` interface endpoint added for the PoC already
+covers the network path for both.
+
+Explicitly not built: reranking, attachment/comment/custom-data embeddings,
+chatbot/RAG. Production population has not been run as of this decision —
+it needs a real cost/time estimate from the PoC's own measured Bedrock
+throughput before it's run for real (~24,557 records across Award,
+Proposal, Negotiation, Subaward, vs. the PoC's 777-row sample).
