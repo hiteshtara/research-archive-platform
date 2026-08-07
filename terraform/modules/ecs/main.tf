@@ -294,6 +294,35 @@ resource "aws_iam_role_policy" "task_documents_s3" {
   policy = data.aws_iam_policy_document.task_documents_s3.json
 }
 
+# Global Search pgvector proof-of-concept (etl/build_search_embedding_poc.py
+# --ecs) - InvokeModel only, scoped to the exact Titan Text Embeddings V2
+# foundation model ARN, never bedrock:* or a wildcard resource. Foundation
+# model ARNs are AWS-owned (no account ID segment), confirmed reachable
+# from this account/region via `aws bedrock list-foundation-models` and a
+# live `aws bedrock-runtime invoke-model` test call before this policy was
+# added. Read-only against the archive schema; this statement only grants
+# the Bedrock call, not any new database access.
+data "aws_iam_policy_document" "task_bedrock" {
+  statement {
+    sid    = "InvokeTitanEmbeddings"
+    effect = "Allow"
+
+    actions = [
+      "bedrock:InvokeModel"
+    ]
+
+    resources = [
+      "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_bedrock" {
+  name   = "${var.project_name}-${var.environment}-loader-bedrock"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_bedrock.json
+}
+
 resource "aws_ecs_task_definition" "loader" {
   family                   = "${var.project_name}-${var.environment}-loader"
   requires_compatibilities = ["FARGATE"]
