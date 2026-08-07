@@ -64,7 +64,7 @@ class GlobalSearchControllerTest {
         GlobalSearchItemResponse item = new GlobalSearchItemResponse(
                 "AWARD", 3831872L, "103692-00002", "Cancer Research Grant",
                 "NIH", "Active", "1054966", "Workflow Document Number",
-                "1054966", "/awards/3831872", null, 3831872L, 46, null
+                "1054966", "/awards/3831872", null, 3831872L, 46, null, null
         );
         GlobalSearchResponse response = new GlobalSearchResponse(
                 "campbell", 1, List.of(item), List.of()
