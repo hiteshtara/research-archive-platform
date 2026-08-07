@@ -44,7 +44,7 @@ VECTOR_SEARCH_SQL = """
            embedding <=> CAST(:query_embedding AS vector) AS distance
     FROM archive.search_embedding_poc
     ORDER BY distance
-    LIMIT 10
+    LIMIT :top_k
 """
 
 LEXICAL_SEARCH_SQL = """
@@ -59,7 +59,9 @@ def _run_ecs_setup() -> None:
     configure_ecs_environment(boto3.client("secretsmanager"), include_oracle=False)
 
 
-def run_query(engine: Engine, bedrock_client: Any, query_text: str) -> dict:
+def run_query(
+    engine: Engine, bedrock_client: Any, query_text: str, top_k: int = 10
+) -> dict:
     lexical_start = time.perf_counter()
     with engine.connect() as connection:
         lexical_rows = connection.execute(
@@ -75,7 +77,7 @@ def run_query(engine: Engine, bedrock_client: Any, query_text: str) -> dict:
     with engine.connect() as connection:
         vector_rows = connection.execute(
             text(VECTOR_SEARCH_SQL),
-            {"query_embedding": _vector_literal(query_embedding)},
+            {"query_embedding": _vector_literal(query_embedding), "top_k": top_k},
         ).mappings().all()
     vector_query_ms = (time.perf_counter() - vector_query_start) * 1000
 
@@ -104,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Run a specific query instead of the default 5-query set "
              "(repeatable).",
     )
+    parser.add_argument(
+        "--top-k", type=int, default=10,
+        help="Number of vector results to return per query (default 10).",
+    )
     arguments = parser.parse_args(argv)
 
     if arguments.ecs:
@@ -118,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"embedding_model: {EMBEDDING_MODEL}")
 
     for query_text in queries:
-        result = run_query(engine, bedrock_client, query_text)
+        result = run_query(engine, bedrock_client, query_text, arguments.top_k)
         print(f"=== query: {query_text} ===")
         print(json.dumps(result, default=str, indent=2))
 

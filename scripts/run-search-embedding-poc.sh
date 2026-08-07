@@ -42,6 +42,7 @@ LIMIT_PER_DOMAIN="200"
 DRY_RUN=false
 QUERIES=()
 IMAGE_URI_OVERRIDE=""
+TOP_K=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --limit-per-domain) LIMIT_PER_DOMAIN="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --query) QUERIES+=("$2"); shift 2 ;;
+    --top-k) TOP_K="$2"; shift 2 ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -136,6 +138,7 @@ else
   for q in "${QUERIES[@]:-}"; do
     [[ -n "$q" ]] && COMMAND_ARGS+=(--query "$q")
   done
+  [[ -n "$TOP_K" ]] && COMMAND_ARGS+=(--top-k "$TOP_K")
 fi
 
 COMMAND_JSON="$(printf '%s\n' "${COMMAND_ARGS[@]}" | jq -R . | jq -s .)"
