@@ -302,6 +302,38 @@ resource "aws_iam_role_policy" "task_documents" {
   policy = data.aws_iam_policy_document.task_documents[0].json
 }
 
+# Global Search semantic search (GlobalSearchService's own Bedrock call to
+# embed a live search query) - InvokeModel only, scoped to the exact Titan
+# Text Embeddings V2 foundation model ARN, mirroring
+# modules/ecs/main.tf's task_bedrock policy (which grants the same action
+# to the loader's task role for etl/build_search_embedding.py). The
+# bedrock-runtime VPC interface endpoint added for that PoC is VPC-wide,
+# so no separate network change is needed here - only this IAM grant,
+# since the API task has its own, separate task role. Not conditional on
+# app.search.semantic.enabled (a Terraform apply doesn't know the Spring
+# property's value) - the flag alone still keeps the Bedrock client from
+# ever being constructed when semantic search is disabled.
+data "aws_iam_policy_document" "task_bedrock" {
+  statement {
+    sid    = "InvokeTitanEmbeddings"
+    effect = "Allow"
+
+    actions = [
+      "bedrock:InvokeModel"
+    ]
+
+    resources = [
+      "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_bedrock" {
+  name   = "${var.project_name}-${var.environment}-api-bedrock"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_bedrock.json
+}
+
 #
 # ECS cluster, task definition and service
 #
