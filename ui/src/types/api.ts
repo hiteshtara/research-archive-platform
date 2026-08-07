@@ -59,6 +59,9 @@ export interface GlobalSearchItem {
   awardId: number | null;
   sequenceNumber: number | null;
   primaryCurrent: boolean | null;
+  // "RELATED" for a semantic-search result that survived deduplication
+  // against structured results; null for every structured result.
+  matchType: string | null;
 }
 
 // failedModules names every domain whose search errored during this

@@ -238,6 +238,14 @@ export function GlobalSearchPage() {
                               variant="outlined"
                             />
                           )}
+
+                          {result.matchType === "RELATED" && (
+                            <Chip
+                              label="Related match"
+                              size="small"
+                              variant="outlined"
+                            />
+                          )}
                         </Stack>
 
                         <Typography
