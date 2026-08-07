@@ -75,6 +75,17 @@ app:
     max-records: ${AI_MAX_RECORDS:100}
     max-serialized-context-chars: ${AI_MAX_CONTEXT_CHARS:20000}
 
+  search:
+    semantic:
+      # Off everywhere except an explicit dev-environment override,
+      # until live evaluation against archive.search_embedding confirms
+      # relevance quality holds at production scale (see the semantic
+      # search integration plan / docs/architecture/GLOBAL_SEARCH_V2).
+      enabled: ${APP_SEARCH_SEMANTIC_ENABLED:false}
+      top-k: ${APP_SEARCH_SEMANTIC_TOP_K:5}
+      embedding-model: ${APP_SEARCH_SEMANTIC_EMBEDDING_MODEL:amazon.titan-embed-text-v2:0}
+      bedrock-timeout-ms: ${APP_SEARCH_SEMANTIC_BEDROCK_TIMEOUT_MS:2000}
+
   security:
     cognito:
       issuer-uri: ${COGNITO_ISSUER_URI}

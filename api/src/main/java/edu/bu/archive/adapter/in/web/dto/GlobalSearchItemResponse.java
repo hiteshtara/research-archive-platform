@@ -13,6 +13,13 @@ package edu.bu.archive.adapter.in.web.dto;
  * no real place to click through to, so the frontend never has to
  * reconstruct a route from module-specific identifiers itself. A card
  * with a null route must render as non-clickable.
+ *
+ * matchType is null for every structured (exact/lexical) result and is
+ * only ever "RELATED" for a semantic-search result that survived
+ * deduplication against the structured branches - see
+ * GlobalSearchService's semantic-search integration. It never carries a
+ * raw similarity score, distance, embedding, or model name - none of
+ * those leave the backend.
  */
 public record GlobalSearchItemResponse(
         String module,
@@ -28,6 +35,7 @@ public record GlobalSearchItemResponse(
         Long protocolId,
         Long awardId,
         Integer sequenceNumber,
-        Boolean primaryCurrent
+        Boolean primaryCurrent,
+        String matchType
 ) {
 }
