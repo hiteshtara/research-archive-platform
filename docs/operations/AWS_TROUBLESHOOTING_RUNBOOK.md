@@ -1901,3 +1901,48 @@ Not fixed in this session - confirmed accurate by the same review but left open,
 - **Medium**: the README's Cognito section still says `manage_cognito = false` is "dev's current setting" when dev's actual config sets it `true`; `environments/test|prod/variables.tf` still describe `amplify_repository_url`/`amplify_github_access_token` as "Required when manage_amplify = true," contradicting the README's Recommended (leave-both-null) flow; `terraform/bootstrap/backend.tf` still lacks `use_lockfile = true` with no note explaining why it differs from every environment's backend; the README's `terraform state rm` guidance still doesn't clarify that it orphans rather than deletes the live resource; no operator prerequisites checklist beyond "admin/power-user role"; post-apply verification guidance still stops at `terraform output` rather than checking ECS/ALB health, DNS/HTTPS, RDS connectivity, Cognito login, or Amplify build status.
 - **Low**: README still says `provider.tf` where the real files are `providers.tf`; the `tflint`/`checkov`/`tfsec` mention still has no install/config/CI guidance; no explicit warning that backend/account selection happens before `allowed_account_ids` can protect anything.
 - None of the above required a source-code change to fix (they're all `terraform/README.md` prose corrections) - they were left for a follow-up pass rather than bundled into this one, since only the two Critical, code-level issues had been explicitly approved for fixing in this session.
+
+## 32. Proposal Explorer 404 investigation and dev API task-definition/Terraform-state divergence (2026-08-10)
+
+### Symptom
+
+`GET /api/v1/explorer/proposals` on the dev Amplify UI returned `403 Forbidden` with `WWW-Authenticate: Bearer error="insufficient_scope"`, while every other authenticated tab worked normally.
+
+### Investigation summary (see chat history for the full step-by-step trace)
+
+The `insufficient_scope` response was a red herring produced by `BearerTokenAccessDeniedHandler` - RFC 6750 has no generic "access denied" error code, so Spring reuses `insufficient_scope` for any post-authentication `AccessDeniedException`, regardless of cause. A live Spring Security TRACE capture (temporary `LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY=TRACE` env var on a throwaway task-definition revision, reverted immediately after capture) proved the real sequence: `/api/v1/explorer/proposals` passed Spring Security's `.authenticated()` check cleanly, then Spring Boot's own "no handler found" path internally forwarded the request to `GET /error`, which - because `/error` matched neither the `permitAll` list nor `/api/**` - fell through to `.anyRequest().denyAll()` and got denied, producing the misleading 403.
+
+Fix #1 (kept permanently, per explicit instruction): added `/error` to `SecurityConfiguration`'s `permitAll()` matcher list (commit `ad41d17`) so Boot's own error view is never masked by the security fallback again. This unmasked the true status: `404`, with a genuine `BasicErrorController` JSON body (`{"status":404,"error":"Not Found","path":"/api/v1/explorer/proposals"}`).
+
+A second temporary diagnostic filter (`TemporaryRequestLoggingConfiguration`, registered at `Ordered.HIGHEST_PRECEDENCE`, logging every request's method/URI/query string before Spring Security even ran) proved the request *was* reaching the JVM - ruling out ALB/CloudFront/routing causes. (Added in commit `adde318`, removed again in commit `47aceeb` once no longer needed.)
+
+Real root cause: `ExplorerController` is gated by a class-level `@ConditionalOnProperty(name = "app.explorer.enabled", havingValue = "true")`, bound to `${APP_EXPLORER_ENABLED:false}` in `application.yml` - defaulting to disabled. The dev Amplify environment sets `VITE_EXPLORER_ENABLED = "true"` (so the UI correctly shows the Explorer nav/route), but the dev API's ECS task definition never had a matching `APP_EXPLORER_ENABLED`, and `terraform/environments/dev/terraform.tfvars`'s `additional_api_environment_variables` never set it either - a real gap between the two independently-declared flags, not a code bug. Since Spring Security's `.requestMatchers("/api/**").authenticated()` matches on path pattern alone, independent of whether any controller handles it, unauthenticated probes returned a plausible-looking `401` that incorrectly suggested the route existed.
+
+### Fix applied
+
+1. `terraform/environments/dev/main.tf`: added a `terraform_data.explorer_flags_match` resource with a `lifecycle.precondition` that hard-fails `plan`/`apply` if `local.explorer_enabled_ui` (now the single source powering `VITE_EXPLORER_ENABLED`) is true while `additional_api_environment_variables["APP_EXPLORER_ENABLED"]` isn't also `"true"` (commit `47aceeb`). This is the permanent guard against this exact class of drift recurring.
+2. `terraform/environments/dev/terraform.tfvars` (gitignored, not committed - matches the existing pattern for `APP_SEARCH_SEMANTIC_ENABLED`): added `APP_EXPLORER_ENABLED = "true"` to `additional_api_environment_variables`, and pinned `api_image_tag` to the exact tag already running (`20260810T161549Z-47aceeb`) instead of leaving it at the `api_image_tag` variable's mutable `"latest"` default.
+3. **Applied via a direct ECS task-definition update, not `terraform apply`** - see divergence note below for why.
+
+### Terraform-state divergence - intentional, recorded here per explicit instruction
+
+Running `terraform plan` (and even a `-target`-scoped one) for the `APP_EXPLORER_ENABLED` change also proposed changing `module.amplify[0].aws_amplify_app.ui` (`+ auto_branch_creation_config { enable_auto_build = false }`) - unrelated, pre-existing drift between Terraform source and the live Amplify app, first observed as an *additional* surprise beyond the two already known-and-documented issues in Section 31. This couldn't be excluded from the plan: `aws_ecs_task_definition.api`'s `APP_CORS_ALLOWED_ORIGINS` value is computed from `local.cors_allowed_origins`, which reads `module.amplify[0].default_domain`, creating a real dependency edge. `-target` therefore pulled the entire `aws_amplify_app.ui` resource (and its independent pending diff) into the apply set. This Terraform version (1.15.7) has no `-exclude` flag to counter that.
+
+Rather than either (a) applying the Amplify change as a side effect of an unrelated fix, or (b) leaving Explorer broken while the Amplify drift got investigated, the API-only fix was applied directly via `aws ecs register-task-definition` + `aws ecs update-service` (task-definition revision 42, cluster/service `research-archive-platform-dev-api`), copying every existing environment variable from the then-current revision 41 unchanged and adding only `APP_EXPLORER_ENABLED=true`. **Terraform state still reflects an older task-definition revision** (it was already stale before this incident, per Section 31's related finding that `ops/deploy-api.sh` deploys out-of-band and never updates Terraform state) and now additionally lacks awareness of `APP_EXPLORER_ENABLED` on the live resource, even though it's present in `terraform.tfvars` and would be applied correctly *if* the Amplify drift blocking a clean apply is resolved first.
+
+### Follow-up task (explicitly not bundled into this fix)
+
+1. Investigate why `module.amplify[0].aws_amplify_app.ui`'s live state lacks `auto_branch_creation_config` matching what `terraform/modules/amplify/main.tf` now declares - was this ever applied, or is it new drift from a module change made without a corresponding `apply`?
+2. Decide whether `auto_branch_creation_config { enable_auto_build = false }` is actually the intended live setting (it looks like a safe, low-risk default, but hasn't been deliberately confirmed).
+3. Once resolved, run `terraform plan` for the dev environment and confirm it now shows **only** a clean no-op or expected reconciliation for `aws_ecs_task_definition.api`/`aws_ecs_service.api` (matching the already-live revision 42 configuration), then `terraform apply` to bring state back in sync with reality.
+4. Re-verify the `terraform_data.explorer_flags_match` precondition still passes after reconciliation.
+
+### Validation
+
+- `/actuator/health` → `{"status":"UP","groups":["liveness","readiness"]}` (`200`) after the task-definition-42 rollout stabilized.
+- Authenticated browser retry of `GET /api/v1/explorer/proposals` confirmed working with real data returned.
+- `ExplorerController.class` confirmed present in both the local Maven build output and the actual deployed jar (`docker cp` + `unzip -l`) - ruled out a packaging/build-context problem before looking at configuration.
+
+### Prevention
+
+The `terraform_data.explorer_flags_match` precondition (Fix #1 above) is the durable guard: any future `terraform plan`/`apply` will hard-fail with a clear error message if `VITE_EXPLORER_ENABLED` and `APP_EXPLORER_ENABLED` ever diverge again, rather than silently shipping a UI nav item/route with no working backend behind it.
