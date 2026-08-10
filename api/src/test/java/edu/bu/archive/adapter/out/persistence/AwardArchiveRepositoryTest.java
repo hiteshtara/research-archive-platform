@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
@@ -71,6 +72,43 @@ class AwardArchiveRepositoryTest {
         verify(statement).param("rawQuery", "cancer");
         verify(statement).param("limit", 25);
         verify(statement).param("offset", 0);
+    }
+
+    /**
+     * Regression for a proven correctness defect (docs/kuali-business-
+     * rules/Time and Money.md): Kuali's own current-AWARD_AMOUNT_INFO-
+     * row rule is MAX(award_amount_info_id), full stop -
+     * source_version_number (Oracle's VER_NBR) is not part of that rule
+     * and must never be allowed to outrank a later-appended row. Real
+     * fixture (award_id 8): a row with award_amount_info_id=8,
+     * source_version_number=1 used to incorrectly win over the truly
+     * current row (award_amount_info_id=897305, source_version_number=0)
+     * because source_version_number was sorted ahead of
+     * award_amount_info_id. Live data confirmed 767 Award families hit
+     * this exact divergence before the fix.
+     */
+    @Test
+    void searchAwardsOrdersCurrentAmountByAwardAmountInfoIdOnly() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc)
+                .searchAwards("%cancer%", "cancer", 25, 0);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_amount_info ai")
+                .contains("ai.award_amount_info_id DESC")
+                .doesNotContain("source_version_number");
     }
 
     @Test
@@ -209,6 +247,32 @@ class AwardArchiveRepositoryTest {
         );
     }
 
+    /** See searchAwardsOrdersCurrentAmountByAwardAmountInfoIdOnly for the
+     * full rationale - same proven defect, same fix. */
+    @Test
+    void findSummaryCardsOrdersCurrentAmountByAwardAmountInfoIdOnly() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSummaryCardRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardSummaryCardRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findSummaryCards(
+                List.of("100004-00001")
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_amount_info ai")
+                .contains("ai.award_amount_info_id DESC")
+                .doesNotContain("source_version_number");
+    }
+
     @Test
     void findSummaryByAwardIdMapsEveryFieldFromTheDesignatedColumns() {
         JdbcClient jdbc = mock(JdbcClient.class);
@@ -244,6 +308,30 @@ class AwardArchiveRepositoryTest {
                 .contains("ah.parent_award_number")
                 .doesNotContain("fain")
                 .doesNotContain("account_type");
+    }
+
+    /** See searchAwardsOrdersCurrentAmountByAwardAmountInfoIdOnly for the
+     * full rationale - same proven defect, same fix. */
+    @Test
+    void findSummaryByAwardIdOrdersCurrentAmountByAwardAmountInfoIdOnly() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("awardId", 3L)).thenReturn(statement);
+        when(statement.query(AwardSummaryResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.empty());
+
+        new AwardArchiveRepository(jdbc).findSummaryByAwardId(3L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_amount_info ai")
+                .contains("ai.award_amount_info_id DESC")
+                .doesNotContain("source_version_number");
     }
 
     @Test
@@ -515,6 +603,34 @@ class AwardArchiveRepositoryTest {
     }
 
     @Test
+    void findAssociatedNegotiationRowsMatchesByAwardNumberFamilyWide() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardAssociatedNegotiationResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardAssociatedNegotiationResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        List<AwardAssociatedNegotiationResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findAssociatedNegotiationRows("202505-00002");
+
+        assertThat(result).isEmpty();
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.negotiation")
+                .contains("negotiation_association_type_code = 'AWD'")
+                .contains("associated_document_id = :awardNumber")
+                .doesNotContain("archive.award_version");
+        verify(statement).param("awardNumber", "202505-00002");
+    }
+
+    @Test
     void findSponsorContactsResolvesThroughRolodex() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =
@@ -755,6 +871,35 @@ class AwardArchiveRepositoryTest {
                 .doesNotContain("pgvector")
                 .doesNotContain("embedding")
                 .doesNotContain("<->");
+    }
+
+    /** See searchAwardsOrdersCurrentAmountByAwardAmountInfoIdOnly for the
+     * full rationale - same proven defect, same fix. */
+    @Test
+    void findCurrentAmountsOrdersByAwardAmountInfoIdOnly() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<
+                edu.bu.archive.adapter.in.web.dto.award.AwardAmountResponse
+                > query = mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(
+                edu.bu.archive.adapter.in.web.dto.award
+                        .AwardAmountResponse.class
+        )).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc)
+                .findCurrentAmounts("204713-00133");
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_amount_info amount")
+                .contains("amount.award_amount_info_id DESC")
+                .doesNotContain("source_version_number DESC");
     }
 
     private String firstSql(JdbcClient jdbc) {

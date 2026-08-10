@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
@@ -367,7 +368,6 @@ public class AwardArchiveRepository {
                 WHERE award.award_number = :awardNumber
                   AND award.is_primary_current = TRUE
                 ORDER BY
-                    amount.source_version_number DESC NULLS LAST,
                     amount.award_amount_info_id DESC
                 """)
                 .param("awardNumber", awardNumber)
@@ -533,6 +533,42 @@ public class AwardArchiveRepository {
     }
 
     /*
+     * The Negotiation(s) associated with this Award - family-wide, from
+     * archive.negotiation. Unlike Award<->Subaward, Negotiation has no
+     * version/family concept of its own (source_version_number is an
+     * Oracle optimistic-lock stamp, not a sequence) - each negotiation_id
+     * is its own root record, always directly navigable, no "current
+     * version" resolution needed. associated_document_id for
+     * negotiation_association_type_code = 'AWD' rows already stores the
+     * shared award_number business key (see
+     * NegotiationArchiveRepository.resolveCurrentAwardId for the forward
+     * direction), so this reverse query is family-wide with no join to
+     * archive.award_version required.
+     */
+    public List<AwardAssociatedNegotiationResponse> findAssociatedNegotiationRows(
+            String awardNumber
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    negotiation_id,
+                    document_number,
+                    negotiation_status_description,
+                    negotiation_agreement_type_description,
+                    negotiator_full_name,
+                    negotiation_start_date,
+                    negotiation_end_date
+                FROM archive.negotiation
+                WHERE negotiation_association_type_code = 'AWD'
+                    AND associated_document_id = :awardNumber
+                ORDER BY negotiation_start_date DESC NULLS LAST,
+                    negotiation_id DESC
+                """)
+                .param("awardNumber", awardNumber)
+                .query(AwardAssociatedNegotiationResponse.class)
+                .list();
+    }
+
+    /*
      * --- Search --------------------------------------------------------
      *
      * pattern is an already-normalized ILIKE pattern (see
@@ -590,7 +626,6 @@ public class AwardArchiveRepository {
                     FROM archive.award_amount_info ai
                     WHERE ai.award_id = av.award_id
                     ORDER BY
-                        ai.source_version_number DESC NULLS LAST,
                         ai.award_amount_info_id DESC
                     LIMIT 1
                 ) amt ON TRUE
@@ -732,7 +767,6 @@ public class AwardArchiveRepository {
                     FROM archive.award_amount_info ai
                     WHERE ai.award_id = av.award_id
                     ORDER BY
-                        ai.source_version_number DESC NULLS LAST,
                         ai.award_amount_info_id DESC
                     LIMIT 1
                 ) amt ON TRUE
@@ -798,7 +832,6 @@ public class AwardArchiveRepository {
                     FROM archive.award_amount_info ai
                     WHERE ai.award_id = av.award_id
                     ORDER BY
-                        ai.source_version_number DESC NULLS LAST,
                         ai.award_amount_info_id DESC
                     LIMIT 1
                 ) amt ON TRUE
