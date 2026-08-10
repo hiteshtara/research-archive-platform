@@ -1,12 +1,9 @@
-import { ArrowForwardOutlined } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Button,
   Card,
   CardContent,
   Chip,
-  CircularProgress,
   Stack,
   Tab,
   Tabs,
@@ -23,7 +20,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Link as RouterLink, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 import {
   downloadSubawardAttachment,
@@ -35,6 +32,13 @@ import {
   getSubawardFunding,
   getSubawardWorkspace,
 } from "../api/client";
+import { EmptyState } from "../components/common/EmptyState";
+import { ErrorState } from "../components/common/ErrorState";
+import { LoadingState } from "../components/common/LoadingState";
+import { RelationshipCard } from "../components/common/RelationshipCard";
+import { SectionCard } from "../components/common/SectionCard";
+import { StatusPill } from "../components/common/StatusPill";
+import { WorkspaceHeader } from "../components/common/WorkspaceHeader";
 import { formatCurrencyAmount } from "../features/award/awardSectionsPresentation.mjs";
 import { groupAttachmentsByType } from "../features/subaward/subawardAttachmentsPresentation.mjs";
 import { resolveContactDisplay } from "../features/subaward/subawardContactsPresentation.mjs";
@@ -66,14 +70,6 @@ type DisplayValue = string | number | null;
 
 function display(value: DisplayValue) {
   return value ?? "—";
-}
-
-function LoadingState() {
-  return (
-    <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-      <CircularProgress />
-    </Box>
-  );
 }
 
 function DetailTable({
@@ -124,11 +120,11 @@ function TableSection<T>({
   }
 
   if (isError) {
-    return <Alert severity="error">{errorMessage}</Alert>;
+    return <ErrorState message={errorMessage} />;
   }
 
   if (!data || data.length === 0) {
-    return <Alert severity="info">{emptyMessage}</Alert>;
+    return <EmptyState message={emptyMessage} />;
   }
 
   return (
@@ -221,7 +217,7 @@ function SubawardWorkspaceContent({
   });
 
   if (!validSubawardId) {
-    return <Alert severity="error">Invalid Subaward ID.</Alert>;
+    return <ErrorState message="Invalid Subaward ID." />;
   }
 
   if (workspaceQuery.isLoading) {
@@ -229,7 +225,7 @@ function SubawardWorkspaceContent({
   }
 
   if (workspaceQuery.isError || !workspaceQuery.data) {
-    return <Alert severity="error">Unable to load Subaward workspace.</Alert>;
+    return <ErrorState message="Unable to load Subaward workspace." />;
   }
 
   const current = workspaceQuery.data.current;
@@ -278,49 +274,24 @@ function SubawardWorkspaceContent({
 
   return (
     <Stack spacing={3}>
-      <Card>
-        <CardContent>
-          <Typography variant="h4">
-            Subaward {current.subawardCode}
-          </Typography>
-          <Typography variant="h6" sx={{ mt: 1 }}>
-            {current.title ?? "Untitled Subaward"}
-          </Typography>
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            Physical source record {current.subawardId}
-          </Typography>
-          <Stack
-            sx={{
-              mt: 3,
-              flexDirection: "row",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: 1,
-            }}
-          >
-            <Chip
-              size="small"
-              variant="outlined"
-              label={`Subaward Code ${current.subawardCode}`}
-            />
-            <Chip
-              size="small"
-              color="primary"
-              label={current.statusDescription ?? "Unknown status"}
-            />
-            <Chip
-              size="small"
-              variant="outlined"
-              label={`Version ${current.sequenceNumber}`}
-            />
-            <Chip
-              size="small"
-              variant="outlined"
-              label={`Workflow ${current.documentNumber ?? "—"}`}
-            />
-          </Stack>
-        </CardContent>
-      </Card>
+      <WorkspaceHeader
+        title={`Subaward ${current.subawardCode}`}
+        subtitle={current.title ?? "Untitled Subaward"}
+        eyebrow={`Physical source record ${current.subawardId}`}
+        chips={[
+          { label: `Subaward Code ${current.subawardCode}` },
+          {
+            element: (
+              <StatusPill
+                status={current.statusDescription}
+                domain="subaward"
+              />
+            ),
+          },
+          { label: `Version ${current.sequenceNumber}` },
+          { label: `Workflow ${current.documentNumber ?? "—"}` },
+        ]}
+      />
 
       <Card>
         <Tabs
@@ -352,16 +323,15 @@ function SubawardWorkspaceContent({
 
               {amountsQuery.isLoading && <LoadingState />}
               {amountsQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Subaward amounts.
-                </Alert>
+                <ErrorState message="Unable to load Subaward amounts." />
               )}
               {!amountsQuery.isLoading &&
                 !amountsQuery.isError &&
                 (amountsQuery.data?.length ?? 0) === 0 && (
-                  <Typography color="text.secondary">
-                    No amount rows are archived for this Subaward record.
-                  </Typography>
+                  <EmptyState
+                    variant="text"
+                    message="No amount rows are archived for this Subaward record."
+                  />
                 )}
 
               {amountsViewMode === "timeline" &&
@@ -371,108 +341,104 @@ function SubawardWorkspaceContent({
                     {(() => {
                       const totals = sumAmendmentTotals(amountsQuery.data);
                       return (
-                        <Card variant="outlined">
-                          <CardContent>
-                            <Stack
-                              direction="row"
-                              spacing={4}
-                              sx={{ flexWrap: "wrap" }}
-                            >
-                              <Box>
-                                <Typography
-                                  variant="overline"
-                                  color="text.secondary"
-                                >
-                                  Total Obligated
-                                </Typography>
-                                <Typography variant="h6">
-                                  {display(totals.totalObligatedChange)}
-                                </Typography>
-                              </Box>
-                              <Box>
-                                <Typography
-                                  variant="overline"
-                                  color="text.secondary"
-                                >
-                                  Total Anticipated
-                                </Typography>
-                                <Typography variant="h6">
-                                  {display(totals.totalAnticipatedChange)}
-                                </Typography>
-                              </Box>
-                            </Stack>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{ mt: 1, display: "block" }}
-                            >
-                              Amount Released and Available Amount require
-                              SUBAWARD_AMOUNT_RELEASED, not yet archived by
-                              this platform.
-                            </Typography>
-                          </CardContent>
-                        </Card>
+                        <SectionCard>
+                          <Stack
+                            direction="row"
+                            spacing={4}
+                            sx={{ flexWrap: "wrap" }}
+                          >
+                            <Box>
+                              <Typography
+                                variant="overline"
+                                color="text.secondary"
+                              >
+                                Total Obligated
+                              </Typography>
+                              <Typography variant="h6">
+                                {display(totals.totalObligatedChange)}
+                              </Typography>
+                            </Box>
+                            <Box>
+                              <Typography
+                                variant="overline"
+                                color="text.secondary"
+                              >
+                                Total Anticipated
+                              </Typography>
+                              <Typography variant="h6">
+                                {display(totals.totalAnticipatedChange)}
+                              </Typography>
+                            </Box>
+                          </Stack>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ mt: 1, display: "block" }}
+                          >
+                            Amount Released and Available Amount require
+                            SUBAWARD_AMOUNT_RELEASED, not yet archived by
+                            this platform.
+                          </Typography>
+                        </SectionCard>
                       );
                     })()}
 
                     {buildAmendmentTimeline(amountsQuery.data).map((card) => (
-                      <Card key={card.subawardAmountInfoId} variant="outlined">
-                        <CardContent>
-                          <Stack
-                            direction="row"
-                            spacing={1}
-                            sx={{ alignItems: "center", flexWrap: "wrap" }}
-                          >
-                            <Typography sx={{ fontWeight: 700 }}>
-                              Amendment {card.amendmentNumber ?? "—"}
-                            </Typography>
-                            {card.modificationType && (
-                              <Chip
-                                size="small"
-                                variant="outlined"
-                                label={card.modificationType}
-                              />
-                            )}
-                          </Stack>
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{ mt: 0.5 }}
-                          >
-                            Effective {display(card.effectiveDate)}
-                            {" · Budget period "}
-                            {display(card.budgetPeriodStart)} –{" "}
-                            {display(card.budgetPeriodEnd)}
+                      <SectionCard key={card.subawardAmountInfoId}>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ alignItems: "center", flexWrap: "wrap" }}
+                        >
+                          <Typography sx={{ fontWeight: 700 }}>
+                            Amendment {card.amendmentNumber ?? "—"}
                           </Typography>
-                          <Stack
-                            direction="row"
-                            spacing={3}
-                            sx={{ mt: 1, flexWrap: "wrap" }}
-                          >
-                            <Typography variant="body2">
-                              Obligated change:{" "}
-                              {display(card.obligatedChange)}
-                            </Typography>
-                            <Typography variant="body2">
-                              Anticipated change:{" "}
-                              {display(card.anticipatedChange)}
-                            </Typography>
-                          </Stack>
-                          {card.comments && (
-                            <Typography variant="body2" sx={{ mt: 1 }}>
-                              {card.comments}
-                            </Typography>
-                          )}
-                          {card.attachmentLabel && (
+                          {card.modificationType && (
                             <Chip
-                              sx={{ mt: 1 }}
                               size="small"
                               variant="outlined"
-                              label={card.attachmentLabel}
+                              label={card.modificationType}
                             />
                           )}
-                        </CardContent>
-                      </Card>
+                        </Stack>
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ mt: 0.5 }}
+                        >
+                          Effective {display(card.effectiveDate)}
+                          {" · Budget period "}
+                          {display(card.budgetPeriodStart)} –{" "}
+                          {display(card.budgetPeriodEnd)}
+                        </Typography>
+                        <Stack
+                          direction="row"
+                          spacing={3}
+                          sx={{ mt: 1, flexWrap: "wrap" }}
+                        >
+                          <Typography variant="body2">
+                            Obligated change:{" "}
+                            {display(card.obligatedChange)}
+                          </Typography>
+                          <Typography variant="body2">
+                            Anticipated change:{" "}
+                            {display(card.anticipatedChange)}
+                          </Typography>
+                        </Stack>
+                        {card.comments && (
+                          <Typography variant="body2" sx={{ mt: 1 }}>
+                            {card.comments}
+                          </Typography>
+                        )}
+                        {card.attachmentLabel && (
+                          <Chip
+                            sx={{ mt: 1 }}
+                            size="small"
+                            variant="outlined"
+                            label={card.attachmentLabel}
+                          />
+                        )}
+                      </SectionCard>
                     ))}
                   </Stack>
                 )}
@@ -515,71 +481,41 @@ function SubawardWorkspaceContent({
                   return null;
                 }
                 return (
-                  <Card
+                  <RelationshipCard
                     key={funding.subawardFundingSourceId}
-                    variant="outlined"
-                  >
-                    <CardContent>
-                      <Typography sx={{ fontWeight: 700 }}>
-                        Award {cardState.awardNumber}
-                      </Typography>
-                      {cardState.kind === "LOADED" ? (
-                        <>
-                          {cardState.awardTitle && (
-                            <Typography variant="body2">
-                              {cardState.awardTitle}
-                            </Typography>
-                          )}
-                          <Stack
-                            direction="row"
-                            spacing={1}
-                            sx={{ mt: 0.5, alignItems: "center", flexWrap: "wrap" }}
-                          >
-                            {cardState.awardStatus && (
-                              <Chip
-                                size="small"
-                                color="primary"
-                                label={cardState.awardStatus}
-                              />
-                            )}
-                            {cardState.awardSponsor && (
-                              <Typography
-                                variant="body2"
-                                color="text.secondary"
-                              >
-                                {cardState.awardSponsor}
-                              </Typography>
-                            )}
-                            {cardState.awardAmount !== null && (
-                              <Typography
-                                variant="body2"
-                                color="text.secondary"
-                              >
-                                {formatCurrencyAmount(cardState.awardAmount)}
-                              </Typography>
-                            )}
-                          </Stack>
-                          <Button
-                            sx={{ mt: 1 }}
-                            variant="outlined"
-                            size="small"
-                            endIcon={<ArrowForwardOutlined />}
-                            component={RouterLink}
-                            to={`/awards/${cardState.navigableCurrentAwardId}`}
-                          >
-                            Open Award
-                          </Button>
-                        </>
-                      ) : (
-                        <Chip
-                          sx={{ mt: 1 }}
-                          size="small"
-                          variant="outlined"
-                          label="Not currently archived"
+                    title={`Award ${cardState.awardNumber}`}
+                    archived={cardState.kind === "LOADED"}
+                    subtitle={
+                      cardState.kind === "LOADED"
+                        ? cardState.awardTitle
+                        : null
+                    }
+                    statusLabel={
+                      cardState.kind === "LOADED" && (
+                        <StatusPill
+                          status={cardState.awardStatus}
+                          domain="award"
                         />
-                      )}
-                    </CardContent>
-                  </Card>
+                      )
+                    }
+                    metaText={
+                      cardState.kind === "LOADED"
+                        ? cardState.awardSponsor
+                        : null
+                    }
+                    amountText={
+                      cardState.kind === "LOADED" &&
+                      cardState.awardAmount !== null
+                        ? formatCurrencyAmount(cardState.awardAmount)
+                        : null
+                    }
+                    buttonLabel="Open Award"
+                    href={
+                      cardState.kind === "LOADED"
+                        ? `/awards/${cardState.navigableCurrentAwardId}`
+                        : undefined
+                    }
+                  />
                 );
               })}
               <TableSection
@@ -653,23 +589,19 @@ function SubawardWorkspaceContent({
           {activeTab === 4 && (
             <Stack spacing={3}>
               {downloadError && (
-                <Alert severity="error" onClose={() => setDownloadError(null)}>
-                  {downloadError}
-                </Alert>
+                <ErrorState
+                  message={downloadError}
+                  onClose={() => setDownloadError(null)}
+                />
               )}
               {attachmentsQuery.isLoading && <LoadingState />}
               {attachmentsQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Subaward attachment metadata.
-                </Alert>
+                <ErrorState message="Unable to load Subaward attachment metadata." />
               )}
               {!attachmentsQuery.isLoading &&
                 !attachmentsQuery.isError &&
                 (attachmentsQuery.data?.length ?? 0) === 0 && (
-                  <Alert severity="info">
-                    No attachment metadata is archived for this Subaward
-                    record.
-                  </Alert>
+                  <EmptyState message="No attachment metadata is archived for this Subaward record." />
                 )}
 
               {attachmentsQuery.data &&

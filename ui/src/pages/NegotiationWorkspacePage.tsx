@@ -5,13 +5,11 @@ import {
   VisibilityOutlined,
 } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Button,
   Card,
   CardContent,
   Chip,
-  CircularProgress,
   Divider,
   Stack,
   Tab,
@@ -39,6 +37,15 @@ import {
   getNegotiationWorkspace,
   previewNegotiationAttachment,
 } from "../api/client";
+import { EmptyState } from "../components/common/EmptyState";
+import { ErrorState } from "../components/common/ErrorState";
+import { LoadingState } from "../components/common/LoadingState";
+import { RelationshipCard } from "../components/common/RelationshipCard";
+import { StatusPill } from "../components/common/StatusPill";
+import {
+  resolveNegotiationAssociationArchived,
+  resolveNegotiationAssociationDisplayKind,
+} from "../features/common/relationshipCardPresentation.mjs";
 import type {
   NegotiationActivity,
   NegotiationAttachment,
@@ -100,14 +107,6 @@ function DetailTable({
         ))}
       </TableBody>
     </Table>
-  );
-}
-
-function LoadingState() {
-  return (
-    <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-      <CircularProgress />
-    </Box>
   );
 }
 
@@ -182,7 +181,7 @@ function NegotiationWorkspaceContent({
   });
 
   if (!validNegotiationId) {
-    return <Alert severity="error">Invalid Negotiation ID.</Alert>;
+    return <ErrorState message="Invalid Negotiation ID." />;
   }
 
   if (workspaceQuery.isLoading) {
@@ -190,7 +189,7 @@ function NegotiationWorkspaceContent({
   }
 
   if (workspaceQuery.isError || !workspaceQuery.data) {
-    return <Alert severity="error">Unable to load Negotiation workspace.</Alert>;
+    return <ErrorState message="Unable to load Negotiation workspace." />;
   }
 
   const current = workspaceQuery.data.current;
@@ -292,10 +291,9 @@ function NegotiationWorkspaceContent({
               gap: 1,
             }}
           >
-            <Chip
-              size="small"
-              color="primary"
-              label={current.negotiationStatusDescription ?? "Unknown status"}
+            <StatusPill
+              status={current.negotiationStatusDescription}
+              domain="negotiation"
             />
             {association?.clickable && association.navigableId ? (
               <Chip
@@ -352,64 +350,36 @@ function NegotiationWorkspaceContent({
             <Stack spacing={2}>
               {associatedRecordQuery.isLoading && <LoadingState />}
               {associatedRecordQuery.isError && (
-                <Alert severity="error">
-                  Unable to load the associated record.
-                </Alert>
+                <ErrorState message="Unable to load the associated record." />
               )}
               {association && (
                 <>
-                  {association.clickable && association.navigableId ? (
-                    <Card variant="outlined">
-                      <CardContent>
-                        <Typography variant="overline" color="text.secondary">
-                          {ASSOCIATION_LABEL[association.kind] ?? "Record"}
-                        </Typography>
-                        <Typography variant="h6">
-                          {association.associatedDocumentId}
-                        </Typography>
-                        <Button
-                          sx={{ mt: 1 }}
-                          variant="outlined"
-                          size="small"
-                          endIcon={<OpenInNewOutlined />}
-                          component={RouterLink}
-                          to={ASSOCIATION_ROUTE[association.kind](
-                            association.navigableId,
-                          )}
-                        >
-                          Open {ASSOCIATION_LABEL[association.kind]} dashboard
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ) : association.kind === "NONE" ? (
-                    <Alert severity="info">
-                      This Negotiation is not associated with a Proposal,
-                      Award, or Subaward.
-                    </Alert>
-                  ) : association.kind === "UNSUPPORTED" ? (
-                    <Alert severity="info">
-                      This Negotiation&apos;s association type (
-                      {association.associationTypeDescription ??
-                        association.associationTypeCode}
-                      ) is not one the archive recognizes yet.
-                    </Alert>
+                  {resolveNegotiationAssociationDisplayKind(association) ===
+                  "none" ? (
+                    <EmptyState message="This Negotiation is not associated with a Proposal, Award, or Subaward." />
+                  ) : resolveNegotiationAssociationDisplayKind(association) ===
+                    "unsupported" ? (
+                    <EmptyState
+                      message={`This Negotiation's association type (${
+                        association.associationTypeDescription ??
+                        association.associationTypeCode
+                      }) is not one the archive recognizes yet.`}
+                    />
                   ) : (
-                    <Card variant="outlined">
-                      <CardContent>
-                        <Typography variant="overline" color="text.secondary">
-                          {ASSOCIATION_LABEL[association.kind] ?? "Record"}
-                        </Typography>
-                        <Typography variant="h6">
-                          {association.associatedDocumentId}
-                        </Typography>
-                        <Chip
-                          sx={{ mt: 1 }}
-                          size="small"
-                          variant="outlined"
-                          label="Not yet archived"
-                        />
-                      </CardContent>
-                    </Card>
+                    <RelationshipCard
+                      title={`${ASSOCIATION_LABEL[association.kind] ?? "Record"} ${association.associatedDocumentId}`}
+                      archived={resolveNegotiationAssociationArchived(
+                        association,
+                      )}
+                      buttonLabel={`Open ${ASSOCIATION_LABEL[association.kind]} dashboard`}
+                      href={
+                        resolveNegotiationAssociationArchived(association)
+                          ? ASSOCIATION_ROUTE[association.kind](
+                              association.navigableId!,
+                            )
+                          : undefined
+                      }
+                    />
                   )}
 
                   {association.kind === "NONE" && (
@@ -418,10 +388,10 @@ function NegotiationWorkspaceContent({
                       {unassociatedQuery.isLoading && <LoadingState />}
                       {unassociatedQuery.data &&
                         (unassociatedQuery.data.length === 0 ? (
-                          <Typography color="text.secondary">
-                            No additional detail is archived for this
-                            Negotiation.
-                          </Typography>
+                          <EmptyState
+                            variant="text"
+                            message="No additional detail is archived for this Negotiation."
+                          />
                         ) : (
                           unassociatedQuery.data.map((detail) => (
                             <Card
@@ -458,9 +428,7 @@ function NegotiationWorkspaceContent({
             <Stack spacing={2}>
               {activitiesQuery.isLoading && <LoadingState />}
               {activitiesQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Negotiation activities.
-                </Alert>
+                <ErrorState message="Unable to load Negotiation activities." />
               )}
               {activitiesQuery.data && (
                 <>
@@ -468,9 +436,7 @@ function NegotiationWorkspaceContent({
                     {activitiesQuery.data.length.toLocaleString()} activities
                   </Typography>
                   {activitiesQuery.data.length === 0 ? (
-                    <Alert severity="info">
-                      No activities are archived for this Negotiation.
-                    </Alert>
+                    <EmptyState message="No activities are archived for this Negotiation." />
                   ) : (
                     <Stack
                       sx={{
@@ -544,15 +510,14 @@ function NegotiationWorkspaceContent({
           {activeTab === 3 && (
             <Stack spacing={2}>
               {actionError && (
-                <Alert severity="error" onClose={() => setActionError(null)}>
-                  {actionError}
-                </Alert>
+                <ErrorState
+                  message={actionError}
+                  onClose={() => setActionError(null)}
+                />
               )}
               {attachmentsQuery.isLoading && <LoadingState />}
               {attachmentsQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Negotiation attachments.
-                </Alert>
+                <ErrorState message="Unable to load Negotiation attachments." />
               )}
               {attachmentsQuery.data && (
                 <>
@@ -560,9 +525,7 @@ function NegotiationWorkspaceContent({
                     {attachmentsQuery.data.length.toLocaleString()} attachments
                   </Typography>
                   {attachmentsQuery.data.length === 0 ? (
-                    <Alert severity="info">
-                      No attachments are archived for this Negotiation.
-                    </Alert>
+                    <EmptyState message="No attachments are archived for this Negotiation." />
                   ) : (
                     Array.from(attachmentsByActivity.entries()).map(
                       ([activityId, activityAttachments]) => {
@@ -714,9 +677,7 @@ function NegotiationWorkspaceContent({
             <Stack spacing={2}>
               {customDataQuery.isLoading && <LoadingState />}
               {customDataQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Negotiation custom data.
-                </Alert>
+                <ErrorState message="Unable to load Negotiation custom data." />
               )}
               {customDataQuery.data && (
                 <>
@@ -724,9 +685,7 @@ function NegotiationWorkspaceContent({
                     {customDataQuery.data.length.toLocaleString()} custom values
                   </Typography>
                   {customDataQuery.data.length === 0 ? (
-                    <Alert severity="info">
-                      No custom data is archived for this Negotiation.
-                    </Alert>
+                    <EmptyState message="No custom data is archived for this Negotiation." />
                   ) : (
                     <TableContainer>
                       <Table size="small">
@@ -770,15 +729,11 @@ function NegotiationWorkspaceContent({
             <Stack spacing={2}>
               {notificationsQuery.isLoading && <LoadingState />}
               {notificationsQuery.isError && (
-                <Alert severity="error">
-                  Unable to load Negotiation notifications.
-                </Alert>
+                <ErrorState message="Unable to load Negotiation notifications." />
               )}
               {notificationsQuery.data &&
                 (notificationsQuery.data.length === 0 ? (
-                  <Alert severity="info">
-                    No notifications are archived for this Negotiation.
-                  </Alert>
+                  <EmptyState message="No notifications are archived for this Negotiation." />
                 ) : (
                   <TableContainer>
                     <Table size="small">
