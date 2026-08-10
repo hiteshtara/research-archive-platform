@@ -348,6 +348,16 @@ export interface AwardFundingSubaward {
   navigableCurrentSubawardId: number | null;
 }
 
+export interface AwardAssociatedNegotiation {
+  negotiationId: number;
+  documentNumber: string | null;
+  negotiationStatusDescription: string | null;
+  negotiationAgreementTypeDescription: string | null;
+  negotiatorFullName: string | null;
+  negotiationStartDate: string | null;
+  negotiationEndDate: string | null;
+}
+
 export interface AwardSummaryV1 {
   awardId: number;
   awardNumber: string;

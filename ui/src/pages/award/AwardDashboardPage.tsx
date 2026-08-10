@@ -1,6 +1,5 @@
 import {
   Box,
-  CircularProgress,
   Divider,
   List,
   ListItemButton,
@@ -20,14 +19,17 @@ import { AwardBudgetSection } from "../../components/award/AwardBudgetSection";
 import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
 import { AwardContactsSection } from "../../components/award/AwardContactsSection";
 import { AwardFundingProposalsSection } from "../../components/award/AwardFundingProposalsSection";
+import { AwardAssociatedNegotiationsSection } from "../../components/award/AwardAssociatedNegotiationsSection";
 import { AwardFundingSubawardsSection } from "../../components/award/AwardFundingSubawardsSection";
 import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTransmissionsSection";
-import { AwardStatusPill } from "../../components/award/AwardStatusPill";
+import { StatusPill } from "../../components/common/StatusPill";
 import { AwardSummarySection } from "../../components/award/AwardSummarySection";
 import { AwardTermsSection } from "../../components/award/AwardTermsSection";
 import { AwardTimeAndMoneySection } from "../../components/award/AwardTimeAndMoneySection";
 import { AwardVersionsSection } from "../../components/award/AwardVersionsSection";
 import { ComingSoonSection } from "../../components/award/ComingSoonSection";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { flattenHierarchyNodes } from "../../components/award/hierarchyUtils";
 import type { AwardHierarchyNode } from "../../types/api";
 
@@ -37,6 +39,7 @@ const SECTIONS = [
   { key: "people", label: "People and Units" },
   { key: "fundingProposals", label: "Funding Proposal" },
   { key: "fundingSubawards", label: "Subawards" },
+  { key: "negotiations", label: "Negotiations" },
   { key: "amounts", label: "Amounts" },
   { key: "budget", label: "Budget" },
   { key: "timeMoney", label: "Time & Money" },
@@ -54,6 +57,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "people",
   "fundingProposals",
   "fundingSubawards",
+  "negotiations",
   "amounts",
   "budget",
   "timeMoney",
@@ -106,19 +110,15 @@ export function AwardDashboardPage() {
   }
 
   if (!Number.isFinite(awardId)) {
-    return <Typography color="error">Invalid Award.</Typography>;
+    return <ErrorState message="Invalid Award." />;
   }
 
   if (summaryQuery.isLoading) {
-    return (
-      <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState />;
   }
 
   if (summaryQuery.isError || !summaryQuery.data) {
-    return <Typography color="error">Award not found.</Typography>;
+    return <ErrorState message="Award not found." />;
   }
 
   const summary = summaryQuery.data;
@@ -166,7 +166,7 @@ export function AwardDashboardPage() {
           </Typography>
         </Box>
 
-        <AwardStatusPill status={summary.status} />
+        <StatusPill status={summary.status} domain="award" />
       </Box>
 
       <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
@@ -235,6 +235,10 @@ export function AwardDashboardPage() {
 
           {activeSection === "fundingSubawards" && (
             <AwardFundingSubawardsSection awardId={awardId} />
+          )}
+
+          {activeSection === "negotiations" && (
+            <AwardAssociatedNegotiationsSection awardId={awardId} />
           )}
 
           {activeSection === "amounts" && (

@@ -1,20 +1,17 @@
-import { ArrowForwardOutlined } from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Skeleton,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Stack } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 
 import { getProposalFundedAwardsV1 } from "../../api/client";
-import { AwardStatusPill } from "../award/AwardStatusPill";
+import {
+  buildFundedAwardMetaText,
+  RELATIONSHIP_ACTION_LABEL,
+  resolveRelationshipCardState,
+} from "../../features/common/relationshipCardPresentation.mjs";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { RelationshipCard } from "../common/RelationshipCard";
+import { StatusPill } from "../common/StatusPill";
 
 // Funded Awards - the primary navigation link from an Institutional
 // Proposal to the Award(s) it funded. One card per real
@@ -32,100 +29,57 @@ export function ProposalFundedAwardsSection({
 }: {
   proposalId: number;
 }) {
-  const navigate = useNavigate();
-
   const fundedAwardsQuery = useQuery({
     queryKey: ["proposal-funded-awards-v1", proposalId],
     queryFn: ({ signal }) => getProposalFundedAwardsV1(proposalId, signal),
   });
 
   if (fundedAwardsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={72} />
-        <Skeleton variant="rounded" height={72} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={72} count={2} />;
   }
 
   if (fundedAwardsQuery.isError) {
-    return <Alert severity="error">Unable to load Funded Awards.</Alert>;
+    return <ErrorState message="Unable to load Funded Awards." />;
   }
 
   const fundedAwards = fundedAwardsQuery.data ?? [];
 
   if (fundedAwards.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No Awards have been funded from this Proposal.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Awards have been funded from this Proposal."
+      />
     );
   }
 
   return (
     <Stack spacing={1.5}>
-      {fundedAwards.map((fundedAward, index) => (
-        <Card
-          key={`${fundedAward.awardNumber}-${index}`}
-          variant="outlined"
-          sx={{
-            opacity: fundedAward.relationshipActive ? 1 : 0.6,
-          }}
-        >
-          <CardContent
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              "&:last-child": { pb: 2 },
-            }}
-          >
-            <Box>
-              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                <Typography sx={{ fontWeight: 700 }}>
-                  {fundedAward.awardNumber}
-                </Typography>
-                {!fundedAward.relationshipActive && (
-                  <Chip size="small" variant="outlined" label="Inactive" />
-                )}
-              </Stack>
+      {fundedAwards.map((fundedAward, index) => {
+        const { archived } = resolveRelationshipCardState(
+          fundedAward.navigableCurrentAwardId,
+        );
 
-              <Typography variant="body2" color="text.secondary">
-                {fundedAward.awardTitle ?? "Untitled award"}
-              </Typography>
-
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ mt: 0.5, alignItems: "center", flexWrap: "wrap" }}
-              >
-                <AwardStatusPill status={fundedAward.awardStatus} />
-                <Typography variant="caption" color="text.secondary">
-                  Current version {fundedAward.currentAwardVersion ?? "—"}
-                  {fundedAward.linkedAwardVersion !==
-                    fundedAward.currentAwardVersion &&
-                    ` (linked at version ${fundedAward.linkedAwardVersion ?? "—"})`}
-                  {" · Proposal version "}
-                  {fundedAward.proposalVersion ?? "—"}
-                </Typography>
-              </Stack>
-            </Box>
-
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={fundedAward.navigableCurrentAwardId === null}
-              endIcon={<ArrowForwardOutlined fontSize="small" />}
-              onClick={() =>
-                fundedAward.navigableCurrentAwardId !== null &&
-                navigate(`/awards/${fundedAward.navigableCurrentAwardId}`)
-              }
-            >
-              Open Award
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+        return (
+          <RelationshipCard
+            key={`${fundedAward.awardNumber}-${index}`}
+            title={fundedAward.awardNumber}
+            subtitle={fundedAward.awardTitle ?? "Untitled award"}
+            archived={archived}
+            inactive={!fundedAward.relationshipActive}
+            statusLabel={
+              <StatusPill status={fundedAward.awardStatus} domain="award" />
+            }
+            metaText={buildFundedAwardMetaText(fundedAward)}
+            buttonLabel={RELATIONSHIP_ACTION_LABEL.award}
+            href={
+              archived
+                ? `/awards/${fundedAward.navigableCurrentAwardId}`
+                : undefined
+            }
+          />
+        );
+      })}
     </Stack>
   );
 }

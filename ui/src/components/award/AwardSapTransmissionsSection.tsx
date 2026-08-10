@@ -3,13 +3,10 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Alert,
   Box,
   Card,
   CardContent,
   Chip,
-  Pagination,
-  Skeleton,
   Stack,
   Typography,
 } from "@mui/material";
@@ -21,6 +18,10 @@ import {
   hasAnyTransmissions,
   xmlDisplayText,
 } from "../../features/award/awardSectionsPresentation.mjs";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { PaginationFooter } from "../common/PaginationFooter";
 
 const PAGE_SIZE = 25;
 
@@ -83,18 +84,11 @@ export function AwardSapTransmissionsSection({ awardId }: { awardId: number }) {
   });
 
   if (transmissionsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={96} />
-        <Skeleton variant="rounded" height={96} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={96} count={2} />;
   }
 
   if (transmissionsQuery.isError) {
-    return (
-      <Alert severity="error">Unable to load SAP transmission history.</Alert>
-    );
+    return <ErrorState message="Unable to load SAP transmission history." />;
   }
 
   const transmissions = transmissionsQuery.data;
@@ -105,9 +99,10 @@ export function AwardSapTransmissionsSection({ awardId }: { awardId: number }) {
 
   if (!hasAnyTransmissions(transmissions.content)) {
     return (
-      <Typography color="text.secondary">
-        No SAP transmissions are recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No SAP transmissions are recorded for this Award."
+      />
     );
   }
 
@@ -190,15 +185,11 @@ export function AwardSapTransmissionsSection({ awardId }: { awardId: number }) {
         </Card>
       ))}
 
-      {transmissions.totalPages > 1 && (
-        <Box sx={{ display: "flex", justifyContent: "center" }}>
-          <Pagination
-            count={transmissions.totalPages}
-            page={page + 1}
-            onChange={(_event, value) => setPage(value - 1)}
-          />
-        </Box>
-      )}
+      <PaginationFooter
+        totalPages={transmissions.totalPages}
+        page={page}
+        onPageChange={setPage}
+      />
     </Stack>
   );
 }

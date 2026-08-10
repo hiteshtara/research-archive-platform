@@ -1,13 +1,10 @@
 import { SearchOutlined } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Card,
   CardContent,
   Chip,
-  CircularProgress,
   InputAdornment,
-  Pagination,
   Stack,
   TextField,
   Typography,
@@ -17,7 +14,11 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { searchAwardsV1 } from "../../api/client";
-import { AwardStatusPill } from "../../components/award/AwardStatusPill";
+import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
+import { PaginationFooter } from "../../components/common/PaginationFooter";
+import { StatusPill } from "../../components/common/StatusPill";
 import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
 import { describeSearchResults } from "../../features/award/awardSearchPresentation.mjs";
 
@@ -117,16 +118,10 @@ export function AwardSearchPage() {
 
       {hasSearched && (
         <Box sx={{ maxWidth: 680, width: "100%" }}>
-          {searchQuery.isLoading && (
-            <Box sx={{ display: "grid", placeItems: "center", py: 6 }}>
-              <CircularProgress />
-            </Box>
-          )}
+          {searchQuery.isLoading && <LoadingState mode="spinner" />}
 
           {searchQuery.isError && (
-            <Alert severity="error">
-              Unable to search Awards right now. Try again in a moment.
-            </Alert>
+            <ErrorState message="Unable to search Awards right now. Try again in a moment." />
           )}
 
           {searchQuery.data && (() => {
@@ -169,7 +164,7 @@ export function AwardSearchPage() {
                         color="primary"
                         size="small"
                       />
-                      <AwardStatusPill status={exactDocumentMatch.status} />
+                      <StatusPill status={exactDocumentMatch.status} domain="award" />
                     </Stack>
                     <Typography sx={{ fontWeight: 700 }}>
                       {exactDocumentMatch.awardNumber} &middot;
@@ -195,9 +190,10 @@ export function AwardSearchPage() {
               </Typography>
 
               {content.length === 0 && !exactDocumentMatch && (
-                <Typography color="text.secondary" sx={{ py: 2 }}>
-                  No awards match &ldquo;{appliedQuery}&rdquo;.
-                </Typography>
+                <EmptyState
+                  variant="text"
+                  message={`No awards match "${appliedQuery}".`}
+                />
               )}
 
               <Stack spacing={1.25}>
@@ -248,7 +244,7 @@ export function AwardSearchPage() {
                           <Typography sx={{ fontWeight: 700 }}>
                             {hit.awardNumber}
                           </Typography>
-                          <AwardStatusPill status={hit.status} />
+                          <StatusPill status={hit.status} domain="award" />
                         </Stack>
 
                         <Typography
@@ -279,15 +275,13 @@ export function AwardSearchPage() {
                 ))}
               </Stack>
 
-              {totalPages > 1 && (
-                <Stack sx={{ alignItems: "center", mt: 3 }}>
-                  <Pagination
-                    count={totalPages}
-                    page={page + 1}
-                    onChange={(_event, value) => setPage(value - 1)}
-                  />
-                </Stack>
-              )}
+              <Box sx={{ mt: 3 }}>
+                <PaginationFooter
+                  totalPages={totalPages}
+                  page={page}
+                  onPageChange={setPage}
+                />
+              </Box>
             </>
             );
           })()}

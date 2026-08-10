@@ -1,34 +1,11 @@
 import { CheckCircle, RadioButtonUnchecked } from "@mui/icons-material";
-import { Alert, Box, Card, CardContent, Skeleton, Stack, Typography } from "@mui/material";
+import { Box, Card, CardContent, Skeleton, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 
 import { getProposalFundedAwardsV1, getProposalSummaryV1 } from "../../api/client";
 import { formatCurrencyAmount as formatAmount } from "../../features/award/awardSectionsPresentation.mjs";
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Box
-      sx={{
-        backgroundColor: "action.hover",
-        borderRadius: 1.5,
-        p: 2,
-      }}
-    >
-      <Box
-        sx={{
-          fontSize: 10.5,
-          color: "text.secondary",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          fontFamily: "monospace",
-        }}
-      >
-        {label}
-      </Box>
-      <Box sx={{ fontSize: 16, fontWeight: 700, mt: 0.5 }}>{value}</Box>
-    </Box>
-  );
-}
+import { ErrorState } from "../common/ErrorState";
+import { StatCard } from "../common/StatCard";
 
 function dateRange(start: string | null, end: string | null): string {
   if (!start && !end) {
@@ -100,9 +77,7 @@ export function ProposalSummarySection({
   }
 
   if (summaryQuery.isError) {
-    return (
-      <Alert severity="error">Unable to load the Proposal summary.</Alert>
-    );
+    return <ErrorState message="Unable to load the Proposal summary." />;
   }
 
   const summary = summaryQuery.data;

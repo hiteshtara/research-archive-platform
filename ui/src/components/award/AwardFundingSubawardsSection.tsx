@@ -1,21 +1,17 @@
-import { ArrowForwardOutlined } from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Skeleton,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 
 import { getAwardFundingSubawardsV1 } from "../../api/client";
 import { formatCurrencyAmount as formatAmount } from "../../features/award/awardSectionsPresentation.mjs";
-import { AwardStatusPill } from "./AwardStatusPill";
+import {
+  RELATIONSHIP_ACTION_LABEL,
+  resolveRelationshipCardState,
+} from "../../features/common/relationshipCardPresentation.mjs";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { RelationshipCard } from "../common/RelationshipCard";
+import { StatusPill } from "../common/StatusPill";
 
 // Subaward(s) - the bidirectional counterpart to a Subaward's own
 // Associated Award(s) card (SubawardWorkspacePage.tsx). One card per
@@ -32,32 +28,27 @@ export function AwardFundingSubawardsSection({
 }: {
   awardId: number;
 }) {
-  const navigate = useNavigate();
-
   const fundingSubawardsQuery = useQuery({
     queryKey: ["award-funding-subawards-v1", awardId],
     queryFn: ({ signal }) => getAwardFundingSubawardsV1(awardId, signal),
   });
 
   if (fundingSubawardsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={72} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={72} />;
   }
 
   if (fundingSubawardsQuery.isError) {
-    return <Alert severity="error">Unable to load Subawards.</Alert>;
+    return <ErrorState message="Unable to load Subawards." />;
   }
 
   const fundingSubawards = fundingSubawardsQuery.data ?? [];
 
   if (fundingSubawards.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No Subaward is recorded against this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Subaward is recorded against this Award."
+      />
     );
   }
 
@@ -69,64 +60,38 @@ export function AwardFundingSubawardsSection({
           : `Associated Subawards (${fundingSubawards.length})`}
       </Typography>
 
-      {fundingSubawards.map((link, index) => (
-        <Card key={`${link.subawardCode}-${index}`} variant="outlined">
-          <CardContent
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              "&:last-child": { pb: 2 },
-            }}
-          >
-            <Box>
-              <Typography sx={{ fontWeight: 700 }}>
-                Subaward {link.subawardCode}
-              </Typography>
+      {fundingSubawards.map((link, index) => {
+        const { archived } = resolveRelationshipCardState(
+          link.navigableCurrentSubawardId,
+        );
 
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ mt: 0.5, alignItems: "center", flexWrap: "wrap" }}
-              >
-                {link.navigableCurrentSubawardId !== null && (
-                  <AwardStatusPill status={link.subawardStatus} />
-                )}
-                {link.navigableCurrentSubawardId === null && (
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    label="Not currently archived"
-                  />
-                )}
-                {link.organizationId && (
-                  <Typography variant="caption" color="text.secondary">
-                    Organization {link.organizationId}
-                  </Typography>
-                )}
-                {link.subawardAmount !== null && (
-                  <Typography variant="caption" color="text.secondary">
-                    {formatAmount(link.subawardAmount)}
-                  </Typography>
-                )}
-              </Stack>
-            </Box>
-
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={link.navigableCurrentSubawardId === null}
-              endIcon={<ArrowForwardOutlined fontSize="small" />}
-              onClick={() =>
-                link.navigableCurrentSubawardId !== null &&
-                navigate(`/subawards/${link.navigableCurrentSubawardId}`)
-              }
-            >
-              Open Subaward
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+        return (
+          <RelationshipCard
+            key={`${link.subawardCode}-${index}`}
+            title={`Subaward ${link.subawardCode}`}
+            archived={archived}
+            statusLabel={
+              <StatusPill status={link.subawardStatus} domain="subaward" />
+            }
+            metaText={
+              link.organizationId
+                ? `Organization ${link.organizationId}`
+                : null
+            }
+            amountText={
+              link.subawardAmount !== null
+                ? formatAmount(link.subawardAmount)
+                : null
+            }
+            buttonLabel={RELATIONSHIP_ACTION_LABEL.subaward}
+            href={
+              archived
+                ? `/subawards/${link.navigableCurrentSubawardId}`
+                : undefined
+            }
+          />
+        );
+      })}
     </Stack>
   );
 }

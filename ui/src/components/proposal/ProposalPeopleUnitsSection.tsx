@@ -1,10 +1,8 @@
 import {
-  Alert,
   Box,
   Card,
   CardContent,
   Chip,
-  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -18,6 +16,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getProposalPeopleV1, getProposalUnitsV1 } from "../../api/client";
 import type { ProposalPersonV1 } from "../../types/api";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 function roleLabel(person: ProposalPersonV1): string {
   if (person.principalInvestigator) {
@@ -55,16 +55,11 @@ export function ProposalPeopleUnitsSection({
   });
 
   if (peopleQuery.isLoading || unitsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={72} />
-        <Skeleton variant="rounded" height={72} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={72} count={2} />;
   }
 
   if (peopleQuery.isError || unitsQuery.isError) {
-    return <Alert severity="error">Unable to load People and Units.</Alert>;
+    return <ErrorState message="Unable to load People and Units." />;
   }
 
   const people = peopleQuery.data ?? [];

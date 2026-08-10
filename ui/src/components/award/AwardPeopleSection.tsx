@@ -1,14 +1,5 @@
 import { StarOutlined } from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  Skeleton,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Box, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 
 import { getAwardPeopleV1 } from "../../api/client";
@@ -17,6 +8,9 @@ import {
   formatEffortNote as formatEffort,
   hasAnyPeople,
 } from "../../features/award/awardSectionsPresentation.mjs";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 // People and Units - lazy-loads from GET /api/v1/awards/{awardId}/people,
 // grouping each person's units and credit splits under that person
@@ -28,26 +22,21 @@ export function AwardPeopleSection({ awardId }: { awardId: number }) {
   });
 
   if (peopleQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        {Array.from({ length: 3 }).map((_, index) => (
-          <Skeleton key={index} variant="rounded" height={96} />
-        ))}
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={96} count={3} />;
   }
 
   if (peopleQuery.isError) {
-    return <Alert severity="error">Unable to load People and Units.</Alert>;
+    return <ErrorState message="Unable to load People and Units." />;
   }
 
   const people = peopleQuery.data ?? [];
 
   if (!hasAnyPeople(people)) {
     return (
-      <Typography color="text.secondary">
-        No people are recorded for this Award version.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No people are recorded for this Award version."
+      />
     );
   }
 

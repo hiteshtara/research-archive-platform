@@ -3,13 +3,10 @@ import {
   Alert,
   Box,
   Chip,
-  CircularProgress,
   Dialog,
   DialogContent,
   DialogTitle,
   Divider,
-  Pagination,
-  Skeleton,
   Stack,
   Tab,
   Table,
@@ -41,33 +38,13 @@ import type {
   TimeAndMoneyActionV1,
   TimeAndMoneyHistoryEntryV1,
 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { PaginationFooter } from "../common/PaginationFooter";
+import { StatCard } from "../common/StatCard";
 
 const PAGE_SIZE = 25;
-
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <Box
-      sx={{
-        border: "1px solid",
-        borderColor: "divider",
-        borderRadius: 2,
-        p: 2,
-        minWidth: 160,
-      }}
-    >
-      <Typography variant="caption" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography sx={{ fontWeight: 700, fontSize: 18 }}>{value}</Typography>
-    </Box>
-  );
-}
 
 function WorkflowDocumentDialog({
   awardId,
@@ -102,16 +79,10 @@ function WorkflowDocumentDialog({
     >
       <DialogTitle>Workflow Details</DialogTitle>
       <DialogContent>
-        {documentQuery.isLoading && (
-          <Box sx={{ display: "grid", placeItems: "center", py: 4 }}>
-            <CircularProgress />
-          </Box>
-        )}
+        {documentQuery.isLoading && <LoadingState mode="compact" />}
 
         {documentQuery.isError && (
-          <Alert severity="error">
-            This Time and Money document could not be loaded.
-          </Alert>
+          <ErrorState message="This Time and Money document could not be loaded." />
         )}
 
         {documentQuery.data && (
@@ -188,16 +159,10 @@ function TransactionDetailsDialog({
     >
       <DialogTitle>Transaction Details</DialogTitle>
       <DialogContent>
-        {transactionQuery.isLoading && (
-          <Box sx={{ display: "grid", placeItems: "center", py: 4 }}>
-            <CircularProgress />
-          </Box>
-        )}
+        {transactionQuery.isLoading && <LoadingState mode="compact" />}
 
         {transactionQuery.isError && (
-          <Alert severity="error">
-            This transaction could not be loaded.
-          </Alert>
+          <ErrorState message="This transaction could not be loaded." />
         )}
 
         {transactionQuery.data && (
@@ -385,14 +350,12 @@ export function AwardTimeAndMoneySection({ awardId }: { awardId: number }) {
   });
 
   if (summaryQuery.isLoading) {
-    return <Skeleton variant="rounded" height={280} />;
+    return <LoadingState mode="skeleton" height={280} />;
   }
 
   if (summaryQuery.isError || !summaryQuery.data) {
     return (
-      <Alert severity="error">
-        Unable to load this Award&rsquo;s Time and Money summary.
-      </Alert>
+      <ErrorState message="Unable to load this Award's Time and Money summary." />
     );
   }
 
@@ -402,14 +365,20 @@ export function AwardTimeAndMoneySection({ awardId }: { awardId: number }) {
     <Stack spacing={3}>
       <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
         <StatCard
+          variant="outlined"
+          minWidth={160}
           label="Obligated total"
           value={formatCurrencyAmount(summary.obligatedTotalAmount)}
         />
         <StatCard
+          variant="outlined"
+          minWidth={160}
           label="Anticipated total"
           value={formatCurrencyAmount(summary.anticipatedTotalAmount)}
         />
         <StatCard
+          variant="outlined"
+          minWidth={160}
           label="Time and Money actions (all versions)"
           value={String(summary.familyTransactionCount)}
         />
@@ -509,18 +478,19 @@ function ActionsTable({
   onSelectDocument: (documentNumber: string) => void;
 }) {
   if (isLoading) {
-    return <Skeleton variant="rounded" height={220} />;
+    return <LoadingState mode="skeleton" height={220} />;
   }
 
   if (isError) {
-    return <Alert severity="error">Unable to load Time and Money actions.</Alert>;
+    return <ErrorState message="Unable to load Time and Money actions." />;
   }
 
   if (actions.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No Time and Money actions are recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Time and Money actions are recorded for this Award."
+      />
     );
   }
 
@@ -571,15 +541,11 @@ function ActionsTable({
         </Table>
       </TableContainer>
 
-      {totalPages > 1 && (
-        <Box sx={{ display: "flex", justifyContent: "center" }}>
-          <Pagination
-            count={totalPages}
-            page={page + 1}
-            onChange={(_event, value) => onPageChange(value - 1)}
-          />
-        </Box>
-      )}
+      <PaginationFooter
+        totalPages={totalPages}
+        page={page}
+        onPageChange={onPageChange}
+      />
     </Stack>
   );
 }
@@ -602,18 +568,19 @@ function HistoryTable({
   onSelectTransaction: (pendingTransactionId: number) => void;
 }) {
   if (isLoading) {
-    return <Skeleton variant="rounded" height={220} />;
+    return <LoadingState mode="skeleton" height={220} />;
   }
 
   if (isError) {
-    return <Alert severity="error">Unable to load Time and Money history.</Alert>;
+    return <ErrorState message="Unable to load Time and Money history." />;
   }
 
   if (entries.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No amount history is recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No amount history is recorded for this Award."
+      />
     );
   }
 
@@ -696,15 +663,11 @@ function HistoryTable({
         </Table>
       </TableContainer>
 
-      {totalPages > 1 && (
-        <Box sx={{ display: "flex", justifyContent: "center" }}>
-          <Pagination
-            count={totalPages}
-            page={page + 1}
-            onChange={(_event, value) => onPageChange(value - 1)}
-          />
-        </Box>
-      )}
+      <PaginationFooter
+        totalPages={totalPages}
+        page={page}
+        onPageChange={onPageChange}
+      />
     </Stack>
   );
 }

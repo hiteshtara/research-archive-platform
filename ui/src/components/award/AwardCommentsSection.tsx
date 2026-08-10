@@ -1,13 +1,11 @@
 import { ExpandLessOutlined, ExpandMoreOutlined } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Card,
   CardContent,
   Collapse,
   Divider,
   IconButton,
-  Skeleton,
   Stack,
   Typography,
 } from "@mui/material";
@@ -20,6 +18,9 @@ import type {
   AwardCommentCategoryV1,
   AwardCommentEntryV1,
 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 function blankCommentMetadataSuffix(entry: AwardCommentEntryV1): string {
   if (!entry.updateTimestamp && !entry.updateUser) {
@@ -165,16 +166,11 @@ export function AwardCommentsSection({ awardId }: { awardId: number }) {
   });
 
   if (commentsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={80} />
-        <Skeleton variant="rounded" height={80} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={80} count={2} />;
   }
 
   if (commentsQuery.isError) {
-    return <Alert severity="error">Unable to load Comments and Notepad.</Alert>;
+    return <ErrorState message="Unable to load Comments and Notepad." />;
   }
 
   const data = commentsQuery.data;
@@ -185,9 +181,10 @@ export function AwardCommentsSection({ awardId }: { awardId: number }) {
 
   if (!hasAnyComments(data.commentCategories, data.notepadEntries)) {
     return (
-      <Typography color="text.secondary">
-        No comments or notepad entries are recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No comments or notepad entries are recorded for this Award."
+      />
     );
   }
 

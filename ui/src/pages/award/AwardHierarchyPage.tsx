@@ -1,4 +1,4 @@
-import { Alert, Box, CircularProgress, Stack, Typography } from "@mui/material";
+import { Box, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -7,6 +7,8 @@ import { getAwardHierarchyV1 } from "../../api/client";
 import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
 import { AwardHierarchyTree } from "../../components/award/AwardHierarchyTree";
 import { flattenHierarchyNodes } from "../../components/award/hierarchyUtils";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import type { AwardHierarchyNode } from "../../types/api";
 
 // Standalone hierarchy screen, reached after selecting a search result.
@@ -40,18 +42,14 @@ export function AwardHierarchyPage() {
   }
 
   if (hierarchyQuery.isLoading) {
-    return (
-      <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState />;
   }
 
   if (hierarchyQuery.isError) {
     return (
-      <Alert severity="error">
-        Unable to load the hierarchy for Award {awardNumber}.
-      </Alert>
+      <ErrorState
+        message={`Unable to load the hierarchy for Award ${awardNumber}.`}
+      />
     );
   }
 

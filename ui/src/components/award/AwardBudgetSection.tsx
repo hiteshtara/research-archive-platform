@@ -1,9 +1,6 @@
 import {
-  Alert,
   Box,
   Chip,
-  Pagination,
-  Skeleton,
   Stack,
   Tab,
   Table,
@@ -37,46 +34,13 @@ import type {
   AwardBudgetPersonnelV1,
   AwardBudgetVersionV1,
 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { PaginationFooter } from "../common/PaginationFooter";
+import { StatCard } from "../common/StatCard";
 
 const PAGE_SIZE = 25;
-
-function StatCard({
-  label,
-  value,
-  caption,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  caption?: string;
-  accent?: boolean;
-}) {
-  return (
-    <Box
-      sx={{
-        border: "1px solid",
-        borderColor: accent ? "primary.main" : "divider",
-        borderRadius: 2,
-        p: 2,
-        minWidth: 200,
-      }}
-    >
-      <Typography variant="caption" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography sx={{ fontWeight: 700, fontSize: 18 }}>{value}</Typography>
-      {caption && (
-        <Typography
-          variant="caption"
-          color="text.disabled"
-          sx={{ display: "block", mt: 0.5 }}
-        >
-          {caption}
-        </Typography>
-      )}
-    </Box>
-  );
-}
 
 function BudgetSummaryPanel({ awardId }: { awardId: number }) {
   const summaryQuery = useQuery({
@@ -85,11 +49,11 @@ function BudgetSummaryPanel({ awardId }: { awardId: number }) {
   });
 
   if (summaryQuery.isLoading) {
-    return <Skeleton variant="rounded" height={120} />;
+    return <LoadingState mode="skeleton" height={120} />;
   }
 
   if (summaryQuery.isError || !summaryQuery.data) {
-    return <Alert severity="error">Unable to load the Budget summary.</Alert>;
+    return <ErrorState message="Unable to load the Budget summary." />;
   }
 
   const summary = summaryQuery.data;
@@ -134,14 +98,20 @@ function BudgetSummaryPanel({ awardId }: { awardId: number }) {
         </Typography>
         <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
           <StatCard
+            variant="outlined"
+            minWidth={200}
             label="Version Total Direct"
             value={formatCurrencyAmount(summary.totalDirectCost)}
           />
           <StatCard
+            variant="outlined"
+            minWidth={200}
             label="Version Total Indirect"
             value={formatCurrencyAmount(summary.totalIndirectCost)}
           />
           <StatCard
+            variant="outlined"
+            minWidth={200}
             label="Version Total Cost"
             value={formatCurrencyAmount(summary.totalCost)}
           />
@@ -155,12 +125,16 @@ function BudgetSummaryPanel({ awardId }: { awardId: number }) {
         </Typography>
         <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
           <StatCard
+            variant="outlined"
+            minWidth={200}
             accent
             label="Budget Total Cost Limit"
             value={formatCurrencyAmount(summary.awardBudgetTotalCostLimit)}
             caption="Award-level ceiling, frozen when this version was created"
           />
           <StatCard
+            variant="outlined"
+            minWidth={200}
             accent
             label="Budget Change Total Cost Limit"
             value={formatCurrencyAmount(summary.budgetChangeTotalCostLimit)}
@@ -223,20 +197,21 @@ function BudgetVersionsPanel({ awardId }: { awardId: number }) {
   });
 
   if (versionsQuery.isLoading) {
-    return <Skeleton variant="rounded" height={200} />;
+    return <LoadingState mode="skeleton" height={200} />;
   }
 
   if (versionsQuery.isError || !versionsQuery.data) {
-    return <Alert severity="error">Unable to load Budget versions.</Alert>;
+    return <ErrorState message="Unable to load Budget versions." />;
   }
 
   const { content, totalElements, totalPages } = versionsQuery.data;
 
   if (!hasAnyBudgetVersions(content) && page === 0) {
     return (
-      <Typography color="text.secondary">
-        No Budget versions recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Budget versions recorded for this Award."
+      />
     );
   }
 
@@ -272,15 +247,13 @@ function BudgetVersionsPanel({ awardId }: { awardId: number }) {
         </Table>
       </TableContainer>
 
-      {totalPages > 1 && (
-        <Stack sx={{ alignItems: "center", mt: 1 }}>
-          <Pagination
-            count={totalPages}
-            page={page + 1}
-            onChange={(_event, value) => setPage(value - 1)}
-          />
-        </Stack>
-      )}
+      <Box sx={{ mt: 1 }}>
+        <PaginationFooter
+          totalPages={totalPages}
+          page={page}
+          onPageChange={setPage}
+        />
+      </Box>
     </Stack>
   );
 }
@@ -292,20 +265,21 @@ function BudgetPeriodsPanel({ awardId }: { awardId: number }) {
   });
 
   if (periodsQuery.isLoading) {
-    return <Skeleton variant="rounded" height={160} />;
+    return <LoadingState mode="skeleton" height={160} />;
   }
 
   if (periodsQuery.isError || !periodsQuery.data) {
-    return <Alert severity="error">Unable to load Budget periods.</Alert>;
+    return <ErrorState message="Unable to load Budget periods." />;
   }
 
   const periods = periodsQuery.data;
 
   if (periods.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No Budget periods recorded for this Award's selected Budget.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Budget periods recorded for this Award's selected Budget."
+      />
     );
   }
 
@@ -374,20 +348,21 @@ function BudgetLineItemsPanel({ awardId }: { awardId: number }) {
   });
 
   if (lineItemsQuery.isLoading) {
-    return <Skeleton variant="rounded" height={200} />;
+    return <LoadingState mode="skeleton" height={200} />;
   }
 
   if (lineItemsQuery.isError || !lineItemsQuery.data) {
-    return <Alert severity="error">Unable to load Budget line items.</Alert>;
+    return <ErrorState message="Unable to load Budget line items." />;
   }
 
   const { content, totalElements, totalPages } = lineItemsQuery.data;
 
   if (content.length === 0 && page === 0) {
     return (
-      <Typography color="text.secondary">
-        No Budget line items recorded for this Award's selected Budget.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Budget line items recorded for this Award's selected Budget."
+      />
     );
   }
 
@@ -421,15 +396,13 @@ function BudgetLineItemsPanel({ awardId }: { awardId: number }) {
         </Table>
       </TableContainer>
 
-      {totalPages > 1 && (
-        <Stack sx={{ alignItems: "center", mt: 1 }}>
-          <Pagination
-            count={totalPages}
-            page={page + 1}
-            onChange={(_event, value) => setPage(value - 1)}
-          />
-        </Stack>
-      )}
+      <Box sx={{ mt: 1 }}>
+        <PaginationFooter
+          totalPages={totalPages}
+          page={page}
+          onPageChange={setPage}
+        />
+      </Box>
     </Stack>
   );
 }
@@ -464,21 +437,17 @@ function BudgetPersonnelPanel({ awardId }: { awardId: number }) {
   });
 
   if (personnelQuery.isLoading) {
-    return <Skeleton variant="rounded" height={200} />;
+    return <LoadingState mode="skeleton" height={200} />;
   }
 
   if (personnelQuery.isError || !personnelQuery.data) {
-    return <Alert severity="error">Unable to load Budget personnel.</Alert>;
+    return <ErrorState message="Unable to load Budget personnel." />;
   }
 
   const { content, totalElements, totalPages } = personnelQuery.data;
 
   if (content.length === 0 && page === 0) {
-    return (
-      <Typography color="text.secondary">
-        {personnelEmptyStateMessage()}
-      </Typography>
-    );
+    return <EmptyState variant="text" message={personnelEmptyStateMessage()} />;
   }
 
   return (
@@ -510,15 +479,13 @@ function BudgetPersonnelPanel({ awardId }: { awardId: number }) {
         </Table>
       </TableContainer>
 
-      {totalPages > 1 && (
-        <Stack sx={{ alignItems: "center", mt: 1 }}>
-          <Pagination
-            count={totalPages}
-            page={page + 1}
-            onChange={(_event, value) => setPage(value - 1)}
-          />
-        </Stack>
-      )}
+      <Box sx={{ mt: 1 }}>
+        <PaginationFooter
+          totalPages={totalPages}
+          page={page}
+          onPageChange={setPage}
+        />
+      </Box>
     </Stack>
   );
 }

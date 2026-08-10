@@ -3,10 +3,8 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Alert,
   Chip,
   Divider,
-  Skeleton,
   Stack,
   Typography,
 } from "@mui/material";
@@ -29,6 +27,9 @@ import type {
   AwardSponsorContactV1,
   AwardUnitContactV1,
 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 import { AwardPeopleSection } from "./AwardPeopleSection";
 
 function ContactRow({
@@ -88,10 +89,10 @@ function SectionShell({
         <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
       </AccordionSummary>
       <AccordionDetails>
-        {isLoading && <Skeleton variant="rounded" height={64} />}
-        {!isLoading && isError && <Alert severity="error">{errorMessage}</Alert>}
+        {isLoading && <LoadingState mode="skeleton" height={64} />}
+        {!isLoading && isError && <ErrorState message={errorMessage} />}
         {!isLoading && !isError && isEmpty && (
-          <Typography color="text.secondary">{emptyMessage}</Typography>
+          <EmptyState variant="text" message={emptyMessage} />
         )}
         {!isLoading && !isError && !isEmpty && children}
       </AccordionDetails>

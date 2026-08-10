@@ -298,6 +298,16 @@ export function getAwardFundingSubawardsV1(
   );
 }
 
+export function getAwardAssociatedNegotiationsV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardAssociatedNegotiation[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/negotiations`,
+    signal,
+  );
+}
+
 export function getAwardVersionsV1(
   awardId: number,
   parameters: {

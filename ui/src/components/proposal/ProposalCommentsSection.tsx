@@ -1,13 +1,11 @@
 import { ExpandLessOutlined, ExpandMoreOutlined } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Card,
   CardContent,
   Collapse,
   Divider,
   IconButton,
-  Skeleton,
   Stack,
   Typography,
 } from "@mui/material";
@@ -19,6 +17,9 @@ import type {
   ProposalCommentCategoryV1,
   ProposalCommentEntryV1,
 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 function metadataSuffix(entry: ProposalCommentEntryV1): string {
   if (!entry.sourceUpdateTimestamp && !entry.sourceUpdateUser) {
@@ -160,25 +161,21 @@ export function ProposalCommentsSection({
   });
 
   if (commentsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={80} />
-        <Skeleton variant="rounded" height={80} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={80} count={2} />;
   }
 
   if (commentsQuery.isError) {
-    return <Alert severity="error">Unable to load Comments.</Alert>;
+    return <ErrorState message="Unable to load Comments." />;
   }
 
   const categories = commentsQuery.data?.commentCategories ?? [];
 
   if (categories.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No comments are recorded for this Proposal.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No comments are recorded for this Proposal."
+      />
     );
   }
 

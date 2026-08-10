@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import type { AwardHierarchyNode } from "../../types/api";
 
-import { AwardStatusPill } from "./AwardStatusPill";
+import { StatusPill } from "../common/StatusPill";
 import { formatCurrencyAmount as fmt } from "../../features/award/awardSectionsPresentation.mjs";
 
 interface AwardHierarchyTreeProps {
@@ -201,7 +201,7 @@ function TreeNodeCard({
       </Typography>
 
       <Box sx={{ mt: 0.75, mb: 0.75 }}>
-        <AwardStatusPill status={node.status} />
+        <StatusPill status={node.status} domain="award" />
         {node.active === false && (
           <Typography
             component="span"

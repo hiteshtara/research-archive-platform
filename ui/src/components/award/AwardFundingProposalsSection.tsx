@@ -1,21 +1,17 @@
-import { ArrowForwardOutlined } from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Skeleton,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Chip, Stack } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 
 import { getAwardFundingProposalsV1 } from "../../api/client";
-import { formatCurrencyAmount as formatAmount } from "../../features/award/awardSectionsPresentation.mjs";
-import { AwardStatusPill } from "./AwardStatusPill";
+import {
+  buildFundingProposalMetaText,
+  RELATIONSHIP_ACTION_LABEL,
+  resolveRelationshipCardState,
+} from "../../features/common/relationshipCardPresentation.mjs";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { RelationshipCard } from "../common/RelationshipCard";
+import { StatusPill } from "../common/StatusPill";
 
 // Funding Proposal(s) - the bidirectional counterpart to Institutional
 // Proposal's own Funded Awards section. One card per real
@@ -30,71 +26,50 @@ export function AwardFundingProposalsSection({
 }: {
   awardId: number;
 }) {
-  const navigate = useNavigate();
-
   const fundingProposalsQuery = useQuery({
     queryKey: ["award-funding-proposals-v1", awardId],
     queryFn: ({ signal }) => getAwardFundingProposalsV1(awardId, signal),
   });
 
   if (fundingProposalsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={72} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={72} />;
   }
 
   if (fundingProposalsQuery.isError) {
-    return <Alert severity="error">Unable to load Funding Proposals.</Alert>;
+    return <ErrorState message="Unable to load Funding Proposals." />;
   }
 
   const fundingProposals = fundingProposalsQuery.data ?? [];
 
   if (fundingProposals.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No Funding Proposal is recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No Funding Proposal is recorded for this Award."
+      />
     );
   }
 
   return (
     <Stack spacing={1.5}>
-      {fundingProposals.map((link, index) => (
-        <Card
-          key={`${link.proposalNumber}-${index}`}
-          variant="outlined"
-          sx={{ opacity: link.relationshipActive ? 1 : 0.6 }}
-        >
-          <CardContent
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              "&:last-child": { pb: 2 },
-            }}
-          >
-            <Box>
-              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                <Typography sx={{ fontWeight: 700 }}>
-                  Institutional Proposal {link.proposalNumber}
-                </Typography>
-                {!link.relationshipActive && (
-                  <Chip size="small" variant="outlined" label="Inactive" />
-                )}
-              </Stack>
+      {fundingProposals.map((link, index) => {
+        const { archived } = resolveRelationshipCardState(
+          link.navigableActiveProposalId,
+        );
 
-              <Typography variant="body2" color="text.secondary">
-                {link.proposalTitle ?? "Untitled proposal"}
-              </Typography>
-
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ mt: 0.5, alignItems: "center", flexWrap: "wrap" }}
-              >
-                <AwardStatusPill status={link.proposalStatus} />
+        return (
+          <RelationshipCard
+            key={`${link.proposalNumber}-${index}`}
+            title={`Institutional Proposal ${link.proposalNumber}`}
+            subtitle={link.proposalTitle ?? "Untitled proposal"}
+            archived={archived}
+            inactive={!link.relationshipActive}
+            statusLabel={
+              <>
+                <StatusPill
+                  status={link.proposalStatus}
+                  domain="proposal"
+                />
                 {link.workflowDocumentNumber && (
                   <Chip
                     size="small"
@@ -102,31 +77,18 @@ export function AwardFundingProposalsSection({
                     label={`Workflow ${link.workflowDocumentNumber}`}
                   />
                 )}
-                <Typography variant="caption" color="text.secondary">
-                  {link.principalInvestigatorName ?? "—"}
-                  {link.sponsorName ? ` · ${link.sponsorName}` : ""}
-                  {link.requestedTotalCost !== null
-                    ? ` · Requested ${formatAmount(link.requestedTotalCost)}`
-                    : ""}
-                </Typography>
-              </Stack>
-            </Box>
-
-            <Button
-              variant="outlined"
-              size="small"
-              endIcon={<ArrowForwardOutlined fontSize="small" />}
-              disabled={link.navigableActiveProposalId === null}
-              onClick={() =>
-                link.navigableActiveProposalId !== null &&
-                navigate(`/proposals/dashboard/${link.navigableActiveProposalId}`)
-              }
-            >
-              Open Proposal
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+              </>
+            }
+            metaText={buildFundingProposalMetaText(link)}
+            buttonLabel={RELATIONSHIP_ACTION_LABEL.proposal}
+            href={
+              archived
+                ? `/proposals/dashboard/${link.navigableActiveProposalId}`
+                : undefined
+            }
+          />
+        );
+      })}
     </Stack>
   );
 }

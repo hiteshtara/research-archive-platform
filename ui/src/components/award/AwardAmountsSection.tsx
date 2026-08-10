@@ -1,9 +1,5 @@
 import {
-  Alert,
-  Box,
   Chip,
-  Pagination,
-  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -11,12 +7,15 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { getAwardAmountsV1 } from "../../api/client";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { PaginationFooter } from "../common/PaginationFooter";
 import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
 
 const PAGE_SIZE = 50;
@@ -34,11 +33,11 @@ export function AwardAmountsSection({ awardId }: { awardId: number }) {
   });
 
   if (amountsQuery.isLoading) {
-    return <Skeleton variant="rounded" height={220} />;
+    return <LoadingState mode="skeleton" height={220} />;
   }
 
   if (amountsQuery.isError) {
-    return <Alert severity="error">Unable to load amount history.</Alert>;
+    return <ErrorState message="Unable to load amount history." />;
   }
 
   const amounts = amountsQuery.data;
@@ -49,9 +48,10 @@ export function AwardAmountsSection({ awardId }: { awardId: number }) {
 
   if (amounts.content.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No amount history is recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No amount history is recorded for this Award."
+      />
     );
   }
 
@@ -85,15 +85,11 @@ export function AwardAmountsSection({ awardId }: { awardId: number }) {
         </Table>
       </TableContainer>
 
-      {amounts.totalPages > 1 && (
-        <Box sx={{ display: "flex", justifyContent: "center" }}>
-          <Pagination
-            count={amounts.totalPages}
-            page={page + 1}
-            onChange={(_event, value) => setPage(value - 1)}
-          />
-        </Box>
-      )}
+      <PaginationFooter
+        totalPages={amounts.totalPages}
+        page={page}
+        onPageChange={setPage}
+      />
     </Stack>
   );
 }

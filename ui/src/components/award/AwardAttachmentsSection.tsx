@@ -8,7 +8,6 @@ import {
   TextSnippetOutlined,
 } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -17,7 +16,6 @@ import {
   CircularProgress,
   IconButton,
   Link,
-  Skeleton,
   Stack,
   Tooltip,
   Typography,
@@ -35,6 +33,9 @@ import {
 } from "../../features/award/awardSectionsPresentation.mjs";
 import type { AttachmentTypeCategory } from "../../features/award/awardSectionsPresentation.mjs";
 import type { AwardAttachmentV1 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 const TYPE_ICONS: Record<AttachmentTypeCategory, typeof InsertDriveFileOutlined> = {
   pdf: PictureAsPdfOutlined,
@@ -109,23 +110,19 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
   }
 
   if (attachmentsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={72} />
-        <Skeleton variant="rounded" height={72} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={72} count={2} />;
   }
 
   if (attachmentsQuery.isError) {
-    return <Alert severity="error">Unable to load Attachments.</Alert>;
+    return <ErrorState message="Unable to load Attachments." />;
   }
 
   if (!hasAnyAttachments(items)) {
     return (
-      <Typography color="text.secondary">
-        No attachments are recorded for this Award.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No attachments are recorded for this Award."
+      />
     );
   }
 
@@ -143,7 +140,7 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
         />
       </Box>
 
-      {downloadError && <Alert severity="error">{downloadError}</Alert>}
+      {downloadError && <ErrorState message={downloadError} />}
 
       {items.map((attachment) => {
         const fileName = attachment.fileName ?? "attachment";

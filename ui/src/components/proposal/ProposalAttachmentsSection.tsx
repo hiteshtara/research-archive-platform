@@ -9,14 +9,12 @@ import {
   VisibilityOutlined,
 } from "@mui/icons-material";
 import {
-  Alert,
   Box,
   Card,
   CardContent,
   Chip,
   CircularProgress,
   IconButton,
-  Skeleton,
   Stack,
   Tooltip,
   Typography,
@@ -36,6 +34,9 @@ import {
 } from "../../features/award/awardSectionsPresentation.mjs";
 import type { AttachmentTypeCategory } from "../../features/award/awardSectionsPresentation.mjs";
 import type { ProposalAttachmentV1 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 const TYPE_ICONS: Record<AttachmentTypeCategory, typeof InsertDriveFileOutlined> = {
   pdf: PictureAsPdfOutlined,
@@ -112,16 +113,11 @@ export function ProposalAttachmentsSection({
   }
 
   if (attachmentsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={72} />
-        <Skeleton variant="rounded" height={72} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" height={72} count={2} />;
   }
 
   if (attachmentsQuery.isError) {
-    return <Alert severity="error">Unable to load Attachments.</Alert>;
+    return <ErrorState message="Unable to load Attachments." />;
   }
 
   const groups = attachmentsQuery.data?.groups ?? [];
@@ -132,9 +128,10 @@ export function ProposalAttachmentsSection({
 
   if (totalCount === 0) {
     return (
-      <Typography color="text.secondary">
-        No attachments are recorded for this Proposal.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No attachments are recorded for this Proposal."
+      />
     );
   }
 
@@ -149,7 +146,7 @@ export function ProposalAttachmentsSection({
         />
       </Box>
 
-      {downloadError && <Alert severity="error">{downloadError}</Alert>}
+      {downloadError && <ErrorState message={downloadError} />}
 
       {groups.map((group) => (
         <Box key={group.attachmentTypeCode ?? "untyped"}>

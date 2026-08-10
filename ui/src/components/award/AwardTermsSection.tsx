@@ -3,10 +3,8 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Alert,
   Box,
   Chip,
-  Skeleton,
   Stack,
   Typography,
 } from "@mui/material";
@@ -14,6 +12,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getAwardTermsV1 } from "../../api/client";
 import { hasAnyTerms } from "../../features/award/awardSectionsPresentation.mjs";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 // Terms - lazy-loads from GET /api/v1/awards/{awardId}/terms. Sponsor
 // terms and report terms are kept as two separate groups, never
@@ -25,16 +26,11 @@ export function AwardTermsSection({ awardId }: { awardId: number }) {
   });
 
   if (termsQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={64} />
-        <Skeleton variant="rounded" height={160} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" heights={[64, 160]} />;
   }
 
   if (termsQuery.isError) {
-    return <Alert severity="error">Unable to load Terms.</Alert>;
+    return <ErrorState message="Unable to load Terms." />;
   }
 
   const terms = termsQuery.data;
@@ -45,9 +41,10 @@ export function AwardTermsSection({ awardId }: { awardId: number }) {
 
   if (!hasAnyTerms(terms.sponsorTerms, terms.reportTerms)) {
     return (
-      <Typography color="text.secondary">
-        No terms are recorded for this Award version.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No terms are recorded for this Award version."
+      />
     );
   }
 

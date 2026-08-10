@@ -1,32 +1,9 @@
-import { Alert, Box, Skeleton } from "@mui/material";
+import { Box, Skeleton } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 
 import { getProposalSummaryV1 } from "../../api/client";
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Box
-      sx={{
-        backgroundColor: "action.hover",
-        borderRadius: 1.5,
-        p: 2,
-      }}
-    >
-      <Box
-        sx={{
-          fontSize: 10.5,
-          color: "text.secondary",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          fontFamily: "monospace",
-        }}
-      >
-        {label}
-      </Box>
-      <Box sx={{ fontSize: 16, fontWeight: 700, mt: 0.5 }}>{value}</Box>
-    </Box>
-  );
-}
+import { ErrorState } from "../common/ErrorState";
+import { StatCard } from "../common/StatCard";
 
 // Sponsor and Program - the same fields already present on
 // GET /api/v1/proposals/{proposalId} (sponsorCode/sponsorName/
@@ -59,9 +36,7 @@ export function ProposalSponsorProgramSection({
   }
 
   if (summaryQuery.isError) {
-    return (
-      <Alert severity="error">Unable to load Sponsor and Program.</Alert>
-    );
+    return <ErrorState message="Unable to load Sponsor and Program." />;
   }
 
   const summary = summaryQuery.data;

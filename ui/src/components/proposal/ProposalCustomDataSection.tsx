@@ -3,10 +3,8 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Alert,
   Box,
   Chip,
-  Skeleton,
   Stack,
   TextField,
   Typography,
@@ -21,6 +19,9 @@ import {
   resolveCustomDataLabel,
 } from "../../features/proposal/proposalCustomDataPresentation.mjs";
 import type { ProposalCustomDataV1 } from "../../types/api";
+import { EmptyState } from "../common/EmptyState";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
 
 // Custom Data - archive.proposal_custom_data for this exact
 // proposalId, version-scoped (never combined with a sibling version's
@@ -43,25 +44,21 @@ export function ProposalCustomDataSection({
   });
 
   if (customDataQuery.isLoading) {
-    return (
-      <Stack spacing={1.5}>
-        <Skeleton variant="rounded" height={48} />
-        <Skeleton variant="rounded" height={160} />
-      </Stack>
-    );
+    return <LoadingState mode="skeleton" heights={[48, 160]} />;
   }
 
   if (customDataQuery.isError) {
-    return <Alert severity="error">Unable to load Custom Data.</Alert>;
+    return <ErrorState message="Unable to load Custom Data." />;
   }
 
   const rows = customDataQuery.data ?? [];
 
   if (rows.length === 0) {
     return (
-      <Typography color="text.secondary">
-        No custom data recorded for this Proposal version.
-      </Typography>
+      <EmptyState
+        variant="text"
+        message="No custom data recorded for this Proposal version."
+      />
     );
   }
 
@@ -79,9 +76,7 @@ export function ProposalCustomDataSection({
       />
 
       {groups.length === 0 && (
-        <Typography color="text.secondary">
-          No custom data matches "{query}".
-        </Typography>
+        <EmptyState variant="text" message={`No custom data matches "${query}".`} />
       )}
 
       {groups.map((group, groupIndex) => (

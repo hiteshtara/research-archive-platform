@@ -1,7 +1,6 @@
 import {
   Box,
   Chip,
-  CircularProgress,
   List,
   ListItemButton,
   ListItemText,
@@ -13,8 +12,10 @@ import { useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { getProposalSummaryV1 } from "../../api/client";
-import { AwardStatusPill } from "../../components/award/AwardStatusPill";
+import { StatusPill } from "../../components/common/StatusPill";
 import { ComingSoonSection } from "../../components/award/ComingSoonSection";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { ProposalAttachmentsSection } from "../../components/proposal/ProposalAttachmentsSection";
 import { ProposalCommentsSection } from "../../components/proposal/ProposalCommentsSection";
 import { ProposalCustomDataSection } from "../../components/proposal/ProposalCustomDataSection";
@@ -101,19 +102,15 @@ export function ProposalDashboardPage() {
   });
 
   if (!Number.isFinite(proposalId)) {
-    return <Typography color="error">Invalid Proposal.</Typography>;
+    return <ErrorState message="Invalid Proposal." />;
   }
 
   if (summaryQuery.isLoading) {
-    return (
-      <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState />;
   }
 
   if (summaryQuery.isError || !summaryQuery.data) {
-    return <Typography color="error">Proposal not found.</Typography>;
+    return <ErrorState message="Proposal not found." />;
   }
 
   const summary = summaryQuery.data;
@@ -153,7 +150,10 @@ export function ProposalDashboardPage() {
               spacing={1}
               sx={{ mt: 1.25, flexWrap: "wrap", alignItems: "center" }}
             >
-              <AwardStatusPill status={summary.proposalSequenceStatus} />
+              <StatusPill
+                status={summary.proposalSequenceStatus}
+                domain="proposal"
+              />
               <Chip
                 size="small"
                 variant="outlined"

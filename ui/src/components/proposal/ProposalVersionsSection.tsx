@@ -1,9 +1,5 @@
 import {
-  Alert,
-  Box,
   Chip,
-  Pagination,
-  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -16,7 +12,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { getProposalVersionsV1 } from "../../api/client";
-import { AwardStatusPill } from "../award/AwardStatusPill";
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { PaginationFooter } from "../common/PaginationFooter";
+import { StatusPill } from "../common/StatusPill";
 
 const PAGE_SIZE = 10;
 
@@ -36,11 +35,11 @@ export function ProposalVersionsSection({
   });
 
   if (versionsQuery.isLoading) {
-    return <Skeleton variant="rounded" height={220} />;
+    return <LoadingState mode="skeleton" height={220} />;
   }
 
   if (versionsQuery.isError) {
-    return <Alert severity="error">Unable to load version history.</Alert>;
+    return <ErrorState message="Unable to load version history." />;
   }
 
   const versions = versionsQuery.data;
@@ -72,7 +71,7 @@ export function ProposalVersionsSection({
                 </TableCell>
                 <TableCell>{version.proposalSequenceStatus ?? "—"}</TableCell>
                 <TableCell>
-                  <AwardStatusPill status={version.status} />
+                  <StatusPill status={version.status} domain="proposal" />
                 </TableCell>
                 <TableCell
                   sx={{
@@ -94,15 +93,11 @@ export function ProposalVersionsSection({
         </Table>
       </TableContainer>
 
-      {versions.totalPages > 1 && (
-        <Box sx={{ display: "flex", justifyContent: "center" }}>
-          <Pagination
-            count={versions.totalPages}
-            page={page + 1}
-            onChange={(_event, value) => setPage(value - 1)}
-          />
-        </Box>
-      )}
+      <PaginationFooter
+        totalPages={versions.totalPages}
+        page={page}
+        onPageChange={setPage}
+      />
     </Stack>
   );
 }

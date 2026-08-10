@@ -1,33 +1,11 @@
-import { Alert, Box, CircularProgress, Skeleton } from "@mui/material";
+import { Box, Skeleton } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 
 import { getAwardSummaryV1 } from "../../api/client";
 import { formatCurrencyAmount as formatAmount } from "../../features/award/awardSectionsPresentation.mjs";
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Box
-      sx={{
-        backgroundColor: "action.hover",
-        borderRadius: 1.5,
-        p: 2,
-      }}
-    >
-      <Box
-        sx={{
-          fontSize: 10.5,
-          color: "text.secondary",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          fontFamily: "monospace",
-        }}
-      >
-        {label}
-      </Box>
-      <Box sx={{ fontSize: 16, fontWeight: 700, mt: 0.5 }}>{value}</Box>
-    </Box>
-  );
-}
+import { ErrorState } from "../common/ErrorState";
+import { LoadingState } from "../common/LoadingState";
+import { StatCard } from "../common/StatCard";
 
 // Approved mockup's stat-card summary grid, fed from the live
 // GET /api/v1/awards/{awardId}/summary endpoint.
@@ -54,9 +32,7 @@ export function AwardSummarySection({ awardId }: { awardId: number }) {
   }
 
   if (summaryQuery.isError) {
-    return (
-      <Alert severity="error">Unable to load the Award summary.</Alert>
-    );
+    return <ErrorState message="Unable to load the Award summary." />;
   }
 
   const summary = summaryQuery.data;
@@ -111,9 +87,5 @@ export function AwardSummarySection({ awardId }: { awardId: number }) {
 }
 
 export function AwardSummaryHeaderSkeleton() {
-  return (
-    <Box sx={{ display: "grid", placeItems: "center", py: 6 }}>
-      <CircularProgress />
-    </Box>
-  );
+  return <LoadingState mode="spinner" />;
 }
