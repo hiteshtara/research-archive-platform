@@ -1,6 +1,7 @@
 package edu.bu.archive.application.award;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
@@ -167,6 +168,20 @@ public class AwardArchiveService {
     ) {
         String awardNumber = requireAwardNumberForId(awardId);
         return repository.findFundingSubawardRows(awardNumber);
+    }
+
+    /*
+     * The Negotiation(s) associated with this Award - family-wide, the
+     * bidirectional counterpart to NegotiationWorkspacePage's own
+     * "Associated Record" link. See
+     * AwardArchiveRepository.findAssociatedNegotiationRows for the
+     * resolution rules.
+     */
+    public List<AwardAssociatedNegotiationResponse> findAssociatedNegotiations(
+            long awardId
+    ) {
+        String awardNumber = requireAwardNumberForId(awardId);
+        return repository.findAssociatedNegotiationRows(awardNumber);
     }
 
     public PageResponse<AwardSequenceSummaryResponse> findSequencePage(

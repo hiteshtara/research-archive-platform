@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
@@ -30,6 +31,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -178,6 +180,59 @@ class AwardV1ControllerTest {
                 );
 
         verify(service).findFundingProposals(148155L);
+    }
+
+    @Test
+    void associatedNegotiationsIsRoutedUnderTheV1Prefix() throws Exception {
+        // Real fixture: Award 104949-00002 (award_id 1648412),
+        // negotiation 11241, "Data Use Agreement", Fully Executed.
+        AwardAssociatedNegotiationResponse negotiation =
+                new AwardAssociatedNegotiationResponse(
+                        11241L, "1060608", "Fully Executed",
+                        "Data Use Agreement", "WILLIAM P SEGARRA",
+                        LocalDate.of(2024, 4, 9), LocalDate.of(2024, 4, 15)
+                );
+        when(service.findAssociatedNegotiations(1648412L))
+                .thenReturn(List.of(negotiation));
+
+        mockMvc.perform(get("/api/v1/awards/1648412/negotiations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].negotiationId").value(11241))
+                .andExpect(jsonPath("$[0].documentNumber").value("1060608"))
+                .andExpect(
+                        jsonPath("$[0].negotiationStatusDescription")
+                                .value("Fully Executed")
+                );
+
+        verify(service).findAssociatedNegotiations(1648412L);
+    }
+
+    @Test
+    void associatedNegotiationsReturnsEmptyArrayWhenNoneExist() throws Exception {
+        // Real fixture: Award 101929-00001 (award_id 3038430) has zero
+        // Award-linked negotiations - must be a real empty 200, not an
+        // error.
+        when(service.findAssociatedNegotiations(3038430L))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/awards/3038430/negotiations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$").isEmpty());
+
+        verify(service).findAssociatedNegotiations(3038430L);
+    }
+
+    @Test
+    void associatedNegotiationsPropagatesNotFoundWithConsistentErrorShape()
+            throws Exception {
+        when(service.findAssociatedNegotiations(999L)).thenThrow(
+                new NoSuchElementException("Award not found: 999")
+        );
+
+        mockMvc.perform(get("/api/v1/awards/999/negotiations"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package edu.bu.archive.application.award;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -142,6 +144,79 @@ class AwardArchiveServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.findFundingProposals(999L))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void findAssociatedNegotiationsResolvesAwardIdToNumberAndDelegates() {
+        // Real fixture: Award 104949-00002 (award_id 1648412) has a real
+        // Fully Executed Data Use Agreement negotiation, 11241.
+        when(repository.findAwardNumberForId(1648412L))
+                .thenReturn(Optional.of("104949-00002"));
+        AwardAssociatedNegotiationResponse negotiation =
+                new AwardAssociatedNegotiationResponse(
+                        11241L, "1060608", "Fully Executed",
+                        "Data Use Agreement", "WILLIAM P SEGARRA",
+                        LocalDate.of(2024, 4, 9), LocalDate.of(2024, 4, 15)
+                );
+        when(repository.findAssociatedNegotiationRows("104949-00002"))
+                .thenReturn(List.of(negotiation));
+
+        List<AwardAssociatedNegotiationResponse> result =
+                service.findAssociatedNegotiations(1648412L);
+
+        assertThat(result).containsExactly(negotiation);
+    }
+
+    @Test
+    void findAssociatedNegotiationsReturnsEveryNegotiationWhenAnAwardHasMultiple() {
+        // Real fixture: Award 104949-00002 has two real negotiations -
+        // one Abandoned, one Fully Executed - both must be returned, in
+        // the repository's own order (most recent start date first).
+        when(repository.findAwardNumberForId(1648412L))
+                .thenReturn(Optional.of("104949-00002"));
+        AwardAssociatedNegotiationResponse abandoned =
+                new AwardAssociatedNegotiationResponse(
+                        11471L, "1074016", "Abandoned",
+                        "Data Use Agreement", "WILLIAM P SEGARRA",
+                        LocalDate.of(2024, 6, 17), LocalDate.of(2024, 12, 13)
+                );
+        AwardAssociatedNegotiationResponse fullyExecuted =
+                new AwardAssociatedNegotiationResponse(
+                        11241L, "1060608", "Fully Executed",
+                        "Data Use Agreement", "WILLIAM P SEGARRA",
+                        LocalDate.of(2024, 4, 9), LocalDate.of(2024, 4, 15)
+                );
+        when(repository.findAssociatedNegotiationRows("104949-00002"))
+                .thenReturn(List.of(abandoned, fullyExecuted));
+
+        List<AwardAssociatedNegotiationResponse> result =
+                service.findAssociatedNegotiations(1648412L);
+
+        assertThat(result).containsExactly(abandoned, fullyExecuted);
+    }
+
+    @Test
+    void findAssociatedNegotiationsReturnsEmptyListWhenNoneExist() {
+        // Real fixture: Award 101929-00001 (award_id 3038430) has zero
+        // Award-linked negotiations - a real, valid state, not an error.
+        when(repository.findAwardNumberForId(3038430L))
+                .thenReturn(Optional.of("101929-00001"));
+        when(repository.findAssociatedNegotiationRows("101929-00001"))
+                .thenReturn(List.of());
+
+        List<AwardAssociatedNegotiationResponse> result =
+                service.findAssociatedNegotiations(3038430L);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void findAssociatedNegotiationsThrowsNotFoundWhenTheAwardDoesNotExist() {
+        when(repository.findAwardNumberForId(999L))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.findAssociatedNegotiations(999L))
                 .isInstanceOf(NoSuchElementException.class);
     }
 

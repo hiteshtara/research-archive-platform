@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetLineItemResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPeriodResponse;
@@ -188,6 +189,24 @@ public class AwardV1Controller {
             long awardId
     ) {
         return ResponseEntity.ok(service.findFundingSubawards(awardId));
+    }
+
+    @Operation(
+            summary = "Get an Award's associated Negotiation(s)",
+            description = "The bidirectional counterpart to "
+                    + "Negotiation's own Associated Record link - "
+                    + "every archive.negotiation row whose "
+                    + "association resolves to this Award's whole "
+                    + "award_number family."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's associated Negotiation(s).")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/negotiations")
+    public ResponseEntity<List<AwardAssociatedNegotiationResponse>> associatedNegotiations(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findAssociatedNegotiations(awardId));
     }
 
     @Operation(
