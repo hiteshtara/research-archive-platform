@@ -214,6 +214,31 @@ export interface AwardAiQuestionResponse {
   correlationId: string;
 }
 
+// Award Evidence Search (Phase 3) - direct, cited evidence retrieval,
+// never a generated narrative answer. Every field traces back to a
+// real archive.search_embedding (V071) row - see
+// docs/architecture/AWARD_EVIDENCE_RETRIEVAL_PHASE3_DESIGN.md section
+// 3.3/6. excerpt is always server-redacted and length-capped before it
+// reaches this response - never raw, unbounded archive text.
+export interface AwardEvidenceSearchResult {
+  documentType: string;
+  awardNumber: string;
+  title: string;
+  excerpt: string;
+  sourceTable: string;
+  sourcePrimaryKey: string;
+  score: number;
+  targetSection: string;
+}
+
+export interface AwardEvidenceSearchResponse {
+  query: string;
+  awardNumber: string;
+  results: AwardEvidenceSearchResult[];
+  insufficientEvidence: boolean;
+  correlationId: string;
+}
+
 export interface AwardAiCurrentRecord {
   awardId: number;
   awardNumber: string;

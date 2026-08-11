@@ -89,6 +89,21 @@
             <version>${aws.sdk.version}</version>
         </dependency>
 
+        <!--
+          Explicit direct dependency (was previously only an
+          undeclared transitive one, not resolvable at this module's
+          compile scope) so SemanticSearchConfiguration can configure
+          the shared Bedrock client's connection-attempt timeout via
+          ApacheHttpClient.builder() - see
+          docs/architecture/AWARD_EVIDENCE_RETRIEVAL_PHASE3_DESIGN.md
+          section 5 (Decision 2, Bedrock timeout wiring).
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

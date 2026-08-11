@@ -18,6 +18,7 @@ import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
 import { AwardBudgetSection } from "../../components/award/AwardBudgetSection";
 import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
 import { AwardContactsSection } from "../../components/award/AwardContactsSection";
+import { AwardEvidenceSearchSection } from "../../components/award/AwardEvidenceSearchSection";
 import { AwardFundingProposalsSection } from "../../components/award/AwardFundingProposalsSection";
 import { AwardAssociatedNegotiationsSection } from "../../components/award/AwardAssociatedNegotiationsSection";
 import { AwardFundingSubawardsSection } from "../../components/award/AwardFundingSubawardsSection";
@@ -47,6 +48,7 @@ const SECTIONS = [
   { key: "comments", label: "Comments and Notepad" },
   { key: "sap", label: "SAP Transmission History" },
   { key: "attachments", label: "Attachments" },
+  { key: "evidenceSearch", label: "Evidence Search" },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
@@ -65,6 +67,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "comments",
   "sap",
   "attachments",
+  "evidenceSearch",
 ]);
 
 // Award Dashboard - the final stop in Search -> Search Results ->
@@ -267,6 +270,15 @@ export function AwardDashboardPage() {
 
           {activeSection === "attachments" && (
             <AwardAttachmentsSection awardId={awardId} />
+          )}
+
+          {activeSection === "evidenceSearch" && (
+            <AwardEvidenceSearchSection
+              awardNumber={summary.awardNumber}
+              onNavigateToSection={(targetSection) =>
+                setActiveSection(targetSection as SectionKey)
+              }
+            />
           )}
 
           {!IMPLEMENTED_SECTIONS.has(activeSection) && (

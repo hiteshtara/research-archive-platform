@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.application.ai.AiProviderException;
 import edu.bu.archive.application.ai.AiSummaryExecutionException;
+import edu.bu.archive.application.ai.AwardEvidenceSearchException;
 
 import java.time.Instant;
 import java.util.Map;
@@ -15,7 +16,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(assignableTypes = {
         AwardAiController.class,
-        AwardAiQuestionController.class
+        AwardAiQuestionController.class,
+        AwardEvidenceSearchController.class
 })
 public class AiExceptionHandler {
 
@@ -58,6 +60,46 @@ public class AiExceptionHandler {
                 .body(error(
                         HttpStatus.SERVICE_UNAVAILABLE,
                         "AI summary is temporarily unavailable",
+                        exception.correlationId().toString()
+                ));
+    }
+
+    @ExceptionHandler(AwardEvidenceSearchException.class)
+    public ResponseEntity<Map<String, Object>> handleEvidenceSearchFailure(
+            AwardEvidenceSearchException exception
+    ) {
+        Throwable cause = exception.getCause();
+
+        if (cause instanceof java.util.NoSuchElementException) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body(error(
+                            HttpStatus.NOT_FOUND,
+                            cause.getMessage(),
+                            exception.correlationId().toString()
+                    ));
+        }
+        if (cause instanceof IllegalArgumentException) {
+            return ResponseEntity
+                    .badRequest()
+                    .body(error(
+                            HttpStatus.BAD_REQUEST,
+                            cause.getMessage(),
+                            exception.correlationId().toString()
+                    ));
+        }
+
+        LOG.error(
+                "Award evidence search failed. correlationId={}",
+                exception.correlationId(),
+                cause
+        );
+
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(error(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "Evidence search is temporarily unavailable",
                         exception.correlationId().toString()
                 ));
     }

@@ -4,6 +4,7 @@ import { parseDownloadFilename } from "../features/award/awardSectionsPresentati
 import type {
   AwardAiQuestionResponse,
   AwardAiSummaryResponse,
+  AwardEvidenceSearchResponse,
   DashboardSummary,
   IrbProtocol,
   PageResponse,
@@ -683,6 +684,25 @@ export function askAwardQuestion(
     signal,
     "POST",
     { question },
+  );
+}
+
+export function searchAwardEvidence(
+  awardNumber: string,
+  query: string,
+  documentTypes: string[],
+  topK?: number,
+  signal?: AbortSignal,
+): Promise<AwardEvidenceSearchResponse> {
+  return request(
+    `/api/ai/awards/${encodeURIComponent(awardNumber)}/evidence-search`,
+    signal,
+    "POST",
+    {
+      query,
+      documentTypes,
+      ...(topK === undefined ? {} : { topK }),
+    },
   );
 }
 

@@ -10,8 +10,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
+
+import java.time.Duration;
 
 /*
  * Semantic search's Bedrock client/provider beans only exist at all when
@@ -34,10 +38,36 @@ public class SemanticSearchConfiguration {
     )
     BedrockRuntimeClient bedrockRuntimeClient(
             @Value("${AWS_REGION:us-east-1}")
-            String awsRegion
+            String awsRegion,
+            SemanticSearchProperties properties
     ) {
+        // apiCallTimeout bounds the whole call (including internal SDK
+        // retries) - the fix for a real, pre-existing gap:
+        // bedrockTimeoutMs was declared in SemanticSearchProperties but
+        // never actually applied anywhere (see
+        // docs/architecture/AWARD_EVIDENCE_RETRIEVAL_PHASE3_DESIGN.md
+        // section 5). connectionTimeout is the separate TCP
+        // connection-attempt timeout on the underlying HTTP client
+        // (ApacheHttpClient, already an existing transitive dependency
+        // of the bedrockruntime SDK module - no new dependency added).
+        // Both default to a finite value (2000ms) rather than the SDK's
+        // own much longer built-in defaults, so an authenticated UI
+        // request (Award Evidence Search) can never hang indefinitely.
         return BedrockRuntimeClient.builder()
                 .region(Region.of(awsRegion))
+                .httpClientBuilder(
+                        ApacheHttpClient.builder()
+                                .connectionTimeout(Duration.ofMillis(
+                                        properties.getConnectionTimeoutMs()
+                                ))
+                )
+                .overrideConfiguration(
+                        ClientOverrideConfiguration.builder()
+                                .apiCallTimeout(Duration.ofMillis(
+                                        properties.getBedrockTimeoutMs()
+                                ))
+                                .build()
+                )
                 .build();
     }
 
