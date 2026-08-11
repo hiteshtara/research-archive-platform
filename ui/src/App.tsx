@@ -6,8 +6,8 @@ import { AwardDashboardPage } from "./pages/award/AwardDashboardPage";
 import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
 import { AwardSearchPage } from "./pages/award/AwardSearchPage";
 
-import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DocumentsPage } from "./pages/DocumentsPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
 import { InvestigatorProfilePage } from "./pages/InvestigatorProfilePage";
@@ -126,7 +126,7 @@ export default function App() {
 
         <Route
           path="documents"
-          element={<ComingSoonPage />}
+          element={<DocumentsPage />}
         />
 
         <Route

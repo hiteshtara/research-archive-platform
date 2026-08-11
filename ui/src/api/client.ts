@@ -6,6 +6,7 @@ import type {
   AwardAiSummaryResponse,
   AwardEvidenceSearchResponse,
   DashboardSummary,
+  DocumentSearchPageResponse,
   IrbProtocol,
   PageResponse,
   SafeApiErrorResponse,
@@ -99,6 +100,50 @@ async function request<T>(
 
 export function getDashboard(): Promise<DashboardSummary> {
   return request<DashboardSummary>("/api/dashboard");
+}
+
+export interface DocumentSearchParameters {
+  documentNumber?: string;
+  module?: string;
+  businessRecordNumber?: string;
+  title?: string;
+  status?: string;
+  page?: number;
+  size?: number;
+}
+
+export function searchDocuments(
+  parameters: DocumentSearchParameters = {},
+  signal?: AbortSignal,
+): Promise<DocumentSearchPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
+  if (parameters.documentNumber?.trim()) {
+    searchParameters.set("documentNumber", parameters.documentNumber.trim());
+  }
+  if (parameters.module?.trim()) {
+    searchParameters.set("module", parameters.module.trim());
+  }
+  if (parameters.businessRecordNumber?.trim()) {
+    searchParameters.set(
+      "businessRecordNumber",
+      parameters.businessRecordNumber.trim(),
+    );
+  }
+  if (parameters.title?.trim()) {
+    searchParameters.set("title", parameters.title.trim());
+  }
+  if (parameters.status?.trim()) {
+    searchParameters.set("status", parameters.status.trim());
+  }
+
+  return request<DocumentSearchPageResponse>(
+    `/api/documents/search?${searchParameters.toString()}`,
+    signal,
+  );
 }
 
 export interface IrbSearchParameters {

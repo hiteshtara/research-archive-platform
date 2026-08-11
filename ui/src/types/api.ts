@@ -38,6 +38,25 @@ export interface PageResponse<T> {
   last: boolean;
 }
 
+// One row of the Kuali Document Search union (Award/Proposal/
+// Negotiation/Subaward/IRB only - never attachments, never the
+// Award-nested transactional/financial document tables). targetRoute
+// is backend-computed and ready to navigate to; null only if the
+// module's routable identifier was unexpectedly missing.
+export interface DocumentSearchResult {
+  module: "AWARD" | "PROPOSAL" | "NEGOTIATION" | "SUBAWARD" | "IRB";
+  documentNumber: string;
+  businessRecordNumber: string;
+  title: string | null;
+  status: string | null;
+  versionOrSequence: string | null;
+  relevantDate: string | null;
+  targetRoute: string | null;
+}
+
+export interface DocumentSearchPageResponse
+  extends PageResponse<DocumentSearchResult> {}
+
 // The one stable, cross-domain result shape Global Search returns
 // regardless of which domain a result came from - route is the
 // backend-computed, ready-to-navigate frontend path (null when this

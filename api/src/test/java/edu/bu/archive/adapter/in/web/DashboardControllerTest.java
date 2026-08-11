@@ -79,19 +79,42 @@ class DashboardControllerTest {
                         "COUNT(DISTINCT subaward_code) "
                                 + "FROM archive.subaward"
                 )
+                // Documents = the five-module Kuali document union, per
+                // docs/architecture/KUALI_DOCUMENT_METRIC_INVESTIGATION.md
+                // - never a hardcoded 0, never attachments, never the
+                // Award-nested transactional/financial document tables.
+                .contains(
+                        "COUNT(DISTINCT (module, document_number)) "
+                                + "FROM kuali_documents"
+                )
+                .contains("'AWARD' AS module, workflow_document_number")
+                .contains("'PROPOSAL', document_number")
+                .contains("'NEGOTIATION', document_number")
+                .contains("'SUBAWARD', document_number")
+                .contains(
+                        "'IRB', document_number "
+                                + "FROM archive.irb_protocol_version"
+                )
+                .doesNotContain("0 AS documents")
                 .doesNotContain(
                         "FROM archive.award_funding_proposal"
                 )
                 .doesNotContain(
                         "archive.protocol_version"
-                );
+                )
+                .doesNotContain("archive.award_attachment")
+                .doesNotContain("archive.attachment_object")
+                .doesNotContain("archive.award_budget")
+                .doesNotContain("archive.time_and_money_document")
+                .doesNotContain("archive.pending_transaction")
+                .doesNotContain("archive.award_transmission");
         assertThat(sql.split(
                 "FROM archive.award_version",
                 -1
-        )).hasSize(2);
+        )).hasSize(3);
         assertThat(sql.split(
                 "FROM archive.proposal_version",
                 -1
-        )).hasSize(2);
+        )).hasSize(3);
     }
 }

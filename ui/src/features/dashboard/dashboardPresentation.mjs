@@ -73,8 +73,9 @@ export const futureModuleCards = [
   },
   {
     key: "documents",
-    title: "Documents",
-    description: "Legacy files and attachments",
+    title: "Kuali Documents",
+    description:
+      "Archived workflow and business documents across all modules",
     path: "/documents",
   },
 ];
