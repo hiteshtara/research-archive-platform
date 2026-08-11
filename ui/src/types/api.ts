@@ -57,6 +57,55 @@ export interface DocumentSearchResult {
 export interface DocumentSearchPageResponse
   extends PageResponse<DocumentSearchResult> {}
 
+// One row of the Kuali Document Explorer union - IRB excluded (see
+// docs/architecture/KUALI_DOCUMENT_EXPLORER_DESIGN.md §16 decision 7).
+// normalizedStatus is always one of the six approved buckets;
+// nativeStatusCode/nativeStatusDescription are always preserved
+// alongside it so a user can see the real underlying value even when
+// normalizedStatus is UNKNOWN. unitCount/personCount/sponsorCount are
+// ADDITIONAL relationships beyond the single primary value already
+// shown - the UI renders "+N other" from these, never duplicate rows.
+export interface DocumentExplorerResult {
+  module: "AWARD" | "PROPOSAL" | "NEGOTIATION" | "SUBAWARD";
+  documentNumber: string;
+  businessRecordNumber: string;
+  title: string | null;
+  normalizedStatus:
+    | "ACTIVE"
+    | "PENDING"
+    | "ARCHIVED"
+    | "CANCELLED"
+    | "CLOSED"
+    | "UNKNOWN";
+  nativeStatusCode: string | null;
+  nativeStatusDescription: string | null;
+  versionOrSequence: string | null;
+  leadUnitNumber: string | null;
+  leadUnitName: string | null;
+  primaryPersonId: string | null;
+  primaryPersonName: string | null;
+  primaryPersonRole: string | null;
+  sponsorCode: string | null;
+  sponsorName: string | null;
+  subrecipientOrganizationId: string | null;
+  subrecipientOrganizationName: string | null;
+  documentDate: string | null;
+  targetRoute: string | null;
+  unitCount: number;
+  personCount: number;
+  sponsorCount: number;
+}
+
+export interface FacetCount {
+  value: string;
+  count: number;
+}
+
+export interface DocumentExplorerResponse {
+  results: PageResponse<DocumentExplorerResult>;
+  moduleFacets: FacetCount[];
+}
+
 // The one stable, cross-domain result shape Global Search returns
 // regardless of which domain a result came from - route is the
 // backend-computed, ready-to-navigate frontend path (null when this

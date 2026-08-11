@@ -51,3 +51,95 @@ export function resultsAreApprovedModulesOnly(results) {
 export function isNavigable(result) {
   return Boolean(result.targetRoute);
 }
+
+// --- Kuali Document Explorer (extends the search above with facets,
+// normalized status, unit/person/sponsor filters) - see
+// docs/architecture/KUALI_DOCUMENT_EXPLORER_DESIGN.md. IRB is
+// deliberately absent here (decision 7: zero rows in dev, routing/
+// status/unit/person behavior unverifiable end to end) - a separate
+// constant from MODULES above, which still reflects the older, simpler
+// Document Search feature's own five-module schema-level union.
+export const EXPLORER_MODULE_LABELS = Object.freeze({
+  AWARD: "Award",
+  PROPOSAL: "Proposal",
+  NEGOTIATION: "Negotiation",
+  SUBAWARD: "Subaward",
+});
+
+export const EXPLORER_MODULES = Object.freeze(
+  Object.keys(EXPLORER_MODULE_LABELS),
+);
+
+export const NORMALIZED_STATUS_LABELS = Object.freeze({
+  ACTIVE: "Active",
+  PENDING: "Pending",
+  ARCHIVED: "Archived",
+  CANCELLED: "Cancelled",
+  CLOSED: "Closed",
+  UNKNOWN: "Unknown",
+});
+
+export const NORMALIZED_STATUSES = Object.freeze(
+  Object.keys(NORMALIZED_STATUS_LABELS),
+);
+
+export function normalizedStatusLabel(status) {
+  return NORMALIZED_STATUS_LABELS[status] ?? status;
+}
+
+export function explorerModuleLabel(module) {
+  return EXPLORER_MODULE_LABELS[module] ?? module;
+}
+
+// Only presets whose underlying status mapping is verified (per the
+// design doc's §2 confident table) are offered - "Archived Subawards"
+// is deliberately omitted because no Subaward native status currently
+// maps to ARCHIVED in the approved mapping (it would silently return
+// zero results, which is worse than not offering the preset at all).
+export const DOCUMENT_EXPLORER_PRESETS = Object.freeze([
+  {
+    key: "activeAwards",
+    label: "Active Awards",
+    filters: { module: "AWARD", normalizedStatus: "ACTIVE" },
+  },
+  {
+    key: "pendingProposals",
+    label: "Pending Proposals",
+    filters: { module: "PROPOSAL", normalizedStatus: "PENDING" },
+  },
+  {
+    key: "negotiationsInProgress",
+    label: "Negotiations in Progress",
+    filters: { module: "NEGOTIATION", normalizedStatus: "PENDING" },
+  },
+  {
+    key: "documentsByPi",
+    label: "Documents by PI",
+    filters: { piOnly: true },
+  },
+]);
+
+export function moduleFacetLabel(facet) {
+  const count = facet.count ?? 0;
+  return `${explorerModuleLabel(facet.value)}: ${count.toLocaleString()}`;
+}
+
+// A result with unitCount/personCount/sponsorCount greater than the
+// single primary value already shown gets a "+N other" indicator
+// rather than a second visible row for the same document - never
+// duplicate a (module, documentNumber) pair into multiple cards.
+export function additionalRelationshipsLabel(count, noun) {
+  if (count <= 0) {
+    return null;
+  }
+  return `+${count} other ${noun}${count === 1 ? "" : "s"}`;
+}
+
+// A Negotiation's unit/sponsor, when present, was always inherited
+// from its associated Award/Subaward/Proposal - Negotiation itself has
+// no native unit or sponsor column at all (see design doc §3). The UI
+// must label this clearly rather than presenting it as Negotiation's
+// own data.
+export function unitSourceLabel(module) {
+  return module === "NEGOTIATION" ? "Unit (via associated Award)" : "Unit";
+}

@@ -5,12 +5,20 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  DOCUMENT_EXPLORER_PRESETS,
+  EXPLORER_MODULES,
   MODULES,
+  NORMALIZED_STATUSES,
+  additionalRelationshipsLabel,
   documentSearchErrorMessage,
   documentSearchResultsCountLabel,
+  explorerModuleLabel,
   isNavigable,
+  moduleFacetLabel,
   moduleLabel,
+  normalizedStatusLabel,
   resultsAreApprovedModulesOnly,
+  unitSourceLabel,
 } from "./documentsPresentation.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +89,72 @@ test("isNavigable is true only when targetRoute is present", () => {
   assert.equal(isNavigable({ targetRoute: "" }), false);
 });
 
+// --- Kuali Document Explorer pure logic ---
+
+test("EXPLORER_MODULES excludes IRB per decision 7 (zero rows in dev, unverifiable end to end)", () => {
+  assert.deepEqual(EXPLORER_MODULES, [
+    "AWARD",
+    "PROPOSAL",
+    "NEGOTIATION",
+    "SUBAWARD",
+  ]);
+  assert.equal(EXPLORER_MODULES.includes("IRB"), false);
+});
+
+test("explorerModuleLabel maps the four approved modules", () => {
+  assert.equal(explorerModuleLabel("AWARD"), "Award");
+  assert.equal(explorerModuleLabel("SUBAWARD"), "Subaward");
+  assert.equal(explorerModuleLabel("IRB"), "IRB");
+});
+
+test("NORMALIZED_STATUSES exposes exactly the six approved buckets", () => {
+  assert.deepEqual(NORMALIZED_STATUSES, [
+    "ACTIVE",
+    "PENDING",
+    "ARCHIVED",
+    "CANCELLED",
+    "CLOSED",
+    "UNKNOWN",
+  ]);
+});
+
+test("normalizedStatusLabel maps known statuses and falls back for unknown ones", () => {
+  assert.equal(normalizedStatusLabel("ACTIVE"), "Active");
+  assert.equal(normalizedStatusLabel("UNKNOWN"), "Unknown");
+  assert.equal(normalizedStatusLabel("SOMETHING_ELSE"), "SOMETHING_ELSE");
+});
+
+test("DOCUMENT_EXPLORER_PRESETS only offers presets with a verified status mapping (no Archived Subawards)", () => {
+  const keys = DOCUMENT_EXPLORER_PRESETS.map((preset) => preset.key);
+  assert.equal(keys.includes("activeAwards"), true);
+  assert.equal(keys.includes("pendingProposals"), true);
+  assert.equal(keys.includes("negotiationsInProgress"), true);
+  assert.equal(keys.includes("documentsByPi"), true);
+  // No Subaward status maps to ARCHIVED in the approved table - this
+  // preset is deliberately absent, not silently returning zero results.
+  assert.equal(keys.includes("archivedSubawards"), false);
+});
+
+test("moduleFacetLabel formats a facet count with a locale-formatted number", () => {
+  assert.equal(
+    moduleFacetLabel({ value: "AWARD", count: 49827 }),
+    "Award: 49,827",
+  );
+});
+
+test("additionalRelationshipsLabel is null at zero or below, and pluralizes correctly", () => {
+  assert.equal(additionalRelationshipsLabel(0, "unit"), null);
+  assert.equal(additionalRelationshipsLabel(-1, "person"), null);
+  assert.equal(additionalRelationshipsLabel(1, "person"), "+1 other person");
+  assert.equal(additionalRelationshipsLabel(3, "unit"), "+3 other units");
+});
+
+test("unitSourceLabel marks a Negotiation's unit as inherited from its associated Award, never native", () => {
+  assert.equal(unitSourceLabel("NEGOTIATION"), "Unit (via associated Award)");
+  assert.equal(unitSourceLabel("AWARD"), "Unit");
+  assert.equal(unitSourceLabel("SUBAWARD"), "Unit");
+});
+
 // --- CARB-X fixture, per
 // docs/architecture/KUALI_DOCUMENT_METRIC_INVESTIGATION.md ---
 
@@ -129,12 +203,47 @@ test("DocumentsPage renders loading, empty, and error states", () => {
   assert.match(source, /<EmptyState/);
 });
 
-test("DocumentsPage exposes document number, module, title, and status filters", () => {
+test("DocumentsPage exposes a combined search field plus module and status filters", () => {
   const source = readSource("../../pages/DocumentsPage.tsx");
-  assert.match(source, /label="Document number"/);
+  assert.match(
+    source,
+    /Search by document number, record number, title, person or sponsor/,
+  );
   assert.match(source, /label="Module"/);
-  assert.match(source, /label="Title"/);
   assert.match(source, /label="Status"/);
+});
+
+test("DocumentsPage exposes unit, person, sponsor, subrecipient, date, and sort filters", () => {
+  const source = readSource("../../pages/DocumentsPage.tsx");
+  assert.match(source, /label="Lead unit number"/);
+  assert.match(source, /Include any associated unit/);
+  assert.match(source, /label="Person name"/);
+  assert.match(source, /label="Person role"/);
+  assert.match(source, /PI only/);
+  assert.match(source, /label="Sponsor code"/);
+  assert.match(source, /label="Subrecipient organization"/);
+  assert.match(source, /label="Date from"/);
+  assert.match(source, /label="Date to"/);
+  assert.match(source, /label="Sort by"/);
+  assert.match(source, /Clear filters/);
+});
+
+test("DocumentsPage offers presets and shows module facet counts", () => {
+  const source = readSource("../../pages/DocumentsPage.tsx");
+  assert.match(source, /DOCUMENT_EXPLORER_PRESETS/);
+  assert.match(source, /moduleFacets/);
+  assert.match(source, /moduleFacetLabel/);
+});
+
+test("DocumentsPage does not offer IRB as a module option", () => {
+  const source = readSource("../../pages/DocumentsPage.tsx");
+  assert.match(source, /EXPLORER_MODULES/);
+  assert.doesNotMatch(source, />IRB</);
+});
+
+test("DocumentsPage calls the Explorer endpoint, not the simpler Document Search endpoint", () => {
+  const source = readSource("../../pages/DocumentsPage.tsx");
+  assert.match(source, /searchDocumentExplorer/);
 });
 
 test("DocumentsPage paginates results and shows a results count", () => {

@@ -146,6 +146,70 @@ export function searchDocuments(
   );
 }
 
+export interface DocumentExplorerParameters {
+  documentNumber?: string;
+  businessRecordNumber?: string;
+  query?: string;
+  module?: string;
+  normalizedStatus?: string;
+  nativeStatus?: string;
+  unitNumber?: string;
+  includeAnyUnit?: boolean;
+  personId?: string;
+  personName?: string;
+  personRole?: string;
+  piOnly?: boolean;
+  sponsorCode?: string;
+  subrecipientOrganizationId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: string;
+  page?: number;
+  size?: number;
+}
+
+const DOCUMENT_EXPLORER_STRING_PARAMS: (keyof DocumentExplorerParameters)[] = [
+  "documentNumber",
+  "businessRecordNumber",
+  "query",
+  "module",
+  "normalizedStatus",
+  "nativeStatus",
+  "unitNumber",
+  "personId",
+  "personName",
+  "personRole",
+  "sponsorCode",
+  "subrecipientOrganizationId",
+  "dateFrom",
+  "dateTo",
+  "sort",
+];
+
+export function searchDocumentExplorer(
+  parameters: DocumentExplorerParameters = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").DocumentExplorerResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+    includeAnyUnit: String(parameters.includeAnyUnit ?? false),
+    piOnly: String(parameters.piOnly ?? false),
+  });
+
+  for (const key of DOCUMENT_EXPLORER_STRING_PARAMS) {
+    const value = parameters[key];
+    if (typeof value === "string" && value.trim()) {
+      searchParameters.set(key, value.trim());
+    }
+  }
+
+  return request<import("../types/api").DocumentExplorerResponse>(
+    `/api/v1/documents?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
 export interface IrbSearchParameters {
   page?: number;
   size?: number;
