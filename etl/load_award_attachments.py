@@ -162,7 +162,13 @@ class BlobLocation:
     table: str
     id_column: str
     blob_column: str
-    reference_id: int
+    # FILE_ID (ATTACHMENT_FILE, the INLINE case) is a numeric Oracle
+    # surrogate key; FILE_DATA_ID (FILE_DATA, the EXTERNAL case) is a
+    # UUID string (e.g. 'f6f4d6d2-9a3f-4a32-a4e4-b6ffb8647847') -
+    # confirmed directly against live Oracle data, not assumed. Never
+    # coerce this to int - see V072's migration for the incident this
+    # fixed.
+    reference_id: int | str
 
 
 def resolve_blob_location(
@@ -173,7 +179,15 @@ def resolve_blob_location(
     primary; FILE_DATA.DATA (EXTERNAL), joined by
     ATTACHMENT_FILE.FILE_DATA_ID = FILE_DATA.ID, is the fallback. Returns
     None when there is nothing to upload at all (blob_source is neither -
-    a MISSING_SOURCE_CONTENT row)."""
+    a MISSING_SOURCE_CONTENT row).
+
+    file_data_id is passed through as a plain string, never int()-
+    coerced - FILE_DATA.ID is a UUID, not a numeric surrogate key (see
+    the module-level incident note near BlobLocation). A prior version
+    of this function called int(file_data_id), which - combined with
+    prepare_files() numerically coercing the same column - meant every
+    EXTERNAL-sourced Award attachment archive-wide was silently
+    unloadable despite a real, retrievable Oracle blob."""
     if blob_source == "INLINE":
         return BlobLocation("ATTACHMENT_FILE", "FILE_ID", "FILE_DATA", file_id)
     if blob_source == "EXTERNAL":
@@ -181,7 +195,10 @@ def resolve_blob_location(
             isinstance(file_data_id, float) and pd.isna(file_data_id)
         ):
             return None
-        return BlobLocation("FILE_DATA", "ID", "DATA", int(file_data_id))
+        text_value = str(file_data_id).strip()
+        if not text_value:
+            return None
+        return BlobLocation("FILE_DATA", "ID", "DATA", text_value)
     return None
 
 
@@ -581,7 +598,12 @@ def prepare_references(dataframe: pd.DataFrame) -> pd.DataFrame:
 def prepare_files(dataframe: pd.DataFrame) -> pd.DataFrame:
     require_columns(dataframe, FILE_REQUIRED_COLUMNS, "award attachment files")
 
-    convert_numeric(dataframe, ["file_id", "file_data_id", "file_size_bytes"])
+    # file_data_id is deliberately excluded here - it's a UUID string
+    # (FILE_DATA.ID), not numeric. Coercing it with convert_numeric was
+    # the root cause of every EXTERNAL-sourced Award attachment being
+    # silently unloadable archive-wide - see V072's migration comment
+    # and resolve_blob_location()'s docstring for the full incident.
+    convert_numeric(dataframe, ["file_id", "file_size_bytes"])
     convert_dates(dataframe, ["oracle_update_timestamp"])
 
     require_values(dataframe, ["file_id"], "award attachment files")

@@ -9,6 +9,22 @@ import pandas as pd
 import load_award_attachments as attachment_loader
 from archive_etl.config.startup_validation import StartupValidationError
 
+# Permanent regression fixture: a real Award attachment whose blob is
+# EXTERNAL (FILE_DATA, not inline in ATTACHMENT_FILE), live-verified
+# against Oracle on 2026-08-11 - Award 204713-00001 (CARB-X), file_id
+# 39524, "Rebudget_Email dtd 11-9-16_Outterson.pdf". FILE_DATA_ID is a
+# UUID string, not a numeric surrogate key; a prior version of this
+# loader coerced it to NaN via convert_numeric() and then int()-coerced
+# it in resolve_blob_location(), which silently made every
+# EXTERNAL-sourced Award attachment archive-wide (5,821 of 5,821)
+# unloadable despite a real, retrievable Oracle blob. Pinned here, by
+# name, so a future numeric-coercion refactor can never silently
+# reintroduce that defect without a fast, no-database test catching it
+# immediately - see V072's migration for the full incident.
+REAL_EXTERNAL_UUID_FIXTURE_FILE_ID = 39524
+REAL_EXTERNAL_UUID_FIXTURE_FILE_DATA_ID = "f6f4d6d2-9a3f-4a32-a4e4-b6ffb8647847"
+REAL_EXTERNAL_UUID_FIXTURE_FILE_NAME = "Rebudget_Email dtd 11-9-16_Outterson.pdf"
+
 
 class FakeBlob:
     """Mirrors tests/test_oracle_blob_readers.py's FakeBlob - a 1-indexed
@@ -136,12 +152,41 @@ class PrepareFilesTest(unittest.TestCase):
 
     def test_external_file_is_marked_pending(self) -> None:
         dataframe = pd.DataFrame(
-            [self._base_row(blob_source="EXTERNAL", file_data_id=555)]
+            [
+                self._base_row(
+                    blob_source="EXTERNAL",
+                    file_data_id=REAL_EXTERNAL_UUID_FIXTURE_FILE_DATA_ID,
+                )
+            ]
         )
 
         prepared = attachment_loader.prepare_files(dataframe)
 
         self.assertEqual(prepared["upload_status"].tolist(), ["PENDING"])
+
+    def test_uuid_file_data_id_survives_prepare_files_unchanged(self) -> None:
+        """The regression this fixture exists for: file_data_id must
+        never be numerically coerced. A UUID string in must be the
+        exact same UUID string out - not NaN, not truncated, not
+        reformatted."""
+        dataframe = pd.DataFrame(
+            [
+                self._base_row(
+                    file_id=REAL_EXTERNAL_UUID_FIXTURE_FILE_ID,
+                    file_name=REAL_EXTERNAL_UUID_FIXTURE_FILE_NAME,
+                    blob_source="EXTERNAL",
+                    file_data_id=REAL_EXTERNAL_UUID_FIXTURE_FILE_DATA_ID,
+                )
+            ]
+        )
+
+        prepared = attachment_loader.prepare_files(dataframe)
+
+        self.assertEqual(
+            prepared["file_data_id"].iloc[0],
+            REAL_EXTERNAL_UUID_FIXTURE_FILE_DATA_ID,
+        )
+        self.assertEqual(prepared["upload_status"].iloc[0], "PENDING")
 
     def test_missing_blob_is_marked_missing_source_content_and_warns(
         self,
@@ -760,14 +805,41 @@ class ResolveBlobLocationTest(unittest.TestCase):
 
     def test_external_resolves_via_file_data_by_file_data_id(self) -> None:
         location = attachment_loader.resolve_blob_location(
-            file_id=9001, file_data_id=555, blob_source="EXTERNAL"
+            file_id=REAL_EXTERNAL_UUID_FIXTURE_FILE_ID,
+            file_data_id=REAL_EXTERNAL_UUID_FIXTURE_FILE_DATA_ID,
+            blob_source="EXTERNAL",
         )
 
         assert location is not None
         self.assertEqual(location.table, "FILE_DATA")
         self.assertEqual(location.id_column, "ID")
         self.assertEqual(location.blob_column, "DATA")
-        self.assertEqual(location.reference_id, 555)
+        self.assertEqual(
+            location.reference_id, REAL_EXTERNAL_UUID_FIXTURE_FILE_DATA_ID
+        )
+        # The regression this fixture exists for: reference_id must be
+        # the exact UUID string, never int()-coerced (a UUID like this
+        # one can't even survive int() - it would raise, not truncate).
+        self.assertIsInstance(location.reference_id, str)
+
+    def test_inline_path_still_uses_numeric_file_id_unaffected_by_uuid_fix(
+        self,
+    ) -> None:
+        """INLINE resolution keys off file_id (a real Oracle numeric
+        surrogate key), never file_data_id - confirms the UUID fix for
+        the EXTERNAL path left the INLINE path's behavior/type
+        completely unchanged."""
+        location = attachment_loader.resolve_blob_location(
+            file_id=REAL_EXTERNAL_UUID_FIXTURE_FILE_ID,
+            file_data_id=None,
+            blob_source="INLINE",
+        )
+
+        assert location is not None
+        self.assertEqual(
+            location.reference_id, REAL_EXTERNAL_UUID_FIXTURE_FILE_ID
+        )
+        self.assertIsInstance(location.reference_id, int)
 
     def test_external_without_file_data_id_is_unresolvable(self) -> None:
         location = attachment_loader.resolve_blob_location(
