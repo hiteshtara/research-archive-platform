@@ -93,11 +93,15 @@ public class DocumentExplorerService {
         int safeSize = PaginationSupport.clampSize(size);
         int offset = safePage * safeSize;
 
-        long totalElements = repository.count(filter);
+        boolean unfiltered = isUnfiltered(filter);
+
+        long totalElements = unfiltered ? repository.countDefault() : repository.count(filter);
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(safePage, safeSize, totalElements);
 
-        List<DocumentExplorerRow> rows = repository.search(filter, safeSize, offset);
+        List<DocumentExplorerRow> rows = unfiltered
+                ? repository.searchDefaultPage(safeSize, offset, filter.sort())
+                : repository.search(filter, safeSize, offset);
         List<DocumentExplorerResultResponse> content = rows.stream()
                 .map(this::toResponse)
                 .toList();
@@ -107,11 +111,44 @@ public class DocumentExplorerService {
                 pageMetadata.totalPages(), pageMetadata.first(), pageMetadata.last()
         );
 
-        List<FacetCountResponse> moduleFacets = repository.moduleFacets(filter).stream()
+        List<FacetCountResponse> moduleFacets = (unfiltered
+                ? repository.moduleFacetsDefault()
+                : repository.moduleFacets(filter)
+        ).stream()
                 .map(row -> new FacetCountResponse(row.module(), row.n()))
                 .toList();
 
         return new DocumentExplorerResponse(results, moduleFacets);
+    }
+
+    /*
+     * The default-page fast path (DocumentExplorerRepository's
+     * countDefault()/moduleFacetsDefault()/searchDefaultPage()) is only
+     * correct when NOTHING is being filtered - it skips the
+     * person/unit-aware joins entirely, so any filter that depends on
+     * them (or any other filter at all) must fall back to the original
+     * count()/search()/moduleFacets(). sort/page/size are not filters -
+     * every approved sort value is available directly on the light
+     * union without the expensive joins, so the fast path applies
+     * regardless of which one is requested.
+     */
+    private boolean isUnfiltered(DocumentExplorerFilter filter) {
+        return filter.documentNumber().isEmpty()
+                && filter.businessRecordNumber().isEmpty()
+                && filter.query().isEmpty()
+                && filter.module().isEmpty()
+                && filter.normalizedStatus().isEmpty()
+                && filter.nativeStatus().isEmpty()
+                && filter.unitNumber().isEmpty()
+                && !filter.includeAnyUnit()
+                && filter.personId().isEmpty()
+                && filter.personName().isEmpty()
+                && filter.personRole().isEmpty()
+                && !filter.piOnly()
+                && filter.sponsorCode().isEmpty()
+                && filter.subrecipientOrganizationId().isEmpty()
+                && filter.dateFrom() == null
+                && filter.dateTo() == null;
     }
 
     private DocumentExplorerResultResponse toResponse(DocumentExplorerRow row) {

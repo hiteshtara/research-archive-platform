@@ -442,4 +442,169 @@ class DocumentExplorerRepositoryTest {
         assertThat(facets).hasSize(1);
         assertThat(capturedSql()).contains("GROUP BY module");
     }
+
+    // --- Default-page fast path (2026-08-12 performance fix): countDefault()/
+    // moduleFacetsDefault()/searchDefaultPage() never touch the heavy
+    // award_pi/award_unit_counts/award_person_counts CTEs for the whole
+    // 267,386-row Award table - see
+    // docs/architecture/KUALI_DOCUMENT_EXPLORER_PERFORMANCE.md. ---
+
+    @Test
+    void countDefaultSumsFourLightweightPerModuleCountsNeverTheFullCte() {
+        DocumentExplorerRepository repository = newRepository();
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query = mock(JdbcClient.MappedQuerySpec.class);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(296413L);
+
+        long result = repository.countDefault();
+
+        assertThat(result).isEqualTo(296413L);
+        String sql = capturedSql();
+        assertThat(sql)
+                .contains("SELECT COUNT(*) FROM archive.award_version WHERE workflow_document_number IS NOT NULL")
+                .contains("SELECT COUNT(*) FROM archive.proposal_version WHERE document_number IS NOT NULL")
+                .contains("SELECT COUNT(*) FROM archive.negotiation WHERE document_number IS NOT NULL")
+                .contains("SELECT COUNT(*) FROM archive.subaward WHERE document_number IS NOT NULL")
+                .doesNotContain("award_pi")
+                .doesNotContain("award_unit_counts")
+                .doesNotContain("award_person_counts")
+                .doesNotContain("archive.award_person");
+    }
+
+    @Test
+    void moduleFacetsDefaultUsesFourDirectPerModuleCountsNeverTheFullCte() {
+        DocumentExplorerRepository repository = newRepository();
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<DocumentExplorerRepository.ModuleFacetRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(statement.query(DocumentExplorerRepository.ModuleFacetRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of(
+                new DocumentExplorerRepository.ModuleFacetRow("AWARD", 267386L),
+                new DocumentExplorerRepository.ModuleFacetRow("PROPOSAL", 17739L),
+                new DocumentExplorerRepository.ModuleFacetRow("NEGOTIATION", 10775L),
+                new DocumentExplorerRepository.ModuleFacetRow("SUBAWARD", 513L)
+        ));
+
+        List<DocumentExplorerRepository.ModuleFacetRow> facets = repository.moduleFacetsDefault();
+
+        assertThat(facets).hasSize(4);
+        String sql = capturedSql();
+        assertThat(sql)
+                .contains("'AWARD' AS module, COUNT(*) AS n FROM archive.award_version")
+                .contains("'PROPOSAL', COUNT(*) FROM archive.proposal_version")
+                .contains("'NEGOTIATION', COUNT(*) FROM archive.negotiation")
+                .contains("'SUBAWARD', COUNT(*) FROM archive.subaward")
+                .doesNotContain("award_pi")
+                .doesNotContain("award_unit_counts")
+                .doesNotContain("award_person_counts");
+    }
+
+    @Test
+    void searchDefaultPagePaginatesTheLightUnionBeforeAnyAwardEnrichment() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+
+        repository.searchDefaultPage(25, 0, "documentNumber");
+
+        String sql = capturedSql();
+        // The paginated CTE (LIMIT/OFFSET) must appear BEFORE the
+        // award_pi/award_unit_counts/award_person_counts enrichment
+        // CTEs in the WITH chain - proving pagination happens first,
+        // enrichment happens only on the already-paginated rows.
+        int paginatedIndex = sql.indexOf("paginated AS (");
+        int awardPiIndex = sql.indexOf("award_pi AS (");
+        assertThat(paginatedIndex).isGreaterThan(0);
+        assertThat(awardPiIndex).isGreaterThan(paginatedIndex);
+
+        // The enrichment CTEs are scoped to only the paginated page's
+        // Award ids - never a bare, unscoped scan of the full table.
+        assertThat(sql).contains("paginated_award_ids AS (");
+        assertThat(sql).contains(
+                "FROM archive.award_person ap WHERE ap.award_id IN (SELECT award_id FROM paginated_award_ids)"
+        );
+        assertThat(sql).contains(
+                "FROM archive.award_person_unit WHERE award_id IN (SELECT award_id FROM paginated_award_ids)"
+        );
+
+        // LIMIT/OFFSET is applied to the light union, not to a fully
+        // enriched result.
+        int limitIndex = sql.indexOf("LIMIT :limit OFFSET :offset");
+        assertThat(limitIndex).isGreaterThan(0).isLessThan(awardPiIndex);
+    }
+
+    @Test
+    void searchDefaultPageUsesSourceRecordIdAsAFinalTiebreakerNeverDocumentNumberAlone() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+
+        repository.searchDefaultPage(25, 0, "documentNumber");
+
+        String sql = capturedSql();
+        assertThat(sql).contains("av.award_id::text AS source_record_id");
+
+        // Each non-AWARD branch's LAST positional column (right before
+        // its own FROM clause) must be its own true per-row identity -
+        // never document_number, which is not globally unique. Anchored
+        // to each branch's own "'MODULE'," marker inside documents_light
+        // since negotiation_associated_award/subaward_sponsor (earlier
+        // CTEs) also reference archive.negotiation/archive.subaward.
+        int proposalFrom = sql.indexOf("FROM archive.proposal_version pv");
+        String proposalTail = sql.substring(sql.lastIndexOf(',', proposalFrom), proposalFrom);
+        assertThat(proposalTail).contains("pv.proposal_id::text || ':' || pv.version_number::text");
+
+        int negotiationBranch = sql.indexOf("'NEGOTIATION',");
+        int negotiationFrom = sql.indexOf("FROM archive.negotiation n", negotiationBranch);
+        String negotiationTail = sql.substring(sql.lastIndexOf(',', negotiationFrom), negotiationFrom);
+        assertThat(negotiationTail).contains("n.negotiation_id::text");
+
+        int subawardBranch = sql.indexOf("'SUBAWARD',");
+        int subawardFrom = sql.indexOf("FROM archive.subaward s", subawardBranch);
+        String subawardTail = sql.substring(sql.lastIndexOf(',', subawardFrom), subawardFrom);
+        assertThat(subawardTail).contains("s.subaward_id::text");
+
+        assertThat(sql).contains("ORDER BY document_number, module, source_record_id");
+        assertThat(sql).contains("ORDER BY p.document_number, p.module, p.source_record_id");
+    }
+
+    @Test
+    void searchDefaultPageNeverDeduplicatesByDocumentNumber() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+
+        repository.searchDefaultPage(25, 0, "documentNumber");
+
+        String sql = capturedSql();
+        // AWARD/141590 legitimately has 8 archived rows sharing one
+        // workflow document number - the light union must never
+        // collapse them (no DISTINCT ON / GROUP BY on document_number).
+        assertThat(sql).doesNotContain("DISTINCT ON (document_number)");
+        assertThat(sql).doesNotContain("DISTINCT ON (module, document_number)");
+        assertThat(sql).doesNotContain("GROUP BY document_number");
+        assertThat(sql).doesNotContain("GROUP BY module, document_number");
+    }
+
+    @Test
+    void searchDefaultPageTitleSortHasTiebreaker() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchDefaultPage(25, 0, "title");
+        assertThat(capturedSql()).contains("ORDER BY title NULLS LAST, document_number, source_record_id");
+    }
+
+    @Test
+    void searchDefaultPageDocumentDateSortHasTiebreaker() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchDefaultPage(25, 0, "documentDate");
+        assertThat(capturedSql()).contains("ORDER BY document_date DESC NULLS LAST, document_number, source_record_id");
+    }
+
+    @Test
+    void searchDefaultPageModuleSortHasTiebreaker() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchDefaultPage(25, 0, "module");
+        assertThat(capturedSql()).contains("ORDER BY module, document_number, source_record_id");
+    }
 }

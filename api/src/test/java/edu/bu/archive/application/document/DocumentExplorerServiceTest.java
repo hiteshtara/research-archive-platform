@@ -26,10 +26,23 @@ class DocumentExplorerServiceTest {
     private final DocumentExplorerService service = new DocumentExplorerService(repository);
 
     private void stub(List<DocumentExplorerRow> rows, long total) {
+        // Stubs both the filtered path (count/search/moduleFacets) and
+        // the default-unfiltered fast path (countDefault/
+        // searchDefaultPage/moduleFacetsDefault) identically, so tests
+        // that only care about row-mapping/routing/pagination logic
+        // (not which path a specific request takes) work regardless of
+        // whether service.search()'s isUnfiltered() check routes to one
+        // or the other - which path is actually taken is verified
+        // separately by the isUnfiltered()-routing tests below.
         when(repository.count(any())).thenReturn(total);
         when(repository.search(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(rows);
         when(repository.moduleFacets(any())).thenReturn(List.of());
+        when(repository.countDefault()).thenReturn(total);
+        when(repository.searchDefaultPage(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(), any()))
+                .thenReturn(rows);
+        when(repository.moduleFacetsDefault()).thenReturn(List.of());
     }
 
     private DocumentExplorerResponse search(String module) {
@@ -149,8 +162,15 @@ class DocumentExplorerServiceTest {
 
     @Test
     void blankModuleAndStatusMeanNoFilter() {
+        // personName is set so this request is NOT fully unfiltered and
+        // stays on the count(filter) path - the point of this test is
+        // blank-module normalization, verified via the filter object
+        // reaching the repository, not which repository method runs.
         stub(List.of(), 0L);
-        search(null);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                null, "Smith", null, false, null, null, null, null, null, 0, 25
+        );
         verify(repository).count(argThat(filter -> filter.module().equals("")));
     }
 
@@ -162,6 +182,23 @@ class DocumentExplorerServiceTest {
         DocumentExplorerResponse response = service.search(
                 null, null, null, null, null, null, null, false,
                 null, null, null, false, null, null, null, null, null, 2, 25
+        );
+        assertThat(response.results().page()).isEqualTo(2);
+        assertThat(response.results().totalElements()).isEqualTo(130L);
+        assertThat(response.results().totalPages()).isEqualTo(6);
+        // Fully unfiltered (module/status/person/etc. all blank) -> the
+        // default fast path, not search(filter, ...). Pagination math
+        // (page clamp, offset) is computed once in the service before
+        // branching, so this is equally valid coverage of it.
+        verify(repository).searchDefaultPage(eq(25), eq(50), eq("documentNumber"));
+    }
+
+    @Test
+    void paginationClampsAndComputesOffsetOnTheFilteredPathToo() {
+        stub(List.of(), 130L);
+        DocumentExplorerResponse response = service.search(
+                null, null, null, null, null, null, null, false,
+                null, "Smith", null, false, null, null, null, null, null, 2, 25
         );
         assertThat(response.results().page()).isEqualTo(2);
         assertThat(response.results().totalElements()).isEqualTo(130L);
@@ -192,6 +229,65 @@ class DocumentExplorerServiceTest {
                 null, null, null, true, null, null, null, null, null, 0, 25
         );
         verify(repository).count(argThat(filter -> filter.includeAnyUnit() && filter.piOnly()));
+    }
+
+    // --- Default-page fast path routing (2026-08-12 performance fix) ---
+
+    @Test
+    void emptyFilterCountUsesTheLightweightDefaultPathNotTheFullCte() {
+        stub(List.of(), 0L);
+        search(null);
+        verify(repository).countDefault();
+        verify(repository, org.mockito.Mockito.never()).count(any());
+    }
+
+    @Test
+    void emptyFilterFacetsUseDirectPerModuleCountsNotTheFullCte() {
+        stub(List.of(), 0L);
+        search(null);
+        verify(repository).moduleFacetsDefault();
+        verify(repository, org.mockito.Mockito.never()).moduleFacets(any());
+    }
+
+    @Test
+    void emptyFilterResultSelectionUsesTheLightPaginateFirstPathNotTheFullCte() {
+        stub(List.of(), 0L);
+        search(null);
+        verify(repository).searchDefaultPage(eq(25), eq(0), eq("documentNumber"));
+        verify(repository, org.mockito.Mockito.never()).search(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void anySingleFilterFallsBackToTheOriginalFullCtePathEntirely() {
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                null, "Smith", null, false, null, null, null, null, null, 0, 25
+        );
+        verify(repository).count(any());
+        verify(repository).search(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repository).moduleFacets(any());
+        verify(repository, org.mockito.Mockito.never()).countDefault();
+        verify(repository, org.mockito.Mockito.never()).searchDefaultPage(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(), any());
+        verify(repository, org.mockito.Mockito.never()).moduleFacetsDefault();
+    }
+
+    @Test
+    void dateRangeFilterAloneAlsoFallsBackToTheFilteredPath() {
+        // A filter type not covered by the other routing tests -
+        // dateFrom/dateTo depend on document_date, which the light
+        // union DOES carry directly, but isUnfiltered() correctly still
+        // routes to the filtered path since ANY filter (not just
+        // person/unit ones) must use it.
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                null, null, null, false, null, null,
+                LocalDate.of(2020, 1, 1), null, null, 0, 25
+        );
+        verify(repository).count(any());
+        verify(repository, org.mockito.Mockito.never()).countDefault();
     }
 
 }
