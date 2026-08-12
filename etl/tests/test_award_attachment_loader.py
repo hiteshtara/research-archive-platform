@@ -1109,6 +1109,130 @@ class StreamUploadTest(unittest.TestCase):
         s3_client.create_multipart_upload.assert_called_once()
         s3_client.put_object.assert_not_called()
 
+    def test_single_part_put_object_carries_sha256_metadata(self) -> None:
+        payload = b"a small inline attachment"
+        connection = FakeBlobConnection(FakeBlobCursor(payload))
+        location = attachment_loader.BlobLocation(
+            "ATTACHMENT_FILE", "FILE_ID", "FILE_DATA", 9001
+        )
+        s3_client = MagicMock()
+
+        byte_size, sha256 = attachment_loader.stream_upload(
+            connection,
+            location,
+            s3_client,
+            bucket="test-bucket",
+            key="k",
+            content_type="application/pdf",
+            file_size_bytes=len(payload),
+            multipart_threshold=attachment_loader.DEFAULT_MULTIPART_THRESHOLD_BYTES,
+        )
+
+        put_kwargs = s3_client.put_object.call_args.kwargs
+        self.assertEqual(put_kwargs["Metadata"], {"sha256": sha256})
+        self.assertEqual(put_kwargs["ContentType"], "application/pdf")
+        self.assertEqual(sha256, hashlib.sha256(payload).hexdigest())
+        s3_client.copy_object.assert_not_called()
+
+    def test_multipart_upload_tags_sha256_via_post_completion_copy_object(self) -> None:
+        payload = b"y" * 1000
+        connection = FakeBlobConnection(FakeBlobCursor(payload))
+        location = attachment_loader.BlobLocation(
+            "ATTACHMENT_FILE", "FILE_ID", "FILE_DATA", 1
+        )
+        s3_client = MagicMock()
+        s3_client.create_multipart_upload.return_value = {"UploadId": "upload-1"}
+        s3_client.upload_part.side_effect = (
+            lambda **kwargs: {"ETag": f"etag-{kwargs['PartNumber']}"}
+        )
+
+        with patch.object(attachment_loader, "_S3_MIN_PART_SIZE", 100):
+            byte_size, sha256 = attachment_loader.stream_upload(
+                connection,
+                location,
+                s3_client,
+                bucket="test-bucket",
+                key="k",
+                content_type="application/octet-stream",
+                file_size_bytes=len(payload),
+                multipart_threshold=100,
+            )
+
+        # create_multipart_upload happens before the digest is known -
+        # it must never carry a (necessarily wrong/absent) Metadata tag.
+        create_kwargs = s3_client.create_multipart_upload.call_args.kwargs
+        self.assertNotIn("Metadata", create_kwargs)
+
+        s3_client.complete_multipart_upload.assert_called_once()
+        s3_client.copy_object.assert_called_once()
+        copy_kwargs = s3_client.copy_object.call_args.kwargs
+        self.assertEqual(copy_kwargs["Bucket"], "test-bucket")
+        self.assertEqual(copy_kwargs["Key"], "k")
+        self.assertEqual(copy_kwargs["CopySource"], {"Bucket": "test-bucket", "Key": "k"})
+        self.assertEqual(copy_kwargs["Metadata"], {"sha256": sha256})
+        self.assertEqual(copy_kwargs["MetadataDirective"], "REPLACE")
+        self.assertEqual(copy_kwargs["ContentType"], "application/octet-stream")
+        self.assertEqual(sha256, hashlib.sha256(payload).hexdigest())
+
+    def test_multipart_copy_object_never_called_when_upload_is_aborted(self) -> None:
+        payload = b"z" * 1000
+        connection = FakeBlobConnection(FakeBlobCursor(payload))
+        location = attachment_loader.BlobLocation(
+            "ATTACHMENT_FILE", "FILE_ID", "FILE_DATA", 1
+        )
+        s3_client = MagicMock()
+        s3_client.create_multipart_upload.return_value = {"UploadId": "upload-1"}
+        s3_client.upload_part.side_effect = RuntimeError("network blip")
+
+        with patch.object(attachment_loader, "_S3_MIN_PART_SIZE", 100):
+            with self.assertRaises(RuntimeError):
+                attachment_loader.stream_upload(
+                    connection,
+                    location,
+                    s3_client,
+                    bucket="test-bucket",
+                    key="k",
+                    content_type=None,
+                    file_size_bytes=len(payload),
+                    multipart_threshold=100,
+                )
+
+        s3_client.copy_object.assert_not_called()
+
+    def test_multipart_copy_object_never_hardcodes_an_encryption_algorithm(self) -> None:
+        # Deliberately relies on (and never overrides) the destination
+        # bucket's own configured default encryption, so a future bucket
+        # policy change is tracked rather than fought - see the comment
+        # at this call site and the 2026-08-12 live verification against
+        # the real dev bucket referenced there. This test pins that
+        # design decision: no ServerSideEncryption/SSEKMSKeyId kwarg.
+        payload = b"y" * 1000
+        connection = FakeBlobConnection(FakeBlobCursor(payload))
+        location = attachment_loader.BlobLocation(
+            "ATTACHMENT_FILE", "FILE_ID", "FILE_DATA", 1
+        )
+        s3_client = MagicMock()
+        s3_client.create_multipart_upload.return_value = {"UploadId": "upload-1"}
+        s3_client.upload_part.side_effect = (
+            lambda **kwargs: {"ETag": f"etag-{kwargs['PartNumber']}"}
+        )
+
+        with patch.object(attachment_loader, "_S3_MIN_PART_SIZE", 100):
+            attachment_loader.stream_upload(
+                connection,
+                location,
+                s3_client,
+                bucket="test-bucket",
+                key="k",
+                content_type="application/octet-stream",
+                file_size_bytes=len(payload),
+                multipart_threshold=100,
+            )
+
+        copy_kwargs = s3_client.copy_object.call_args.kwargs
+        self.assertNotIn("ServerSideEncryption", copy_kwargs)
+        self.assertNotIn("SSEKMSKeyId", copy_kwargs)
+
 
 class SelectUploadCandidatesTest(unittest.TestCase):
     def test_default_statuses_exclude_failed(self) -> None:

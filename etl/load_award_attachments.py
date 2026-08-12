@@ -358,7 +358,55 @@ def _multipart_upload(
         )
         raise
 
-    return total_bytes, digest.hexdigest()
+    sha256 = digest.hexdigest()
+    # S3 multipart uploads cannot carry an object Metadata tag set at
+    # create_multipart_upload time here, because the SHA-256 digest is
+    # only fully known once every chunk has streamed through - and
+    # complete_multipart_upload has no Metadata parameter to set it
+    # afterward either. The minimal, standard fix is a same-bucket/
+    # same-key server-side copy (no re-upload of bytes from this
+    # process) with MetadataDirective="REPLACE" immediately after
+    # completion, to attach the now-known digest. ContentType must be
+    # re-specified here too - REPLACE overwrites all metadata/headers,
+    # not just the ones being added.
+    #
+    # Size limit: a single copy_object call supports source objects up
+    # to 5 GiB. Live-verified (2026-08-12) against every attachment
+    # blob currently reachable in Oracle (KCOEUS.ATTACHMENT_FILE.FILE_DATA
+    # and KCOEUS.FILE_DATA.DATA, via DBMS_LOB.GETLENGTH() - length only,
+    # no content read): the largest is 194,350,900 bytes (~185 MiB),
+    # about 27x under the 5 GiB limit. UploadPartCopy (required above
+    # that limit) is not implemented here - re-verify this assumption
+    # against Oracle before relying on it again if the source ever
+    # changes.
+    #
+    # Encryption: deliberately never sets ServerSideEncryption/
+    # SSEKMSKeyId here - the destination (this same bucket/key) applies
+    # its own configured default encryption automatically when none is
+    # requested explicitly (see terraform/modules/s3/main.tf's documents
+    # bucket: SSE-S3/AES256 bucket-default). Live-verified (2026-08-12,
+    # same-bucket self-copy against the real dev bucket under this
+    # loader's own IAM role): ContentLength, body bytes, and
+    # ServerSideEncryption were all unchanged before/after; only
+    # VersionId changed, because the bucket has versioning enabled - the
+    # prior version remains fully intact and recoverable, so this is a
+    # new version, never an in-place overwrite/truncation. Hardcoding a
+    # specific algorithm here would fight a future bucket policy change
+    # instead of tracking it, so this intentionally relies on (and
+    # re-verifies, above) the bucket's own default rather than asserting
+    # one in code.
+    copy_kwargs: dict[str, Any] = {
+        "Bucket": bucket,
+        "Key": key,
+        "CopySource": {"Bucket": bucket, "Key": key},
+        "Metadata": {"sha256": sha256},
+        "MetadataDirective": "REPLACE",
+    }
+    if content_type:
+        copy_kwargs["ContentType"] = content_type
+    s3_client.copy_object(**copy_kwargs)
+
+    return total_bytes, sha256
 
 
 def stream_upload(
@@ -392,13 +440,14 @@ def stream_upload(
         for chunk in chunks:
             digest.update(chunk)
             buffer.extend(chunk)
-        extra_args: dict[str, str] = {}
+        sha256 = digest.hexdigest()
+        extra_args: dict[str, Any] = {"Metadata": {"sha256": sha256}}
         if content_type:
             extra_args["ContentType"] = content_type
         s3_client.put_object(
             Bucket=bucket, Key=key, Body=bytes(buffer), **extra_args
         )
-        return len(buffer), digest.hexdigest()
+        return len(buffer), sha256
 
     return _multipart_upload(
         chunks,

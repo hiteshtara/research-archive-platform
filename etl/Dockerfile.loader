@@ -42,6 +42,7 @@ COPY etl/postgres_award_performance.py .
 COPY etl/investigate_amount_rows.py .
 COPY etl/investigate_amount_rows2.py .
 COPY etl/check_amount_info_tiebreak_invariant.py .
+COPY etl/attachment_orchestrator.py .
 COPY oracle oracle
 COPY sql/extract/award sql/extract/award
 COPY sql/extract/proposal sql/extract/proposal
