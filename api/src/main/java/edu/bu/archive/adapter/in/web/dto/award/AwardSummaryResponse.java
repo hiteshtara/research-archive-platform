@@ -44,6 +44,8 @@ public record AwardSummaryResponse(
         String methodOfPaymentCode,
         String methodOfPaymentDescription,
         String rootAwardNumber,
-        String parentAwardNumber
+        String parentAwardNumber,
+        boolean primaryCurrent,
+        String documentNumber
 ) {
 }

@@ -48,6 +48,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
@@ -727,6 +728,80 @@ public class AwardArchiveService {
                 pageMetadata.first(),
                 pageMetadata.last()
         );
+    }
+
+    private static final String VERSION_SORT_BY_SEQUENCE =
+            "ORDER BY av.sequence_number DESC, av.award_number, av.award_id DESC\n";
+    private static final String VERSION_SORT_BY_DATE =
+            "ORDER BY av.source_update_timestamp DESC NULLS LAST, av.award_id DESC\n";
+
+    /*
+     * Historical Award Records explorer: one row per award_id, never
+     * scoped to is_primary_current - deliberately independent of
+     * search()/searchAwards() above, which must stay family/current-
+     * record oriented. sort is validated against a fixed allow-list
+     * here (never passed through to SQL as raw text) before selecting
+     * one of two fixed ORDER BY literals - see the repository's own
+     * comment on why a date sort has no supporting index today.
+     */
+    public PageResponse<AwardVersionSearchResultResponse> searchVersions(
+            String query,
+            String awardNumber,
+            String documentNumber,
+            String versionFilter,
+            String sort,
+            int page,
+            int size
+    ) {
+        String rawQuery = query == null ? "" : query.trim();
+        String pattern = AwardSearchPattern.toLikePattern(rawQuery);
+        String safeAwardNumber = awardNumber == null ? "" : awardNumber.trim();
+        String safeDocumentNumber = documentNumber == null ? "" : documentNumber.trim();
+        String safeVersionFilter = normalizeVersionFilter(versionFilter);
+        String sortSql = "date".equals(sort)
+                ? VERSION_SORT_BY_DATE
+                : VERSION_SORT_BY_SEQUENCE;
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countSearchAwardVersions(
+                pattern, rawQuery, safeAwardNumber, safeDocumentNumber, safeVersionFilter
+        );
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        int offset = safePage * safeSize;
+
+        List<AwardVersionSearchResultResponse> content =
+                repository.searchAwardVersions(
+                        pattern,
+                        rawQuery,
+                        safeAwardNumber,
+                        safeDocumentNumber,
+                        safeVersionFilter,
+                        sortSql,
+                        safeSize,
+                        offset
+                );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    private static String normalizeVersionFilter(String versionFilter) {
+        if ("current".equals(versionFilter) || "historical".equals(versionFilter)) {
+            return versionFilter;
+        }
+        return "all";
     }
 
     public List<AwardPersonDetailResponse> findPeople(long awardId) {

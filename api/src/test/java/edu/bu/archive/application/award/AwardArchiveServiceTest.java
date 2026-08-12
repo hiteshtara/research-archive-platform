@@ -14,12 +14,14 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.AwardAttachmentStorage;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,6 +32,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -467,12 +472,51 @@ class AwardArchiveServiceTest {
                 "Brown University", null, "MICHAEL MCCLEAN",
                 "SPH ENVIRONMENTAL HEALTH", null, null, null, null,
                 BigDecimal.TEN, BigDecimal.TEN, "1", "Cost reimbursement",
-                "28", "Invoice", null, null
+                "28", "Invoice", null, null, true, null
         );
         when(repository.findSummaryByAwardId(3L))
                 .thenReturn(Optional.of(expected));
 
         assertThat(service.findSummary(3L)).isEqualTo(expected);
+    }
+
+    /*
+     * CARB-X 204713-00001 regression fixture: award_id 3561610 (sequence
+     * 544, the current version) vs award_id 3561589 (sequence 543, a
+     * non-current historical version) - opening the historical award_id
+     * must return ITS OWN data (a different status here: "Approved
+     * Award" vs "Closed"), never the current version's data. Proves
+     * "selecting an old award_id opens that exact version" and "the
+     * page does not silently replace it with the current version" at
+     * the service layer, independent of any HTTP/routing behavior.
+     */
+    @Test
+    void findSummaryReturnsTheExactHistoricalVersionNotTheCurrentOne() {
+        AwardSummaryResponse currentVersion = new AwardSummaryResponse(
+                3561610L, "204713-00001", 544, "CARB-X", "Closed",
+                "Boston University", null, "PI NAME", "MEDICINE",
+                null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
+                null, null, null, null, null, null, true, null
+        );
+        AwardSummaryResponse historicalVersion = new AwardSummaryResponse(
+                3561589L, "204713-00001", 543, "CARB-X", "Approved Award",
+                "Boston University", null, "PI NAME", "MEDICINE",
+                null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
+                null, null, null, null, null, null, false, null
+        );
+        when(repository.findSummaryByAwardId(3561610L))
+                .thenReturn(Optional.of(currentVersion));
+        when(repository.findSummaryByAwardId(3561589L))
+                .thenReturn(Optional.of(historicalVersion));
+
+        AwardSummaryResponse result = service.findSummary(3561589L);
+
+        assertThat(result.awardId()).isEqualTo(3561589L);
+        assertThat(result.sequenceNumber()).isEqualTo(543);
+        assertThat(result.status()).isEqualTo("Approved Award");
+        assertThat(result.primaryCurrent()).isFalse();
+        assertThat(result.status()).isNotEqualTo(currentVersion.status());
+        assertThat(result.sequenceNumber()).isNotEqualTo(currentVersion.sequenceNumber());
     }
 
     @Test
@@ -519,6 +563,85 @@ class AwardArchiveServiceTest {
         assertThat(page.page()).isZero();
         assertThat(page.size()).isEqualTo(100);
         verify(repository).findVersionSummaries("100004-00003", 100, 0);
+    }
+
+    @Test
+    void searchVersionsReturnsBothCurrentAndHistoricalRowsByDefault() {
+        AwardVersionSearchResultResponse current = new AwardVersionSearchResultResponse(
+                3561610L, "204713-00001", 544, "DOC-544", "CARB-X", "Closed",
+                "Boston University", "PI NAME", "MEDICINE", null, null, true
+        );
+        AwardVersionSearchResultResponse historical = new AwardVersionSearchResultResponse(
+                3561589L, "204713-00001", 543, "DOC-543", "CARB-X", "Approved Award",
+                "Boston University", "PI NAME", "MEDICINE", null, null, false
+        );
+        when(repository.countSearchAwardVersions(anyString(), anyString(), anyString(), anyString(), eq("all")))
+                .thenReturn(2L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq("all"), anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(current, historical));
+
+        PageResponse<AwardVersionSearchResultResponse> page =
+                service.searchVersions("carbx", "", "", "all", "sequence", 0, 25);
+
+        assertThat(page.content()).containsExactly(current, historical);
+        assertThat(page.totalElements()).isEqualTo(2L);
+    }
+
+    @Test
+    void searchVersionsNormalizesAnUnrecognizedVersionFilterToAll() {
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq("all")
+        )).thenReturn(0L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq("all"), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        service.searchVersions("", "", "", "not-a-real-filter", "sequence", 0, 25);
+
+        verify(repository).countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq("all")
+        );
+    }
+
+    @Test
+    void searchVersionsSelectsTheDateSortOnlyWhenExplicitlyRequested() {
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), anyString()
+        )).thenReturn(0L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+        ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
+
+        service.searchVersions("", "", "", "all", "date", 0, 25);
+
+        verify(repository).searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                sortSqlCaptor.capture(), anyInt(), anyInt()
+        );
+        assertThat(sortSqlCaptor.getValue())
+                .contains("source_update_timestamp DESC")
+                .doesNotContain("av.sequence_number DESC");
+    }
+
+    @Test
+    void searchVersionsDefaultsToTheSequenceSort() {
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), anyString()
+        )).thenReturn(0L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+        ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
+
+        service.searchVersions("", "", "", "all", "sequence", 0, 25);
+
+        verify(repository).searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), anyString(),
+                sortSqlCaptor.capture(), anyInt(), anyInt()
+        );
+        assertThat(sortSqlCaptor.getValue()).contains("av.sequence_number DESC");
     }
 
     private AwardSummaryCardRow summaryCard(String awardNumber) {

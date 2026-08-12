@@ -226,7 +226,7 @@ class GlobalSearchServiceTest {
                         3831872L, "103692-00002", 46, "Cancer Research Grant",
                         "Active", "NIH", null, "Dr. Smith", "Medicine",
                         null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                        null, null, null, null, null, null
+                        null, null, null, null, null, null, true, null
                 )
         );
 
@@ -497,7 +497,7 @@ class GlobalSearchServiceTest {
                         555L, "100200-00001", 3, "Campbell Research", "Active",
                         "NSF", null, "Dr. Campbell", "Biology",
                         null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                        null, null, null, null, null, null
+                        null, null, null, null, null, null, true, null
                 )
         );
         when(awardArchiveService.search("555", 0, 25)).thenReturn(
@@ -526,7 +526,7 @@ class GlobalSearchServiceTest {
                         555L, "100200-00001", 3, "Campbell Research", "Active",
                         "NSF", null, "Dr. Campbell", "Biology",
                         null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                        null, null, null, null, null, null
+                        null, null, null, null, null, null, true, null
                 )
         );
         when(awardArchiveService.search("555", 0, 25)).thenReturn(

@@ -19,6 +19,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
@@ -135,6 +136,54 @@ class AwardV1ControllerTest {
                 );
 
         verify(service).search("328797", 0, 25);
+    }
+
+    @Test
+    void searchVersionsIsRoutedUnderVersionsSearchNotTheFamilySearchRoute()
+            throws Exception {
+        // CARB-X 204713-00001 fixture: current award_id 3561610 (seq
+        // 544) and historical award_id 3561589 (seq 543) both returned
+        // by the SAME query - proves this route surfaces version-level
+        // rows, unlike /search which stays current-only.
+        AwardVersionSearchResultResponse current =
+                new AwardVersionSearchResultResponse(
+                        3561610L, "204713-00001", 544, "DOC-544", "CARB-X",
+                        "Closed", "Boston University", "PI NAME", "MEDICINE",
+                        null, null, true
+                );
+        AwardVersionSearchResultResponse historical =
+                new AwardVersionSearchResultResponse(
+                        3561589L, "204713-00001", 543, "DOC-543", "CARB-X",
+                        "Approved Award", "Boston University", "PI NAME",
+                        "MEDICINE", null, null, false
+                );
+        when(service.searchVersions("carbx", null, null, "all", "sequence", 0, 25))
+                .thenReturn(new PageResponse<>(
+                        List.of(current, historical), 0, 25, 2L, 1, true, true
+                ));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/versions/search").param("q", "carbx")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].awardId").value(3561610))
+                .andExpect(jsonPath("$.content[0].primaryCurrent").value(true))
+                .andExpect(jsonPath("$.content[1].awardId").value(3561589))
+                .andExpect(jsonPath("$.content[1].sequenceNumber").value(543))
+                .andExpect(jsonPath("$.content[1].primaryCurrent").value(false));
+
+        verify(service).searchVersions("carbx", null, null, "all", "sequence", 0, 25);
+    }
+
+    @Test
+    void searchVersionsDefaultsFiltersAndSortWhenOmitted() throws Exception {
+        when(service.searchVersions(null, null, null, "all", "sequence", 0, 25))
+                .thenReturn(new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true));
+
+        mockMvc.perform(get("/api/v1/awards/versions/search"))
+                .andExpect(status().isOk());
+
+        verify(service).searchVersions(null, null, null, "all", "sequence", 0, 25);
     }
 
     @Test
@@ -287,7 +336,7 @@ class AwardV1ControllerTest {
                 "Brown University", null, "MICHAEL MCCLEAN",
                 "SPH ENVIRONMENTAL HEALTH", null, null, null, null,
                 BigDecimal.TEN, BigDecimal.TEN, "1", "Cost reimbursement",
-                "28", "Invoice", null, null
+                "28", "Invoice", null, null, true, null
         );
         when(service.findSummary(3L)).thenReturn(summary);
 

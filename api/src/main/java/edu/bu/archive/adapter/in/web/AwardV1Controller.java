@@ -23,6 +23,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyDocumentResponse;
@@ -130,6 +131,61 @@ public class AwardV1Controller {
     ) {
         return ResponseEntity.ok(
                 service.search(q, page, size)
+        );
+    }
+
+    @Operation(
+            summary = "Search Historical Award Records (version-level)",
+            description = "Free-text search across every archived "
+                    + "Award *version* (award_id), never scoped to "
+                    + "the current version - deliberately independent "
+                    + "of /search above, which stays family/current-"
+                    + "record oriented. Supports exact award-number "
+                    + "and document-number match, a current/historical "
+                    + "filter, and sort by sequence number (default) "
+                    + "or last-update date."
+    )
+    @ApiResponse(responseCode = "200", description = "A page of matching Award versions.")
+    @ApiResponse(responseCode = "400", description = "page/size out of range.")
+    @GetMapping("/versions/search")
+    public ResponseEntity<PageResponse<AwardVersionSearchResultResponse>> searchVersions(
+            @Parameter(description = "Free-text query across title, "
+                    + "sponsor, lead unit, and PI/person name. "
+                    + "Supports *wildcard* syntax.")
+            @RequestParam(name = "q", required = false)
+            String q,
+
+            @Parameter(description = "Exact award_number match.")
+            @RequestParam(required = false)
+            String awardNumber,
+
+            @Parameter(description = "Exact workflow document_number match.")
+            @RequestParam(required = false)
+            String documentNumber,
+
+            @Parameter(description = "\"all\" (default), \"current\", or \"historical\".")
+            @RequestParam(defaultValue = "all")
+            String versionFilter,
+
+            @Parameter(description = "\"sequence\" (default) or \"date\".")
+            @RequestParam(defaultValue = "sequence")
+            String sort,
+
+            @Parameter(description = "Zero-based page index.")
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @Parameter(description = "Page size, 1-100.")
+            @RequestParam(defaultValue = "25")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(
+                service.searchVersions(
+                        q, awardNumber, documentNumber, versionFilter, sort, page, size
+                )
         );
     }
 

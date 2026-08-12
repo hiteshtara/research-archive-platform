@@ -439,6 +439,45 @@ export function getAwardVersionsV1(
   );
 }
 
+// Historical Award Records explorer - version-level search across every
+// archived Award, never scoped to the current version. Deliberately a
+// separate call from searchAwardsV1 above, which must stay family/
+// current-record oriented.
+export function searchAwardVersionsV1(
+  parameters: {
+    q?: string;
+    awardNumber?: string;
+    documentNumber?: string;
+    versionFilter?: "all" | "current" | "historical";
+    sort?: "sequence" | "date";
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardVersionSearchPageResponse> {
+  const searchParameters = new URLSearchParams({
+    versionFilter: parameters.versionFilter ?? "all",
+    sort: parameters.sort ?? "sequence",
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
+  });
+
+  if (parameters.q?.trim()) {
+    searchParameters.set("q", parameters.q.trim());
+  }
+  if (parameters.awardNumber?.trim()) {
+    searchParameters.set("awardNumber", parameters.awardNumber.trim());
+  }
+  if (parameters.documentNumber?.trim()) {
+    searchParameters.set("documentNumber", parameters.documentNumber.trim());
+  }
+
+  return request(
+    `/api/v1/awards/versions/search?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
 // --- Award API v1 Phase 2 (people / amounts / terms / comments / SAP / attachments) ---
 
 export function getAwardPeopleV1(

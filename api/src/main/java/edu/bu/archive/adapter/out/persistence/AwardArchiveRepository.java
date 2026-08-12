@@ -39,6 +39,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyActionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyDocumentResponse;
@@ -809,7 +810,9 @@ public class AwardArchiveRepository {
                     av.method_of_payment_code,
                     av.method_of_payment_description,
                     ah.root_award_number,
-                    ah.parent_award_number
+                    ah.parent_award_number,
+                    av.is_primary_current AS primary_current,
+                    av.workflow_document_number AS document_number
                 FROM archive.award_version av
                 LEFT JOIN LATERAL (
                     SELECT ap.full_name
@@ -903,6 +906,138 @@ public class AwardArchiveRepository {
                 WHERE award_number = :awardNumber
                 """)
                 .param("awardNumber", awardNumber)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    /*
+     * --- Version-level search (Historical Award Records) -----------------
+     *
+     * One row per award_id, deliberately NEVER scoped to
+     * is_primary_current - the whole point of this query is to surface
+     * both current and historical versions side by side (primaryCurrent
+     * distinguishes them). awardNumber/documentNumber are exact-match
+     * sentinels ('' means "no filter"), matching searchAwards' own
+     * :rawQuery = '' convention - both hit real indexes
+     * (ix_award_version_family_sequence/ix_award_version_number for
+     * award_number, ix_award_version_workflow_document_number for
+     * document_number; see V011/V012/V055). versionFilter is a fixed,
+     * server-validated enum ("all"/"current"/"historical"), never raw
+     * user text, so comparing it by ordinary equality is safe. sortSql
+     * is likewise never user-supplied - AwardArchiveService picks one of
+     * two fixed literal ORDER BY clauses before calling this method: a
+     * date-unfiltered sort has no supporting index today (flagged, not
+     * fixed, per the investigation - archive.award_version has none on
+     * source_update_timestamp alone) and may be slower at full scale
+     * than the sequence-based default.
+     */
+    public List<AwardVersionSearchResultResponse> searchAwardVersions(
+            String pattern,
+            String rawQuery,
+            String awardNumber,
+            String documentNumber,
+            String versionFilter,
+            String sortSql,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    av.award_id,
+                    av.award_number,
+                    av.sequence_number,
+                    av.workflow_document_number AS document_number,
+                    av.title,
+                    av.status_description AS status,
+                    av.sponsor_name AS sponsor,
+                    pi.full_name AS principal_investigator,
+                    av.lead_unit_name AS lead_unit,
+                    av.award_effective_date,
+                    av.source_update_timestamp AS update_timestamp,
+                    av.is_primary_current AS primary_current
+                FROM archive.award_version av
+                LEFT JOIN LATERAL (
+                    SELECT ap.full_name
+                    FROM archive.award_person ap
+                    WHERE ap.award_id = av.award_id
+                    ORDER BY
+                        CASE
+                            WHEN UPPER(TRIM(ap.contact_role_code)) = 'PI'
+                            THEN 0
+                            ELSE 1
+                        END,
+                        ap.full_name NULLS LAST,
+                        ap.award_person_id
+                    LIMIT 1
+                ) pi ON TRUE
+                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
+                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (
+                        :rawQuery = ''
+                        OR av.title ILIKE :pattern
+                        OR av.sponsor_name ILIKE :pattern
+                        OR av.lead_unit_name ILIKE :pattern
+                        OR EXISTS (
+                            SELECT 1 FROM archive.award_person ap2
+                            WHERE ap2.award_id = av.award_id
+                              AND ap2.full_name ILIKE :pattern
+                        )
+                  )
+                  AND (
+                        :versionFilter = 'all'
+                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
+                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
+                  )
+                """ + sortSql + """
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("pattern", pattern)
+                .param("rawQuery", rawQuery)
+                .param("awardNumber", awardNumber)
+                .param("documentNumber", documentNumber)
+                .param("versionFilter", versionFilter)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AwardVersionSearchResultResponse.class)
+                .list();
+    }
+
+    public long countSearchAwardVersions(
+            String pattern,
+            String rawQuery,
+            String awardNumber,
+            String documentNumber,
+            String versionFilter
+    ) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_version av
+                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
+                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (
+                        :rawQuery = ''
+                        OR av.title ILIKE :pattern
+                        OR av.sponsor_name ILIKE :pattern
+                        OR av.lead_unit_name ILIKE :pattern
+                        OR EXISTS (
+                            SELECT 1 FROM archive.award_person ap2
+                            WHERE ap2.award_id = av.award_id
+                              AND ap2.full_name ILIKE :pattern
+                        )
+                  )
+                  AND (
+                        :versionFilter = 'all'
+                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
+                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
+                  )
+                """)
+                .param("pattern", pattern)
+                .param("rawQuery", rawQuery)
+                .param("awardNumber", awardNumber)
+                .param("documentNumber", documentNumber)
+                .param("versionFilter", versionFilter)
                 .query(Long.class)
                 .single();
 

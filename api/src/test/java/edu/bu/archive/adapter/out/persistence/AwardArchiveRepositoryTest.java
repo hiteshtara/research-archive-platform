@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
@@ -287,7 +288,7 @@ class AwardArchiveRepositoryTest {
                 "SPH ENVIRONMENTAL HEALTH", LocalDate.of(2007, 9, 15),
                 null, null, null, BigDecimal.TEN, BigDecimal.TEN,
                 "1", "Cost reimbursement", "28", "Invoice",
-                null, null
+                null, null, true, null
         );
 
         when(jdbc.sql(anyString())).thenReturn(statement);
@@ -412,6 +413,124 @@ class AwardArchiveRepositoryTest {
                 .contains("SELECT COUNT(*)")
                 .contains("FROM archive.award_version")
                 .contains("award_number = :awardNumber");
+    }
+
+    @Test
+    void searchAwardVersionsNeverUnconditionallyScopesToPrimaryCurrent() {
+        // The whole point of this query (Historical Award Records) is
+        // both current and historical rows side by side - unlike
+        // searchAwards, is_primary_current must only ever appear inside
+        // the versionFilter-conditional clause, never as a bare
+        // unconditional requirement.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%cancer%", "cancer", "", "", "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("FROM archive.award_version av")
+                .contains(":versionFilter = 'all'")
+                .contains(":versionFilter = 'current' AND av.is_primary_current = TRUE")
+                .contains(":versionFilter = 'historical' AND av.is_primary_current = FALSE")
+                .contains("UPPER(av.award_number) = UPPER(:awardNumber)")
+                .contains("UPPER(av.workflow_document_number) = UPPER(:documentNumber)")
+                .contains("av.is_primary_current AS primary_current")
+                .doesNotContain("WHERE av.is_primary_current = TRUE");
+    }
+
+    @Test
+    void searchAwardVersionsBindsEveryFilterParameter() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%cancer%", "cancer", "204713-00001", "DOC-9001",
+                "historical", "ORDER BY av.sequence_number DESC\n", 25, 50
+        );
+
+        verify(statement).param("pattern", "%cancer%");
+        verify(statement).param("rawQuery", "cancer");
+        verify(statement).param("awardNumber", "204713-00001");
+        verify(statement).param("documentNumber", "DOC-9001");
+        verify(statement).param("versionFilter", "historical");
+        verify(statement).param("limit", 25);
+        verify(statement).param("offset", 50);
+    }
+
+    @Test
+    void countSearchAwardVersionsAppliesTheSameFiltersAsSearch() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(544L);
+
+        long total = new AwardArchiveRepository(jdbc).countSearchAwardVersions(
+                "%carbx%", "carbx", "", "", "all"
+        );
+
+        assertThat(total).isEqualTo(544L);
+        assertThat(firstSql(jdbc))
+                .contains("SELECT COUNT(*)")
+                .contains("FROM archive.award_version av")
+                .doesNotContain("WHERE av.is_primary_current = TRUE");
+    }
+
+    @Test
+    void findSummaryByAwardIdIsNeverScopedToPrimaryCurrentAndExposesIt() {
+        // Historical version support depends entirely on this endpoint
+        // resolving an exact, possibly non-current award_id - it must
+        // never silently redirect to the family's current version, and
+        // the caller needs primaryCurrent to know which one it got.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("awardId", 3561589L)).thenReturn(statement);
+        when(statement.query(AwardSummaryResponse.class)).thenReturn(query);
+        when(query.optional()).thenReturn(Optional.empty());
+
+        new AwardArchiveRepository(jdbc).findSummaryByAwardId(3561589L);
+
+        assertThat(firstSql(jdbc))
+                .contains("av.award_id = :awardId")
+                .contains("av.is_primary_current AS primary_current")
+                .contains("av.workflow_document_number AS document_number")
+                .doesNotContain("is_primary_current = TRUE");
     }
 
     @Test

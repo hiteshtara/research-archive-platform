@@ -22,11 +22,13 @@ test("Awards card navigates to the current Award Search route, not the retired l
   assert.notEqual(card.path, "/awards");
 });
 
-test("Historical Award Records card also uses the current Award Search route", () => {
-  const card = findCard(historicalActivityCards, "awardHistoryRecords");
+test("Historical Award Records card routes to the version-level explorer, not the Awards family search", () => {
+  const awards = findCard(primaryBusinessCards, "awards");
+  const history = findCard(historicalActivityCards, "awardHistoryRecords");
 
-  assert.equal(card.path, "/awards/search");
-  assert.notEqual(card.path, "/awards");
+  assert.equal(history.path, "/awards/versions/search");
+  assert.notEqual(history.path, awards.path);
+  assert.notEqual(history.path, "/awards");
 });
 
 test("Awards and Historical Award Records describe different grains, matching their different dashboard counts", () => {

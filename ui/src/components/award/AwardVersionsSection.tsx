@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { getAwardVersionsV1 } from "../../api/client";
 import { ErrorState } from "../common/ErrorState";
@@ -22,6 +23,7 @@ const PAGE_SIZE = 10;
 // Every version of this Award's own award_number, newest first - fed
 // from the live GET /api/v1/awards/{awardId}/versions endpoint.
 export function AwardVersionsSection({ awardId }: { awardId: number }) {
+  const navigate = useNavigate();
   const [page, setPage] = useState(0);
 
   const versionsQuery = useQuery({
@@ -62,7 +64,20 @@ export function AwardVersionsSection({ awardId }: { awardId: number }) {
 
           <TableBody>
             {versions.content.map((version) => (
-              <TableRow key={version.awardId}>
+              <TableRow
+                key={version.awardId}
+                hover
+                sx={{ cursor: "pointer" }}
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/awards/${version.awardId}`)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    navigate(`/awards/${version.awardId}`);
+                  }
+                }}
+              >
                 <TableCell>
                   <Chip size="small" label={version.sequenceNumber} />
                 </TableCell>

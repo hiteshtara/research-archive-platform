@@ -1,5 +1,6 @@
 import {
   Box,
+  Chip,
   Divider,
   List,
   ListItemButton,
@@ -166,7 +167,22 @@ export function AwardDashboardPage() {
           >
             award_id {summary.awardId} &middot; sequence{" "}
             {summary.sequenceNumber}
+            {summary.documentNumber ? (
+              <>
+                {" "}
+                &middot; document {summary.documentNumber}
+              </>
+            ) : null}
           </Typography>
+
+          {!summary.primaryCurrent && (
+            <Chip
+              size="small"
+              color="warning"
+              label="Historical version"
+              sx={{ mt: 1 }}
+            />
+          )}
         </Box>
 
         <StatusPill status={summary.status} domain="award" />

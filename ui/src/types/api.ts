@@ -473,6 +473,8 @@ export interface AwardSummaryV1 {
   methodOfPaymentDescription: string | null;
   rootAwardNumber: string | null;
   parentAwardNumber: string | null;
+  primaryCurrent: boolean;
+  documentNumber: string | null;
 }
 
 export interface AwardVersionV1 {
@@ -490,6 +492,29 @@ export interface AwardVersionV1 {
 }
 
 export interface AwardVersionPageResponse extends PageResponse<AwardVersionV1> {}
+
+// Historical Award Records explorer - one row per award_id (a specific
+// version), never scoped to the current version. Deliberately a
+// separate type from AwardSearchHit (which is always current-only) and
+// from AwardVersionV1 (which is always one Award family's own history,
+// not a cross-family search result).
+export interface AwardVersionSearchHit {
+  awardId: number;
+  awardNumber: string;
+  sequenceNumber: number | null;
+  documentNumber: string | null;
+  title: string | null;
+  status: string | null;
+  sponsor: string | null;
+  principalInvestigator: string | null;
+  leadUnit: string | null;
+  awardEffectiveDate: string | null;
+  updateTimestamp: string | null;
+  primaryCurrent: boolean;
+}
+
+export interface AwardVersionSearchPageResponse
+  extends PageResponse<AwardVersionSearchHit> {}
 
 // --- Award API v1 Phase 2 (people / amounts / terms / comments / SAP / attachments) ---
 

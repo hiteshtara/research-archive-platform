@@ -30,7 +30,7 @@ export const historicalActivityCards = [
     key: "awardHistoryRecords",
     title: "Historical Award Records",
     description: "All archived Award versions",
-    path: "/awards/search",
+    path: "/awards/versions/search",
   },
   {
     key: "proposalHistoryRecords",

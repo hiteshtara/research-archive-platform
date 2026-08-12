@@ -5,6 +5,7 @@ import { AppLayout } from "./layout/AppLayout";
 import { AwardDashboardPage } from "./pages/award/AwardDashboardPage";
 import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
 import { AwardSearchPage } from "./pages/award/AwardSearchPage";
+import { AwardVersionSearchPage } from "./pages/award/AwardVersionSearchPage";
 
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
@@ -77,6 +78,11 @@ export default function App() {
         <Route
           path="awards/search"
           element={<AwardSearchPage />}
+        />
+
+        <Route
+          path="awards/versions/search"
+          element={<AwardVersionSearchPage />}
         />
 
         <Route

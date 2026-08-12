@@ -165,7 +165,7 @@ class AwardV1ContractTest {
                 "SPH ENVIRONMENTAL HEALTH", LocalDate.of(2007, 9, 15),
                 null, null, null, BigDecimal.TEN, BigDecimal.TEN,
                 "1", "Cost reimbursement", "28", "Invoice",
-                "100004-00001", "100004-00002"
+                "100004-00001", "100004-00002", true, "DOC-9001"
         );
 
         assertFieldNames(summary, Set.of(
@@ -177,7 +177,7 @@ class AwardV1ContractTest {
                 "anticipatedTotalAmount", "basisOfPaymentCode",
                 "basisOfPaymentDescription", "methodOfPaymentCode",
                 "methodOfPaymentDescription", "rootAwardNumber",
-                "parentAwardNumber"
+                "parentAwardNumber", "primaryCurrent", "documentNumber"
         ));
 
         // FAIN and "account type" must never reappear as fields -
