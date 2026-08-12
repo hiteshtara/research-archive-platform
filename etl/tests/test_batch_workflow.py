@@ -412,6 +412,73 @@ class RunCreateBatchTest(_BatchPostgresTestCase):
 
         self.assertEqual(result["selected_file_ids"], [2, 3])
 
+    def test_excludes_pending_file_ids_with_metadata_already_loaded(self) -> None:
+        # Regression (live-verified 2026-08-12): a file_id whose
+        # metadata is already loaded but whose binary content isn't
+        # uploaded yet (PENDING) must also be excluded from a new
+        # batch's candidate selection - not just UPLOADED ones. Before
+        # this fix, a caller that creates metadata batches repeatedly
+        # without an upload in between (attachment_orchestrator's
+        # metadata-to-exhaustion loop) would re-select the same
+        # not-yet-uploaded file_ids into an identical new batch every
+        # time, making zero forward progress and never reaching the
+        # binary stage.
+        self._insert_attachment_object(1, upload_status="PENDING")
+        batches = _oracle_batches_stub([pd.DataFrame({"file_id": [1, 2, 3]})])
+
+        with patch.object(
+            attachment_loader, "OracleDataSource", return_value=batches
+        ):
+            result = attachment_loader._run_create_batch(self.engine, 2)
+
+        self.assertEqual(result["selected_file_ids"], [2, 3])
+
+    def test_excludes_missing_source_content_file_ids_too(self) -> None:
+        # MISSING_SOURCE_CONTENT means Oracle already confirmed there is
+        # no blob at all - re-selecting it into a new metadata batch
+        # would only ever be a wasteful, unchanged no-op.
+        self._insert_attachment_object(1, upload_status="MISSING_SOURCE_CONTENT")
+        batches = _oracle_batches_stub([pd.DataFrame({"file_id": [1, 2, 3]})])
+
+        with patch.object(
+            attachment_loader, "OracleDataSource", return_value=batches
+        ):
+            result = attachment_loader._run_create_batch(self.engine, 2)
+
+        self.assertEqual(result["selected_file_ids"], [2, 3])
+
+    def test_repeated_metadata_batch_creation_makes_forward_progress_without_an_upload_in_between(
+        self,
+    ) -> None:
+        # The exact shape of the live incident: create a batch, load its
+        # metadata (leaving files PENDING, no upload), then create
+        # another batch - the second call must select DIFFERENT
+        # file_ids, not the identical set again.
+        batches_first = _oracle_batches_stub(
+            [pd.DataFrame({"file_id": [1, 2, 3, 4]})]
+        )
+        with patch.object(
+            attachment_loader, "OracleDataSource", return_value=batches_first
+        ):
+            first = attachment_loader._run_create_batch(self.engine, 2)
+        self.assertEqual(first["selected_file_ids"], [1, 2])
+
+        # Simulate _run_load_batch's own effect: metadata loaded, still
+        # PENDING (no upload happened).
+        self._insert_attachment_object(1, upload_status="PENDING")
+        self._insert_attachment_object(2, upload_status="PENDING")
+
+        batches_second = _oracle_batches_stub(
+            [pd.DataFrame({"file_id": [1, 2, 3, 4]})]
+        )
+        with patch.object(
+            attachment_loader, "OracleDataSource", return_value=batches_second
+        ):
+            second = attachment_loader._run_create_batch(self.engine, 2)
+
+        self.assertEqual(second["selected_file_ids"], [3, 4])
+        self.assertNotEqual(first["selected_file_ids"], second["selected_file_ids"])
+
     def test_include_already_uploaded_flag_includes_them(self) -> None:
         self._insert_attachment_object(1, upload_status="UPLOADED")
         batches = _oracle_batches_stub([pd.DataFrame({"file_id": [1, 2, 3]})])

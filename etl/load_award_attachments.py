@@ -1314,10 +1314,28 @@ def _run_create_batch(
     oracle/award/export_award_attachment_files.sql), and persist that
     exact membership as a new batch via the generic batch framework.
     Never reads a BLOB (the Oracle query never selects blob content) and
-    never touches S3. By default, excludes file_ids already fully
-    UPLOADED in PostgreSQL - pass include_already_uploaded=True to select
-    from the full candidate pool regardless. Raises ValueError for a
-    non-positive requested_size, before touching Oracle or PostgreSQL."""
+    never touches S3. By default, excludes every file_id that already
+    has ANY archive.attachment_object row - its metadata has already
+    been loaded (by this batch or an earlier one), regardless of
+    upload_status, so there is nothing left for a new metadata batch to
+    do for it; pass include_already_uploaded=True to select from the
+    full candidate pool regardless. Raises ValueError for a non-positive
+    requested_size, before touching Oracle or PostgreSQL.
+
+    Live-verified incident (2026-08-12): this previously excluded only
+    upload_status='UPLOADED' rows. Any caller that creates metadata
+    batches repeatedly without an upload in between - which is exactly
+    what attachment_orchestrator.run_orchestration does (metadata stage
+    runs to full exhaustion before the binary stage ever starts) -
+    would re-select the SAME still-PENDING file_ids into a new batch
+    every single time, since PENDING was never excluded: batches 86-91
+    of a real dev run all had byte-for-byte identical 2000-file
+    membership, making zero forward progress and never reaching the
+    binary stage at all. The CLI's own historical usage
+    (--create-batch, --load-batch, --upload for one batch before ever
+    creating the next) never triggered this, since --upload always
+    flipped the batch's own files to UPLOADED before the next
+    --create-batch call ran."""
     if requested_size <= 0:
         raise ValueError(
             f"requested_size must be positive, got {requested_size}"
@@ -1327,10 +1345,7 @@ def _run_create_batch(
     if not include_already_uploaded:
         with engine.connect() as connection:
             rows = connection.execute(
-                text(
-                    "SELECT file_id FROM archive.attachment_object "
-                    "WHERE upload_status = 'UPLOADED'"
-                )
+                text("SELECT file_id FROM archive.attachment_object")
             ).scalars()
             excluded_file_ids = {int(value) for value in rows}
 
