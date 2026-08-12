@@ -82,7 +82,7 @@ class ExistingObjectReuseTest(unittest.TestCase):
         return row
 
     def test_proposal_skips_already_uploaded_without_touching_oracle(self) -> None:
-        matching_key = "proposals/by-file-data-id/uuid-1/a.pdf"
+        matching_key = "proposal/by-file-data-id/uuid-1/a.pdf"
         connection = MagicMock()
         engine = _engine_with_connection(connection)
         candidates = pd.DataFrame([self._candidate(object_key=matching_key)])
@@ -241,7 +241,7 @@ class CrashWindowReuseTest(unittest.TestCase):
         stream.assert_not_called()
         mark_uploaded.assert_called_once_with(
             engine, "uuid-1", bucket="bucket-x",
-            key="proposals/by-file-data-id/uuid-1/a.pdf",
+            key="proposal/by-file-data-id/uuid-1/a.pdf",
             sha256="realsha", byte_size=12345,
         )
         self.assertEqual(report["reused_from_s3"], 1)
@@ -318,7 +318,7 @@ class S3MismatchStopsOrchestrationTest(unittest.TestCase):
             patch.object(
                 orch, "check_s3_existing_object",
                 side_effect=orch.S3ObjectMismatch(
-                    key="proposals/by-file-data-id/uuid-1/a.pdf",
+                    key="proposal/by-file-data-id/uuid-1/a.pdf",
                     reason="size mismatch", expected=500, actual=999,
                 ),
             ),
@@ -1057,6 +1057,32 @@ class ModuleIsolationTest(unittest.TestCase):
 # ---------------------------------------------------------------------
 # 13. No deletion or overwrite paths
 # ---------------------------------------------------------------------
+
+class S3PrefixMatchesGrantedIamScopeTest(unittest.TestCase):
+    """Live-verified (2026-08-12): the loader task role's IAM policy
+    (terraform/modules/ecs/main.tf) grants s3:PutObject/GetObject only
+    on specific literal prefixes, not a bare bucket-wide wildcard - a
+    key computed under any other prefix fails closed with S3
+    AccessDenied at upload time, not at code-review time. This was
+    caught by the canary: proposal_binary_stage's default prefix was
+    originally "proposals/by-file-data-id" (plural), but
+    UploadProposalAttachmentObjects only grants "proposal/*" (singular,
+    matching ProposalAttachmentPlugin's own default_s3_prefix). Pin the
+    corrected values so a future accidental rename trips a test instead
+    of a real upload run."""
+
+    def test_proposal_binary_stage_default_prefix_is_singular_matching_granted_iam_scope(self) -> None:
+        import inspect
+
+        signature = inspect.signature(orch.proposal_binary_stage)
+        self.assertEqual(signature.parameters["prefix"].default, "proposal/by-file-data-id")
+
+    def test_subaward_binary_stage_default_prefix_matches_granted_iam_scope(self) -> None:
+        import inspect
+
+        signature = inspect.signature(orch.subaward_binary_stage)
+        self.assertEqual(signature.parameters["prefix"].default, "subawards/by-file-data-id")
+
 
 class NoDeletionOrOverwritePathsTest(unittest.TestCase):
     def test_module_source_never_contains_destructive_sql(self) -> None:

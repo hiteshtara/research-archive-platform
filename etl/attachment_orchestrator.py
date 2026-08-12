@@ -675,7 +675,22 @@ def proposal_binary_stage(
     *,
     bucket: str,
     batch_id: int,
-    prefix: str = "proposals/by-file-data-id",
+    # Must stay under "proposal/*" (singular) - that is the exact prefix
+    # the loader task role's UploadProposalAttachmentObjects IAM
+    # statement grants s3:PutObject/GetObject on (see
+    # terraform/modules/ecs/main.tf), matching ProposalAttachmentPlugin's
+    # own default_s3_prefix. A plural "proposals/..." prefix here is not
+    # a cosmetic naming choice - it silently falls outside the granted
+    # IAM resource pattern and every upload fails closed with S3
+    # AccessDenied. Live-verified (2026-08-12): the original "proposals/
+    # by-file-data-id" default caused exactly this failure against the
+    # real dev bucket/task role; this corrected prefix does not collide
+    # with ProposalAttachmentPlugin's own real key shape under the same
+    # prefix ("proposal/{proposalNumber}/{sequenceNumber}/
+    # {proposalAttachmentId}/{file}" - keyed by reference, not by
+    # physical-file identity), since this orchestrator's own keys live
+    # under the distinct "proposal/by-file-data-id/" sub-path.
+    prefix: str = "proposal/by-file-data-id",
     run_id: str | None = None,
 ) -> dict[str, Any]:
     file_data_ids = _batch_file_data_ids(engine, batch_id)
