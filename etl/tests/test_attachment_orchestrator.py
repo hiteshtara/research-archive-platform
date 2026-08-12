@@ -870,6 +870,38 @@ class SizeHashMismatchTest(unittest.TestCase):
         self.assertIn("stopped_reason", summary)
         self.assertIn("uuid-1", summary["stopped_reason"])
 
+    def test_run_orchestration_does_not_stop_the_binary_loop_after_a_zero_selected_batch(self) -> None:
+        # Live incident (2026-08-12): _next_ready_batch can legitimately
+        # return an older READY batch whose own candidates are already
+        # fully UPLOADED (physical_files_selected=0 for THAT batch) -
+        # this must never be treated as "nothing left to do anywhere".
+        # A real run hit exactly this: it processed one such zero-work
+        # batch, stopped the whole binary stage, and exited 0 while
+        # ~90,000 genuinely PENDING files were never touched. The binary
+        # loop must keep calling _next_ready_batch until it returns None
+        # - not stop early just because one batch along the way had
+        # nothing to upload.
+        binary_reports = [
+            {"physical_files_selected": 0, "uploaded": 0},
+            {"physical_files_selected": 500, "uploaded": 500},
+            {"physical_files_selected": 0, "uploaded": 0},
+        ]
+        with (
+            patch.object(orch, "acquire_lock", return_value=MagicMock()),
+            patch.object(orch, "release_lock"),
+            patch.object(orch, "create_postgres_engine", return_value=MagicMock()),
+            patch.object(orch, "proposal_metadata_stage", return_value={"selected_count": 0}),
+            patch.object(orch, "_next_ready_batch", side_effect=[1, 2, 3, None]),
+            patch.object(orch, "_batch_file_data_ids", return_value=["uuid-1"]),
+            patch.object(orch, "proposal_binary_stage", side_effect=binary_reports) as binary_stage,
+            patch.object(orch, "reconcile_batch", return_value={"clean": True, "mismatches": []}),
+        ):
+            summary = orch.run_orchestration(modules=(orch.PROPOSAL,), bucket="bucket-x")
+
+        self.assertEqual(binary_stage.call_count, 3)
+        self.assertNotIn("stopped_reason", summary)
+        self.assertEqual(len(summary["modules"]["proposal"]["binary_batches"]), 3)
+
 
 # ---------------------------------------------------------------------
 # 10. Failed batch restart

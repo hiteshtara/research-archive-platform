@@ -1604,8 +1604,28 @@ def run_orchestration(
                             connection, batch_id, status=batch_framework.BATCH_STATUS_COMPLETED
                         )
 
-                if upload_report.get("physical_files_selected", 0) == 0:
-                    break
+                # Deliberately NOT "if physical_files_selected == 0: break"
+                # here. Live incident (2026-08-12): _next_ready_batch can
+                # return an older READY batch whose own candidates are
+                # already fully UPLOADED (e.g. a pre-existing batch that
+                # was never touched before this orchestrator existed) -
+                # that is a legitimate, harmless no-op for THAT batch, not
+                # proof that every other READY batch is also empty. A
+                # batch-selected-zero break here silently ended a real
+                # run's whole binary stage after processing exactly one
+                # such no-op batch, leaving ~90,000 genuinely PENDING
+                # Award files (and every newly-loaded Proposal file)
+                # completely unprocessed while the run still exited 0.
+                # The correct, sufficient termination condition is
+                # already above: "if batch_id is None: break" - every
+                # batch processed here (Award via _run_upload's own
+                # unconditional finish_batch_processing call; Proposal/
+                # Subaward via the explicit set_batch_status just above,
+                # itself unconditional) always leaves READY status
+                # regardless of how many candidates it held, so
+                # _next_ready_batch is guaranteed to make forward
+                # progress and eventually return None - no infinite-loop
+                # risk from removing this check.
 
             summary["modules"][module] = module_summary
     finally:
