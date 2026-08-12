@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   describeVersionSearchResults,
+  isValidAwardIdInput,
   versionCurrentLabel,
   versionDetailPath,
 } from "./awardVersionSearchPresentation.mjs";
@@ -96,4 +97,26 @@ test("selecting an old award_id opens that exact version - the detail path is al
 test("current-version and historical-version labels are correct", () => {
   assert.equal(versionCurrentLabel(CURRENT_HIT), "Current");
   assert.equal(versionCurrentLabel(HISTORICAL_HIT), "Historical");
+});
+
+test("Award ID validation: real CARB-X ids and other whole numbers are valid", () => {
+  assert.equal(isValidAwardIdInput("3561589"), true);
+  assert.equal(isValidAwardIdInput("3561610"), true);
+  assert.equal(isValidAwardIdInput("1"), true);
+  assert.equal(isValidAwardIdInput("999999999"), true);
+});
+
+test("Award ID validation: blank or whitespace-only counts as valid (no filter), not an error", () => {
+  assert.equal(isValidAwardIdInput(""), true);
+  assert.equal(isValidAwardIdInput("   "), true);
+  assert.equal(isValidAwardIdInput(null), true);
+  assert.equal(isValidAwardIdInput(undefined), true);
+});
+
+test("Award ID validation: non-numeric or partial-looking input is invalid, never a silent substring search", () => {
+  assert.equal(isValidAwardIdInput("abc"), false);
+  assert.equal(isValidAwardIdInput("356*"), false);
+  assert.equal(isValidAwardIdInput("35615.89"), false);
+  assert.equal(isValidAwardIdInput("-3561589"), false);
+  assert.equal(isValidAwardIdInput("3561589 "), true, "trims surrounding whitespace before validating");
 });

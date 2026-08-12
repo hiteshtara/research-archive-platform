@@ -157,7 +157,7 @@ class AwardV1ControllerTest {
                         "Approved Award", "Boston University", "PI NAME",
                         "MEDICINE", null, null, false
                 );
-        when(service.searchVersions("carbx", null, null, "all", "sequence", 0, 25))
+        when(service.searchVersions("carbx", null, null, null, "all", "sequence", 0, 25))
                 .thenReturn(new PageResponse<>(
                         List.of(current, historical), 0, 25, 2L, 1, true, true
                 ));
@@ -172,18 +172,54 @@ class AwardV1ControllerTest {
                 .andExpect(jsonPath("$.content[1].sequenceNumber").value(543))
                 .andExpect(jsonPath("$.content[1].primaryCurrent").value(false));
 
-        verify(service).searchVersions("carbx", null, null, "all", "sequence", 0, 25);
+        verify(service).searchVersions("carbx", null, null, null, "all", "sequence", 0, 25);
     }
 
     @Test
     void searchVersionsDefaultsFiltersAndSortWhenOmitted() throws Exception {
-        when(service.searchVersions(null, null, null, "all", "sequence", 0, 25))
+        when(service.searchVersions(null, null, null, null, "all", "sequence", 0, 25))
                 .thenReturn(new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true));
 
         mockMvc.perform(get("/api/v1/awards/versions/search"))
                 .andExpect(status().isOk());
 
-        verify(service).searchVersions(null, null, null, "all", "sequence", 0, 25);
+        verify(service).searchVersions(null, null, null, null, "all", "sequence", 0, 25);
+    }
+
+    @Test
+    void searchVersionsPassesAwardIdThroughExactly() throws Exception {
+        AwardVersionSearchResultResponse historical =
+                new AwardVersionSearchResultResponse(
+                        3561589L, "204713-00001", 543, "DOC-543", "CARB-X",
+                        "Approved Award", "Boston University", "PI NAME",
+                        "MEDICINE", null, null, false
+                );
+        when(service.searchVersions(null, null, null, "3561589", "all", "sequence", 0, 25))
+                .thenReturn(new PageResponse<>(List.of(historical), 0, 25, 1L, 1, true, true));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/versions/search").param("awardId", "3561589")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].awardId").value(3561589))
+                .andExpect(jsonPath("$.content[0].sequenceNumber").value(543))
+                .andExpect(jsonPath("$.content[0].primaryCurrent").value(false));
+
+        verify(service).searchVersions(null, null, null, "3561589", "all", "sequence", 0, 25);
+    }
+
+    @Test
+    void searchVersionsReturns400NotAServerErrorForAnInvalidAwardId() throws Exception {
+        when(service.searchVersions(null, null, null, "not-a-number", "all", "sequence", 0, 25))
+                .thenThrow(new IllegalArgumentException(
+                        "Award ID must be a valid whole number: not-a-number"
+                ));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/versions/search").param("awardId", "not-a-number")
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
     }
 
     @Test

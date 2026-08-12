@@ -448,6 +448,7 @@ export function searchAwardVersionsV1(
     q?: string;
     awardNumber?: string;
     documentNumber?: string;
+    awardId?: string;
     versionFilter?: "all" | "current" | "historical";
     sort?: "sequence" | "date";
     page?: number;
@@ -470,6 +471,9 @@ export function searchAwardVersionsV1(
   }
   if (parameters.documentNumber?.trim()) {
     searchParameters.set("documentNumber", parameters.documentNumber.trim());
+  }
+  if (parameters.awardId?.trim()) {
+    searchParameters.set("awardId", parameters.awardId.trim());
   }
 
   return request(

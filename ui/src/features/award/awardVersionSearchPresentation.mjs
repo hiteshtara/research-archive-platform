@@ -33,3 +33,19 @@ export function versionDetailPath(hit) {
 export function versionCurrentLabel(hit) {
   return hit?.primaryCurrent ? "Current" : "Historical";
 }
+
+// Award ID is an exact numeric identifier (archive.award_version's own
+// surrogate primary key), never a partial/substring search - a blank
+// value means "no filter" (valid), matching every other optional
+// filter's own empty convention; a non-blank, non-whole-number value is
+// invalid and must never be sent to the API (the API independently
+// rejects it too, as defense in depth - see AwardArchiveService's own
+// parseAwardId). Whitespace-only counts as blank/valid, matching how
+// every other text filter on this page is trimmed before use.
+export function isValidAwardIdInput(value) {
+  const trimmed = (value ?? "").trim();
+  if (trimmed.length === 0) {
+    return true;
+  }
+  return /^\d+$/.test(trimmed);
+}

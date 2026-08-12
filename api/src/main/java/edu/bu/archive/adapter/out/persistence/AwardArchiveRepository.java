@@ -932,12 +932,25 @@ public class AwardArchiveRepository {
      * fixed, per the investigation - archive.award_version has none on
      * source_update_timestamp alone) and may be slower at full scale
      * than the sequence-based default.
+     *
+     * awardId is the one nullable *numeric* filter here (every other
+     * filter is a String using an empty-string sentinel) - it needs the
+     * explicit "CAST(:awardId AS BIGINT) IS NULL OR ..." form, not a
+     * bare "IS NULL OR ...", per the live-verified incident documented
+     * on findProposalDiscoveryRows below (Postgres throws
+     * AmbiguousParameter/"could not determine data type of parameter"
+     * for a null numeric bind without the cast, even though the same
+     * parameter is also compared against a bigint column elsewhere in
+     * the same statement). Since award_id is the primary key, an exact
+     * match returns at most one row - a real, but unknown, id
+     * correctly returns zero rows (an empty page), never an error.
      */
     public List<AwardVersionSearchResultResponse> searchAwardVersions(
             String pattern,
             String rawQuery,
             String awardNumber,
             String documentNumber,
+            Long awardId,
             String versionFilter,
             String sortSql,
             int limit,
@@ -974,6 +987,7 @@ public class AwardArchiveRepository {
                 ) pi ON TRUE
                 WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
                   AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
                   AND (
                         :rawQuery = ''
                         OR av.title ILIKE :pattern
@@ -997,6 +1011,7 @@ public class AwardArchiveRepository {
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)
                 .param("documentNumber", documentNumber)
+                .param("awardId", awardId)
                 .param("versionFilter", versionFilter)
                 .param("limit", limit)
                 .param("offset", offset)
@@ -1009,6 +1024,7 @@ public class AwardArchiveRepository {
             String rawQuery,
             String awardNumber,
             String documentNumber,
+            Long awardId,
             String versionFilter
     ) {
         Long count = jdbc.sql("""
@@ -1016,6 +1032,7 @@ public class AwardArchiveRepository {
                 FROM archive.award_version av
                 WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
                   AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
                   AND (
                         :rawQuery = ''
                         OR av.title ILIKE :pattern
@@ -1037,6 +1054,7 @@ public class AwardArchiveRepository {
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)
                 .param("documentNumber", documentNumber)
+                .param("awardId", awardId)
                 .param("versionFilter", versionFilter)
                 .query(Long.class)
                 .single();

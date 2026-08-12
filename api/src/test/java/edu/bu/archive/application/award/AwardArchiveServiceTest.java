@@ -31,12 +31,15 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AwardArchiveServiceTest {
@@ -575,49 +578,151 @@ class AwardArchiveServiceTest {
                 3561589L, "204713-00001", 543, "DOC-543", "CARB-X", "Approved Award",
                 "Boston University", "PI NAME", "MEDICINE", null, null, false
         );
-        when(repository.countSearchAwardVersions(anyString(), anyString(), anyString(), anyString(), eq("all")))
-                .thenReturn(2L);
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all")
+        )).thenReturn(2L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq("all"), anyString(), eq(25), eq(0)
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"),
+                anyString(), eq(25), eq(0)
         )).thenReturn(List.of(current, historical));
 
         PageResponse<AwardVersionSearchResultResponse> page =
-                service.searchVersions("carbx", "", "", "all", "sequence", 0, 25);
+                service.searchVersions("carbx", "", "", "", "all", "sequence", 0, 25);
 
         assertThat(page.content()).containsExactly(current, historical);
         assertThat(page.totalElements()).isEqualTo(2L);
     }
 
+    /*
+     * CARB-X 204713-00001 fixture, at the service layer: award_id
+     * 3561589 (sequence 543, historical) must resolve to exactly that
+     * one row, and 3561610 (sequence 544, current) to exactly its own
+     * row - proves "searching an award_id opens that exact version",
+     * never the family's current version, independent of the
+     * repository's own SQL (already covered in
+     * AwardArchiveRepositoryTest).
+     */
+    @Test
+    void searchVersionsByExactAwardIdReturnsOnlyTheHistoricalRow() {
+        AwardVersionSearchResultResponse historical = new AwardVersionSearchResultResponse(
+                3561589L, "204713-00001", 543, "DOC-543", "CARB-X", "Approved Award",
+                "Boston University", "PI NAME", "MEDICINE", null, null, false
+        );
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq(3561589L), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq(3561589L), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(historical));
+
+        PageResponse<AwardVersionSearchResultResponse> page =
+                service.searchVersions(null, null, null, "3561589", "all", "sequence", 0, 25);
+
+        assertThat(page.content()).containsExactly(historical);
+        assertThat(page.content().get(0).sequenceNumber()).isEqualTo(543);
+        assertThat(page.content().get(0).primaryCurrent()).isFalse();
+    }
+
+    @Test
+    void searchVersionsByExactAwardIdReturnsOnlyTheCurrentRow() {
+        AwardVersionSearchResultResponse current = new AwardVersionSearchResultResponse(
+                3561610L, "204713-00001", 544, "DOC-544", "CARB-X", "Closed",
+                "Boston University", "PI NAME", "MEDICINE", null, null, true
+        );
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq(3561610L), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq(3561610L), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(current));
+
+        PageResponse<AwardVersionSearchResultResponse> page =
+                service.searchVersions(null, null, null, "3561610", "all", "sequence", 0, 25);
+
+        assertThat(page.content()).containsExactly(current);
+        assertThat(page.content().get(0).sequenceNumber()).isEqualTo(544);
+        assertThat(page.content().get(0).primaryCurrent()).isTrue();
+    }
+
+    @Test
+    void searchVersionsByAnUnknownButValidAwardIdReturnsAnEmptyPageNotAnError() {
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq(999999999L), eq("all")
+        )).thenReturn(0L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), eq(999999999L), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        PageResponse<AwardVersionSearchResultResponse> page =
+                service.searchVersions(null, null, null, "999999999", "all", "sequence", 0, 25);
+
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isZero();
+    }
+
+    @Test
+    void searchVersionsTreatsABlankAwardIdAsNoFilterNotAnError() {
+        when(repository.countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all")
+        )).thenReturn(0L);
+        when(repository.searchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        service.searchVersions(null, null, null, "   ", "all", "sequence", 0, 25);
+
+        verify(repository).countSearchAwardVersions(
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all")
+        );
+    }
+
+    @Test
+    void searchVersionsRejectsANonNumericAwardIdWithoutReachingTheRepository() {
+        assertThatThrownBy(() ->
+                service.searchVersions(null, null, null, "not-a-number", "all", "sequence", 0, 25)
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not-a-number");
+
+        verifyNoInteractions(repository);
+    }
+
     @Test
     void searchVersionsNormalizesAnUnrecognizedVersionFilterToAll() {
         when(repository.countSearchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq("all")
+                anyString(), anyString(), anyString(), anyString(), any(), eq("all")
         )).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq("all"), anyString(), anyInt(), anyInt()
+                anyString(), anyString(), anyString(), anyString(), any(), eq("all"),
+                anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
 
-        service.searchVersions("", "", "", "not-a-real-filter", "sequence", 0, 25);
+        service.searchVersions("", "", "", "", "not-a-real-filter", "sequence", 0, 25);
 
         verify(repository).countSearchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq("all")
+                anyString(), anyString(), anyString(), anyString(), any(), eq("all")
         );
     }
 
     @Test
     void searchVersionsSelectsTheDateSortOnlyWhenExplicitlyRequested() {
         when(repository.countSearchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), anyString()
+                anyString(), anyString(), anyString(), anyString(), any(), anyString()
         )).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt()
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(),
+                anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
         ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
 
-        service.searchVersions("", "", "", "all", "date", 0, 25);
+        service.searchVersions("", "", "", "", "all", "date", 0, 25);
 
         verify(repository).searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(),
                 sortSqlCaptor.capture(), anyInt(), anyInt()
         );
         assertThat(sortSqlCaptor.getValue())
@@ -628,17 +733,18 @@ class AwardArchiveServiceTest {
     @Test
     void searchVersionsDefaultsToTheSequenceSort() {
         when(repository.countSearchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), anyString()
+                anyString(), anyString(), anyString(), anyString(), any(), anyString()
         )).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt()
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(),
+                anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
         ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
 
-        service.searchVersions("", "", "", "all", "sequence", 0, 25);
+        service.searchVersions("", "", "", "", "all", "sequence", 0, 25);
 
         verify(repository).searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(),
                 sortSqlCaptor.capture(), anyInt(), anyInt()
         );
         assertThat(sortSqlCaptor.getValue()).contains("av.sequence_number DESC");

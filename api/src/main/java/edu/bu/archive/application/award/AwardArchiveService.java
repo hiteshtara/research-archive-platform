@@ -748,6 +748,7 @@ public class AwardArchiveService {
             String query,
             String awardNumber,
             String documentNumber,
+            String awardId,
             String versionFilter,
             String sort,
             int page,
@@ -757,6 +758,7 @@ public class AwardArchiveService {
         String pattern = AwardSearchPattern.toLikePattern(rawQuery);
         String safeAwardNumber = awardNumber == null ? "" : awardNumber.trim();
         String safeDocumentNumber = documentNumber == null ? "" : documentNumber.trim();
+        Long safeAwardId = parseAwardId(awardId);
         String safeVersionFilter = normalizeVersionFilter(versionFilter);
         String sortSql = "date".equals(sort)
                 ? VERSION_SORT_BY_DATE
@@ -766,7 +768,7 @@ public class AwardArchiveService {
         int safeSize = PaginationSupport.clampSize(size);
 
         long totalElements = repository.countSearchAwardVersions(
-                pattern, rawQuery, safeAwardNumber, safeDocumentNumber, safeVersionFilter
+                pattern, rawQuery, safeAwardNumber, safeDocumentNumber, safeAwardId, safeVersionFilter
         );
 
         PaginationSupport.PageMetadata pageMetadata =
@@ -780,6 +782,7 @@ public class AwardArchiveService {
                         rawQuery,
                         safeAwardNumber,
                         safeDocumentNumber,
+                        safeAwardId,
                         safeVersionFilter,
                         sortSql,
                         safeSize,
@@ -795,6 +798,30 @@ public class AwardArchiveService {
                 pageMetadata.first(),
                 pageMetadata.last()
         );
+    }
+
+    /*
+     * awardId is an EXACT numeric identifier, never a partial/substring
+     * match - a blank value (omitted, empty, or whitespace-only) means
+     * "no filter", matching every other optional filter's own
+     * empty-string convention. Non-blank but non-numeric input is a
+     * genuine client error - IllegalArgumentException is already mapped
+     * to a 400 with a consistent JSON body by GlobalExceptionHandler,
+     * so a malformed value (whether from a UI bug or a direct API call
+     * that bypasses the UI's own client-side check) can never reach the
+     * repository layer or surface as a 500.
+     */
+    private static Long parseAwardId(String awardId) {
+        if (awardId == null || awardId.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(awardId.trim());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "Award ID must be a valid whole number: " + awardId
+            );
+        }
     }
 
     private static String normalizeVersionFilter(String versionFilter) {

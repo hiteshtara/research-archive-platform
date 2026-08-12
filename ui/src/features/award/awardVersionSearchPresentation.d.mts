@@ -13,3 +13,5 @@ export function versionDetailPath(hit: AwardVersionSearchHit): string;
 export function versionCurrentLabel(
   hit: AwardVersionSearchHit | null | undefined,
 ): string;
+
+export function isValidAwardIdInput(value: string | null | undefined): boolean;

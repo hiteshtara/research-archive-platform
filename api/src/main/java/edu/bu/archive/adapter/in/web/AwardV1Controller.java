@@ -140,13 +140,13 @@ public class AwardV1Controller {
                     + "Award *version* (award_id), never scoped to "
                     + "the current version - deliberately independent "
                     + "of /search above, which stays family/current-"
-                    + "record oriented. Supports exact award-number "
-                    + "and document-number match, a current/historical "
-                    + "filter, and sort by sequence number (default) "
-                    + "or last-update date."
+                    + "record oriented. Supports exact award-number, "
+                    + "document-number, and award-id match, a "
+                    + "current/historical filter, and sort by sequence "
+                    + "number (default) or last-update date."
     )
     @ApiResponse(responseCode = "200", description = "A page of matching Award versions.")
-    @ApiResponse(responseCode = "400", description = "page/size out of range.")
+    @ApiResponse(responseCode = "400", description = "page/size out of range, or awardId is not a valid whole number.")
     @GetMapping("/versions/search")
     public ResponseEntity<PageResponse<AwardVersionSearchResultResponse>> searchVersions(
             @Parameter(description = "Free-text query across title, "
@@ -162,6 +162,12 @@ public class AwardV1Controller {
             @Parameter(description = "Exact workflow document_number match.")
             @RequestParam(required = false)
             String documentNumber,
+
+            @Parameter(description = "Exact award_id match (a specific "
+                    + "version's surrogate key, not a partial/substring "
+                    + "search) - omit or leave blank for no filter.")
+            @RequestParam(required = false)
+            String awardId,
 
             @Parameter(description = "\"all\" (default), \"current\", or \"historical\".")
             @RequestParam(defaultValue = "all")
@@ -184,7 +190,7 @@ public class AwardV1Controller {
     ) {
         return ResponseEntity.ok(
                 service.searchVersions(
-                        q, awardNumber, documentNumber, versionFilter, sort, page, size
+                        q, awardNumber, documentNumber, awardId, versionFilter, sort, page, size
                 )
         );
     }

@@ -20,6 +20,7 @@ import { PaginationFooter } from "../../components/common/PaginationFooter";
 import { StatusPill } from "../../components/common/StatusPill";
 import {
   describeVersionSearchResults,
+  isValidAwardIdInput,
   versionCurrentLabel,
   versionDetailPath,
 } from "../../features/award/awardVersionSearchPresentation.mjs";
@@ -29,10 +30,10 @@ const PAGE_SIZE = 25;
 // Historical Award Records explorer: one result per award_id (a
 // specific version), never scoped to the current version - the
 // version-level counterpart to AwardSearchPage. Every filter (q,
-// awardNumber, documentNumber, versionFilter, sort, page) lives in the
-// URL's own search params rather than component state, so browser
-// back/forward naturally restores the exact search that was active,
-// not just the page shell.
+// awardNumber, documentNumber, awardId, versionFilter, sort, page)
+// lives in the URL's own search params rather than component state, so
+// browser back/forward naturally restores the exact search that was
+// active, not just the page shell.
 export function AwardVersionSearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -40,6 +41,7 @@ export function AwardVersionSearchPage() {
   const q = searchParams.get("q") ?? "";
   const awardNumber = searchParams.get("awardNumber") ?? "";
   const documentNumber = searchParams.get("documentNumber") ?? "";
+  const awardId = searchParams.get("awardId") ?? "";
   const rawVersionFilter = searchParams.get("versionFilter");
   const versionFilter: "all" | "current" | "historical" =
     rawVersionFilter === "current" || rawVersionFilter === "historical"
@@ -49,10 +51,18 @@ export function AwardVersionSearchPage() {
   const sort: "sequence" | "date" = rawSort === "date" ? "date" : "sequence";
   const page = Number(searchParams.get("page") ?? "0") || 0;
 
+  // Award ID is an exact numeric identifier, never a partial/substring
+  // search - validated client-side so an obviously bad value never
+  // reaches the API at all (the API validates independently too, as
+  // defense in depth for direct callers - see AwardArchiveService).
+  const awardIdIsValid = isValidAwardIdInput(awardId);
+  const awardIdError = awardId.trim().length > 0 && !awardIdIsValid;
+
   const hasSearched =
     q.trim().length > 0 ||
     awardNumber.trim().length > 0 ||
-    documentNumber.trim().length > 0;
+    documentNumber.trim().length > 0 ||
+    (awardId.trim().length > 0 && awardIdIsValid);
 
   const searchQuery = useQuery({
     queryKey: [
@@ -60,16 +70,26 @@ export function AwardVersionSearchPage() {
       q,
       awardNumber,
       documentNumber,
+      awardId,
       versionFilter,
       sort,
       page,
     ],
     queryFn: ({ signal }) =>
       searchAwardVersionsV1(
-        { q, awardNumber, documentNumber, versionFilter, sort, page, size: PAGE_SIZE },
+        {
+          q,
+          awardNumber,
+          documentNumber,
+          awardId: awardIdIsValid ? awardId.trim() : "",
+          versionFilter,
+          sort,
+          page,
+          size: PAGE_SIZE,
+        },
         signal,
       ),
-    enabled: hasSearched,
+    enabled: hasSearched && !awardIdError,
   });
 
   function updateParam(name: string, value: string) {
@@ -131,6 +151,18 @@ export function AwardVersionSearchPage() {
               value={documentNumber}
               onChange={(event) => updateParam("documentNumber", event.target.value)}
             />
+            <TextField
+              fullWidth
+              label="Award ID (exact)"
+              placeholder="e.g. 3561589"
+              value={awardId}
+              onChange={(event) => updateParam("awardId", event.target.value)}
+              error={awardIdError}
+              helperText={awardIdError ? "Award ID must be a whole number." : " "}
+            />
+          </Stack>
+
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
               fullWidth
               select

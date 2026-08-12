@@ -436,7 +436,7 @@ class AwardArchiveRepositoryTest {
         when(query.list()).thenReturn(List.of());
 
         new AwardArchiveRepository(jdbc).searchAwardVersions(
-                "%cancer%", "cancer", "", "", "all",
+                "%cancer%", "cancer", "", "", null, "all",
                 "ORDER BY av.sequence_number DESC\n", 25, 0
         );
 
@@ -468,7 +468,7 @@ class AwardArchiveRepositoryTest {
         when(query.list()).thenReturn(List.of());
 
         new AwardArchiveRepository(jdbc).searchAwardVersions(
-                "%cancer%", "cancer", "204713-00001", "DOC-9001",
+                "%cancer%", "cancer", "204713-00001", "DOC-9001", 3561589L,
                 "historical", "ORDER BY av.sequence_number DESC\n", 25, 50
         );
 
@@ -476,9 +476,39 @@ class AwardArchiveRepositoryTest {
         verify(statement).param("rawQuery", "cancer");
         verify(statement).param("awardNumber", "204713-00001");
         verify(statement).param("documentNumber", "DOC-9001");
+        verify(statement).param("awardId", 3561589L);
         verify(statement).param("versionFilter", "historical");
         verify(statement).param("limit", 25);
         verify(statement).param("offset", 50);
+    }
+
+    @Test
+    void searchAwardVersionsAwardIdFilterUsesTheDocumentedNullSafeCast() {
+        // See the module-level comment on searchAwardVersions and
+        // findProposalDiscoveryRows below: a bare ":awardId IS NULL OR
+        // ..." throws AmbiguousParameter for a null Long bind against
+        // Postgres - the explicit CAST(:awardId AS BIGINT) is required,
+        // not decorative.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%%", "", "", "", null, "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId");
     }
 
     @Test
@@ -496,13 +526,14 @@ class AwardArchiveRepositoryTest {
         when(query.single()).thenReturn(544L);
 
         long total = new AwardArchiveRepository(jdbc).countSearchAwardVersions(
-                "%carbx%", "carbx", "", "", "all"
+                "%carbx%", "carbx", "", "", null, "all"
         );
 
         assertThat(total).isEqualTo(544L);
         assertThat(firstSql(jdbc))
                 .contains("SELECT COUNT(*)")
                 .contains("FROM archive.award_version av")
+                .contains("CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId")
                 .doesNotContain("WHERE av.is_primary_current = TRUE");
     }
 
