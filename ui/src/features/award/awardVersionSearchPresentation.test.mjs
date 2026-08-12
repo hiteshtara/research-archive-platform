@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -7,6 +9,13 @@ import {
   versionCurrentLabel,
   versionDetailPath,
 } from "./awardVersionSearchPresentation.mjs";
+
+function readAwardVersionSearchPageSource() {
+  const pagePath = fileURLToPath(
+    new URL("../../pages/award/AwardVersionSearchPage.tsx", import.meta.url),
+  );
+  return readFileSync(pagePath, "utf8");
+}
 
 // CARB-X 204713-00001 regression fixture: current award_id 3561610
 // (sequence 544) and non-current award_id 3561589 (sequence 543),
@@ -119,4 +128,39 @@ test("Award ID validation: non-numeric or partial-looking input is invalid, neve
   assert.equal(isValidAwardIdInput("35615.89"), false);
   assert.equal(isValidAwardIdInput("-3561589"), false);
   assert.equal(isValidAwardIdInput("3561589 "), true, "trims surrounding whitespace before validating");
+});
+
+// No component-render harness exists in this project (see CLAUDE.md),
+// so this proves the page copy/link genuinely exist in source rather
+// than merely trusting a mock - same static-source-inspection approach
+// dashboardPresentation.test.mjs uses for App.tsx's router config.
+test("Historical Award Records heading/helper text says results are individual Award versions", () => {
+  const source = readAwardVersionSearchPageSource();
+
+  assert.match(
+    source,
+    /Historical Award Records/,
+    "the page heading must still read Historical Award Records",
+  );
+  assert.match(
+    source,
+    /individual archived Award version/i,
+    "the helper text must say results represent individual Award versions",
+  );
+});
+
+test("Historical Award Records still exposes the dedicated exact Award ID field", () => {
+  const source = readAwardVersionSearchPageSource();
+
+  assert.match(source, /label="Award ID \(exact\)"/);
+});
+
+test("the Historical Awards page's helper link goes back to the current Award-family search", () => {
+  const source = readAwardVersionSearchPageSource();
+
+  assert.match(
+    source,
+    /component=\{RouterLink\}\s*\n?\s*to="\/awards\/search"/,
+    'the back-link must navigate to "/awards/search"',
+  );
 });

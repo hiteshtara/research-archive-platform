@@ -5,13 +5,14 @@ import {
   CardContent,
   Chip,
   InputAdornment,
+  Link,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 
 import { searchAwardsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -114,6 +115,15 @@ export function AwardSearchPage() {
             />
           ))}
         </Stack>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
+          This searches for one current Award record per Award number.
+          Looking for an internal Award ID or a prior sequence?{" "}
+          <Link component={RouterLink} to="/awards/versions/search">
+            Use Historical Awards
+          </Link>
+          .
+        </Typography>
       </Box>
 
       {hasSearched && (

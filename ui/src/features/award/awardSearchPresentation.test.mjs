@@ -1,7 +1,55 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { describeSearchResults } from "./awardSearchPresentation.mjs";
+
+function readAwardSearchPageSource() {
+  const pagePath = fileURLToPath(
+    new URL("../../pages/award/AwardSearchPage.tsx", import.meta.url),
+  );
+  return readFileSync(pagePath, "utf8");
+}
+
+// No component-render harness exists in this project (see CLAUDE.md),
+// so this proves the page copy/link genuinely exist in source rather
+// than merely trusting a mock - same static-source-inspection approach
+// dashboardPresentation.test.mjs uses for App.tsx's router config.
+test("Awards page explains that Award ID searches belong in Historical Awards", () => {
+  const source = readAwardSearchPageSource();
+
+  assert.match(
+    source,
+    /one current Award record per Award number/i,
+    "the page must explain it returns one current record per Award number",
+  );
+  assert.match(
+    source,
+    /internal Award ID/i,
+    "the page must mention internal Award ID as the reason to use Historical Awards",
+  );
+});
+
+test("the Awards page's helper link opens the Historical Awards explorer", () => {
+  const source = readAwardSearchPageSource();
+
+  assert.match(
+    source,
+    /component=\{RouterLink\}\s*\n?\s*to="\/awards\/versions\/search"/,
+    'the helper link must navigate to "/awards/versions/search"',
+  );
+});
+
+test("the Awards page never adds an Award ID field - that search only exists on Historical Awards", () => {
+  const source = readAwardSearchPageSource();
+
+  assert.doesNotMatch(
+    source,
+    /label="Award ID/i,
+    "AwardSearchPage.tsx must not gain its own Award ID field",
+  );
+});
 
 test("ordinary Award search: no exact document match, results present", () => {
   const response = {

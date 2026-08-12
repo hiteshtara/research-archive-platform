@@ -4,13 +4,14 @@ import {
   Card,
   CardContent,
   Chip,
+  Link,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 
 import { searchAwardVersionsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -119,9 +120,19 @@ export function AwardVersionSearchPage() {
           Historical Award Records
         </Typography>
 
-        <Typography color="text.secondary" sx={{ mb: 4 }}>
-          Search every archived Award version - not just the current
-          one. Each result opens the exact selected version.
+        <Typography color="text.secondary" sx={{ mb: 1 }}>
+          Each result here is an individual archived Award version, not
+          a family/current-record summary - every historical sequence
+          is searchable, including by its exact internal Award ID.
+          Selecting a result opens that exact version.
+        </Typography>
+
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+          Looking for the current record for an Award number instead?{" "}
+          <Link component={RouterLink} to="/awards/search">
+            Use Awards
+          </Link>
+          .
         </Typography>
 
         <Stack spacing={2}>

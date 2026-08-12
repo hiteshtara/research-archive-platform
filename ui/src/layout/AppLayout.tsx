@@ -5,6 +5,7 @@ import {
   DescriptionOutlined,
   GavelOutlined,
   HandshakeOutlined,
+  HistoryOutlined,
   LogoutOutlined,
   SearchOutlined,
   TravelExploreOutlined,
@@ -28,42 +29,38 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { currentUser, logout } from "../auth";
+import { sidebarNavigationItems } from "../features/navigation/navigationPresentation.mjs";
 
 const drawerWidth = 250;
 
 const EXPLORER_ENABLED = import.meta.env.VITE_EXPLORER_ENABLED === "true";
 
-const navigation = [
-  {
-    label: "Dashboard",
-    icon: <DashboardOutlined />,
-    path: "/",
-  },
-  {
-    label: "Awards",
-    icon: <ArchiveOutlined />,
-    path: "/awards/search",
-  },
-  {
-    label: "Proposals",
-    icon: <DescriptionOutlined />,
-    path: "/proposals",
-  },
-  {
-    label: "Negotiations",
-    icon: <HandshakeOutlined />,
-    path: "/negotiations",
-  },
-  {
-    label: "Subawards",
-    icon: <GavelOutlined />,
-    path: "/subawards",
-  },
-  {
-    label: "Global Search",
-    icon: <SearchOutlined />,
-    path: "/search",
-  },
+// Icons are JSX and can't live in the plain-data presentation-helper
+// module, so each item's icon is looked up here by key instead - same
+// pattern DashboardPage.tsx uses for its dashboard cards.
+const NAV_ICONS: Record<string, React.ReactNode> = {
+  dashboard: <DashboardOutlined />,
+  awards: <ArchiveOutlined />,
+  historicalAwards: <HistoryOutlined />,
+  proposals: <DescriptionOutlined />,
+  negotiations: <HandshakeOutlined />,
+  subawards: <GavelOutlined />,
+  globalSearch: <SearchOutlined />,
+};
+
+type NavigationEntry = {
+  label: string;
+  icon: React.ReactNode;
+  path: string;
+  badge?: string;
+};
+
+const navigation: NavigationEntry[] = [
+  ...sidebarNavigationItems.map((item) => ({
+    label: item.label,
+    icon: NAV_ICONS[item.key],
+    path: item.path,
+  })),
   // Dev-only developer tool - hidden unless the deployed environment's
   // VITE_EXPLORER_ENABLED matches the API's own APP_EXPLORER_ENABLED
   // (see docs/ARCHIVE_EXPLORER.md). Never enable in test/prod.
