@@ -16,26 +16,20 @@ token to stdout. Defaults point to the dev user pool; use
 `AWS_REGION` to override identifiers and routing. Do not enable shell tracing or
 paste the resulting token into logs.
 
-## Open a dev database tunnel
+## Dev database access
 
-Validate identity, endpoint, VPC, SSM instance, DNS, and the local port without
-opening a session:
+**Removed 2026-08-13:** `scripts/start-db-tunnel.sh` (a local SSM
+port-forward to dev RDS) and `api/scripts/dev.sh`. This project has no
+EC2 bastion, so the tunnel could never actually be opened — its presence
+kept sending sessions down a dead-end path. There is no supported direct
+Mac-to-dev-RDS connection; do not provision a bastion or substitute
+personal infrastructure to reintroduce one without explicit approval.
 
-```bash
-scripts/start-db-tunnel.sh --check-only
-```
-
-Then open the tunnel:
-
-```bash
-scripts/start-db-tunnel.sh
-```
-
-It defaults to AWS profile `bu-nprd`, BU dev account `770203350335`, region
-`us-east-1`, and local port `15432`. An SSM-managed EC2 instance must already
-exist with a route to RDS; the script never creates one. An explicit
-`--instance-id` is verified, although a cross-VPC instance produces a warning
-rather than a hard failure.
+For dev RDS investigation or one-off ETL, use an ECS Fargate task instead
+(`scripts/run-award-loader.sh`, etc. — see `CLAUDE.md`'s "Authoritative
+data location" section). For local development, use
+`scripts/run-local.sh` (local Homebrew Postgres, not authoritative for
+dev-data validation).
 
 ## Deploy to dev
 

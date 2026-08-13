@@ -428,8 +428,14 @@ scales, with timing and an idempotent-rerun check at each scale.
   to push down when the point is enumerating candidates), so its own
   timing is unrelated to the `--load-batch` fix being validated.
 
+Historical/deprecated (2026-08-13): the tunnel-based setup below no
+longer applies — `scripts/start-db-tunnel.sh` was removed (this project
+has no EC2 bastion) in favor of an ECS Fargate one-off task; see
+`CLAUDE.md`'s "Authoritative data location" section. Kept as a record of
+how this validation was actually run at the time.
+
 ```bash
-# --- one-time setup ---
+# --- one-time setup (historical - see note above) ---
 # 1. Connect to the BU VPN; run `buaws` if AWS credentials need refreshing.
 # 2. Start the approved tunnel to dev RDS (leave running in its own terminal):
 AWS_PROFILE=bu-nprd scripts/start-db-tunnel.sh

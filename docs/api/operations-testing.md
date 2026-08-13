@@ -55,18 +55,15 @@ docker build -t research-archive-api:local .
 The runtime image uses Java 21 and runs as the non-root `archive` user with
 UID 10001.
 
-## How to run against an RDS tunnel
+## How to run against dev RDS
 
-`api/scripts/dev.sh` loads the direnv environment, starts the repository's
-SSM database tunnel, waits for its port, and launches the API with the local
-profile:
-
-```bash
-./api/scripts/dev.sh
-```
-
-This keeps local permit-all security and stub AI behavior while using the
-configured database tunnel. Do not treat it as a production launch command.
+**Removed 2026-08-13:** `api/scripts/dev.sh` and the SSM database tunnel
+it depended on (`scripts/start-db-tunnel.sh`). This project has no EC2
+bastion, so the tunnel could never actually be opened. There is no
+supported direct Mac-to-dev-RDS connection for the API — use
+`scripts/run-local.sh` for local Postgres, or an ECS Fargate one-off task
+for dev RDS investigation/ETL (see `CLAUDE.md`'s "Authoritative data
+location" section).
 
 ## How to verify a deployed API
 

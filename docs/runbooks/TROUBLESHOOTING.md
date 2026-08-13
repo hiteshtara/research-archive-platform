@@ -2,9 +2,12 @@
 
 ## Connection refused localhost:15432
 
-The AWS SSM tunnel is not running.
-
-Restart the tunnel.
+**Removed 2026-08-13.** This referred to `scripts/start-db-tunnel.sh`, a
+local SSM tunnel to dev RDS - deleted because this project has no EC2
+bastion, so the tunnel could never actually be opened. Do not try to
+restart it. For dev RDS, use an ECS Fargate one-off task instead (see
+`CLAUDE.md`'s "Authoritative data location" section). For local
+development, use `scripts/run-local.sh`.
 
 -------------------------------------------------------------------------------
 

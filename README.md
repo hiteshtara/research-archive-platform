@@ -82,18 +82,19 @@ the package layout departs from strict hexagonal architecture.
 
 ## Getting started
 
-Two supported local setups (see
-[`docs/runbooks/LOCAL_SETUP.md`](docs/runbooks/LOCAL_SETUP.md) for the full
-walkthrough, including the BU VPN and AWS SSM tunnel steps):
+Local setup (see [`docs/runbooks/LOCAL_SETUP.md`](docs/runbooks/LOCAL_SETUP.md)
+for the full walkthrough):
 
 ```bash
 # Local Postgres, no AWS dependency
 ./scripts/run-local.sh
-
-# Or: tunnel to the real dev RDS instance via SSM (needs direnv + AWS creds)
-./api/scripts/dev.sh   # in one terminal
-cd ui && npm run dev   # in another
 ```
+
+There is no supported direct Mac-to-dev-RDS connection (the local SSM
+tunnel, `scripts/start-db-tunnel.sh` + `api/scripts/dev.sh`, was removed -
+this project has no EC2 bastion). Dev RDS investigation and ETL go through
+ECS Fargate one-off tasks inside the project VPC instead - see
+`CLAUDE.md`'s "Authoritative data location" section.
 
 Backend and frontend commands:
 

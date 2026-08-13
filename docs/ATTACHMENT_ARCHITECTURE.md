@@ -667,9 +667,9 @@ local-data/attachments/
 ```
 
 `application-local.yml` points `app.attachments.local-directory` at
-`../local-data/attachments` (relative to `api/`, since both supported local
-run methods — `scripts/run-local.sh` and `api/scripts/dev.sh` — execute
-`mvn spring-boot:run` with `api/` as the working directory).
+`../local-data/attachments` (relative to `api/`, since the supported local
+run method, `scripts/run-local.sh`, executes `mvn spring-boot:run` with
+`api/` as the working directory).
 
 ### How to regenerate them
 

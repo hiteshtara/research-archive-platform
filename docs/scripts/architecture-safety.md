@@ -10,12 +10,13 @@ work to Maven/npm, Terraform outputs, AWS services, or the Python ETL package.
 local developer
 ├── run-local / setup-local ─────> local PostgreSQL, API, UI, fixtures
 ├── get-access-token ────────────> Cognito
-├── start-db-tunnel ─────────────> SSM session ──> private dev RDS
 ├── deploy-api / dev-deploy ─────> ECR, ECS service, Amplify checks
 └── ETL wrappers ────────────────> ECR + ECS one-off task
                                       ├── Secrets Manager identifiers
                                       ├── Oracle source
-                                      ├── PostgreSQL archive
+                                      ├── PostgreSQL archive (incl. dev RDS -
+                                      │   no local Mac-to-RDS tunnel exists;
+                                      │   see CLAUDE.md)
                                       └── documents S3 bucket
 ```
 
@@ -47,9 +48,11 @@ dev-specific. Changing `EXPECTED_ACCOUNT_ID` does not rewrite ECR/ECS names,
 Cognito IDs, Terraform directories, database endpoints, or fallback VPC IDs.
 Review all resolved context before treating a wrapper as account-portable.
 
-`start-db-tunnel.sh` prefers Terraform output, then Secrets Manager, then a
-literal RDS fallback. A supplied cross-VPC SSM instance is allowed with a
-warning. Its `--check-only` mode is the safest first check.
+**Removed 2026-08-13:** `start-db-tunnel.sh` (a local SSM tunnel to dev
+RDS) and `api/scripts/dev.sh`. This project has no EC2 bastion, so the
+tunnel could never actually be opened. Use an ECS Fargate one-off task
+for dev RDS work instead — see `CLAUDE.md`'s "Authoritative data
+location" section.
 
 `--dry-run` describes the ETL application's transaction behavior; it does not
 make the surrounding wrapper free of AWS mutations. Without `--image-uri`, the

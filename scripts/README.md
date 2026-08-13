@@ -12,7 +12,7 @@ or a read-only reporting mode where one exists.
 | Run the API and UI locally | [`run-local.sh`](../docs/scripts/getting-started.md#run-the-application-locally) | Starts local processes |
 | Seed local attachment examples | [`setup-local.sh`](../docs/scripts/getting-started.md#add-the-local-attachment-demo) | Writes synthetic local files and rows |
 | Get a dev Cognito token | [`get-access-token.sh`](../docs/scripts/operations.md#get-a-cognito-access-token) | Authenticates; prints a token |
-| Check/open an RDS tunnel | [`start-db-tunnel.sh`](../docs/scripts/operations.md#open-a-dev-database-tunnel) | Read-only check or long-lived SSM session |
+| Investigate/ETL against dev RDS | ECS one-off task (`run-award-loader.sh` etc.) | No local Mac-to-RDS tunnel is supported - see `CLAUDE.md` |
 | Deploy the API or the full dev stack | [`deploy-api.sh`](../docs/scripts/operations.md#deploy-to-dev) / [`dev-deploy.sh`](../docs/scripts/operations.md#deploy-to-dev) | Builds, pushes, and updates AWS resources |
 | Run Award ETL or diagnostics | [`run-award-loader.sh`](../docs/scripts/operations.md#run-award-etl-in-ecs) | May write PostgreSQL and register/run ECS tasks |
 | Run attachment ETL or uploads | [`run-award-attachment-loader.sh`](../docs/scripts/operations.md#run-attachment-etl-in-ecs) | May write PostgreSQL/S3 and register/run ECS tasks |

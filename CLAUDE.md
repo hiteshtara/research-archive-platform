@@ -9,12 +9,18 @@ Kuali Research Administration data, preserved after the legacy Kuali system's
 retirement. It is not a system of record and never writes back to source data.
 ## Session continuity
 
+> At the beginning of a new session, after context loss, or before
+> concluding that a project resource is unavailable, run
+> `scripts/restore-project-context.sh`. Use `--aws` or `--oracle` only
+> when live verification is relevant.
+
 At the beginning of each session:
 
-1. Read `07 AI Sessions/Next Session.md` if it exists.
-2. Run `git status --short`.
-3. Review recent commits.
-4. Summarize the current state before changing code.
+1. Run `scripts/restore-project-context.sh`.
+2. Read `07 AI Sessions/Next Session.md` if it exists.
+3. Run `git status --short`.
+4. Review recent commits.
+5. Summarize the current state before changing code.
 
 Before ending a substantial session, update
 `07 AI Sessions/Next Session.md` with:
@@ -59,11 +65,15 @@ uv run pytest tests/test_x.py::test_name   # single test
 
 ## Local development
 
-Two supported ways to run the API locally — they're not interchangeable:
-- `scripts/run-local.sh`: starts a local Homebrew Postgres and runs API+UI against it. Sets `SPRING_PROFILES_ACTIVE=local` itself.
-- `api/scripts/dev.sh` + `scripts/start-db-tunnel.sh`: opens an SSM tunnel to the real dev RDS instance (needs `.envrc`/direnv with AWS credentials), then runs the API against that.
+`scripts/run-local.sh` is the only supported way to run the API locally: it
+starts a local Homebrew Postgres and runs API+UI against it, setting
+`SPRING_PROFILES_ACTIVE=local` itself. There is no supported direct
+Mac-to-dev-RDS connection — `api/scripts/dev.sh` and
+`scripts/start-db-tunnel.sh` (an SSM tunnel to dev RDS) were removed; this
+project has no EC2 bastion to tunnel through. See "Authoritative data
+location" below for the real dev RDS access path (ECS Fargate).
 
-Either way, the `local` Spring profile must be active for `application-local.yml`
+The `local` Spring profile must be active for `application-local.yml`
 to take effect (it isn't picked up automatically — there's no `.idea`/`.vscode`
 run config committed to this repo). `application-local.yml` is what makes AI
 features work locally with the deterministic stub provider and disables Cognito
@@ -108,12 +118,17 @@ already has real historical evidence of successful `--load-award-id`
 0ed7001c-...`, 2026-08-03, dry-run, and multiple real committed runs
 2026-08-04/05) — this is a proven, working route, not a novel one.
 
-**A missing local bastion blocks only `scripts/start-db-tunnel.sh` (the
-Mac-to-RDS SSM tunnel) — it says nothing about whether RDS is reachable
-from ECS,** which is a separate, already-working network path. Never
-provision a bastion/EC2 instance, substitute personal infrastructure, or
-change networking/security-group configuration to work around this without
-explicit approval — treat it as a hard stop, not something to route around.
+**There is no supported direct Mac-to-dev-RDS connection.** A local SSM
+tunnel (`scripts/start-db-tunnel.sh` + `api/scripts/dev.sh`) existed
+briefly but was removed 2026-08-13 — its repeated presence, even while
+correctly failing closed ("no bastion host"), kept sending sessions down
+the wrong path instead of straight to the working ECS route. This project
+has no EC2 bastion and none should be provisioned/substituted (personal
+infrastructure, networking/security-group changes) to work around this
+without explicit approval — treat it as a hard stop, not something to
+route around. The absence of a local tunnel says nothing about whether RDS
+is reachable — it is, from ECS, which is a separate, already-working
+network path (above).
 
 **Oracle** (staging by default; production only with explicit
 authorization) is queried read-only from a BU-VPN-connected local Mac using

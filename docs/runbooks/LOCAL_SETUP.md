@@ -8,37 +8,29 @@ Never connect AWS directly to Oracle.
 
 -------------------------------------------------------------------------------
 
-## 2. Start AWS SSM Tunnel
+## 2. Dev RDS access: ECS Fargate, not a local tunnel
 
-export AWS_PROFILE=bu-nprd
-scripts/start-db-tunnel.sh
+**DEPRECATED/REMOVED (2026-08-13):** `scripts/start-db-tunnel.sh` and
+`api/scripts/dev.sh` (an SSM port-forwarding tunnel from
+`localhost:15432` to dev RDS) have been deleted. This project has no EC2
+bastion host, so a local Mac-to-RDS tunnel was never actually usable -
+keeping the script around, even though it correctly failed closed every
+time, kept sending sessions down the wrong path instead of straight to
+the route that actually works. **There is no supported direct
+Mac-to-dev-RDS connection**, and none should be provisioned (a personal
+EC2 instance, a personal RDS endpoint, networking/security-group
+changes) without explicit approval.
 
-This resolves the RDS endpoint from Terraform/Secrets Manager and
-discovers an SSM-managed bastion host in the project's own VPC itself -
-it requires account 770203350335 and refuses to run against anything
-else. Use `--check-only` first to validate everything without opening a
-tunnel: `scripts/start-db-tunnel.sh --check-only`. See the script's own
-`--help` for details and env var overrides.
-
-As of this writing, this project's ECS service runs on Fargate (no EC2
-instances) and there is no dedicated bastion host yet - the script will
-say so clearly rather than connect to anything else. Do not substitute
-a personal EC2 instance ID or a personal RDS endpoint here; if you see
-either of those, the tunnel is not targeting BU's environment.
-
-Leave this terminal running once the tunnel is up.
-
-**If no bastion exists, this tunnel is simply unavailable - that does
-NOT mean dev RDS is unreachable.** ECS Fargate tasks (cluster
+**The supported path for dev RDS database investigation and one-off ETL
+execution is an ECS Fargate task.** Cluster
 `research-archive-platform-dev-etl`, task family
-`research-archive-platform-dev-loader`) already run inside the same VPC
-as RDS with a direct security-group rule, and reach it via
-`POSTGRES_SECRET_ID` without any tunnel at all - see
+`research-archive-platform-dev-loader` - it already runs inside the same
+VPC as RDS with a direct security-group rule, and reaches it via
+`POSTGRES_SECRET_ID` (Secrets Manager) with no tunnel at all. See
 `docs/runbooks/UNATTENDED_FARGATE_ETL_LOADS.md` and `CLAUDE.md`'s
-"Authoritative data location" section for the ECS route (`scripts/run-award-loader.sh`,
-etc.), which is the correct fallback for database investigation/one-off
-ETL work when this tunnel can't be opened. Never provision a bastion or
-substitute personal infrastructure to work around this.
+"Authoritative data location" section for the full mechanism
+(`scripts/run-award-loader.sh`, `etl/scripts/build_award_ecs_overrides.py`,
+one-off `aws ecs run-task` diagnostic commands).
 
 Local Homebrew Postgres (started by `scripts/run-local.sh`) is **not**
 the authoritative dev database and can be silently stale relative to RDS
@@ -48,25 +40,7 @@ results from it must be labeled as local test data.
 
 -------------------------------------------------------------------------------
 
-## 3. Environment
-
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=15432
-export POSTGRES_DB=research_archive
-
-Verify
-
-env | grep POSTGRES
-
--------------------------------------------------------------------------------
-
-## 4. Verify Tunnel
-
-lsof -nP -iTCP:15432 -sTCP:LISTEN
-
--------------------------------------------------------------------------------
-
-## 5. Backend
+## 3. Backend
 
 cd api
 
@@ -74,7 +48,7 @@ mvn test
 
 -------------------------------------------------------------------------------
 
-## 6. Frontend
+## 4. Frontend
 
 cd ui
 
@@ -84,7 +58,7 @@ npm run dev
 
 -------------------------------------------------------------------------------
 
-## 7. ETL
+## 5. ETL
 
 PYTHONPATH=etl
 
@@ -92,7 +66,7 @@ uv run --project etl python ...
 
 -------------------------------------------------------------------------------
 
-## 8. Finish
+## 6. Finish
 
 git status
 

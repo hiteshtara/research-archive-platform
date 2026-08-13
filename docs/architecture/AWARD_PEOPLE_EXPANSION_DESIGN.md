@@ -315,12 +315,15 @@ report dict.
 
 ### Local real-data smoke-test plan
 
-**Prepared here, not run** — executing it requires the BU VPN, a real
-AWS SSM session, and the approved dev RDS tunnel, all outside what this
-work is authorized to run directly (no ECS involved either way — Award
-has no ECS execution mode, per `AWARD_IMPLEMENTATION_ROADMAP.md`'s prior
-finding; the real path is local + BU VPN + SSM tunnel, per
-`docs/runbooks/ORACLE.md`/`LOCAL_SETUP.md`).
+**Prepared here, not run** — executing it requires the BU VPN and a real
+AWS session, outside what this work is authorized to run directly.
+**Historical/deprecated (2026-08-13):** the `scripts/start-db-tunnel.sh`
+step below no longer exists (this project has no EC2 bastion; the script
+was removed) and Award has since gained a real ECS execution mode
+(`scripts/run-award-loader.sh`) that supersedes this local-tunnel
+procedure entirely — see `CLAUDE.md`'s "Authoritative data location"
+section for the current path. Left here as a record of what was
+proposed at the time, not current guidance.
 
 1. Connect to the BU VPN; run `buaws` if AWS credentials need
    refreshing.

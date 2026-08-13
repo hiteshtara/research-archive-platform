@@ -209,10 +209,13 @@ defense-in-depth backstop regardless.
 - **Local Postgres against real data** (not yet exercised for Protocol on
   this branch — no migration or full load has been run anywhere): use
   `scripts/run-local.sh` from the repo root to start a local Homebrew
-  Postgres and set `SPRING_PROFILES_ACTIVE=local`, or the BU dev RDS via
-  `scripts/start-db-tunnel.sh` + `api/scripts/dev.sh`. Either way, Protocol
-  itself only needs a reachable Postgres and Oracle (over the BU VPN) —
-  it does not depend on the API or UI being up at all.
+  Postgres and set `SPRING_PROFILES_ACTIVE=local`. There is no supported
+  direct Mac-to-dev-RDS connection (`scripts/start-db-tunnel.sh` +
+  `api/scripts/dev.sh` were removed 2026-08-13 — no EC2 bastion exists);
+  for dev RDS, use an ECS Fargate one-off task instead (see `CLAUDE.md`'s
+  "Authoritative data location" section). Protocol itself only needs a
+  reachable Postgres and Oracle (over the BU VPN) — it does not depend on
+  the API or UI being up at all.
 
 ## Migration V034
 
@@ -290,9 +293,9 @@ merge to `main`) is ready to run against a real target:
 
 1. Connect to the BU VPN; refresh AWS credentials (`buaws`) if needed.
 2. Establish the approved PostgreSQL connection — local Postgres
-   (`./scripts/run-local.sh`) for a first dry run, or the approved SSM
-   tunnel to BU dev RDS (`scripts/start-db-tunnel.sh`) for a real target.
-   See [`docs/runbooks/LOCAL_SETUP.md`](runbooks/LOCAL_SETUP.md).
+   (`./scripts/run-local.sh`) for a first dry run, or an ECS Fargate
+   one-off task for a real dev RDS target (no local Mac-to-RDS tunnel is
+   supported). See [`docs/runbooks/LOCAL_SETUP.md`](runbooks/LOCAL_SETUP.md).
 3. Export `ORACLE_USER` / `ORACLE_PASSWORD` / `ORACLE_DSN` and the
    `POSTGRES_*` variables into the shell (never commit them).
 4. `uv run python -m archive_etl check protocol` — confirms Oracle and

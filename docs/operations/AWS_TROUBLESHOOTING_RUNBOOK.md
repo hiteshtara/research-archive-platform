@@ -1335,10 +1335,8 @@ for script_file in \
   scripts/get-access-token.sh \
   scripts/setup-local.sh \
   scripts/dev-deploy.sh \
-  scripts/start-db-tunnel.sh \
   ops/deploy-api.sh \
-  ops/logs-api.sh \
-  api/scripts/dev.sh
+  ops/logs-api.sh
 do
   test -f "$script_file" || continue
   echo "===== $script_file ====="
@@ -1360,18 +1358,23 @@ rg -n \
 |---|---|---|---|
 | `scripts/dev-deploy.sh --check-only` | Run backend tests and frontend checks without deployment | Preflight before any full dev deployment | Safe validation mode |
 | `ops/deploy-api.sh --check-only` | Validate AWS account, region, ECR and ECS targets | API deployment preflight | Safe validation mode |
-| `scripts/start-db-tunnel.sh --check-only` | Determine whether an approved SSM database tunnel is possible | Tunnel preflight | Read-only discovery |
 | `ops/logs-api.sh` | Follow API CloudWatch logs | API diagnosis | Read-only; long-running until `Ctrl+C` |
 | `scripts/get-access-token.sh` | Obtain a Cognito access token for API testing | Secured endpoint tests | Authentication only; protect the returned token |
 | `scripts/setup-local.sh` | Create synthetic attachment fixtures locally | Local attachment development | Modifies local PostgreSQL only |
 | `scripts/run-award-loader.sh` | Build/run Award metadata ETL as an ECS one-off task | Migrate, create batch, inspect batch, dry-run, real load | Writes ECR/ECS/RDS during real execution |
 | `scripts/run-award-attachment-loader.sh` | Separate attachment schema/load/upload workflow | Migrate-only, targeted dry-run, attachment load | Writes ECR/ECS/RDS/S3 depending on flags |
 | `scripts/run-archive-explorer.sh` | Query archived PostgreSQL records with an ECS one-off task | Award, workflow-document or unit investigation | Data query is read-only, but registers an ECS task-definition revision and starts a task |
-| `scripts/start-db-tunnel.sh` | Attempt local forwarding to private PostgreSQL | Only if a verified SSM managed instance can reach RDS | Starts a temporary session; historical project design has no dedicated bastion |
 | `ops/deploy-api.sh` | Build, push, register and deploy API image | API deployment after validation-only mode passes | Changes ECR, ECS task definition and service |
 | `scripts/dev-deploy.sh` | Test, deploy API, push Git and trigger Amplify | Intentional full dev release | Major change across code and AWS |
-| `api/scripts/dev.sh` | Intended local API helper | Do not use until its path calculation is fixed | Appears broken at commit `2e69577` |
 | `buaws` | Refresh local BU AWS CLI profiles | Before AWS work or after STS expiry | Rewrites local AWS credential profiles, but does not modify cloud infrastructure |
+
+**Removed 2026-08-13** (deprecated/unsupported, do not recreate without
+explicit approval): `scripts/start-db-tunnel.sh` (local SSM tunnel to dev
+RDS) and `api/scripts/dev.sh` (its API-runner wrapper). This project has
+no EC2 bastion, so the tunnel was never actually usable — its continued
+presence kept sending sessions down the wrong path. Use an ECS Fargate
+one-off task for dev RDS investigation/ETL instead — see `CLAUDE.md`'s
+"Authoritative data location" section and `scripts/run-award-loader.sh`.
 
 ### Recommended order at the start of AWS work
 
@@ -1389,7 +1392,6 @@ test "$(aws sts get-caller-identity --query Account --output text)" = "770203350
 
 ./ops/deploy-api.sh --check-only
 ./scripts/dev-deploy.sh --check-only
-./scripts/start-db-tunnel.sh --check-only
 ```
 
 The `buaws` command authenticates the AWS CLI through BU SAML. It does not create a Cognito bearer token for the application.
@@ -1561,31 +1563,27 @@ export LOADER_IMAGE_URI='770203350335.dkr.ecr.us-east-1.amazonaws.com/research-a
 
 Use `./scripts/run-archive-explorer.sh --help` as the authority for current subcommands and flags.
 
-### `start-db-tunnel.sh`: when not to use it
+### `start-db-tunnel.sh`: removed, do not recreate
 
-The historical command tried to forward local port `15432` through an SSM managed instance. The Research Archive Terraform created ECS, RDS and S3 but no dedicated EC2 bastion. Seeing unrelated SSM-managed BU instances does not authorize using them as a tunnel.
+**DEPRECATED/REMOVED (2026-08-13).** This section previously warned about
+when *not* to use `scripts/start-db-tunnel.sh` (an SSM port-forward from
+local port `15432` to dev RDS) — the Research Archive Terraform created
+ECS, RDS and S3 but no dedicated EC2 bastion, so the tunnel could never
+actually be opened, and seeing unrelated SSM-managed BU instances never
+authorized using them as a substitute. Kept as historical record only:
+the never-usable script (and its caller, `api/scripts/dev.sh`, which also
+had a real project-root path-calculation bug as of commit `2e69577`) has
+since been deleted rather than fixed, because its mere presence kept
+sending sessions down this dead-end path instead of straight to the
+route that actually works.
 
-Before starting any tunnel, prove all three facts:
-
-1. The instance belongs to this project or is an approved shared access host.
-2. Its security group and route table can reach the project RDS endpoint on `5432`.
-3. You are authorized to use it for port forwarding.
-
-Inventory only:
-
-```bash
-aws ssm describe-instance-information \
-  --query 'InstanceInformationList[].{Id:InstanceId,Name:ComputerName,Ping:PingStatus}' \
-  --output table
-```
-
-If those facts are not established, do not run `scripts/start-db-tunnel.sh`. Use local PostgreSQL for development and ECS one-off loaders for private RDS migrations and ETL.
-
-At commit `2e69577`, `api/scripts/dev.sh` appears to calculate the project root as `api`, then looks for `api/scripts/start-db-tunnel.sh` and attempts to enter `api/api`. Until corrected, run the root tunnel check directly:
-
-```bash
-./scripts/start-db-tunnel.sh --check-only
-```
+**Use ECS Fargate instead** — a one-off `aws ecs run-task` against
+`research-archive-platform-dev-etl` / `research-archive-platform-dev-loader`,
+which already has a working, direct security-group path to RDS with no
+tunnel needed. See `CLAUDE.md`'s "Authoritative data location" section
+and `scripts/run-award-loader.sh`. Never provision a bastion or
+substitute personal infrastructure to reintroduce a tunnel without
+explicit approval.
 
 ### API deployment script
 

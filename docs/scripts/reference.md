@@ -10,7 +10,6 @@ All paths are relative to the repository root.
 | `scripts/setup-local.sh` | Create local attachment demo | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_DB` | Generates local fixtures; inserts synthetic rows |
 | `scripts/seed-local-subaward-attachments.sql` | Seed demo metadata | Local `archive` schema | Deletes obsolete seed rows; inserts IDs 9000000001–9000000004 |
 | `scripts/get-access-token.sh` | Cognito admin password authentication | username; Cognito/AWS identifier overrides | Calls Cognito; creates and removes a 0600 temp payload |
-| `scripts/start-db-tunnel.sh` | SSM port forwarding to dev RDS | `--check-only`, `--instance-id`; AWS/tunnel overrides | Opens a long-lived session; never provisions AWS resources |
 | `scripts/deploy-api.sh` | Deploy API to dev ECS | `--check-only`, `EXPECTED_ACCOUNT_ID` | Builds/pushes images; registers task revision; updates ECS service |
 | `scripts/dev-deploy.sh` | Full developer deploy pipeline | `--check-only`, `--skip-backend`, `--skip-frontend`, `--no-push`, `--full` | Tests/builds; may push Git and deploy ECS; observes Amplify |
 | `scripts/run-award-loader.sh` | Run core Award loader in Fargate | ECS/network/secret identifiers; one loader verb | May push image, register/run task, migrate/write PostgreSQL |
@@ -19,11 +18,16 @@ All paths are relative to the repository root.
 | `scripts/filter_award_child_export.py` | Enforce parent-child Award export membership | `--parent`, `--child` | Creates `.original`; replaces child CSV |
 | `scripts/tests/test-bulk-load-reconciliation.sh` | Regression-test bulk resume accounting | `jq`; sourced attachment wrapper | Uses only a temporary directory; AWS/Docker calls are faked |
 
+**Removed 2026-08-13:** `scripts/start-db-tunnel.sh` (SSM port forwarding
+to dev RDS) and `api/scripts/dev.sh`. This project has no EC2 bastion, so
+the tunnel was never actually usable. Dev RDS investigation/ETL goes
+through an ECS Fargate one-off task instead - see `CLAUDE.md`'s
+"Authoritative data location" section.
+
 ## Tool dependencies
 
 The scripts collectively use Bash, AWS CLI, Docker, Git, Maven, npm, Python 3,
-`jq`, `curl`, `lsof`, PostgreSQL client tools, Terraform, and `uv`. The SSM
-tunnel also needs the Session Manager plugin. Local startup assumes Homebrew's
+`jq`, `curl`, `lsof`, PostgreSQL client tools, Terraform, and `uv`. Local startup assumes Homebrew's
 Apple Silicon PostgreSQL path `/opt/homebrew/opt/postgresql@17/bin/pg_isready`.
 No single script needs every tool; its preamble and failure messages are the
 authoritative per-command requirements.

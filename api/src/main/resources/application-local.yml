@@ -18,6 +18,6 @@ app:
 
   attachments:
     storage: local
-    # mvn spring-boot:run (both scripts/run-local.sh and api/scripts/dev.sh)
-    # runs with CWD = api/, so this points up to the repo root.
+    # mvn spring-boot:run (via scripts/run-local.sh) runs with CWD = api/,
+    # so this points up to the repo root.
     local-directory: ../local-data/attachments

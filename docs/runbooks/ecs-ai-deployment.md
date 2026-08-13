@@ -63,13 +63,11 @@ direnv reload
 
 ## Local database
 
-Credentials are loaded from AWS Secrets Manager through `.envrc`.
-
-Start tunnel:
-
-```bash
-./scripts/start-db-tunnel.sh
-```
+There is no supported direct Mac-to-dev-RDS connection
+(`scripts/start-db-tunnel.sh` was removed 2026-08-13 — this project has
+no EC2 bastion). Use `scripts/run-local.sh` for local Postgres, or an ECS
+Fargate one-off task for dev RDS work — see `CLAUDE.md`'s "Authoritative
+data location" section.
 
 ---
 
