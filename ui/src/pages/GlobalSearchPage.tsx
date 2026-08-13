@@ -20,6 +20,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
+import { filterOutIrbResults } from "../features/search/globalSearchPresentation.mjs";
 
 
 export function GlobalSearchPage() {
@@ -31,7 +32,7 @@ export function GlobalSearchPage() {
 
   const searchQuery = useQuery({
     queryKey: ["global-search", queryValue],
-    queryFn: () => globalSearch(queryValue),
+    queryFn: async () => filterOutIrbResults(await globalSearch(queryValue)),
     enabled: queryValue.trim().length >= 2,
   });
 
@@ -59,7 +60,10 @@ export function GlobalSearchPage() {
         </Typography>
 
         <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Global Search currently covers IRB and Awards. Search by study ID, protocol number, document number, CRC number, title, investigator, sponsor, award, funding source, status, or review type.
+          Global Search covers Awards, Proposals, Negotiations, and
+          Subawards. Search by document number, title, investigator,
+          sponsor, award, status, subaward code, or negotiation agreement
+          type.
         </Typography>
       </Box>
 
@@ -75,7 +79,7 @@ export function GlobalSearchPage() {
                 submitSearch();
               }
             }}
-            placeholder="Search document number, protocol, PI, sponsor, award, title..."
+            placeholder="Search document number, PI, sponsor, award, title..."
             slotProps={{
               input: {
                 startAdornment: (
@@ -109,7 +113,7 @@ export function GlobalSearchPage() {
               </Typography>
 
               <Typography color="text.secondary">
-                Try a document number, award number, sponsor, person name, study ID, protocol number, or title keyword.
+                Try a document number, award number, sponsor, person name, or title keyword.
               </Typography>
             </Stack>
           </CardContent>

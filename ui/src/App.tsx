@@ -11,10 +11,6 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
-import { InvestigatorProfilePage } from "./pages/InvestigatorProfilePage";
-import { IrbDetailPage } from "./pages/IrbDetailPage";
-import { IrbHistoryDetailPage } from "./pages/IrbHistoryDetailPage";
-import { IrbPage } from "./pages/IrbPage";
 import { NegotiationFamiliesPage } from "./pages/NegotiationFamiliesPage";
 import { NegotiationWorkspacePage } from "./pages/NegotiationWorkspacePage";
 import { ProposalDiscoveryPage } from "./pages/ProposalDiscoveryPage";
@@ -30,33 +26,6 @@ export default function App() {
       <Route element={<AppLayout />}>
 
         <Route index element={<DashboardPage />} />
-
-        <Route path="irb" element={<IrbPage />} />
-        <Route
-          path="irb/families"
-          element={<Navigate to="/irb" replace />}
-        />
-        <Route
-          path="irb/history"
-          element={<Navigate to="/irb" replace />}
-        />
-        <Route
-          path="irb/history/:protocolId"
-          element={<IrbHistoryDetailPage />}
-        />
-        <Route
-          path="irb/record/:recordId"
-          element={<IrbDetailPage />}
-        />
-
-        <Route
-          path="protocols"
-          element={<Navigate to="/irb" replace />}
-        />
-        <Route
-          path="protocols/:protocolNumber"
-          element={<Navigate to="/irb" replace />}
-        />
 
         {/* Retired: the legacy Award Families/History pages predated
             the current Award Search/Dashboard experience and bypassed
@@ -160,11 +129,6 @@ export default function App() {
         <Route
           path="search"
           element={<GlobalSearchPage />}
-        />
-
-        <Route
-          path="investigators/:email"
-          element={<InvestigatorProfilePage />}
         />
 
         <Route

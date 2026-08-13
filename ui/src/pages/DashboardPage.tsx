@@ -5,9 +5,7 @@ import {
   GavelOutlined,
   HandshakeOutlined,
   HistoryOutlined,
-  MenuBookOutlined,
   SearchOutlined,
-  TimelineOutlined,
 } from "@mui/icons-material";
 import {
   Alert,
@@ -38,14 +36,10 @@ import type { DashboardSummary } from "../types/api";
 // Icons are JSX and can't live in the plain-data presentation-helper
 // module, so each card's icon is looked up here by key instead.
 const CARD_ICONS: Record<string, React.ReactNode> = {
-  irb: <MenuBookOutlined />,
   awards: <ArchiveOutlined />,
   proposals: <DescriptionOutlined />,
   awardHistoryRecords: <HistoryOutlined />,
   proposalHistoryRecords: <HistoryOutlined />,
-  submissions: <DescriptionOutlined />,
-  fundingRecords: <GavelOutlined />,
-  timelineEvents: <TimelineOutlined />,
   negotiations: <HandshakeOutlined />,
   subawards: <GavelOutlined />,
   documents: <FolderOutlined />,
@@ -96,8 +90,8 @@ export function DashboardPage() {
         </Typography>
 
         <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Search and review current and historical research administration
-          records.
+          Search and review archived Awards, Proposals, Negotiations,
+          Subawards, and Kuali business documents.
         </Typography>
       </Box>
 
@@ -120,7 +114,7 @@ export function DashboardPage() {
           fullWidth
           value={searchText}
           onChange={(event) => setSearchText(event.target.value)}
-          placeholder="Search document number, protocol, PI, sponsor, award, title..."
+          placeholder="Search document number, PI, sponsor, award, title..."
           slotProps={{
             input: {
               startAdornment: (
@@ -153,148 +147,77 @@ export function DashboardPage() {
       </Stack>
 
       <Box>
-        <Typography variant="h6">Primary business objects</Typography>
+        <Typography variant="h6">Awards and Proposals</Typography>
 
         <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-          Current records and stable institutional business identifiers.
+          Current records and complete preserved history for the
+          archive's two core business objects.
         </Typography>
 
         <Grid container spacing={2.5}>
-          {primaryBusinessCards.map((card) => {
-            const value = dashboard[card.key as keyof DashboardSummary];
+          {[...primaryBusinessCards, ...historicalActivityCards].map(
+            (card) => {
+              const value = dashboard[card.key as keyof DashboardSummary];
 
-            return (
-              <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
-                <Card
-                  onClick={() => navigate(card.path)}
-                  sx={{
-                    height: "100%",
-                    cursor: "pointer",
-                    transition: "transform 160ms ease, box-shadow 160ms ease",
-                    "&:hover": {
-                      transform: "translateY(-3px)",
-                      boxShadow: "0 14px 30px rgba(15, 23, 42, 0.10)",
-                    },
-                  }}
-                >
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack
-                      sx={{
-                        flexDirection: "row",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Box
+              return (
+                <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 3 }}>
+                  <Card
+                    onClick={() => navigate(card.path)}
+                    sx={{
+                      height: "100%",
+                      cursor: "pointer",
+                      transition:
+                        "transform 160ms ease, box-shadow 160ms ease",
+                      "&:hover": {
+                        transform: "translateY(-3px)",
+                        boxShadow: "0 14px 30px rgba(15, 23, 42, 0.10)",
+                      },
+                    }}
+                  >
+                    <CardContent sx={{ p: 3 }}>
+                      <Stack
                         sx={{
-                          width: 46,
-                          height: 46,
-                          borderRadius: 2.5,
-                          display: "grid",
-                          placeItems: "center",
-                          backgroundColor: "rgba(139, 24, 50, 0.10)",
-                          color: "primary.main",
+                          flexDirection: "row",
+                          alignItems: "flex-start",
+                          justifyContent: "space-between",
                         }}
                       >
-                        {CARD_ICONS[card.key]}
-                      </Box>
+                        <Box
+                          sx={{
+                            width: 46,
+                            height: 46,
+                            borderRadius: 2.5,
+                            display: "grid",
+                            placeItems: "center",
+                            backgroundColor: "rgba(139, 24, 50, 0.10)",
+                            color: "primary.main",
+                          }}
+                        >
+                          {CARD_ICONS[card.key]}
+                        </Box>
 
-                      <Typography variant="h4">
-                        {value.toLocaleString()}
+                        <Typography variant="h4">
+                          {value.toLocaleString()}
+                        </Typography>
+                      </Stack>
+
+                      <Typography variant="h6" sx={{ mt: 3 }}>
+                        {card.title}
                       </Typography>
-                    </Stack>
 
-                    <Typography variant="h6" sx={{ mt: 3 }}>
-                      {card.title}
-                    </Typography>
-
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{ mt: 0.5 }}
-                    >
-                      {card.description}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            );
-          })}
-        </Grid>
-      </Box>
-
-      <Box>
-        <Typography variant="h6">
-          Historical and activity metrics
-        </Typography>
-
-        <Typography color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-          Complete preserved history and relationships across archive
-          domains.
-        </Typography>
-
-        <Grid container spacing={2.5}>
-          {historicalActivityCards.map((card) => {
-            const value = dashboard[card.key as keyof DashboardSummary];
-
-            return (
-              <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
-                <Card
-                  onClick={() => navigate(card.path)}
-                  sx={{
-                    height: "100%",
-                    cursor: "pointer",
-                    transition:
-                      "transform 160ms ease, box-shadow 160ms ease",
-                    "&:hover": {
-                      transform: "translateY(-3px)",
-                      boxShadow: "0 14px 30px rgba(15, 23, 42, 0.10)",
-                    },
-                  }}
-                >
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack
-                      sx={{
-                        flexDirection: "row",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 46,
-                          height: 46,
-                          borderRadius: 2.5,
-                          display: "grid",
-                          placeItems: "center",
-                          backgroundColor: "rgba(15, 23, 42, 0.06)",
-                          color: "text.secondary",
-                        }}
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ mt: 0.5 }}
                       >
-                        {CARD_ICONS[card.key]}
-                      </Box>
-
-                      <Typography variant="h4">
-                        {value.toLocaleString()}
+                        {card.description}
                       </Typography>
-                    </Stack>
-
-                    <Typography variant="h6" sx={{ mt: 3 }}>
-                      {card.title}
-                    </Typography>
-
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{ mt: 0.5 }}
-                    >
-                      {card.description}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            );
-          })}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            },
+          )}
         </Grid>
       </Box>
 
@@ -364,50 +287,6 @@ export function DashboardPage() {
           })}
         </Grid>
       </Box>
-
-      <Card>
-        <CardContent sx={{ p: 3 }}>
-          <Typography variant="h6">Latest IRB archive load</Typography>
-
-          <Grid container spacing={3} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                Current records
-              </Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                {dashboard.irb.toLocaleString()}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                Submissions
-              </Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                {dashboard.submissions.toLocaleString()}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                Timeline events
-              </Typography>
-              <Typography sx={{ fontWeight: 700 }}>
-                {dashboard.timelineEvents.toLocaleString()}
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 6, sm: 4, md: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                Status
-              </Typography>
-              <Box sx={{ mt: 0.4 }}>
-                <Chip label="Loaded" color="success" size="small" />
-              </Box>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
     </Stack>
   );
 }

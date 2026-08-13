@@ -1,8 +1,9 @@
+// IRB is outside current implementation scope (see docs/DECISIONS.md) -
+// this type deliberately only reflects the fields the UI actually
+// consumes; the real API response may still include additional IRB-only
+// fields, which is harmless since this interface is used purely to type
+// what the frontend reads from the response, not to constrain it.
 export interface DashboardSummary {
-  irb: number;
-  submissions: number;
-  fundingRecords: number;
-  timelineEvents: number;
   awards: number;
   awardHistoryRecords: number;
   proposals: number;
@@ -10,22 +11,6 @@ export interface DashboardSummary {
   negotiations: number;
   subawards: number;
   documents: number;
-}
-
-export interface IrbProtocol {
-  recordId: number;
-  studyId: string | null;
-  protocolBase: string;
-  protocolNumber: string;
-  title: string;
-  protocolType: string | null;
-  protocolStatus: string | null;
-  approvalDate: string | null;
-  piBuid: string | null;
-  piFullName: string | null;
-  piEmail: string | null;
-  piBuidMissing: boolean;
-  active: boolean;
 }
 
 export interface PageResponse<T> {
@@ -123,7 +108,6 @@ export interface GlobalSearchItem {
   matchedField: string | null;
   matchedValue: string | null;
   route: string | null;
-  protocolId: number | null;
   awardId: number | null;
   sequenceNumber: number | null;
   primaryCurrent: boolean | null;
@@ -140,118 +124,6 @@ export interface GlobalSearchResponse {
   totalResults: number;
   results: GlobalSearchItem[];
   failedModules: string[];
-}
-
-export interface IrbWorkspaceProtocol {
-  protocolId: number;
-  protocolBase: string;
-  protocolNumber: string;
-  sequenceNumber: number | null;
-  crcProtocolNumber: string | null;
-  documentNumber: string | null;
-  title: string | null;
-  protocolType: string | null;
-  protocolStatus: string | null;
-  ohrpCategories: string | null;
-  summaryKeywords: string | null;
-  piId: string | null;
-  piEmail: string | null;
-  piAffiliation: string | null;
-  fundCenterNumber: string | null;
-  schoolNumber: string | null;
-  irbAnalystId: string | null;
-  irbAdvisorId: string | null;
-  receivedDate: string | null;
-  claimedDate: string | null;
-  determinationDate: string | null;
-  approvalDate: string | null;
-  expirationDate: string | null;
-  closureDate: string | null;
-  authorizationDate: string | null;
-  recordStorageBox: string | null;
-  expirationStatus: string | null;
-  workingDays: number | null;
-  calendarDays: number | null;
-  irbDays: number | null;
-  piDays: number | null;
-  fundingSourceCount: number | null;
-}
-
-export interface IrbWorkspaceFunding {
-  sequence: number | null;
-  source: string;
-}
-
-export interface IrbWorkspaceSubmission {
-  sequenceNumber: number | null;
-  submissionNumber: number | null;
-  submissionType: string | null;
-  submissionStatus: string | null;
-  eventType: string | null;
-  reviewType: string | null;
-}
-
-export interface IrbWorkspaceTimelineEvent {
-  date: string;
-  type: string;
-  sequence: number | null;
-}
-
-export interface IrbWorkspace {
-  protocol: IrbWorkspaceProtocol;
-  funding: IrbWorkspaceFunding[];
-  submissions: IrbWorkspaceSubmission[];
-  timeline: IrbWorkspaceTimelineEvent[];
-}
-
-export interface IrbFamily {
-  protocolBase: string;
-  versionCount: number;
-  latestProtocolId: number;
-  latestProtocolNumber: string;
-  latestTitle: string | null;
-  latestStatus: string | null;
-  latestType: string | null;
-  piId: string | null;
-  piEmail: string | null;
-  latestApprovalDate: string | null;
-}
-
-export interface IrbHistoryVersion {
-  protocolId: number;
-  protocolBase: string;
-  protocolNumber: string;
-  sequenceNumber: number | null;
-  documentNumber: string | null;
-  crcProtocolNumber: string | null;
-  title: string | null;
-  protocolStatus: string | null;
-  protocolType: string | null;
-  piId: string | null;
-  piEmail: string | null;
-  approvalDate: string | null;
-  expirationDate: string | null;
-}
-
-export interface InvestigatorStudy {
-  recordId: number | null;
-  protocolId: number;
-  protocolBase: string;
-  protocolNumber: string;
-  title: string | null;
-  status: string | null;
-  recordType: string | null;
-  approvalDate: string | null;
-}
-
-export interface InvestigatorProfile {
-  name: string;
-  email: string;
-  buid: string | null;
-  currentStudyCount: number;
-  historicalStudyCount: number;
-  currentStudies: InvestigatorStudy[];
-  historicalStudies: InvestigatorStudy[];
 }
 
 export interface AiCitation {

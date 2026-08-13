@@ -284,18 +284,6 @@ export function AppLayout() {
           <Typography variant="body2" sx={{ fontWeight: 700 }}>
             Kuali Legacy Archive
           </Typography>
-
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: "block", mt: 1.5 }}
-          >
-            Current IRB records
-          </Typography>
-
-          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-            1,852
-          </Typography>
         </Box>
       </Drawer>
 

@@ -4,13 +4,14 @@
 // DashboardPage.tsx imports these arrays directly rather than declaring
 // its own inline versions.
 
+// IRB is outside current implementation scope (see
+// docs/DECISIONS.md) - no card here routes anywhere near /irb. Award
+// and Proposal are the only domains with both a current and a
+// historical card; DashboardPage.tsx renders these two arrays together
+// under a single "Awards and Proposals" heading (not two separate
+// sections) so removing IRB's three historical-activity cards doesn't
+// leave a visibly sparse section.
 export const primaryBusinessCards = [
-  {
-    key: "irb",
-    title: "Current IRB Records",
-    description: "Current curated IRB records available for search",
-    path: "/irb",
-  },
   {
     key: "awards",
     title: "Awards",
@@ -37,24 +38,6 @@ export const historicalActivityCards = [
     title: "Historical Proposal Records",
     description: "All preserved Kuali Proposal history rows",
     path: "/proposals",
-  },
-  {
-    key: "submissions",
-    title: "Submissions",
-    description: "Initial applications, amendments, renewals and other submissions",
-    path: "/irb",
-  },
-  {
-    key: "fundingRecords",
-    title: "Funding Relationships",
-    description: "Archived IRB funding source relationships",
-    path: "/irb",
-  },
-  {
-    key: "timelineEvents",
-    title: "Timeline Events",
-    description: "Historical workflow and review events",
-    path: "/irb",
   },
 ];
 
