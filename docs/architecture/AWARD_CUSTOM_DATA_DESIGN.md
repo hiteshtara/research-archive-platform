@@ -178,6 +178,38 @@ batch-level assertions added to `test_loads_every_batch_member`.
    Phase 4A, not yet implemented for any Award child table).
 8. Next Tier 1 subsystem per `AWARD_DOMAIN_DECOMPOSITION.md`.
 
+## 2026-08-13 status update: API/UI built, data already loaded
+
+The 2026-07-31 "implementation complete" above covered ETL/database only
+— Award Custom Data had no API endpoint, UI section, or nav entry until
+`bb22466` (local commit, not yet pushed/deployed), which added
+`GET /api/v1/awards/{awardId}/custom-data` and an `AwardCustomDataSection`
+UI component mirroring `ProposalV1Repository.findCustomDataRows`'s
+label-resolution pattern (`archive.custom_attribute` LEFT JOIN).
+
+Verified against real Oracle staging and dev RDS (2026-08-13, via the
+Keychain-backed staging runner and an ECS Fargate one-off task —
+`CLAUDE.md`'s "Authoritative data location" section):
+
+- Oracle staging `AWARD_CUSTOM_DATA`: 6,328,084 rows total; 267,386
+  `AWARD` rows / 40,926 Award numbers.
+- Dev RDS `archive.award_custom_data`: **6,328,064 rows already loaded**
+  — the 20-row gap from staging is exactly the 20 Oracle rows whose
+  `AWARD_ID` has no matching `AWARD` row (fails the archive's FK
+  constraint, correctly excluded, not a bug).
+- Award `204713-00117` (the family this design/investigation used as its
+  running example): all 7 versions, all 260 `award_custom_data` rows,
+  already present in dev RDS.
+- An ECS `--load-award-id 3160098 --dry-run` proved, for real, that all
+  48 Award child tables (not just custom_data) are already synchronized
+  between Oracle staging and dev RDS for this family — every table
+  reported `inserted=0 updated=0`, and pre/post RDS row counts were
+  byte-for-byte identical (rollback proof).
+
+**No Award Custom Data load is required.** Dev RDS already has the data;
+what's missing is deploying `bb22466`'s API/UI code so the existing data
+becomes visible.
+
 ## Date last updated
 
-2026-07-31 (implementation complete).
+2026-08-13.
