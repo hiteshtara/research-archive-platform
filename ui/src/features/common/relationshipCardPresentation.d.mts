@@ -19,6 +19,16 @@ export function resolveNegotiationAssociationDisplayKind(
   association: NegotiationAssociatedRecord | null | undefined,
 ): "none" | "unsupported" | "card";
 
+export function resolveFundingProposalCardTitle(link: {
+  proposalNumber: string | null;
+  exactLinkedProposalId: number | null;
+}): string;
+
+export function resolveFundingProposalCardSubtitle(link: {
+  proposalNumber: string | null;
+  proposalTitle: string | null;
+}): string;
+
 export function buildFundingProposalMetaText(link: {
   principalInvestigatorName: string | null;
   sponsorName: string | null;

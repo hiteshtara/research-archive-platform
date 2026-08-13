@@ -415,7 +415,9 @@ export interface AwardHierarchy {
 // AWARD_FUNDING_PROPOSALS.ACTIVE - inactive relationships are still
 // returned, never dropped.
 export interface AwardFundingProposalV1 {
-  proposalNumber: string;
+  awardFundingProposalId: number;
+  awardId: number;
+  proposalNumber: string | null;
   proposalTitle: string | null;
   proposalStatus: string | null;
   workflowDocumentNumber: string | null;

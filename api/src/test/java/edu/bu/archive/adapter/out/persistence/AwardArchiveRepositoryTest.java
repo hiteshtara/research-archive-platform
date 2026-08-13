@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResultResponse;
@@ -750,6 +751,55 @@ class AwardArchiveRepositoryTest {
                         "current_subaward.subaward_id AS navigable_current_subaward_id"
                 );
         verify(statement).param("awardNumber", "202505-00002");
+    }
+
+    /**
+     * Regression for a proven live defect (docs/architecture/
+     * AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md): Award
+     * 202034-00001's only archive.award_funding_proposal row
+     * (award_funding_proposal_id 663222, award_id 663209, proposal_id
+     * 9199) was silently dropped by the UI-facing endpoint because
+     * linked_proposal used to be an INNER JOIN and Institutional
+     * Proposal 6327 has never been loaded into archive.proposal_version
+     * (the Proposal domain is loaded incrementally, not all at once
+     * like Award). The relationship row itself is the authoritative
+     * source of whether a Funding Proposal exists - it must never
+     * disappear just because Proposal detail hasn't been archived yet.
+     */
+    @Test
+    void findFundingProposalRowsUsesALeftJoinToProposalVersionSoAnUnresolvedRelationshipIsNeverDropped() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardFundingProposalResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardFundingProposalResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        List<AwardFundingProposalResponse> result =
+                new AwardArchiveRepository(jdbc)
+                        .findFundingProposalRows("202034-00001");
+
+        assertThat(result).isEmpty();
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_funding_proposal proposal")
+                .contains(
+                        "LEFT JOIN archive.proposal_version linked_proposal"
+                )
+                .contains(
+                        "linked_proposal.proposal_id = proposal.proposal_id"
+                )
+                .contains("LEFT JOIN archive.proposal_version active_proposal")
+                .contains("award.award_number = :awardNumber")
+                .contains("proposal.award_funding_proposal_id")
+                .contains("proposal.award_id")
+                .contains("proposal.proposal_id AS exact_linked_proposal_id");
+        verify(statement).param("awardNumber", "202034-00001");
     }
 
     @Test

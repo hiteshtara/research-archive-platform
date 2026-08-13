@@ -252,6 +252,7 @@ class AwardV1ControllerTest {
     @Test
     void fundingProposalsIsRoutedUnderTheV1Prefix() throws Exception {
         AwardFundingProposalResponse link = new AwardFundingProposalResponse(
+                148183L, 148155L,
                 "205", "Title", "Funded", "125761", "PI", "Sponsor",
                 BigDecimal.TEN, 1, 2, true, 212L, 2986L
         );
@@ -265,6 +266,45 @@ class AwardV1ControllerTest {
                 );
 
         verify(service).findFundingProposals(148155L);
+    }
+
+    /**
+     * Regression for a proven live defect (docs/architecture/
+     * AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md), real fixture:
+     * Award 202034-00001 (award_id 1930812, current version),
+     * award_funding_proposal_id 663222, award_id 663209 (its oldest
+     * historical version, where the relationship is actually attached),
+     * proposal_id 9199 (source Institutional Proposal 6327 version 2,
+     * never archived). The endpoint must return the relationship - not
+     * an empty array - with the relationship-table fields populated and
+     * every Proposal-enrichment field null.
+     */
+    @Test
+    void fundingProposalsReturnsAnUnresolvedRelationshipRatherThanAnEmptyArray() throws Exception {
+        AwardFundingProposalResponse unresolved = new AwardFundingProposalResponse(
+                663222L, 663209L,
+                null, null, null, null, null, null,
+                null, null, null, true, 9199L, null
+        );
+        when(service.findFundingProposals(1930812L))
+                .thenReturn(List.of(unresolved));
+
+        mockMvc.perform(get("/api/v1/awards/1930812/funding-proposals"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(
+                        jsonPath("$[0].awardFundingProposalId").value(663222)
+                )
+                .andExpect(jsonPath("$[0].awardId").value(663209))
+                .andExpect(jsonPath("$[0].exactLinkedProposalId").value(9199))
+                .andExpect(jsonPath("$[0].relationshipActive").value(true))
+                .andExpect(jsonPath("$[0].proposalNumber").doesNotExist())
+                .andExpect(jsonPath("$[0].proposalTitle").doesNotExist())
+                .andExpect(
+                        jsonPath("$[0].navigableActiveProposalId").doesNotExist()
+                );
+
+        verify(service).findFundingProposals(1930812L);
     }
 
     @Test

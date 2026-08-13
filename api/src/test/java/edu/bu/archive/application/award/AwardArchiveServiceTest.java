@@ -88,6 +88,7 @@ class AwardArchiveServiceTest {
         when(repository.findAwardNumberForId(148155L))
                 .thenReturn(Optional.of("200268-00001"));
         AwardFundingProposalResponse link = new AwardFundingProposalResponse(
+                148183L, 148155L,
                 "205", "Title", "Funded", "125761", "PI", "Sponsor",
                 BigDecimal.TEN, 1, 2, true, 212L, 2986L
         );
@@ -108,14 +109,17 @@ class AwardArchiveServiceTest {
         when(repository.findAwardNumberForId(1L))
                 .thenReturn(Optional.of("100072-00001"));
         AwardFundingProposalResponse first = new AwardFundingProposalResponse(
+                1001L, 1L,
                 "01100001", "First", "Funded", "111", "PI1", "Sponsor",
                 BigDecimal.TEN, 1, 1, true, 10L, 10L
         );
         AwardFundingProposalResponse second = new AwardFundingProposalResponse(
+                1002L, 1L,
                 "01100002", "Second", "Funded", "112", "PI2", "Sponsor",
                 BigDecimal.TEN, 1, 1, true, 20L, 20L
         );
         AwardFundingProposalResponse third = new AwardFundingProposalResponse(
+                1003L, 1L,
                 "01100003", "Third", "Funded", "113", "PI3", "Sponsor",
                 BigDecimal.TEN, 1, 1, true, 30L, 30L
         );
@@ -133,6 +137,7 @@ class AwardArchiveServiceTest {
         when(repository.findAwardNumberForId(148155L))
                 .thenReturn(Optional.of("200268-00001"));
         AwardFundingProposalResponse inactive = new AwardFundingProposalResponse(
+                148183L, 148155L,
                 "205", "Title", "Funded", "125761", "PI", "Sponsor",
                 BigDecimal.TEN, 1, 2, false, 212L, 2986L
         );
@@ -144,6 +149,45 @@ class AwardArchiveServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).relationshipActive()).isFalse();
+    }
+
+    /**
+     * Regression for a proven live defect (docs/architecture/
+     * AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md), real fixture:
+     * Award 202034-00001, award_funding_proposal_id 663222, award_id
+     * 663209 (its oldest historical version), proposal_id 9199 (source
+     * Institutional Proposal 6327, version 2 - never archived into
+     * archive.proposal_version). The relationship must still reach the
+     * caller with every archive.award_funding_proposal-sourced field
+     * populated and every Proposal-enrichment field null - never
+     * fabricated, never dropped.
+     */
+    @Test
+    void findFundingProposalsPreservesAnUnresolvedRelationshipWithNullEnrichmentFieldsRatherThanDroppingIt() {
+        when(repository.findAwardNumberForId(1930812L))
+                .thenReturn(Optional.of("202034-00001"));
+        AwardFundingProposalResponse unresolved = new AwardFundingProposalResponse(
+                663222L, 663209L,
+                null, null, null, null, null, null,
+                null, null, null, true, 9199L, null
+        );
+        when(repository.findFundingProposalRows("202034-00001"))
+                .thenReturn(List.of(unresolved));
+
+        List<AwardFundingProposalResponse> result =
+                service.findFundingProposals(1930812L);
+
+        assertThat(result).hasSize(1);
+        AwardFundingProposalResponse link = result.get(0);
+        assertThat(link.awardFundingProposalId()).isEqualTo(663222L);
+        assertThat(link.awardId()).isEqualTo(663209L);
+        assertThat(link.exactLinkedProposalId()).isEqualTo(9199L);
+        assertThat(link.relationshipActive()).isTrue();
+        assertThat(link.proposalNumber()).isNull();
+        assertThat(link.proposalTitle()).isNull();
+        assertThat(link.principalInvestigatorName()).isNull();
+        assertThat(link.sponsorName()).isNull();
+        assertThat(link.navigableActiveProposalId()).isNull();
     }
 
     @Test

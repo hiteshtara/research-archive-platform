@@ -63,6 +63,38 @@ export function resolveNegotiationAssociationDisplayKind(association) {
   return "card";
 }
 
+// Award's Funding Proposals card title. The preserved
+// archive.award_funding_proposal relationship is the authoritative
+// source of whether a Funding Proposal exists - proposalNumber is only
+// ever null when the linked Proposal hasn't been archived into
+// archive.proposal_version yet (a LEFT JOIN in
+// AwardArchiveRepository.findFundingProposalRows, not a dropped row -
+// see docs/architecture/AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md).
+// In that case, fall back to the one identifier that IS always
+// preserved on the relationship row itself - exactLinkedProposalId -
+// never invent or derive a proposal number that was never actually
+// stored.
+export function resolveFundingProposalCardTitle(link) {
+  if (link.proposalNumber) {
+    return `Institutional Proposal ${link.proposalNumber}`;
+  }
+  return `Institutional Proposal (Proposal ID ${link.exactLinkedProposalId})`;
+}
+
+// Companion to resolveFundingProposalCardTitle: the subtitle used to
+// show proposalTitle (falling back to "Untitled proposal" only for a
+// resolved Proposal that genuinely has no title). An unresolved
+// relationship instead gets an explicit, honest fallback - never
+// "Untitled proposal", which would incorrectly imply the Proposal
+// itself has no title rather than that its detail simply hasn't been
+// archived yet.
+export function resolveFundingProposalCardSubtitle(link) {
+  if (!link.proposalNumber) {
+    return "Proposal details not yet archived";
+  }
+  return link.proposalTitle ?? "Untitled proposal";
+}
+
 // Award's Funding Proposals card caption: PI, sponsor, requested cost -
 // only the pieces that actually exist, in this exact order, joined the
 // same way the original inline JSX always has.

@@ -5,6 +5,8 @@ import { getAwardFundingProposalsV1 } from "../../api/client";
 import {
   buildFundingProposalMetaText,
   RELATIONSHIP_ACTION_LABEL,
+  resolveFundingProposalCardSubtitle,
+  resolveFundingProposalCardTitle,
   resolveRelationshipCardState,
 } from "../../features/common/relationshipCardPresentation.mjs";
 import { EmptyState } from "../common/EmptyState";
@@ -17,10 +19,19 @@ import { StatusPill } from "../common/StatusPill";
 // Proposal's own Funded Awards section. One card per real
 // archive.award_funding_proposal relationship row (family-wide - every
 // award_id in this Award's whole award_number family), including
-// inactive relationships (shown, labeled Inactive, never hidden). Fed
-// from GET /api/v1/awards/{awardId}/funding-proposals, which already
-// resolves the linked Proposal's ACTIVE version server-side
-// (navigableActiveProposalId) - "Open Proposal" navigates directly.
+// inactive relationships (shown, labeled Inactive, never hidden) AND
+// relationships whose linked Proposal hasn't been archived yet (shown
+// with a "Proposal details not yet archived" fallback title/subtitle,
+// never dropped - the preserved archive.award_funding_proposal row is
+// the authoritative source of whether a relationship exists, not
+// whether archive.proposal_version happens to have caught up yet - see
+// docs/architecture/AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md).
+// Fed from GET /api/v1/awards/{awardId}/funding-proposals, which
+// already resolves the linked Proposal's ACTIVE version server-side
+// (navigableActiveProposalId) - "Open Proposal" navigates directly, and
+// resolveRelationshipCardState already correctly disables that button
+// (no href) when no navigable version exists yet, so an unresolved
+// relationship never produces a broken link.
 export function AwardFundingProposalsSection({
   awardId,
 }: {
@@ -52,16 +63,16 @@ export function AwardFundingProposalsSection({
 
   return (
     <Stack spacing={1.5}>
-      {fundingProposals.map((link, index) => {
+      {fundingProposals.map((link) => {
         const { archived } = resolveRelationshipCardState(
           link.navigableActiveProposalId,
         );
 
         return (
           <RelationshipCard
-            key={`${link.proposalNumber}-${index}`}
-            title={`Institutional Proposal ${link.proposalNumber}`}
-            subtitle={link.proposalTitle ?? "Untitled proposal"}
+            key={link.awardFundingProposalId}
+            title={resolveFundingProposalCardTitle(link)}
+            subtitle={resolveFundingProposalCardSubtitle(link)}
             archived={archived}
             inactive={!link.relationshipActive}
             statusLabel={

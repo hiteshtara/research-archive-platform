@@ -14,8 +14,20 @@ import java.math.BigDecimal;
  * is what a client navigates to. relationshipActive mirrors
  * AWARD_FUNDING_PROPOSALS.ACTIVE - inactive relationships are still
  * returned, never silently dropped.
+ *
+ * awardFundingProposalId/awardId/exactLinkedProposalId come straight
+ * from archive.award_funding_proposal itself and are therefore always
+ * present, even when the linked Proposal has not been archived into
+ * archive.proposal_version yet (see AwardArchiveRepository.findFundingProposalRows -
+ * a LEFT JOIN, not an INNER JOIN, to proposal_version). Every other
+ * field is Proposal-enrichment and may legitimately be null in that
+ * case - the preserved relationship row is the authoritative source of
+ * whether a Funding Proposal exists, not whether its detail has been
+ * loaded.
  */
 public record AwardFundingProposalResponse(
+        Long awardFundingProposalId,
+        Long awardId,
         String proposalNumber,
         String proposalTitle,
         String proposalStatus,

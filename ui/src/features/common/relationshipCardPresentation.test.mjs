@@ -5,11 +5,52 @@ import {
   RELATIONSHIP_ACTION_LABEL,
   buildFundedAwardMetaText,
   buildFundingProposalMetaText,
+  resolveFundingProposalCardSubtitle,
+  resolveFundingProposalCardTitle,
   resolveNegotiationAssociationArchived,
   resolveNegotiationAssociationDisplayKind,
   resolveNegotiationCardTitle,
   resolveRelationshipCardState,
 } from "./relationshipCardPresentation.mjs";
+
+// Real fixture (docs/architecture/AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md):
+// Award 202034-00001's only funding-proposal relationship,
+// award_funding_proposal_id 663222, proposal_id 9199 (Institutional
+// Proposal 6327 version 2), never archived into archive.proposal_version
+// - every Proposal-enrichment field is genuinely null, not omitted.
+const UNRESOLVED_LINK = {
+  awardFundingProposalId: 663222,
+  awardId: 663209,
+  proposalNumber: null,
+  proposalTitle: null,
+  proposalStatus: null,
+  workflowDocumentNumber: null,
+  principalInvestigatorName: null,
+  sponsorName: null,
+  requestedTotalCost: null,
+  linkedProposalVersion: null,
+  activeProposalVersion: null,
+  relationshipActive: true,
+  exactLinkedProposalId: 9199,
+  navigableActiveProposalId: null,
+};
+
+const RESOLVED_LINK = {
+  awardFundingProposalId: 148183,
+  awardId: 148155,
+  proposalNumber: "205",
+  proposalTitle: "Quality of Care in the Treatment of Burn Injuries",
+  proposalStatus: "Funded",
+  workflowDocumentNumber: "125761",
+  principalInvestigatorName: "Lois K Horwitz",
+  sponsorName: "Boston University",
+  requestedTotalCost: 13254,
+  linkedProposalVersion: 2,
+  activeProposalVersion: 2,
+  relationshipActive: true,
+  exactLinkedProposalId: 2986,
+  navigableActiveProposalId: 2986,
+};
 
 // --- resolveRelationshipCardState (loaded / not-currently-archived) -----
 
@@ -130,6 +171,64 @@ test("RELATIONSHIP_ACTION_LABEL provides one label per domain, matching each mod
   assert.equal(RELATIONSHIP_ACTION_LABEL.proposal, "Open Proposal");
   assert.equal(RELATIONSHIP_ACTION_LABEL.subaward, "Open Subaward");
   assert.equal(RELATIONSHIP_ACTION_LABEL.negotiation, "Open Negotiation");
+});
+
+// --- resolveFundingProposalCardTitle/Subtitle (unresolved-relationship ---
+// --- fallback - see docs/architecture/AWARD_FUNDING_PROPOSAL_UI_GAP_ ----
+// --- INVESTIGATION.md, Award 202034-00001) --------------------------------
+
+test("resolveFundingProposalCardTitle shows the real Proposal number when resolved", () => {
+  assert.equal(
+    resolveFundingProposalCardTitle(RESOLVED_LINK),
+    "Institutional Proposal 205",
+  );
+});
+
+test("resolveFundingProposalCardTitle falls back to the preserved Proposal ID when the Proposal is unresolved - never fabricates a Proposal number", () => {
+  assert.equal(
+    resolveFundingProposalCardTitle(UNRESOLVED_LINK),
+    "Institutional Proposal (Proposal ID 9199)",
+  );
+});
+
+test("resolveFundingProposalCardSubtitle shows the real Proposal title when resolved", () => {
+  assert.equal(
+    resolveFundingProposalCardSubtitle(RESOLVED_LINK),
+    "Quality of Care in the Treatment of Burn Injuries",
+  );
+});
+
+test("resolveFundingProposalCardSubtitle falls back to 'Untitled proposal' only for a resolved Proposal with a genuinely missing title", () => {
+  assert.equal(
+    resolveFundingProposalCardSubtitle({
+      ...RESOLVED_LINK,
+      proposalTitle: null,
+    }),
+    "Untitled proposal",
+  );
+});
+
+test("resolveFundingProposalCardSubtitle shows the unresolved fallback message, not 'Untitled proposal', when the Proposal hasn't been archived yet", () => {
+  assert.equal(
+    resolveFundingProposalCardSubtitle(UNRESOLVED_LINK),
+    "Proposal details not yet archived",
+  );
+});
+
+test("an unresolved relationship never produces a navigable Proposal link - resolveRelationshipCardState is false with no navigableActiveProposalId", () => {
+  assert.equal(
+    resolveRelationshipCardState(UNRESOLVED_LINK.navigableActiveProposalId)
+      .archived,
+    false,
+  );
+});
+
+test("a resolved relationship still produces a navigable Proposal link", () => {
+  assert.equal(
+    resolveRelationshipCardState(RESOLVED_LINK.navigableActiveProposalId)
+      .archived,
+    true,
+  );
 });
 
 // --- buildFundingProposalMetaText (Award -> Funding Proposals caption) --

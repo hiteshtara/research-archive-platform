@@ -429,14 +429,33 @@ public class AwardArchiveRepository {
      * linkedProposalVersion); display fields and the navigation target
      * instead resolve through linked_proposal.proposal_number to that
      * family's ACTIVE version (PROPOSAL_SEQUENCE_STATUS = 'ACTIVE' -
-     * never the highest sequence number) - a LEFT JOIN since a
-     * malformed family could in principle have no row marked ACTIVE.
+     * never the highest sequence number).
+     *
+     * linked_proposal is a LEFT JOIN, not an INNER JOIN - proven
+     * necessary live (see docs/architecture/AWARD_FUNDING_PROPOSAL_UI_GAP_INVESTIGATION.md,
+     * Award 202034-00001/award_funding_proposal_id 663222/proposal_id
+     * 9199): the Proposal domain is loaded incrementally
+     * (etl/load_proposals_from_csv.py's --create-batch/--load-batch), so
+     * a real, preserved relationship row routinely points at a
+     * proposal_id not yet archived into archive.proposal_version. An
+     * INNER JOIN there silently drops the relationship itself, which is
+     * wrong: archive.award_funding_proposal is the authoritative source
+     * for whether the relationship exists, not archive.proposal_version.
+     * proposal.award_funding_proposal_id/award_id are selected directly
+     * off the relationship row (never null) precisely so a caller can
+     * always identify an unresolved relationship rather than lose it;
+     * active_proposal is unaffected by this change and remains a LEFT
+     * JOIN for the same reason it already was (a malformed family could
+     * in principle have no row marked ACTIVE even when linked_proposal
+     * itself resolves).
      */
     public List<AwardFundingProposalResponse> findFundingProposalRows(
             String awardNumber
     ) {
         return jdbc.sql("""
                 SELECT
+                    proposal.award_funding_proposal_id,
+                    proposal.award_id,
                     linked_proposal.proposal_number,
                     active_proposal.title AS proposal_title,
                     active_proposal.status_description AS proposal_status,
@@ -455,7 +474,7 @@ public class AwardArchiveRepository {
                 FROM archive.award_funding_proposal proposal
                 INNER JOIN archive.award_version award
                     ON award.award_id = proposal.award_id
-                JOIN archive.proposal_version linked_proposal
+                LEFT JOIN archive.proposal_version linked_proposal
                     ON linked_proposal.proposal_id = proposal.proposal_id
                 LEFT JOIN archive.proposal_version active_proposal
                     ON active_proposal.proposal_number
