@@ -53,6 +53,14 @@ PERSON_SQL = REFERENCE_SQL_DIR / "05_person.sql"
 COMMENT_TYPE_SQL = REFERENCE_SQL_DIR / "06_comment_type.sql"
 CUSTOM_ATTRIBUTE_SQL = REFERENCE_SQL_DIR / "07_custom_attribute.sql"
 CUSTOM_ATTRIBUTE_DOCUMENT_SQL = REFERENCE_SQL_DIR / "08_custom_attribute_document.sql"
+SPONSOR_TERM_TYPE_SQL = REFERENCE_SQL_DIR / "09_sponsor_term_type.sql"
+SPONSOR_TERM_SQL = REFERENCE_SQL_DIR / "10_sponsor_term.sql"
+REPORT_SQL = REFERENCE_SQL_DIR / "11_report.sql"
+REPORT_CLASS_SQL = REFERENCE_SQL_DIR / "12_report_class.sql"
+FREQUENCY_SQL = REFERENCE_SQL_DIR / "13_frequency.sql"
+FREQUENCY_BASE_SQL = REFERENCE_SQL_DIR / "14_frequency_base.sql"
+DISTRIBUTION_SQL = REFERENCE_SQL_DIR / "15_distribution.sql"
+CONTACT_TYPE_SQL = REFERENCE_SQL_DIR / "16_contact_type.sql"
 
 
 def _sql_value(value: Any) -> Any:
@@ -221,6 +229,85 @@ _CUSTOM_ATTRIBUTE_DOCUMENT_COLUMNS = [
     "sort_id",
     "source_update_timestamp",
     "source_update_user",
+]
+
+_SPONSOR_TERM_TYPE_COLUMNS = [
+    "sponsor_term_type_code",
+    "description",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_SPONSOR_TERM_COLUMNS = [
+    "sponsor_term_id",
+    "sponsor_term_code",
+    "sponsor_term_type_code",
+    "description",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_REPORT_COLUMNS = [
+    "report_code",
+    "description",
+    "final_report_flag",
+    "active_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_REPORT_CLASS_COLUMNS = [
+    "report_class_code",
+    "description",
+    "generate_report_requirements",
+    "active_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_FREQUENCY_COLUMNS = [
+    "frequency_code",
+    "description",
+    "number_of_days",
+    "number_of_months",
+    "repeat_flag",
+    "advance_number_of_days",
+    "advance_number_of_months",
+    "active_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_FREQUENCY_BASE_COLUMNS = [
+    "frequency_base_code",
+    "description",
+    "regeneration_type_name",
+    "active_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_DISTRIBUTION_COLUMNS = [
+    "osp_distribution_code",
+    "description",
+    "active_flag",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_CONTACT_TYPE_COLUMNS = [
+    "contact_type_code",
+    "description",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
 ]
 
 
@@ -440,6 +527,250 @@ def load_custom_attribute_documents(
         rows=frame,
         load_id=load_id,
     )
+
+
+def load_sponsor_term_types(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(SPONSOR_TERM_TYPE_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="sponsor_term_type",
+        pk_columns=["sponsor_term_type_code"],
+        columns=_SPONSOR_TERM_TYPE_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_sponsor_terms(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(SPONSOR_TERM_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="sponsor_term",
+        pk_columns=["sponsor_term_id"],
+        columns=_SPONSOR_TERM_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_reports(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(REPORT_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="report",
+        pk_columns=["report_code"],
+        columns=_REPORT_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_report_classes(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(REPORT_CLASS_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="report_class",
+        pk_columns=["report_class_code"],
+        columns=_REPORT_CLASS_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_frequencies(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(FREQUENCY_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="frequency",
+        pk_columns=["frequency_code"],
+        columns=_FREQUENCY_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_frequency_bases(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(FREQUENCY_BASE_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="frequency_base",
+        pk_columns=["frequency_base_code"],
+        columns=_FREQUENCY_BASE_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_distributions(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(DISTRIBUTION_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="distribution",
+        pk_columns=["osp_distribution_code"],
+        columns=_DISTRIBUTION_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def load_contact_types(connection: Connection, load_id: int) -> dict[str, int]:
+    frame = OracleDataSource(CONTACT_TYPE_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    return _upsert_rows(
+        connection,
+        table="contact_type",
+        pk_columns=["contact_type_code"],
+        columns=_CONTACT_TYPE_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def run_load_terms_reference_data(
+    engine: Engine, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """Loads the eight small, static lookups resolving the raw codes
+    already stored in archive.award_sponsor_term/award_report_term/
+    award_report_term_recipient into readable labels
+    (sponsor_term_type, sponsor_term, report, report_class, frequency,
+    frequency_base, distribution, contact_type) - independent of every
+    other reference-data bundle (no FK relationship to Unit/Person,
+    Comment Type, or Custom Attribute), so it gets its own top-level
+    entry point and CLI flag rather than being folded into one of
+    those. sponsor_term is loaded after sponsor_term_type (its own
+    lookup) for read-order clarity only - archive.sponsor_term has no
+    physical FK to archive.sponsor_term_type (see V074's migration
+    comment), so there is no load-ordering *requirement* between them,
+    unlike the Unit bundle's real FK chain."""
+    started = time.perf_counter()
+    report: dict[str, Any] = {}
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = connection.execute(
+                text(
+                    """
+                    INSERT INTO archive.load_run (
+                        domain, source_system, source_file_name,
+                        rows_read, status
+                    ) VALUES (
+                        'AWARD_TERMS_REFERENCE_DATA', 'KUALI',
+                        'Oracle KCOEUS export', 0, 'STARTED'
+                    )
+                    RETURNING load_id
+                    """
+                )
+            ).scalar_one()
+
+            report["sponsor_term_type"] = load_sponsor_term_types(
+                connection, load_id
+            )
+            report["sponsor_term"] = load_sponsor_terms(connection, load_id)
+            report["report"] = load_reports(connection, load_id)
+            report["report_class"] = load_report_classes(connection, load_id)
+            report["frequency"] = load_frequencies(connection, load_id)
+            report["frequency_base"] = load_frequency_bases(connection, load_id)
+            report["distribution"] = load_distributions(connection, load_id)
+            report["contact_type"] = load_contact_types(connection, load_id)
+
+            connection.execute(
+                text(
+                    """
+                    UPDATE archive.load_run
+                       SET status = 'LOADED', completed_at = CURRENT_TIMESTAMP
+                     WHERE load_id = :load_id
+                    """
+                ),
+                {"load_id": load_id},
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    report["elapsed_ms"] = (time.perf_counter() - started) * 1000
+    logger.bind(stage="load_terms_reference_data").info(
+        "Award Terms reference data load{}: {}",
+        " [DRY RUN - not persisted]" if dry_run else "",
+        report,
+    )
+    return report
 
 
 def run_load_custom_attribute_reference_data(

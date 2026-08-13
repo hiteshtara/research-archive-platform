@@ -480,3 +480,397 @@ class UnitReferenceDataLoadTest(unittest.TestCase):
                 )
             ).scalar_one()
         self.assertEqual(count, 0)
+
+
+def _sponsor_term_type_frame() -> pd.DataFrame:
+    # Real fixture, live-verified against BU Oracle staging 2026-08-14.
+    return pd.DataFrame(
+        [
+            {
+                "SPONSOR_TERM_TYPE_CODE": "6",
+                "DESCRIPTION": "Equipment Approval Terms",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+            {
+                "SPONSOR_TERM_TYPE_CODE": "2",
+                "DESCRIPTION": "Invention Terms",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _sponsor_term_frame() -> pd.DataFrame:
+    # Real fixture: Award 204713-00088 (award_id 2727052)'s own Sponsor
+    # Terms - live-verified against BU Oracle staging 2026-08-14.
+    # SPONSOR_TERM_ID (this table's own surrogate PK, what
+    # archive.award_sponsor_term.sponsor_term_id actually points at) is
+    # deliberately different from SPONSOR_TERM_CODE (the human-readable
+    # value Kuali's UI displays) - 370 -> 64, not 370 -> 370.
+    return pd.DataFrame(
+        [
+            {
+                "SPONSOR_TERM_ID": 370,
+                "SPONSOR_TERM_CODE": "64",
+                "SPONSOR_TERM_TYPE_CODE": "6",
+                "DESCRIPTION": (
+                    "Converted Record.  Please refer to sponsor award "
+                    "documentation for any Equipment Approval terms."
+                ),
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+            {
+                "SPONSOR_TERM_ID": 371,
+                "SPONSOR_TERM_CODE": "65",
+                "SPONSOR_TERM_TYPE_CODE": "2",
+                "DESCRIPTION": (
+                    "Converted Record.  Please refer to sponsor award "
+                    "documentation for any Invention terms."
+                ),
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _report_frame() -> pd.DataFrame:
+    # Real fixture: Award 204713-00088's own Report Terms codes -
+    # live-verified against BU Oracle staging 2026-08-14.
+    return pd.DataFrame(
+        [
+            {
+                "REPORT_CODE": "43",
+                "DESCRIPTION": "Converted Record  - See Sponsor Documentation",
+                "FINAL_REPORT_FLAG": "N",
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+            {
+                "REPORT_CODE": "26",
+                "DESCRIPTION": "Standard BU Invoice",
+                "FINAL_REPORT_FLAG": "N",
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _report_class_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "REPORT_CLASS_CODE": "1",
+                "DESCRIPTION": "Financial",
+                "GENERATE_REPORT_REQUIREMENTS": "Y",
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+            {
+                "REPORT_CLASS_CODE": "6",
+                "DESCRIPTION": "Payment/Invoice",
+                "GENERATE_REPORT_REQUIREMENTS": "Y",
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _frequency_frame() -> pd.DataFrame:
+    # FREQUENCY_CODE 5 ("As required") genuinely has null advance-notice
+    # columns on real Oracle - not a load gap, see 13_frequency.sql.
+    return pd.DataFrame(
+        [
+            {
+                "FREQUENCY_CODE": "5",
+                "DESCRIPTION": "As required",
+                "NUMBER_OF_DAYS": None,
+                "NUMBER_OF_MONTHS": None,
+                "REPEAT_FLAG": "N",
+                "ADVANCE_NUMBER_OF_DAYS": None,
+                "ADVANCE_NUMBER_OF_MONTHS": None,
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _frequency_base_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "FREQUENCY_BASE_CODE": "6",
+                "DESCRIPTION": "As Required",
+                "REGENERATION_TYPE_NAME": None,
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _distribution_frame() -> pd.DataFrame:
+    # Genuinely binary Yes/No lookup - live-verified only 2 rows exist.
+    return pd.DataFrame(
+        [
+            {
+                "OSP_DISTRIBUTION_CODE": "1",
+                "DESCRIPTION": "Yes",
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+            {
+                "OSP_DISTRIBUTION_CODE": "2",
+                "DESCRIPTION": "No",
+                "ACTIVE_FLAG": "Y",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2011-06-23"),
+                "UPDATE_USER": "KCRM",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+def _contact_type_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "CONTACT_TYPE_CODE": "34",
+                "DESCRIPTION": "Administrative Contact",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2014-11-01"),
+                "UPDATE_USER": "admin",
+                "VER_NBR": 1,
+            },
+            {
+                "CONTACT_TYPE_CODE": "35",
+                "DESCRIPTION": "Financial Contact",
+                "UPDATE_TIMESTAMP": pd.Timestamp("2014-11-01"),
+                "UPDATE_USER": "admin",
+                "VER_NBR": 1,
+            },
+        ]
+    )
+
+
+@unittest.skipUnless(_postgres_available(), "local PostgreSQL is not reachable")
+class TermsReferenceDataLoadTest(unittest.TestCase):
+    """Regression tests for the eight lookups resolving Award Sponsor
+    Terms/Report Terms/Report Term Recipients raw codes into readable
+    labels - see docs/architecture/AWARD_TERMS_DESIGN.md and the
+    Award 204713-00088 (award_id 2727052) verification fixture used
+    throughout."""
+
+    db_prefix = "pytest_terms_reference_data"
+
+    def setUp(self) -> None:
+        self.db_name = f"{self.db_prefix}_{uuid.uuid4().hex[:12]}"
+
+        maintenance = _maintenance_engine()
+        with maintenance.connect() as connection:
+            connection.execution_options(isolation_level="AUTOCOMMIT")
+            connection.execute(text(f'CREATE DATABASE "{self.db_name}"'))
+        maintenance.dispose()
+
+        self.engine = create_engine(
+            f"postgresql+psycopg://{POSTGRES_USER}@{POSTGRES_HOST}:"
+            f"{POSTGRES_PORT}/{self.db_name}"
+        )
+        apply_migrations(self.engine, MIGRATIONS_DIR)
+
+    def tearDown(self) -> None:
+        self.engine.dispose()
+
+        maintenance = _maintenance_engine()
+        with maintenance.connect() as connection:
+            connection.execution_options(isolation_level="AUTOCOMMIT")
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{self.db_name}"'))
+        maintenance.dispose()
+
+    def _row(self, table: str, **where: object) -> dict:
+        clause = " AND ".join(f"{key} = :{key}" for key in where)
+        with self.engine.connect() as connection:
+            return dict(
+                connection.execute(
+                    text(f"SELECT * FROM archive.{table} WHERE {clause}"),
+                    where,
+                )
+                .mappings()
+                .one()
+            )
+
+    def _patched_oracle(self):
+        return patch.multiple(
+            reference_data.OracleDataSource,
+            __init__=lambda self, sql_path, **kwargs: setattr(
+                self, "sql_path", sql_path
+            ),
+            read=lambda self: {
+                reference_data.SPONSOR_TERM_TYPE_SQL: _sponsor_term_type_frame(),
+                reference_data.SPONSOR_TERM_SQL: _sponsor_term_frame(),
+                reference_data.REPORT_SQL: _report_frame(),
+                reference_data.REPORT_CLASS_SQL: _report_class_frame(),
+                reference_data.FREQUENCY_SQL: _frequency_frame(),
+                reference_data.FREQUENCY_BASE_SQL: _frequency_base_frame(),
+                reference_data.DISTRIBUTION_SQL: _distribution_frame(),
+                reference_data.CONTACT_TYPE_SQL: _contact_type_frame(),
+            }[self.sql_path].copy(),
+        )
+
+    def test_loads_real_fixture_terms_reference_data(self) -> None:
+        with self._patched_oracle():
+            report = reference_data.run_load_terms_reference_data(self.engine)
+
+        self.assertEqual(
+            report["sponsor_term_type"],
+            {"inserted": 2, "updated": 0, "unchanged": 0},
+        )
+        self.assertEqual(
+            report["sponsor_term"], {"inserted": 2, "updated": 0, "unchanged": 0}
+        )
+        self.assertEqual(
+            report["report"], {"inserted": 2, "updated": 0, "unchanged": 0}
+        )
+        self.assertEqual(
+            report["report_class"], {"inserted": 2, "updated": 0, "unchanged": 0}
+        )
+        self.assertEqual(
+            report["frequency"], {"inserted": 1, "updated": 0, "unchanged": 0}
+        )
+        self.assertEqual(
+            report["frequency_base"],
+            {"inserted": 1, "updated": 0, "unchanged": 0},
+        )
+        self.assertEqual(
+            report["distribution"], {"inserted": 2, "updated": 0, "unchanged": 0}
+        )
+        self.assertEqual(
+            report["contact_type"], {"inserted": 2, "updated": 0, "unchanged": 0}
+        )
+
+        # SPONSOR_TERM_ID 370 -> SPONSOR_TERM_CODE 64, never conflated.
+        equipment_term = self._row("sponsor_term", sponsor_term_id=370)
+        self.assertEqual(equipment_term["sponsor_term_code"], "64")
+        self.assertEqual(equipment_term["sponsor_term_type_code"], "6")
+        self.assertIn(
+            "Equipment Approval terms", equipment_term["description"]
+        )
+
+        equipment_category = self._row(
+            "sponsor_term_type", sponsor_term_type_code="6"
+        )
+        self.assertEqual(
+            equipment_category["description"], "Equipment Approval Terms"
+        )
+
+        report_43 = self._row("report", report_code="43")
+        self.assertEqual(
+            report_43["description"],
+            "Converted Record  - See Sponsor Documentation",
+        )
+
+        report_class_1 = self._row("report_class", report_class_code="1")
+        self.assertEqual(report_class_1["description"], "Financial")
+
+        frequency_5 = self._row("frequency", frequency_code="5")
+        self.assertEqual(frequency_5["description"], "As required")
+        self.assertIsNone(frequency_5["advance_number_of_days"])
+        self.assertIsNone(frequency_5["advance_number_of_months"])
+
+        distribution_2 = self._row("distribution", osp_distribution_code="2")
+        self.assertEqual(distribution_2["description"], "No")
+
+    def test_reload_with_no_oracle_changes_is_unchanged(self) -> None:
+        with self._patched_oracle():
+            reference_data.run_load_terms_reference_data(self.engine)
+            report = reference_data.run_load_terms_reference_data(self.engine)
+
+        for table in (
+            "sponsor_term_type",
+            "sponsor_term",
+            "report",
+            "report_class",
+            "distribution",
+            "contact_type",
+        ):
+            self.assertEqual(report[table]["inserted"], 0)
+            self.assertEqual(report[table]["updated"], 0)
+        self.assertEqual(report["frequency"]["unchanged"], 1)
+        self.assertEqual(report["frequency_base"]["unchanged"], 1)
+
+    def test_dry_run_does_not_persist(self) -> None:
+        with self._patched_oracle():
+            reference_data.run_load_terms_reference_data(
+                self.engine, dry_run=True
+            )
+
+        with self.engine.connect() as connection:
+            count = connection.execute(
+                text("SELECT COUNT(*) FROM archive.sponsor_term")
+            ).scalar_one()
+        self.assertEqual(count, 0)
+
+    def test_unresolved_code_never_blocks_or_deletes_anything(self) -> None:
+        # A code that doesn't exist in any of the eight lookups (e.g.
+        # Oracle later adds one this archive hasn't refreshed yet) must
+        # never be treated as an error by the loader - there is no
+        # foreign key from award_sponsor_term/award_report_term to
+        # these tables (see V074's migration comment) specifically so
+        # this can never happen. This test proves the loader itself
+        # tolerates being run against a family whose codes are a
+        # strict subset of what's already archived, without erroring.
+        with self._patched_oracle():
+            reference_data.run_load_terms_reference_data(self.engine)
+            # Re-running with a narrower Oracle result (as if some
+            # codes were retired) must not raise or delete existing rows.
+            with patch.multiple(
+                reference_data.OracleDataSource,
+                __init__=lambda self, sql_path, **kwargs: setattr(
+                    self, "sql_path", sql_path
+                ),
+                read=lambda self: (
+                    _sponsor_term_type_frame().iloc[:1].copy()
+                    if self.sql_path == reference_data.SPONSOR_TERM_TYPE_SQL
+                    else {
+                        reference_data.SPONSOR_TERM_SQL: _sponsor_term_frame(),
+                        reference_data.REPORT_SQL: _report_frame(),
+                        reference_data.REPORT_CLASS_SQL: _report_class_frame(),
+                        reference_data.FREQUENCY_SQL: _frequency_frame(),
+                        reference_data.FREQUENCY_BASE_SQL: _frequency_base_frame(),
+                        reference_data.DISTRIBUTION_SQL: _distribution_frame(),
+                        reference_data.CONTACT_TYPE_SQL: _contact_type_frame(),
+                    }[self.sql_path]
+                ),
+            ):
+                reference_data.run_load_terms_reference_data(self.engine)
+
+        with self.engine.connect() as connection:
+            count = connection.execute(
+                text("SELECT COUNT(*) FROM archive.sponsor_term_type")
+            ).scalar_one()
+        # The previously-loaded row (code 2, "Invention Terms") is
+        # still present - a narrower Oracle result never deletes.
+        self.assertEqual(count, 2)

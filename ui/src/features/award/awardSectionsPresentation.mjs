@@ -78,6 +78,118 @@ export function hasAnyTerms(sponsorTerms, reportTerms) {
   return sponsorTerms.length > 0 || reportTerms.length > 0;
 }
 
+// --- Terms -------------------------------------------------------------
+//
+// sponsorTermId (SPONSOR_TERM's own surrogate PK) and sponsorTermCode
+// (the human-readable code Kuali's own UI displays) are deliberately
+// different values - see AWARD_TERMS_DESIGN.md and the live-verified
+// award_id 2727052 fixture (sponsorTermId 370 -> sponsorTermCode "64").
+// Neither archive.sponsor_term nor archive.sponsor_term_type (V074) has
+// a foreign key from award_sponsor_term, so sponsorTermCode/description
+// can both be null - fall back to the bare sponsorTermId (never the
+// internal awardSponsorTermId row identifier) so Kuali's raw code stays
+// findable even when this archive hasn't loaded its lookup row yet.
+export function resolveAwardSponsorTermLabel(term) {
+  if (term.sponsorTermCode && term.description) {
+    return `${term.sponsorTermCode}: ${term.description}`;
+  }
+  return `Sponsor Term ${term.sponsorTermId ?? term.awardSponsorTermId ?? "—"}`;
+}
+
+const UNCATEGORIZED_SPONSOR_TERM_KEY = "__uncategorized__";
+const UNCATEGORIZED_SPONSOR_TERM_LABEL = "Uncategorized";
+
+// Groups by sponsorTermTypeCode in the 10 Kuali categories' own
+// authoritative numeric order (Referenced Document Terms=1 ... Special
+// Award Restrictions Terms=10 - live-verified against BU Oracle
+// staging 2026-08-14), never alphabetic order (which would sort "10"
+// before "2"). A term whose sponsorTermTypeCode has no matching
+// archive.sponsor_term_type row (or is entirely unresolved) collapses
+// into a trailing "Uncategorized" group, mirroring
+// groupAwardCustomData's "Other" convention, rather than one throwaway
+// group per row.
+export function groupAwardSponsorTerms(terms) {
+  const groups = new Map();
+
+  for (const term of terms) {
+    const resolved = term.sponsorTermTypeCode && term.categoryDescription;
+    const key = resolved
+      ? term.sponsorTermTypeCode
+      : UNCATEGORIZED_SPONSOR_TERM_KEY;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        categoryCode: resolved ? term.sponsorTermTypeCode : null,
+        categoryDescription: resolved
+          ? term.categoryDescription
+          : UNCATEGORIZED_SPONSOR_TERM_LABEL,
+        terms: [],
+      });
+    }
+    groups.get(key).terms.push(term);
+  }
+
+  const categorized = [...groups.entries()]
+    .filter(([key]) => key !== UNCATEGORIZED_SPONSOR_TERM_KEY)
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([, group]) => group);
+
+  const uncategorized = groups.has(UNCATEGORIZED_SPONSOR_TERM_KEY)
+    ? [groups.get(UNCATEGORIZED_SPONSOR_TERM_KEY)]
+    : [];
+
+  return [...categorized, ...uncategorized];
+}
+
+// Every archive.report/report_class/frequency/frequency_base/
+// distribution LEFT JOIN (V074) can miss - code/description come back
+// as a pair with description null in that case. Falls back to the raw
+// code so it stays findable rather than showing nothing; returns null
+// only when both are missing entirely, so callers can omit the field.
+// "No" is a real, valid resolved archive.distribution description and
+// must never be treated as blank/falsy the way an empty string is -
+// this only checks for null/undefined/"", never falsiness.
+export function resolveAwardReportTermFieldLabel(code, description) {
+  if (description !== null && description !== undefined && description !== "") {
+    return description;
+  }
+  if (code !== null && code !== undefined && code !== "") {
+    return code;
+  }
+  return null;
+}
+
+export function resolveAwardReportTermHeading(term) {
+  return (
+    resolveAwardReportTermFieldLabel(term.reportCode, term.reportDescription) ??
+    `Report term ${term.awardReportTermId ?? "—"}`
+  );
+}
+
+export function resolveAwardReportTermRecipientLabel(recipient) {
+  return (
+    resolveAwardReportTermFieldLabel(
+      recipient.contactTypeCode,
+      recipient.contactTypeDescription,
+    ) ?? `Recipient ${recipient.awardReportTermRecipientId ?? "—"}`
+  );
+}
+
+// Renders null (never "0 days"/an empty string) when both are
+// null/zero - the real, live-verified Oracle value for e.g. award_id
+// 2727052's own frequencyCode "5"/"As required" is null/null, not a
+// load gap - so AwardTermsSection can omit "Advance Notice" entirely
+// rather than show an empty or zero-length notice period.
+export function formatAdvanceNotice(days, months) {
+  const parts = [];
+  if (months) {
+    parts.push(`${months} month${months === 1 ? "" : "s"}`);
+  }
+  if (days) {
+    parts.push(`${days} day${days === 1 ? "" : "s"}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
 // --- Custom Data -----------------------------------------------------
 //
 // A separate Award section from Terms, never merged - see

@@ -5,7 +5,10 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRecipientRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardReportTermRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionChildRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorTermResponse;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -193,6 +196,87 @@ class AwardArchiveRepositoryCompositeSectionsTest {
         verify(statement).param("awardId", 3L);
         verify(statement).param("limit", 25);
         verify(statement).param("offset", 0);
+    }
+
+    // --- Terms (V074 reference-data LEFT JOINs) --------------------------
+
+    @Test
+    void findSponsorTermsScopesByAwardIdAndJoinsTheSponsorTermLookups() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSponsorTermResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardSponsorTermResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findSponsorTerms(3L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_sponsor_term ast")
+                .contains("LEFT JOIN archive.sponsor_term st")
+                .contains("ON st.sponsor_term_id = ast.sponsor_term_id")
+                .contains("LEFT JOIN archive.sponsor_term_type stt")
+                .contains("ON stt.sponsor_term_type_code = st.sponsor_term_type_code")
+                .contains("WHERE ast.award_id = :awardId");
+        verify(statement).param("awardId", 3L);
+    }
+
+    @Test
+    void findReportTermRowsScopesByAwardIdAndJoinsAllFiveReportLookups() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardReportTermRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardReportTermRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findReportTermRows(3L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_report_term art")
+                .contains("LEFT JOIN archive.report r")
+                .contains("LEFT JOIN archive.report_class rc")
+                .contains("LEFT JOIN archive.frequency f")
+                .contains("LEFT JOIN archive.frequency_base fb")
+                .contains("LEFT JOIN archive.distribution d")
+                .contains("WHERE art.award_id = :awardId");
+        verify(statement).param("awardId", 3L);
+    }
+
+    @Test
+    void findReportTermRecipientRowsScopesByAwardIdAndJoinsContactType() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardReportTermRecipientRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardReportTermRecipientRow.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findReportTermRecipientRows(3L);
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_report_term_recipient artr")
+                .contains("LEFT JOIN archive.contact_type ct")
+                .contains("ON ct.contact_type_code = artr.contact_type_code")
+                .contains("WHERE artr.award_id = :awardId");
+        verify(statement).param("awardId", 3L);
     }
 
     @Test

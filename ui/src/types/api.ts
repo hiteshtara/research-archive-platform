@@ -487,27 +487,54 @@ export interface AwardAmountHistoryV1 {
 export interface AwardAmountHistoryPageResponse
   extends PageResponse<AwardAmountHistoryV1> {}
 
+// sponsorTermId (SPONSOR_TERM's own surrogate PK) and sponsorTermCode
+// (the human-readable code Kuali's UI displays) are deliberately
+// different values - see AWARD_TERMS_DESIGN.md and the live-verified
+// award_id 2727052 fixture (sponsorTermId 370 -> sponsorTermCode "64").
+// sponsorTermCode/description/sponsorTermTypeCode/categoryDescription
+// are all null together when the LEFT JOIN finds no matching lookup
+// row (no foreign key exists) - never dropped, fall back to the raw
+// sponsorTermId in that case.
 export interface AwardSponsorTermV1 {
   awardSponsorTermId: number | null;
   sponsorTermId: number | null;
+  sponsorTermCode: string | null;
+  description: string | null;
+  sponsorTermTypeCode: string | null;
+  categoryDescription: string | null;
 }
 
 export interface AwardReportTermRecipientV1 {
   awardReportTermRecipientId: number | null;
   contactId: number | null;
   contactTypeCode: string | null;
+  contactTypeDescription: string | null;
   rolodexId: number | null;
   numberOfCopies: number | null;
 }
 
+// Every *Description field is null (not dropped) when its raw code has
+// no matching lookup row - see AwardArchiveRepository.findReportTermRows.
+// advanceNumberOfDays/advanceNumberOfMonths are frequently both null
+// (e.g. real fixture award_id 2727052's own frequencyCode "5" - a
+// genuine Oracle value, not a load gap). recipientCount always equals
+// recipients.length.
 export interface AwardReportTermV1 {
   awardReportTermId: number | null;
-  reportClassCode: string | null;
   reportCode: string | null;
+  reportDescription: string | null;
+  reportClassCode: string | null;
+  reportClassDescription: string | null;
   frequencyCode: string | null;
+  frequencyDescription: string | null;
   frequencyBaseCode: string | null;
+  frequencyBaseDescription: string | null;
   ospDistributionCode: string | null;
+  distributionDescription: string | null;
+  advanceNumberOfDays: number | null;
+  advanceNumberOfMonths: number | null;
   dueDate: string | null;
+  recipientCount: number;
   recipients: AwardReportTermRecipientV1[];
 }
 

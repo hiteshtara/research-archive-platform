@@ -28,6 +28,7 @@ from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.reference_data import (
     run_load_comment_type_reference_data,
     run_load_custom_attribute_reference_data,
+    run_load_terms_reference_data,
     run_load_unit_reference_data,
 )
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
@@ -10596,6 +10597,22 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--load-terms-reference-data",
+        action="store_true",
+        help=(
+            "Loads sponsor_term_type, sponsor_term, report, "
+            "report_class, frequency, frequency_base, distribution, "
+            "contact_type - the eight lookups resolving the raw codes "
+            "already stored in archive.award_sponsor_term/"
+            "award_report_term/award_report_term_recipient into "
+            "readable labels. Small, bounded full reference-data loads "
+            "(10/293/54/11/28/8/2/3 rows on BU's real Oracle), "
+            "independent of every other reference-data bundle. "
+            "Idempotent - combine with --dry-run to roll back. See "
+            "docs/architecture/AWARD_TERMS_DESIGN.md."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -10729,6 +10746,13 @@ def main() -> None:
         if not arguments.ecs:
             apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         run_load_custom_attribute_reference_data(engine, dry_run=arguments.dry_run)
+        return
+
+    if arguments.load_terms_reference_data:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        run_load_terms_reference_data(engine, dry_run=arguments.dry_run)
         return
 
     if arguments.load_award_id is not None:

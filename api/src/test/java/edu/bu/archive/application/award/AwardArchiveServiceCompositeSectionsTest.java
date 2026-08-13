@@ -168,21 +168,37 @@ class AwardArchiveServiceCompositeSectionsTest {
 
     // --- Terms ---------------------------------------------------------
 
+    // Sponsor Term / Report Term fixture values below are the real,
+    // live-verified rows for award_id 2727052 (award_sponsor_term_id
+    // 2479163 / award_report_term_id 2727057) - see
+    // AWARD_TERMS_DESIGN.md and AwardV1ContractTest's own Terms
+    // coverage for the same fixture used end-to-end.
+
     @Test
     void findTermsGroupsRecipientsUnderTheirOwnReportTerm() {
-        AwardSponsorTermResponse sponsorTerm =
-                new AwardSponsorTermResponse(1L, 555L);
+        AwardSponsorTermResponse sponsorTerm = new AwardSponsorTermResponse(
+                2479163L, 370L, "64",
+                "Converted Record.  Please refer to sponsor award "
+                        + "documentation for any Equipment Approval terms.",
+                "6", "Equipment Approval Terms"
+        );
         when(repository.findSponsorTerms(3L))
                 .thenReturn(List.of(sponsorTerm));
         when(repository.findReportTermRows(3L)).thenReturn(List.of(
                 new AwardReportTermRow(
-                        200L, "FINANCIAL", "FIN-1", "ANNUAL",
-                        "ANNIVERSARY", "PI", LocalDate.of(2021, 6, 30)
+                        2727057L, "43",
+                        "Converted Record  - See Sponsor Documentation",
+                        "1", "Financial",
+                        "5", "As required", null, null,
+                        "6", "As Required",
+                        "2", "No",
+                        null
                 )
         ));
         when(repository.findReportTermRecipientRows(3L)).thenReturn(List.of(
                 new AwardReportTermRecipientRow(
-                        900L, 200L, 42L, "PI", null, 1
+                        900L, 2727057L, 42L, "34",
+                        "Administrative Contact", null, 1
                 )
         ));
 
@@ -190,9 +206,13 @@ class AwardArchiveServiceCompositeSectionsTest {
 
         assertThat(terms.sponsorTerms()).containsExactly(sponsorTerm);
         assertThat(terms.reportTerms()).hasSize(1);
+        assertThat(terms.reportTerms().get(0).recipientCount()).isEqualTo(1);
         assertThat(terms.reportTerms().get(0).recipients()).hasSize(1);
         assertThat(terms.reportTerms().get(0).recipients().get(0).contactId())
                 .isEqualTo(42L);
+        assertThat(terms.reportTerms().get(0).recipients().get(0)
+                .contactTypeDescription())
+                .isEqualTo("Administrative Contact");
     }
 
     @Test
@@ -205,6 +225,32 @@ class AwardArchiveServiceCompositeSectionsTest {
 
         assertThat(terms.sponsorTerms()).isEmpty();
         assertThat(terms.reportTerms()).isEmpty();
+    }
+
+    @Test
+    void findTermsReportsZeroRecipientCountWhenThereAreNoRecipients() {
+        // Real, live-verified Oracle fact: AWARD_REP_TERMS_RECNT is
+        // empty archive-wide as of the 2026-08 staging verification
+        // behind this change, so award_id 2727052's own two report
+        // terms genuinely have zero recipients each - not a load gap.
+        when(repository.findSponsorTerms(3L)).thenReturn(List.of());
+        when(repository.findReportTermRows(3L)).thenReturn(List.of(
+                new AwardReportTermRow(
+                        2727058L, "26", "Standard BU Invoice",
+                        "6", "Payment/Invoice",
+                        "5", "As required", null, null,
+                        "6", "As Required",
+                        "2", "No",
+                        null
+                )
+        ));
+        when(repository.findReportTermRecipientRows(3L)).thenReturn(List.of());
+
+        AwardTermsResponse terms = service.findTerms(3L);
+
+        assertThat(terms.reportTerms()).hasSize(1);
+        assertThat(terms.reportTerms().get(0).recipientCount()).isZero();
+        assertThat(terms.reportTerms().get(0).recipients()).isEmpty();
     }
 
     // --- Custom Data -----------------------------------------------------

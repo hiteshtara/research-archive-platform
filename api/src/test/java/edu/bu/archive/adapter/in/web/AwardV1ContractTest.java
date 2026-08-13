@@ -330,25 +330,59 @@ class AwardV1ContractTest {
     @Test
     void termsShapeIsStableAndSeparatesSponsorFromReportTerms()
             throws Exception {
+        // Real, live-verified fixture: award_id 2727052's own
+        // award_sponsor_term_id 2479163 / award_report_term_id 2727057
+        // rows - see AWARD_TERMS_DESIGN.md.
         AwardTermsResponse terms = new AwardTermsResponse(
-                List.of(new AwardSponsorTermResponse(1L, 555L)),
+                List.of(new AwardSponsorTermResponse(
+                        2479163L, 370L, "64",
+                        "Converted Record.  Please refer to sponsor award "
+                                + "documentation for any Equipment Approval "
+                                + "terms.",
+                        "6", "Equipment Approval Terms"
+                )),
                 List.of(new AwardReportTermResponse(
-                        200L, "FINANCIAL", "FIN-1", "ANNUAL",
-                        "ANNIVERSARY", "PI", LocalDate.of(2021, 6, 30),
+                        2727057L, "43",
+                        "Converted Record  - See Sponsor Documentation",
+                        "1", "Financial",
+                        "5", "As required",
+                        "6", "As Required",
+                        "2", "No",
+                        null, null,
+                        null,
+                        1,
                         List.of(new AwardReportTermRecipientResponse(
-                                900L, 42L, "PI", null, 1
+                                900L, 42L, "34", "Administrative Contact",
+                                null, 1
                         ))
                 ))
         );
 
         assertFieldNames(terms, Set.of("sponsorTerms", "reportTerms"));
 
+        JsonNode sponsorTerm =
+                objectMapper.valueToTree(terms).get("sponsorTerms").get(0);
+        assertFieldNames(sponsorTerm, Set.of(
+                "awardSponsorTermId", "sponsorTermId", "sponsorTermCode",
+                "description", "sponsorTermTypeCode", "categoryDescription"
+        ));
+
         JsonNode reportTerm =
                 objectMapper.valueToTree(terms).get("reportTerms").get(0);
         assertFieldNames(reportTerm, Set.of(
-                "awardReportTermId", "reportClassCode", "reportCode",
-                "frequencyCode", "frequencyBaseCode", "ospDistributionCode",
-                "dueDate", "recipients"
+                "awardReportTermId", "reportCode", "reportDescription",
+                "reportClassCode", "reportClassDescription",
+                "frequencyCode", "frequencyDescription",
+                "frequencyBaseCode", "frequencyBaseDescription",
+                "ospDistributionCode", "distributionDescription",
+                "advanceNumberOfDays", "advanceNumberOfMonths",
+                "dueDate", "recipientCount", "recipients"
+        ));
+
+        JsonNode recipient = reportTerm.get("recipients").get(0);
+        assertFieldNames(recipient, Set.of(
+                "awardReportTermRecipientId", "contactId", "contactTypeCode",
+                "contactTypeDescription", "rolodexId", "numberOfCopies"
         ));
     }
 

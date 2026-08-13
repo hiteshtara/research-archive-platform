@@ -6,11 +6,13 @@ import test from "node:test";
 import {
   classifyAttachmentType,
   downloadUnavailableReason,
+  formatAdvanceNotice,
   formatAttachmentCountLabel,
   formatByteSize,
   formatCreditSplitLabel,
   formatCurrencyAmount,
   formatEffortNote,
+  groupAwardSponsorTerms,
   hasAnyAttachments,
   hasAnyCentralAdministrationContacts,
   hasAnyComments,
@@ -23,6 +25,10 @@ import {
   matchesAwardCustomDataQuery,
   parseDownloadFilename,
   resolveAwardCustomDataLabel,
+  resolveAwardReportTermFieldLabel,
+  resolveAwardReportTermHeading,
+  resolveAwardReportTermRecipientLabel,
+  resolveAwardSponsorTermLabel,
   xmlDisplayText,
 } from "./awardSectionsPresentation.mjs";
 
@@ -272,6 +278,225 @@ test("formats the attachment count badge with correct pluralization", () => {
   assert.equal(formatAttachmentCountLabel(0), "0 Attachments");
   assert.equal(formatAttachmentCountLabel(1), "1 Attachment");
   assert.equal(formatAttachmentCountLabel(24), "24 Attachments");
+});
+
+// --- Terms ---------------------------------------------------------
+//
+// Sponsor Term fixture rows below are the real, live-verified
+// award_sponsor_term rows for award_id 2727052 (12 rows across all 10
+// Kuali categories, Prior Approval and Property each having 2) - see
+// AWARD_TERMS_DESIGN.md.
+
+const REAL_SPONSOR_TERMS_2727052 = [
+  {
+    awardSponsorTermId: 2479168, sponsorTermId: 375, sponsorTermCode: "69",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Reference Document terms.",
+    sponsorTermTypeCode: "1", categoryDescription: "Referenced Document Terms",
+  },
+  {
+    awardSponsorTermId: 2479172, sponsorTermId: 379, sponsorTermCode: "73",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Special Award Restriction terms.",
+    sponsorTermTypeCode: "10", categoryDescription: "Special Award Restrictions Terms",
+  },
+  {
+    awardSponsorTermId: 2479164, sponsorTermId: 371, sponsorTermCode: "65",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Invention terms.",
+    sponsorTermTypeCode: "2", categoryDescription: "Invention Terms",
+  },
+  {
+    awardSponsorTermId: 2479165, sponsorTermId: 372, sponsorTermCode: "66",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Prior Approval terms.",
+    sponsorTermTypeCode: "3", categoryDescription: "Prior Approval Terms",
+  },
+  {
+    awardSponsorTermId: 2479174, sponsorTermId: 456, sponsorTermCode: "150",
+    description: "No-cost extension requires Sponsor prior approval",
+    sponsorTermTypeCode: "3", categoryDescription: "Prior Approval Terms",
+  },
+  {
+    awardSponsorTermId: 2479166, sponsorTermId: 373, sponsorTermCode: "67",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Property terms.",
+    sponsorTermTypeCode: "4", categoryDescription: "Property Terms",
+  },
+  {
+    awardSponsorTermId: 2479173, sponsorTermId: 420, sponsorTermCode: "114",
+    description: "Property Owned by BU",
+    sponsorTermTypeCode: "4", categoryDescription: "Property Terms",
+  },
+  {
+    awardSponsorTermId: 2479167, sponsorTermId: 374, sponsorTermCode: "68",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Publication terms.",
+    sponsorTermTypeCode: "5", categoryDescription: "Publication Terms",
+  },
+  {
+    awardSponsorTermId: 2479163, sponsorTermId: 370, sponsorTermCode: "64",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Equipment Approval terms.",
+    sponsorTermTypeCode: "6", categoryDescription: "Equipment Approval Terms",
+  },
+  {
+    awardSponsorTermId: 2479169, sponsorTermId: 376, sponsorTermCode: "70",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Rights in Data Terms terms.",
+    sponsorTermTypeCode: "7", categoryDescription: "Rights In Data Terms",
+  },
+  {
+    awardSponsorTermId: 2479170, sponsorTermId: 377, sponsorTermCode: "71",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Subaward Approval terms.",
+    sponsorTermTypeCode: "8", categoryDescription: "Subaward Approval Terms",
+  },
+  {
+    awardSponsorTermId: 2479171, sponsorTermId: 378, sponsorTermCode: "72",
+    description: "Converted Record.  Please refer to sponsor award documentation for any Travel Restriction terms.",
+    sponsorTermTypeCode: "9", categoryDescription: "Travel Restrictions Terms",
+  },
+];
+
+test("resolveAwardSponsorTermLabel renders the code and full description when resolved", () => {
+  const label = resolveAwardSponsorTermLabel(REAL_SPONSOR_TERMS_2727052[8]);
+
+  assert.equal(
+    label,
+    "64: Converted Record.  Please refer to sponsor award documentation for any Equipment Approval terms.",
+  );
+});
+
+test("resolveAwardSponsorTermLabel falls back to the raw sponsorTermId when unresolved", () => {
+  const term = {
+    awardSponsorTermId: 1,
+    sponsorTermId: 370,
+    sponsorTermCode: null,
+    description: null,
+    sponsorTermTypeCode: null,
+    categoryDescription: null,
+  };
+
+  assert.equal(resolveAwardSponsorTermLabel(term), "Sponsor Term 370");
+});
+
+test("groupAwardSponsorTerms reproduces the real award_id 2727052 fixture: 10 categories in authoritative numeric order, Prior Approval and Property each with 2", () => {
+  const grouped = groupAwardSponsorTerms(REAL_SPONSOR_TERMS_2727052);
+
+  assert.equal(grouped.length, 10);
+  assert.deepEqual(
+    grouped.map((group) => group.categoryDescription),
+    [
+      "Referenced Document Terms",
+      "Invention Terms",
+      "Prior Approval Terms",
+      "Property Terms",
+      "Publication Terms",
+      "Equipment Approval Terms",
+      "Rights In Data Terms",
+      "Subaward Approval Terms",
+      "Travel Restrictions Terms",
+      "Special Award Restrictions Terms",
+    ],
+    "codes 1..10 in numeric order, not alphabetic (which would put \"10\" before \"2\")",
+  );
+
+  const counts = Object.fromEntries(
+    grouped.map((group) => [group.categoryDescription, group.terms.length]),
+  );
+  assert.equal(counts["Prior Approval Terms"], 2);
+  assert.equal(counts["Property Terms"], 2);
+  assert.equal(counts["Referenced Document Terms"], 1);
+  assert.equal(counts["Equipment Approval Terms"], 1);
+});
+
+test("groupAwardSponsorTerms collapses unresolved terms into one trailing 'Uncategorized' group", () => {
+  const terms = [
+    ...REAL_SPONSOR_TERMS_2727052.slice(0, 2),
+    {
+      awardSponsorTermId: 999,
+      sponsorTermId: 88888,
+      sponsorTermCode: null,
+      description: null,
+      sponsorTermTypeCode: null,
+      categoryDescription: null,
+    },
+  ];
+
+  const grouped = groupAwardSponsorTerms(terms);
+
+  assert.equal(grouped.at(-1).categoryDescription, "Uncategorized");
+  assert.equal(grouped.at(-1).categoryCode, null);
+  assert.equal(grouped.at(-1).terms.length, 1);
+});
+
+// Report Term fixture values below are the real, live-verified
+// award_report_term rows for award_id 2727052 (award_report_term_id
+// 2727057/2727058) - see AWARD_TERMS_DESIGN.md. AWARD_REP_TERMS_RECNT
+// is genuinely empty archive-wide, so both report terms have zero
+// recipients - a real Oracle fact, not a load gap.
+
+test("resolveAwardReportTermFieldLabel prefers the resolved description", () => {
+  assert.equal(
+    resolveAwardReportTermFieldLabel("43", "Converted Record  - See Sponsor Documentation"),
+    "Converted Record  - See Sponsor Documentation",
+  );
+});
+
+test("resolveAwardReportTermFieldLabel falls back to the raw code when unresolved", () => {
+  assert.equal(resolveAwardReportTermFieldLabel("43", null), "43");
+});
+
+test("resolveAwardReportTermFieldLabel returns null only when both code and description are missing", () => {
+  assert.equal(resolveAwardReportTermFieldLabel(null, null), null);
+  assert.equal(resolveAwardReportTermFieldLabel(null, undefined), null);
+});
+
+test("resolveAwardReportTermFieldLabel treats the real distribution value \"No\" as a valid resolved value, never as blank", () => {
+  assert.equal(resolveAwardReportTermFieldLabel("2", "No"), "No");
+});
+
+test("resolveAwardReportTermHeading uses the resolved report description", () => {
+  const term = {
+    awardReportTermId: 2727057,
+    reportCode: "43",
+    reportDescription: "Converted Record  - See Sponsor Documentation",
+  };
+
+  assert.equal(
+    resolveAwardReportTermHeading(term),
+    "Converted Record  - See Sponsor Documentation",
+  );
+});
+
+test("resolveAwardReportTermHeading falls back to a synthetic heading, never the bare row ID alone, when unresolved", () => {
+  const term = {
+    awardReportTermId: 2727057,
+    reportCode: null,
+    reportDescription: null,
+  };
+
+  const heading = resolveAwardReportTermHeading(term);
+
+  assert.notEqual(heading, "2727057");
+  assert.match(heading, /2727057/);
+});
+
+test("resolveAwardReportTermRecipientLabel prefers the resolved contact type description", () => {
+  const recipient = {
+    awardReportTermRecipientId: 900,
+    contactTypeCode: "34",
+    contactTypeDescription: "Administrative Contact",
+  };
+
+  assert.equal(
+    resolveAwardReportTermRecipientLabel(recipient),
+    "Administrative Contact",
+  );
+});
+
+test("formatAdvanceNotice returns null when both days and months are null, the real fixture value for award_id 2727052's own frequencyCode \"5\"", () => {
+  assert.equal(formatAdvanceNotice(null, null), null);
+});
+
+test("formatAdvanceNotice formats days and months together with correct pluralization", () => {
+  assert.equal(formatAdvanceNotice(1, null), "1 day");
+  assert.equal(formatAdvanceNotice(30, null), "30 days");
+  assert.equal(formatAdvanceNotice(null, 1), "1 month");
+  assert.equal(formatAdvanceNotice(null, 3), "3 months");
+  assert.equal(formatAdvanceNotice(15, 1), "1 month, 15 days");
 });
 
 // --- Custom Data -------------------------------------------------------

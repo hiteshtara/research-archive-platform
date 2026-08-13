@@ -1,4 +1,10 @@
-import type { AwardCreditSplitV1, AwardCustomDataV1 } from "../../types/api";
+import type {
+  AwardCreditSplitV1,
+  AwardCustomDataV1,
+  AwardReportTermRecipientV1,
+  AwardReportTermV1,
+  AwardSponsorTermV1,
+} from "../../types/api";
 
 export function formatCurrencyAmount(amount: number | null): string;
 
@@ -24,6 +30,30 @@ export function hasAnyTerms(
   sponsorTerms: unknown[],
   reportTerms: unknown[],
 ): boolean;
+
+export function resolveAwardSponsorTermLabel(term: AwardSponsorTermV1): string;
+
+export function groupAwardSponsorTerms(terms: AwardSponsorTermV1[]): {
+  categoryCode: string | null;
+  categoryDescription: string;
+  terms: AwardSponsorTermV1[];
+}[];
+
+export function resolveAwardReportTermFieldLabel(
+  code: string | null,
+  description: string | null,
+): string | null;
+
+export function resolveAwardReportTermHeading(term: AwardReportTermV1): string;
+
+export function resolveAwardReportTermRecipientLabel(
+  recipient: AwardReportTermRecipientV1,
+): string;
+
+export function formatAdvanceNotice(
+  days: number | null,
+  months: number | null,
+): string | null;
 
 export function resolveAwardCustomDataLabel(row: AwardCustomDataV1): string;
 

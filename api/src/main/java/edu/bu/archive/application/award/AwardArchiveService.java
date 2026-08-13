@@ -1139,25 +1139,38 @@ public class AwardArchiveService {
                             row.awardReportTermRecipientId(),
                             row.contactId(),
                             row.contactTypeCode(),
+                            row.contactTypeDescription(),
                             row.rolodexId(),
                             row.numberOfCopies()
                     ));
         }
 
         List<AwardReportTermResponse> reportTerms = reportTermRows.stream()
-                .map(row -> new AwardReportTermResponse(
-                        row.awardReportTermId(),
-                        row.reportClassCode(),
-                        row.reportCode(),
-                        row.frequencyCode(),
-                        row.frequencyBaseCode(),
-                        row.ospDistributionCode(),
-                        row.dueDate(),
-                        recipientsByReportTermId.getOrDefault(
-                                row.awardReportTermId(),
-                                List.of()
-                        )
-                ))
+                .map(row -> {
+                    List<AwardReportTermRecipientResponse> recipients =
+                            recipientsByReportTermId.getOrDefault(
+                                    row.awardReportTermId(),
+                                    List.of()
+                            );
+                    return new AwardReportTermResponse(
+                            row.awardReportTermId(),
+                            row.reportCode(),
+                            row.reportDescription(),
+                            row.reportClassCode(),
+                            row.reportClassDescription(),
+                            row.frequencyCode(),
+                            row.frequencyDescription(),
+                            row.frequencyBaseCode(),
+                            row.frequencyBaseDescription(),
+                            row.ospDistributionCode(),
+                            row.distributionDescription(),
+                            row.advanceNumberOfDays(),
+                            row.advanceNumberOfMonths(),
+                            row.dueDate(),
+                            recipients.size(),
+                            recipients
+                    );
+                })
                 .toList();
 
         return new AwardTermsResponse(sponsorTerms, reportTerms);

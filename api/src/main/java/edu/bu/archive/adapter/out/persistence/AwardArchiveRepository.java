@@ -1573,15 +1573,31 @@ public class AwardArchiveRepository {
      * directly by award_id rather than batched by report-term IDs.
      * Recipients are grouped onto their parent report term in
      * AwardArchiveService.
+     *
+     * All three LEFT JOIN the reference lookups added in V074
+     * (sponsor_term/sponsor_term_type, report/report_class/frequency/
+     * frequency_base/distribution, contact_type) for readable labels -
+     * none of those lookups have a foreign key from the historical Award
+     * Terms tables (V074's own migration comment), so an unresolved code
+     * still comes back as a row with its *Description sibling(s) null,
+     * never dropped. Mirrors findCustomData's LEFT JOIN pattern above.
      */
     public List<AwardSponsorTermResponse> findSponsorTerms(long awardId) {
         return jdbc.sql("""
                 SELECT
-                    award_sponsor_term_id,
-                    sponsor_term_id
-                FROM archive.award_sponsor_term
-                WHERE award_id = :awardId
-                ORDER BY award_sponsor_term_id
+                    ast.award_sponsor_term_id,
+                    ast.sponsor_term_id,
+                    st.sponsor_term_code,
+                    st.description,
+                    st.sponsor_term_type_code,
+                    stt.description AS category_description
+                FROM archive.award_sponsor_term ast
+                LEFT JOIN archive.sponsor_term st
+                    ON st.sponsor_term_id = ast.sponsor_term_id
+                LEFT JOIN archive.sponsor_term_type stt
+                    ON stt.sponsor_term_type_code = st.sponsor_term_type_code
+                WHERE ast.award_id = :awardId
+                ORDER BY ast.award_sponsor_term_id
                 """)
                 .param("awardId", awardId)
                 .query(AwardSponsorTermResponse.class)
@@ -1591,16 +1607,33 @@ public class AwardArchiveRepository {
     public List<AwardReportTermRow> findReportTermRows(long awardId) {
         return jdbc.sql("""
                 SELECT
-                    award_report_term_id,
-                    report_class_code,
-                    report_code,
-                    frequency_code,
-                    frequency_base_code,
-                    osp_distribution_code,
-                    due_date
-                FROM archive.award_report_term
-                WHERE award_id = :awardId
-                ORDER BY award_report_term_id
+                    art.award_report_term_id,
+                    art.report_code,
+                    r.description AS report_description,
+                    art.report_class_code,
+                    rc.description AS report_class_description,
+                    art.frequency_code,
+                    f.description AS frequency_description,
+                    f.advance_number_of_days,
+                    f.advance_number_of_months,
+                    art.frequency_base_code,
+                    fb.description AS frequency_base_description,
+                    art.osp_distribution_code,
+                    d.description AS distribution_description,
+                    art.due_date
+                FROM archive.award_report_term art
+                LEFT JOIN archive.report r
+                    ON r.report_code = art.report_code
+                LEFT JOIN archive.report_class rc
+                    ON rc.report_class_code = art.report_class_code
+                LEFT JOIN archive.frequency f
+                    ON f.frequency_code = art.frequency_code
+                LEFT JOIN archive.frequency_base fb
+                    ON fb.frequency_base_code = art.frequency_base_code
+                LEFT JOIN archive.distribution d
+                    ON d.osp_distribution_code = art.osp_distribution_code
+                WHERE art.award_id = :awardId
+                ORDER BY art.award_report_term_id
                 """)
                 .param("awardId", awardId)
                 .query(AwardReportTermRow.class)
@@ -1612,15 +1645,18 @@ public class AwardArchiveRepository {
     ) {
         return jdbc.sql("""
                 SELECT
-                    award_report_term_recipient_id,
-                    award_report_term_id,
-                    contact_id,
-                    contact_type_code,
-                    rolodex_id,
-                    number_of_copies
-                FROM archive.award_report_term_recipient
-                WHERE award_id = :awardId
-                ORDER BY award_report_term_id, award_report_term_recipient_id
+                    artr.award_report_term_recipient_id,
+                    artr.award_report_term_id,
+                    artr.contact_id,
+                    artr.contact_type_code,
+                    ct.description AS contact_type_description,
+                    artr.rolodex_id,
+                    artr.number_of_copies
+                FROM archive.award_report_term_recipient artr
+                LEFT JOIN archive.contact_type ct
+                    ON ct.contact_type_code = artr.contact_type_code
+                WHERE artr.award_id = :awardId
+                ORDER BY artr.award_report_term_id, artr.award_report_term_recipient_id
                 """)
                 .param("awardId", awardId)
                 .query(AwardReportTermRecipientRow.class)
