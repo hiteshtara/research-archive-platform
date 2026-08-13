@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetPersonnelResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
@@ -1623,6 +1624,51 @@ public class AwardArchiveRepository {
                 """)
                 .param("awardId", awardId)
                 .query(AwardReportTermRecipientRow.class)
+                .list();
+    }
+
+    /*
+     * --- Custom Data -------------------------------------------------------
+     *
+     * A separate Award section from Terms - archive.award_custom_data
+     * is its own Tier 1 subsystem (V038), never merged with
+     * archive.award_sponsor_term/award_report_term above. Scoped to
+     * this exact award_id (version-scoped, same discipline as
+     * ProposalV1Repository.findCustomDataRows - a version's own values
+     * are never combined with a sibling version's). LEFT JOINed to the
+     * shared archive.custom_attribute lookup (V064) for a readable
+     * label; custom_attribute_id has no foreign key, so a row with no
+     * matching lookup still comes back with a null label rather than
+     * being dropped.
+     */
+    public List<AwardCustomDataResponse> findCustomData(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    acd.award_custom_data_id,
+                    acd.award_id,
+                    acd.award_number,
+                    acd.sequence_number,
+                    acd.custom_attribute_id,
+                    ca.label,
+                    ca.name,
+                    ca.data_type_description AS data_type,
+                    ca.group_name,
+                    acd.value,
+                    acd.source_update_timestamp,
+                    acd.source_update_user,
+                    acd.source_version_number,
+                    acd.source_object_id
+                FROM archive.award_custom_data acd
+                LEFT JOIN archive.custom_attribute ca
+                    ON ca.custom_attribute_id = acd.custom_attribute_id
+                WHERE acd.award_id = :awardId
+                ORDER BY
+                    ca.group_name NULLS LAST,
+                    acd.custom_attribute_id,
+                    acd.award_custom_data_id
+                """)
+                .param("awardId", awardId)
+                .query(AwardCustomDataResponse.class)
                 .list();
     }
 

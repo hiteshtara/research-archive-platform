@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardNotepadEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonCreditSplitRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardPersonDetailResponse;
@@ -39,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -203,6 +205,97 @@ class AwardArchiveServiceCompositeSectionsTest {
 
         assertThat(terms.sponsorTerms()).isEmpty();
         assertThat(terms.reportTerms()).isEmpty();
+    }
+
+    // --- Custom Data -----------------------------------------------------
+    //
+    // A separate Award section from Terms above, never merged - see
+    // AwardArchiveRepository.findCustomData's header comment. Mirrors
+    // ProposalArchiveV1ServiceTest's Custom Data coverage.
+
+    @Test
+    void findCustomDataResolvesTheLabelViaTheSharedLookup() {
+        AwardCustomDataResponse row = new AwardCustomDataResponse(
+                1L, 3L, "100004-00003", 1, 480L, "Submitted Date",
+                "ip_submission_date", "Date", null, "08/09/2011",
+                LocalDateTime.of(2017, 5, 3, 11, 31, 39), "dhaywood",
+                1L, "OBJ-1"
+        );
+        when(repository.findCustomData(3L)).thenReturn(List.of(row));
+
+        List<AwardCustomDataResponse> result = service.findCustomData(3L);
+
+        assertThat(result).containsExactly(row);
+        assertThat(result.get(0).label()).isEqualTo("Submitted Date");
+    }
+
+    @Test
+    void findCustomDataThrowsNotFoundWhenTheAwardDoesNotExist() {
+        when(repository.findAwardNumberForId(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.findCustomData(999L))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void findCustomDataPreservesARowWithNoMatchingLookupRatherThanDroppingIt() {
+        // custom_attribute_id has no foreign key (V038/V064) - Oracle
+        // can add an attribute this archive hasn't loaded into
+        // archive.custom_attribute yet. The row must still come back,
+        // with label/name/dataType null, never silently filtered out.
+        AwardCustomDataResponse unresolvedRow = new AwardCustomDataResponse(
+                999999L, 3L, "100004-00003", 1, 424242L, null, null,
+                null, null, "some value", LocalDateTime.now(),
+                "dhaywood", null, null
+        );
+        when(repository.findCustomData(3L)).thenReturn(List.of(unresolvedRow));
+
+        List<AwardCustomDataResponse> result = service.findCustomData(3L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).label()).isNull();
+        assertThat(result.get(0).value()).isEqualTo("some value");
+    }
+
+    @Test
+    void findCustomDataPreservesARealBlankValueDistinctFromNoRowAtAll() {
+        AwardCustomDataResponse blankRow = new AwardCustomDataResponse(
+                1495997L, 3L, "100004-00003", 1, 1209L, "Opportunity Title",
+                "OppTitle", "String", null, null,
+                LocalDateTime.of(2020, 3, 6, 15, 40, 37), "dhaywood",
+                1L, "OBJ-2"
+        );
+        when(repository.findCustomData(3L)).thenReturn(List.of(blankRow));
+
+        List<AwardCustomDataResponse> result = service.findCustomData(3L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).value()).isNull();
+        assertThat(result.get(0).label()).isEqualTo("Opportunity Title");
+    }
+
+    @Test
+    void findCustomDataNeverCombinesRowsAcrossSiblingVersions() {
+        // Version scoping proof: the service must query by the exact
+        // awardId only - never resolve to awardNumber and fan out
+        // across the whole family. Real fixture Award 204713-00117 has
+        // 7 sibling versions (award_id 2673287..3160098) - combining
+        // them would silently merge unrelated versions' data.
+        AwardCustomDataResponse thisVersionOnly = new AwardCustomDataResponse(
+                1L, 3160098L, "204713-00117", 7, 100L, "Label", "name",
+                "String", null, "v7 value", LocalDateTime.now(),
+                "dhaywood", 1L, "OBJ-3"
+        );
+        when(repository.findAwardNumberForId(3160098L))
+                .thenReturn(Optional.of("204713-00117"));
+        when(repository.findCustomData(3160098L))
+                .thenReturn(List.of(thisVersionOnly));
+
+        List<AwardCustomDataResponse> result = service.findCustomData(3160098L);
+
+        assertThat(result).containsExactly(thisVersionOnly);
+        verify(repository).findCustomData(3160098L);
+        verify(repository, never()).findCustomData(2673287L);
     }
 
     // --- Comments and Notepad --------------------------------------------

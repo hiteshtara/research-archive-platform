@@ -430,6 +430,16 @@ export function getAwardTermsV1(
   return request(`/api/v1/awards/${encodeURIComponent(awardId)}/terms`, signal);
 }
 
+export function getAwardCustomDataV1(
+  awardId: number,
+  signal?: AbortSignal,
+): Promise<import("../types/api").AwardCustomDataV1[]> {
+  return request(
+    `/api/v1/awards/${encodeURIComponent(awardId)}/custom-data`,
+    signal,
+  );
+}
+
 export function getAwardCommentsV1(
   awardId: number,
   signal?: AbortSignal,

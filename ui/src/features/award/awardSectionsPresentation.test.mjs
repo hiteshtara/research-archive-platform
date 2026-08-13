@@ -19,7 +19,10 @@ import {
   hasAnyTerms,
   hasAnyTransmissions,
   hasAnyUnitContacts,
+  groupAwardCustomData,
+  matchesAwardCustomDataQuery,
   parseDownloadFilename,
+  resolveAwardCustomDataLabel,
   xmlDisplayText,
 } from "./awardSectionsPresentation.mjs";
 
@@ -269,4 +272,115 @@ test("formats the attachment count badge with correct pluralization", () => {
   assert.equal(formatAttachmentCountLabel(0), "0 Attachments");
   assert.equal(formatAttachmentCountLabel(1), "1 Attachment");
   assert.equal(formatAttachmentCountLabel(24), "24 Attachments");
+});
+
+// --- Custom Data -------------------------------------------------------
+//
+// A separate Award section from Terms, never merged - see
+// AwardArchiveRepository.findCustomData's header comment.
+
+test("resolveAwardCustomDataLabel prefers the resolved label", () => {
+  const row = {
+    customAttributeId: 480,
+    label: "Submitted Date",
+    name: "ip_submission_date",
+    value: "08/09/2011",
+  };
+
+  assert.equal(resolveAwardCustomDataLabel(row), "Submitted Date");
+});
+
+test("resolveAwardCustomDataLabel falls back to name when label is missing", () => {
+  const row = {
+    customAttributeId: 1214,
+    label: null,
+    name: "OppNum",
+    value: null,
+  };
+
+  assert.equal(resolveAwardCustomDataLabel(row), "OppNum");
+});
+
+test("resolveAwardCustomDataLabel never renders only the bare custom-attribute ID", () => {
+  const row = {
+    customAttributeId: 424242,
+    label: null,
+    name: null,
+    value: "some value",
+  };
+
+  const label = resolveAwardCustomDataLabel(row);
+
+  assert.notEqual(label, "424242");
+  assert.match(label, /424242/);
+  assert.ok(label.length > String(424242).length);
+});
+
+test("groupAwardCustomData groups by the proven groupName, preserving row order", () => {
+  const rows = [
+    { customAttributeId: 1, groupName: "Sponsor Info", value: "a" },
+    { customAttributeId: 2, groupName: "Sponsor Info", value: "b" },
+    { customAttributeId: 3, groupName: "Compliance", value: "c" },
+  ];
+
+  const grouped = groupAwardCustomData(rows);
+
+  assert.deepEqual(
+    grouped.map((group) => group.groupName),
+    ["Sponsor Info", "Compliance"],
+  );
+  assert.equal(grouped[0].rows.length, 2);
+  assert.equal(grouped[0].rows[0].customAttributeId, 1);
+});
+
+test("groupAwardCustomData collapses rows with no groupName into one trailing 'Other' group", () => {
+  const rows = [
+    { customAttributeId: 1, groupName: null, value: "a" },
+    { customAttributeId: 2, groupName: "Sponsor Info", value: "b" },
+    { customAttributeId: 3, groupName: null, value: "c" },
+  ];
+
+  const grouped = groupAwardCustomData(rows);
+
+  assert.deepEqual(
+    grouped.map((group) => group.groupName),
+    ["Sponsor Info", "Other"],
+  );
+  assert.equal(grouped[1].rows.length, 2);
+});
+
+test("matchesAwardCustomDataQuery matches against the resolved label", () => {
+  const row = {
+    customAttributeId: 480,
+    label: "Submitted Date",
+    name: "ip_submission_date",
+    value: "08/09/2011",
+  };
+
+  assert.equal(matchesAwardCustomDataQuery(row, "submitted"), true);
+  assert.equal(matchesAwardCustomDataQuery(row, "unrelated"), false);
+});
+
+test("matchesAwardCustomDataQuery treats a blank query as matching everything", () => {
+  const row = {
+    customAttributeId: 480,
+    label: null,
+    name: null,
+    value: null,
+  };
+
+  assert.equal(matchesAwardCustomDataQuery(row, ""), true);
+  assert.equal(matchesAwardCustomDataQuery(row, "   "), true);
+});
+
+test("matchesAwardCustomDataQuery does not blow up on a real persisted blank value", () => {
+  const row = {
+    customAttributeId: 1209,
+    label: "Opportunity Title",
+    name: "OppTitle",
+    value: null,
+  };
+
+  assert.equal(matchesAwardCustomDataQuery(row, "opportunity"), true);
+  assert.equal(matchesAwardCustomDataQuery(row, "nonsense"), false);
 });

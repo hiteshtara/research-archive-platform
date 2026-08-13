@@ -13,6 +13,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCommentCategoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
@@ -1160,6 +1161,14 @@ public class AwardArchiveService {
                 .toList();
 
         return new AwardTermsResponse(sponsorTerms, reportTerms);
+    }
+
+    // Custom Data - a separate Award section from Terms, never merged.
+    // Scoped to this exact award_id (version-scoped, see
+    // AwardArchiveRepository.findCustomData's header comment).
+    public List<AwardCustomDataResponse> findCustomData(long awardId) {
+        requireAwardNumberForId(awardId);
+        return repository.findCustomData(awardId);
     }
 
     public AwardCommentsResponse findComments(long awardId) {

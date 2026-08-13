@@ -19,6 +19,7 @@ import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
 import { AwardBudgetSection } from "../../components/award/AwardBudgetSection";
 import { AwardCommentsSection } from "../../components/award/AwardCommentsSection";
 import { AwardContactsSection } from "../../components/award/AwardContactsSection";
+import { AwardCustomDataSection } from "../../components/award/AwardCustomDataSection";
 import { AwardEvidenceSearchSection } from "../../components/award/AwardEvidenceSearchSection";
 import { AwardFundingProposalsSection } from "../../components/award/AwardFundingProposalsSection";
 import { AwardAssociatedNegotiationsSection } from "../../components/award/AwardAssociatedNegotiationsSection";
@@ -46,6 +47,7 @@ const SECTIONS = [
   { key: "budget", label: "Budget" },
   { key: "timeMoney", label: "Time & Money" },
   { key: "terms", label: "Terms" },
+  { key: "customData", label: "Custom Data" },
   { key: "comments", label: "Comments and Notepad" },
   { key: "sap", label: "SAP Transmission History" },
   { key: "attachments", label: "Attachments" },
@@ -65,6 +67,7 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
   "budget",
   "timeMoney",
   "terms",
+  "customData",
   "comments",
   "sap",
   "attachments",
@@ -274,6 +277,10 @@ export function AwardDashboardPage() {
 
           {activeSection === "terms" && (
             <AwardTermsSection awardId={awardId} />
+          )}
+
+          {activeSection === "customData" && (
+            <AwardCustomDataSection awardId={awardId} />
           )}
 
           {activeSection === "comments" && (

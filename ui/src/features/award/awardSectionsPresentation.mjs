@@ -78,6 +78,88 @@ export function hasAnyTerms(sponsorTerms, reportTerms) {
   return sponsorTerms.length > 0 || reportTerms.length > 0;
 }
 
+// --- Custom Data -----------------------------------------------------
+//
+// A separate Award section from Terms, never merged - see
+// AwardArchiveRepository.findCustomData's header comment. Mirrors
+// features/proposal/proposalCustomDataPresentation.mjs's logic
+// (kept as its own copy per this file's existing per-domain
+// convention - see budgetPresentation.mjs/timeAndMoneyPresentation.mjs
+// as prior examples of the same pattern).
+
+const UNGROUPED_CUSTOM_DATA_LABEL = "Other";
+
+// custom_attribute_id has no foreign key (database migration V064) -
+// a row can arrive with label and name both null when Oracle has an
+// attribute this archive hasn't loaded into archive.custom_attribute
+// yet. Never render the bare numeric ID as the only visible text -
+// fall back to name, then a synthetic label that still names the
+// attribute.
+export function resolveAwardCustomDataLabel(row) {
+  if (row.label && row.label.trim() !== "") {
+    return row.label;
+  }
+  if (row.name && row.name.trim() !== "") {
+    return row.name;
+  }
+  return `Custom Field ${row.customAttributeId ?? "?"}`;
+}
+
+// Groups rows by their proven groupName, preserving each group's
+// first-seen order and each row's order within its group. Rows with
+// no groupName (null, or a lookup miss) collapse into a single
+// "Other" group placed last, rather than one throwaway group per
+// null row.
+export function groupAwardCustomData(rows) {
+  const groups = new Map();
+
+  for (const row of rows) {
+    const key =
+      row.groupName && row.groupName.trim() !== ""
+        ? row.groupName
+        : UNGROUPED_CUSTOM_DATA_LABEL;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(row);
+  }
+
+  const ordered = [...groups.entries()].filter(
+    ([groupName]) => groupName !== UNGROUPED_CUSTOM_DATA_LABEL,
+  );
+  if (groups.has(UNGROUPED_CUSTOM_DATA_LABEL)) {
+    ordered.push([
+      UNGROUPED_CUSTOM_DATA_LABEL,
+      groups.get(UNGROUPED_CUSTOM_DATA_LABEL),
+    ]);
+  }
+
+  return ordered.map(([groupName, groupRows]) => ({
+    groupName,
+    rows: groupRows,
+  }));
+}
+
+// Case-insensitive match against the resolved label, the raw name,
+// and the value - so a search box can find a field by any of the
+// three, including awards where most rows lack a resolved label.
+export function matchesAwardCustomDataQuery(row, query) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery === "") {
+    return true;
+  }
+
+  const haystack = [
+    resolveAwardCustomDataLabel(row),
+    row.name ?? "",
+    row.value ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(normalizedQuery);
+}
+
 // commentCategories always has one entry per screen_flag='Y' comment
 // type, even when this Award family has never used it (current: null,
 // history: []) - so "any comments" means at least one category has a

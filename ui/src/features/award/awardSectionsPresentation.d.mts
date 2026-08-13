@@ -1,4 +1,4 @@
-import type { AwardCreditSplitV1 } from "../../types/api";
+import type { AwardCreditSplitV1, AwardCustomDataV1 } from "../../types/api";
 
 export function formatCurrencyAmount(amount: number | null): string;
 
@@ -23,6 +23,17 @@ export function hasAnyPeople(people: unknown[]): boolean;
 export function hasAnyTerms(
   sponsorTerms: unknown[],
   reportTerms: unknown[],
+): boolean;
+
+export function resolveAwardCustomDataLabel(row: AwardCustomDataV1): string;
+
+export function groupAwardCustomData(
+  rows: AwardCustomDataV1[],
+): { groupName: string; rows: AwardCustomDataV1[] }[];
+
+export function matchesAwardCustomDataQuery(
+  row: AwardCustomDataV1,
+  query: string,
 ): boolean;
 
 export function hasAnyComments(

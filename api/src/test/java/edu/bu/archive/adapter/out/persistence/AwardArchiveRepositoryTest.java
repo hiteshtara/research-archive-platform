@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
@@ -1100,6 +1101,38 @@ class AwardArchiveRepositoryTest {
                 .contains("FROM archive.award_amount_info amount")
                 .contains("amount.award_amount_info_id DESC")
                 .doesNotContain("source_version_number DESC");
+    }
+
+    @Test
+    void findCustomDataResolvesTheLookupAndScopesByExactAwardId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardCustomDataResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardCustomDataResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findCustomData(3160098L);
+
+        // custom_attribute_id has no foreign key (V038/V064) - this
+        // must be a LEFT JOIN, never an inner join, so a row with no
+        // matching lookup still comes back. Scoped by the exact
+        // award_id (version-scoped), never award_number (which would
+        // fan out across sibling versions and silently combine their
+        // data) - and never joined against award_sponsor_term/
+        // award_report_term, which is a separate Award section.
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_custom_data acd")
+                .contains("LEFT JOIN archive.custom_attribute ca")
+                .contains("acd.award_id = :awardId")
+                .doesNotContain("award_sponsor_term")
+                .doesNotContain("award_report_term");
     }
 
     private String firstSql(JdbcClient jdbc) {

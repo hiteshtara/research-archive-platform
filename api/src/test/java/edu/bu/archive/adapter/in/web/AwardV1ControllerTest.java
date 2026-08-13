@@ -6,6 +6,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationRespons
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyNodeResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
@@ -658,6 +659,34 @@ class AwardV1ControllerTest {
                 .thenThrow(new NoSuchElementException("Award not found: 999"));
 
         mockMvc.perform(get("/api/v1/awards/999/terms"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void customDataIsRoutedUnderTheV1PrefixAndCarriesTheResolvedLabel()
+            throws Exception {
+        AwardCustomDataResponse row = new AwardCustomDataResponse(
+                1L, 3L, "100004-00003", 1, 480L, "Submitted Date",
+                "ip_submission_date", "Date", null, "08/09/2011",
+                null, "dhaywood", 1L, "OBJ-1"
+        );
+        when(service.findCustomData(3L)).thenReturn(List.of(row));
+
+        mockMvc.perform(get("/api/v1/awards/3/custom-data"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].label").value("Submitted Date"))
+                .andExpect(jsonPath("$[0].value").value("08/09/2011"))
+                .andExpect(jsonPath("$[0].customAttributeId").value(480));
+
+        verify(service).findCustomData(3L);
+    }
+
+    @Test
+    void customDataPropagatesNotFoundAsAnHttp404() throws Exception {
+        when(service.findCustomData(999L))
+                .thenThrow(new NoSuchElementException("Award not found: 999"));
+
+        mockMvc.perform(get("/api/v1/awards/999/custom-data"))
                 .andExpect(status().isNotFound());
     }
 

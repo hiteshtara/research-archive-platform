@@ -516,6 +516,28 @@ export interface AwardTermsV1 {
   reportTerms: AwardReportTermV1[];
 }
 
+// archive.award_custom_data LEFT JOINed to the shared
+// archive.custom_attribute lookup - a separate Award section from
+// Terms, never merged. label/name/dataType/groupName are null when
+// the lookup has no matching row; value being null is a real,
+// persisted blank, distinct from the row simply not existing.
+export interface AwardCustomDataV1 {
+  awardCustomDataId: number;
+  awardId: number;
+  awardNumber: string | null;
+  sequenceNumber: number | null;
+  customAttributeId: number | null;
+  label: string | null;
+  name: string | null;
+  dataType: string | null;
+  groupName: string | null;
+  value: string | null;
+  sourceUpdateTimestamp: string | null;
+  sourceUpdateUser: string | null;
+  sourceVersionNumber: number | null;
+  sourceObjectId: string | null;
+}
+
 // One archived award_comment row - a specific Award version's comment,
 // with its workflow_document_number joined in. Appears both as a
 // category's "current" entry and as a member of its "history" list.

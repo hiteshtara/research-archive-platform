@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCentralAdministrationContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardCustomDataResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyResponse;
@@ -631,6 +632,25 @@ public class AwardV1Controller {
             long awardId
     ) {
         return ResponseEntity.ok(service.findTerms(awardId));
+    }
+
+    @Operation(
+            summary = "Get an Award's Custom Data",
+            description = "Keyed by the surrogate award_id - a separate "
+                    + "section from Terms, never merged. Each row is "
+                    + "LEFT JOINed to the shared archive.custom_attribute "
+                    + "lookup for a readable label; a row with no "
+                    + "matching lookup still comes back with a null "
+                    + "label rather than being dropped."
+    )
+    @ApiResponse(responseCode = "200", description = "The Award's custom data.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/custom-data")
+    public ResponseEntity<List<AwardCustomDataResponse>> customData(
+            @PathVariable
+            long awardId
+    ) {
+        return ResponseEntity.ok(service.findCustomData(awardId));
     }
 
     @Operation(
