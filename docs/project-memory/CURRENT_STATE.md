@@ -89,6 +89,52 @@ can change independently of this file.
 - **Conclusion: no Award Custom Data (or broader Award) load is required
   for this family.** What's missing is deploying `bb22466`'s API/UI code.
 
+## Verified Award/Proposal attachment loading facts (as of 2026-08-13)
+
+**These are point-in-time verified facts, not live values.** Re-verify
+via a read-only ECS diagnostic task before relying on them beyond
+historical context — both the active task's progress and dev RDS
+counts change continuously.
+
+- **Award attachments are complete**: `archive.attachment_object` shows
+  127,752 `UPLOADED` + 6 `MISSING_SOURCE_CONTENT` (structural — Oracle
+  has no blob for these 6 files) = 127,758/127,758, 0 real pending, 0
+  failed. S3 reconciliation clean (0 mismatches). All 103
+  `AWARD_ATTACHMENT`/`PHYSICAL_FILE` batches are `COMPLETED`.
+- **Proposal attachment processing is active**, not stalled — ECS task
+  `a315e91b4c364901b5db3d4e5a4403ca` (task-def
+  `research-archive-platform-dev-loader:192`, command
+  `attachment_orchestrator.py --ecs --modules award,proposal`), started
+  2026-08-12T15:04:44-04:00, still `RUNNING` and making fresh progress
+  (~2,000 files uploaded every ~6 minutes, 0 failed, S3 reconciliation
+  clean on every batch). `archive.proposal_attachment` had 165,177
+  `UPLOADED` / 240,602 `NOT_REQUESTED` / 405,779 total as of the
+  2026-08-13 investigation — the `NOT_REQUESTED` remainder is real
+  outstanding work this task is actively draining, not stale/missing
+  data.
+- **Do not launch a retry or a second loader/orchestrator task.** No
+  failed items exist in either domain (0 `FAILED` in
+  `attachment_object`/`proposal_attachment`), so there is nothing to
+  retry, and a second concurrent task would race the running one on the
+  same `archive.etl_batch`/`etl_batch_item`/`attachment_object`/
+  `proposal_attachment` rows.
+- **The 6,657 `archive.etl_batch_item` rows showing `PENDING` status for
+  the `AWARD_ATTACHMENT`/`PHYSICAL_FILE` domain are stale bookkeeping,
+  not real pending work** — cross-checked directly: every one of those
+  6,657 `entity_key` (file_id) values already shows `UPLOADED` in the
+  authoritative `archive.attachment_object.upload_status` column. They
+  belong to batch 65 (836 items) and batch 66 (5,821 items — the
+  external-file backfill, see below), both `COMPLETED` at the batch
+  level; only their individual item rows never got flipped from
+  `PENDING`. Don't treat non-`COMPLETED` `etl_batch_item` rows as proof
+  of outstanding work without cross-checking the domain's own
+  authoritative status column first.
+- The external-file backfill (`etl/backfill_external_attachment_file_data_id.py`,
+  task `9ea0174f811445b9bd04123df103f27b`, completed 2026-08-11) is a
+  completed sub-component of Award's overall completion, not a separate
+  unfinished job: 5,821 external files, 5,821 S3 objects verified, 0
+  missing, 0 size mismatches, 2,467,950,513 bytes (2.47 GB) transferred.
+
 ## Deployment architecture — verified 2026-08-13, not assumed
 
 `clean committed source → local Docker build → BU non-production ECR →
