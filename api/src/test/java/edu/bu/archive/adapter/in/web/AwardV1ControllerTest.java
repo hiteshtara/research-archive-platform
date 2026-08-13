@@ -177,6 +177,48 @@ class AwardV1ControllerTest {
     }
 
     @Test
+    void searchVersionsPassesQAndAwardNumberThroughTogetherUnchanged()
+            throws Exception {
+        // Real regression fixture: Award 200086-00001 (165 versions,
+        // current award_id 3047454) previously returned 0 results when
+        // the same value was supplied in both the general search box
+        // and the exact Award-number field - fixed at the repository
+        // layer only (AwardArchiveRepository's SQL). This test proves
+        // the controller/service wiring for passing both params through
+        // together is unaffected by that fix - same request shape, same
+        // response shape as every other route on this controller.
+        AwardVersionSearchResultResponse currentVersion =
+                new AwardVersionSearchResultResponse(
+                        3047454L, "200086-00001", 165, "879423",
+                        "Coulter Foundation Translational Partners in "
+                                + "Biomedical Engineering",
+                        "Closed", "Coulter Foundation", "PI NAME",
+                        "BIOMEDICAL ENGINEERING", null, null, true
+                );
+        when(service.searchVersions(
+                "200086-00001", "200086-00001", null, null,
+                "all", "sequence", 0, 25
+        )).thenReturn(new PageResponse<>(
+                List.of(currentVersion), 0, 25, 165L, 7, true, false
+        ));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/versions/search")
+                                .param("q", "200086-00001")
+                                .param("awardNumber", "200086-00001")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].awardId").value(3047454))
+                .andExpect(jsonPath("$.content[0].awardNumber").value("200086-00001"))
+                .andExpect(jsonPath("$.totalElements").value(165));
+
+        verify(service).searchVersions(
+                "200086-00001", "200086-00001", null, null,
+                "all", "sequence", 0, 25
+        );
+    }
+
+    @Test
     void searchVersionsDefaultsFiltersAndSortWhenOmitted() throws Exception {
         when(service.searchVersions(null, null, null, null, "all", "sequence", 0, 25))
                 .thenReturn(new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true));

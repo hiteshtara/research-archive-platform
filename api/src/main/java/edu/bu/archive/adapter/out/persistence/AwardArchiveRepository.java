@@ -964,6 +964,18 @@ public class AwardArchiveRepository {
      * the same statement). Since award_id is the primary key, an exact
      * match returns at most one row - a real, but unknown, id
      * correctly returns zero rows (an empty page), never an error.
+     *
+     * rawQuery's own OR-chain also matches award_number/
+     * workflow_document_number (mirroring searchAwards' already-correct
+     * pattern) - previously it only matched title/sponsor/lead_unit/PI
+     * name, so a real award_number typed into the general search box
+     * (alone, or alongside the already-correct exact awardNumber/
+     * documentNumber field with the same value) always evaluated false
+     * and silently zeroed out an otherwise-exact match, since every
+     * filter group here is ANDed together by design. This does not
+     * relax awardNumber/documentNumber's own exact-match semantics
+     * above - those two sentinels are unchanged; this only widens what
+     * counts as a *free-text* hit.
      */
     public List<AwardVersionSearchResultResponse> searchAwardVersions(
             String pattern,
@@ -1010,6 +1022,8 @@ public class AwardArchiveRepository {
                   AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
                   AND (
                         :rawQuery = ''
+                        OR av.award_number ILIKE :pattern
+                        OR av.workflow_document_number ILIKE :pattern
                         OR av.title ILIKE :pattern
                         OR av.sponsor_name ILIKE :pattern
                         OR av.lead_unit_name ILIKE :pattern
@@ -1055,6 +1069,8 @@ public class AwardArchiveRepository {
                   AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
                   AND (
                         :rawQuery = ''
+                        OR av.award_number ILIKE :pattern
+                        OR av.workflow_document_number ILIKE :pattern
                         OR av.title ILIKE :pattern
                         OR av.sponsor_name ILIKE :pattern
                         OR av.lead_unit_name ILIKE :pattern

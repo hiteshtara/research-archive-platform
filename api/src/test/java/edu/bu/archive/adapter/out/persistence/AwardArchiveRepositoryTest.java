@@ -539,6 +539,269 @@ class AwardArchiveRepositoryTest {
                 .doesNotContain("WHERE av.is_primary_current = TRUE");
     }
 
+    // --- searchAwardVersions/countSearchAwardVersions: general search
+    // also matches award_number/workflow_document_number ------------------
+    //
+    // Fixture below is the real, live-verified regression case: Award
+    // 200086-00001 (165 versions, current award_id 3047454, document
+    // 879423) reported 0 results with the general search box alone, and
+    // 0 results with the same value in both the general box and the
+    // exact Award-number field, even though the Award genuinely exists
+    // and the exact-match filter alone correctly returns all 165 rows -
+    // confirmed live via a read-only ECS diagnostic against dev RDS
+    // before this fix, and will be reconfirmed the same way after
+    // deployment. These tests assert only the SQL shape this JdbcClient-
+    // mock tier can verify; the literal row counts were and will be
+    // proven against real Postgres data outside this test suite.
+
+    @Test
+    void searchAwardVersionsGeneralSearchMatchesExactAwardNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%200086-00001%", "200086-00001", "", "", null, "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("av.award_number ILIKE :pattern");
+        verify(statement).param("pattern", "%200086-00001%");
+        verify(statement).param("rawQuery", "200086-00001");
+    }
+
+    @Test
+    void searchAwardVersionsGeneralSearchMatchesPartialAwardNumberViaIlike() {
+        // The pattern itself (a substring wrapped in '%...%') is built by
+        // AwardSearchPattern before reaching the repository - this test
+        // only proves the repository's own SQL uses ILIKE (substring-
+        // capable), not equality, for award_number in the free-text
+        // clause, so a partial pattern like "%200086%" is structurally
+        // able to match "200086-00001" through this same predicate.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%200086%", "200086", "", "", null, "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("av.award_number ILIKE :pattern")
+                .doesNotContain("av.award_number = :pattern");
+        verify(statement).param("pattern", "%200086%");
+    }
+
+    @Test
+    void searchAwardVersionsGeneralSearchMatchesDocumentNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%879423%", "879423", "", "", null, "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("av.workflow_document_number ILIKE :pattern");
+        verify(statement).param("pattern", "%879423%");
+    }
+
+    @Test
+    void searchAwardVersionsSameValueInGeneralSearchAndExactAwardNumberBothContributeToTheMatch() {
+        // The regression itself: awardNumber's own exact-match clause
+        // and rawQuery's free-text OR-chain must both be present and
+        // both able to independently satisfy their own AND-branch when
+        // populated with the identical value - proving the fix doesn't
+        // special-case "same value in both fields" by dropping either
+        // clause, only widens what the free-text clause itself can match.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%200086-00001%", "200086-00001", "200086-00001", "", null,
+                "all", "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("UPPER(av.award_number) = UPPER(:awardNumber)")
+                .contains("av.award_number ILIKE :pattern");
+        verify(statement).param("awardNumber", "200086-00001");
+        verify(statement).param("rawQuery", "200086-00001");
+        verify(statement).param("pattern", "%200086-00001%");
+    }
+
+    @Test
+    void searchAwardVersionsSameValueInGeneralSearchAndExactDocumentNumberBothContributeToTheMatch() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%879423%", "879423", "", "879423", null,
+                "all", "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("UPPER(av.workflow_document_number) = UPPER(:documentNumber)")
+                .contains("av.workflow_document_number ILIKE :pattern");
+        verify(statement).param("documentNumber", "879423");
+        verify(statement).param("rawQuery", "879423");
+    }
+
+    @Test
+    void searchAwardVersionsUnrelatedGeneralSearchStillAndsWithExactFilterNotOr() {
+        // An unrelated rawQuery combined with a valid exact filter must
+        // remain a true negative - the fix widens what the free-text
+        // clause can match, it never changes the top-level AND relating
+        // the free-text clause to the exact-match clauses into an OR.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%completely-unrelated-text%", "completely-unrelated-text",
+                "200086-00001", "", null, "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        String sql = firstSql(jdbc);
+        int exactClauseIndex = sql.indexOf(
+                "UPPER(av.award_number) = UPPER(:awardNumber)"
+        );
+        int freeTextClauseIndex = sql.indexOf(":rawQuery = ''");
+        int andBetween = sql.indexOf("AND", exactClauseIndex);
+
+        assertThat(exactClauseIndex).isGreaterThan(-1);
+        assertThat(freeTextClauseIndex).isGreaterThan(-1);
+        // The AND joining the awardNumber sentinel to the next filter
+        // group appears before the free-text group starts - i.e. the two
+        // clauses are still ANDed, not OR-ed, regardless of the values
+        // bound to them.
+        assertThat(andBetween).isGreaterThan(-1).isLessThan(freeTextClauseIndex);
+        assertThat(sql).doesNotContain(
+                "UPPER(av.award_number) = UPPER(:awardNumber) OR"
+        );
+    }
+
+    @Test
+    void countSearchAwardVersionsAppliesTheSameGeneralSearchColumnsAsSearch() {
+        // Count and list queries must never drift apart - both need the
+        // exact same award_number/workflow_document_number ILIKE
+        // predicates added by this fix, or pagination totals would
+        // disagree with the actual result set.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(165L);
+
+        long total = new AwardArchiveRepository(jdbc).countSearchAwardVersions(
+                "%200086-00001%", "200086-00001", "", "", null, "all"
+        );
+
+        assertThat(total).isEqualTo(165L);
+        assertThat(firstSql(jdbc))
+                .contains("av.award_number ILIKE :pattern")
+                .contains("av.workflow_document_number ILIKE :pattern");
+    }
+
+    @Test
+    void searchAwardVersionsExistingFreeTextColumnsStillPresent() {
+        // Regression guard: title/sponsor/lead-unit/PI-name matching
+        // (already correct before this fix) must survive unchanged
+        // alongside the two new columns.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardVersionSearchResultResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardVersionSearchResultResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardVersions(
+                "%cancer%", "cancer", "", "", null, "all",
+                "ORDER BY av.sequence_number DESC\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("av.title ILIKE :pattern")
+                .contains("av.sponsor_name ILIKE :pattern")
+                .contains("av.lead_unit_name ILIKE :pattern")
+                .contains("ap2.full_name ILIKE :pattern");
+    }
+
     @Test
     void findSummaryByAwardIdIsNeverScopedToPrimaryCurrentAndExposesIt() {
         // Historical version support depends entirely on this endpoint
