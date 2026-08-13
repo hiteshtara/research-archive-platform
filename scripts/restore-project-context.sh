@@ -20,8 +20,15 @@
 # --aws: verifies AWS identity (expects account 770203350335) and
 #   inspects the ECS ETL cluster/loader task definition/recent tasks/log
 #   group - describe/list calls only, never a write API, never a secret
-#   value. If credentials are expired, reports that `buaws` is needed and
-#   continues with the offline report.
+#   value. Every AWS call explicitly passes `--profile bu-nprd --region
+#   us-east-1` - this script NEVER relies on ambient default credentials
+#   (a bare `aws` call can silently resolve to whatever account happens
+#   to be the default, which has been a real personal AWS account before,
+#   not the BU dev account). If the `bu-nprd` profile isn't configured or
+#   its credentials are expired, reports that `buaws` is needed and
+#   continues with the offline report only. If the resolved account is
+#   not 770203350335, AWS verification stops immediately (no ECS/task
+#   calls) and the offline report still completes.
 #
 # --oracle: locates the existing Keychain-backed staging runner under
 #   ~/projects/bu-huron-data-exchange/scripts and runs only its --test
@@ -258,68 +265,109 @@ else
 fi
 
 # --- Optional: AWS verification ------------------------------------------
+#
+# Every real AWS call in this section goes through aws_bu(), which always
+# passes --profile "$AWS_PROFILE_NAME" --region "$AWS_REGION_NAME"
+# explicitly - never a bare `aws` call relying on whatever the ambient
+# default credential chain happens to resolve to. Wrapped in a function
+# (not an inline if-block) specifically so account-mismatch can `return`
+# immediately and skip every subsequent ECS/task call, rather than just
+# printing a warning and continuing anyway.
+
+readonly AWS_PROFILE_NAME="bu-nprd"
+readonly AWS_REGION_NAME="us-east-1"
+readonly EXPECTED_AWS_ACCOUNT="770203350335"
+
+aws_bu() {
+  aws --profile "$AWS_PROFILE_NAME" --region "$AWS_REGION_NAME" "$@"
+}
+
+run_aws_verification() {
+  if ! have aws; then
+    warn_missing "aws CLI"
+    return 0
+  fi
+
+  # Refuse to proceed at all if the named profile isn't even configured -
+  # never let a subsequent bare/misconfigured call silently fall through
+  # to the AWS CLI's own default-credential-chain behavior.
+  if ! aws configure list-profiles 2>/dev/null | grep -qx "$AWS_PROFILE_NAME"; then
+    echo "AWS profile \`$AWS_PROFILE_NAME\` is not configured on this Mac."
+    echo "Run \`buaws\` to set it up, then re-run with \`--aws\`. Continuing"
+    echo "with the offline report only (nothing below this point could be"
+    echo "verified live)."
+    return 0
+  fi
+
+  local identity_json=""
+  if ! identity_json="$(aws_bu sts get-caller-identity --output json 2>&1)"; then
+    echo "AWS credentials for profile \`$AWS_PROFILE_NAME\` are missing or"
+    echo "expired. Run \`buaws\` to refresh, then re-run with \`--aws\`."
+    echo "Continuing with the offline report only (nothing below this point"
+    echo "could be verified live)."
+    return 0
+  fi
+
+  local account="unknown" caller_arn="unknown"
+  if have python3; then
+    account="$(echo "$identity_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Account","unknown"))' 2>/dev/null || echo unknown)"
+    caller_arn="$(echo "$identity_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Arn","unknown"))' 2>/dev/null || echo unknown)"
+  else
+    warn_missing "python3 (cannot parse identity JSON)"
+  fi
+
+  echo "- AWS profile: \`$AWS_PROFILE_NAME\` (region \`$AWS_REGION_NAME\`)"
+  echo "- AWS account: \`$account\` (expected \`$EXPECTED_AWS_ACCOUNT\`)"
+  echo "- Caller ARN: \`$caller_arn\`"
+
+  if [[ "$account" != "$EXPECTED_AWS_ACCOUNT" ]]; then
+    echo
+    echo "**STOPPING AWS verification here: the \`$AWS_PROFILE_NAME\` profile"
+    echo "resolved account \`$account\`, not the expected BU dev account"
+    echo "\`$EXPECTED_AWS_ACCOUNT\`. No further AWS calls will be made this"
+    echo "run.** Re-run \`buaws\` and confirm the \`$AWS_PROFILE_NAME\` profile"
+    echo "itself is correctly configured before retrying."
+    return 0
+  fi
+
+  subsection "ECS ETL cluster"
+  aws_bu ecs describe-clusters \
+    --clusters research-archive-platform-dev-etl \
+    --query 'clusters[0].{status:status,runningTasks:runningTasksCount,activeServices:activeServicesCount}' \
+    --output json 2>/dev/null || echo "_could not describe cluster_"
+
+  subsection "Latest loader task definition"
+  # --max-items triggers CLI pagination, which appends a NextToken
+  # line (literally "None" when there isn't one) even in --output
+  # text mode - take only the first line.
+  local latest_taskdef
+  latest_taskdef="$(aws_bu ecs list-task-definitions \
+    --family-prefix research-archive-platform-dev-loader \
+    --sort DESC --max-items 1 \
+    --query 'taskDefinitionArns[0]' --output text 2>/dev/null | head -1 || true)"
+  if [[ -n "$latest_taskdef" && "$latest_taskdef" != "None" ]]; then
+    echo "- ARN: \`$latest_taskdef\`"
+    aws_bu ecs describe-task-definition \
+      --task-definition "$latest_taskdef" \
+      --query 'taskDefinition.containerDefinitions[0].{image:image,logGroup:logConfiguration.options."awslogs-group"}' \
+      --output json 2>/dev/null || echo "_could not describe task definition_"
+  else
+    echo "_could not resolve latest task definition_"
+  fi
+
+  subsection "Recent tasks"
+  echo "Running:"
+  aws_bu ecs list-tasks --cluster research-archive-platform-dev-etl \
+    --query 'taskArns' --output json 2>/dev/null || echo "_could not list running tasks_"
+  echo "Recently stopped (up to 5):"
+  aws_bu ecs list-tasks --cluster research-archive-platform-dev-etl \
+    --desired-status STOPPED --max-items 5 \
+    --query 'taskArns' --output json 2>/dev/null || echo "_could not list stopped tasks_"
+}
 
 if $MODE_AWS; then
   section "AWS verification (--aws) — read-only, describe/list calls only"
-
-  if ! have aws; then
-    warn_missing "aws CLI"
-  else
-    IDENTITY_JSON=""
-    if ! IDENTITY_JSON="$(aws sts get-caller-identity --output json 2>&1)"; then
-      echo "AWS credentials are missing or expired. Run \`buaws\` to refresh,"
-      echo "then re-run with \`--aws\`. Continuing with the offline report only"
-      echo "(nothing below this point could be verified live)."
-    else
-      if have python3; then
-        ACCOUNT="$(echo "$IDENTITY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Account","unknown"))' 2>/dev/null || echo unknown)"
-        CALLER_ARN="$(echo "$IDENTITY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Arn","unknown"))' 2>/dev/null || echo unknown)"
-      else
-        ACCOUNT="unknown"
-        CALLER_ARN="unknown"
-        warn_missing "python3 (cannot parse identity JSON)"
-      fi
-      echo "- AWS account: \`$ACCOUNT\` (expected \`770203350335\`)"
-      if [[ "$ACCOUNT" != "770203350335" && "$ACCOUNT" != "unknown" ]]; then
-        echo "  **WARNING: this is not the expected BU dev account. Stop and"
-        echo "  verify \`AWS_PROFILE\` before doing anything else with AWS.**"
-      fi
-      echo "- Caller ARN: \`$CALLER_ARN\`"
-
-      subsection "ECS ETL cluster"
-      aws ecs describe-clusters \
-        --clusters research-archive-platform-dev-etl \
-        --query 'clusters[0].{status:status,runningTasks:runningTasksCount,activeServices:activeServicesCount}' \
-        --output json 2>/dev/null || echo "_could not describe cluster_"
-
-      subsection "Latest loader task definition"
-      # --max-items triggers CLI pagination, which appends a NextToken
-      # line (literally "None" when there isn't one) even in --output
-      # text mode - take only the first line.
-      LATEST_TASKDEF="$(aws ecs list-task-definitions \
-        --family-prefix research-archive-platform-dev-loader \
-        --sort DESC --max-items 1 \
-        --query 'taskDefinitionArns[0]' --output text 2>/dev/null | head -1 || true)"
-      if [[ -n "$LATEST_TASKDEF" && "$LATEST_TASKDEF" != "None" ]]; then
-        echo "- ARN: \`$LATEST_TASKDEF\`"
-        aws ecs describe-task-definition \
-          --task-definition "$LATEST_TASKDEF" \
-          --query 'taskDefinition.containerDefinitions[0].{image:image,logGroup:logConfiguration.options."awslogs-group"}' \
-          --output json 2>/dev/null || echo "_could not describe task definition_"
-      else
-        echo "_could not resolve latest task definition_"
-      fi
-
-      subsection "Recent tasks"
-      echo "Running:"
-      aws ecs list-tasks --cluster research-archive-platform-dev-etl \
-        --query 'taskArns' --output json 2>/dev/null || echo "_could not list running tasks_"
-      echo "Recently stopped (up to 5):"
-      aws ecs list-tasks --cluster research-archive-platform-dev-etl \
-        --desired-status STOPPED --max-items 5 \
-        --query 'taskArns' --output json 2>/dev/null || echo "_could not list stopped tasks_"
-    fi
-  fi
+  run_aws_verification
 fi
 
 # --- Optional: Oracle verification ---------------------------------------

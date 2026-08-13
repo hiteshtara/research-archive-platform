@@ -58,17 +58,55 @@ assert_contains "offline mode still shows project identity" "$OFFLINE_OUTPUT" "#
 
 # --- Test 2: --aws invokes only allowlisted read-only AWS commands ------
 
-FAKE_AWS_DIR="$TMP_TEST_DIR/fake-aws-bin"
-mkdir -p "$FAKE_AWS_DIR"
-AWS_CALL_LOG="$TMP_TEST_DIR/aws-calls.log"
-: > "$AWS_CALL_LOG"
-
-cat > "$FAKE_AWS_DIR/aws" <<FAKE_AWS_EOF
+# write_fake_aws DIR CALL_LOG: writes a parameterized fake `aws` binary
+# to DIR/aws, logging every full argv line to CALL_LOG. Every real call
+# this script makes (except `aws configure list-profiles`, which takes
+# no --profile/--region - it's how the profile's existence is discovered
+# in the first place) is expected to arrive as
+# `--profile bu-nprd --region us-east-1 <subcommand> ...` - the fake
+# strips exactly that fixed 4-token prefix before matching, so tests
+# assert against the real subcommand rather than hand-parsing the whole
+# argv each time. Behavior is controlled by env vars read at call time:
+#   FAKE_AWS_PROFILES        space-separated profiles `configure
+#                             list-profiles` should report (default: bu-nprd)
+#   FAKE_AWS_IDENTITY_EXIT   exit code for sts get-caller-identity (default: 0)
+#   FAKE_AWS_ACCOUNT         Account value in the identity JSON (default: 770203350335)
+write_fake_aws() {
+  local dir="$1" call_log="$2"
+  mkdir -p "$dir"
+  : > "$call_log"
+  cat > "$dir/aws" <<FAKE_AWS_EOF
 #!/usr/bin/env bash
-echo "\$*" >> "$AWS_CALL_LOG"
-case "\$1 \$2" in
+echo "\$*" >> "$call_log"
+
+profiles="\${FAKE_AWS_PROFILES:-bu-nprd}"
+identity_exit="\${FAKE_AWS_IDENTITY_EXIT:-0}"
+account="\${FAKE_AWS_ACCOUNT:-770203350335}"
+
+args=("\$@")
+if [[ "\${args[0]:-}" == "configure" && "\${args[1]:-}" == "list-profiles" ]]; then
+  for p in \$profiles; do echo "\$p"; done
+  exit 0
+fi
+
+# Every other allowed call must arrive with the fixed 4-token
+# --profile bu-nprd --region us-east-1 prefix - anything else (a bare
+# call, a different profile/region, or a call this script shouldn't be
+# making at all) is rejected outright, the same way a real misconfigured
+# or malicious call would be caught.
+if [[ "\${args[0]:-}" != "--profile" || "\${args[1]:-}" != "bu-nprd" \\
+      || "\${args[2]:-}" != "--region" || "\${args[3]:-}" != "us-east-1" ]]; then
+  echo "FAKE AWS: call missing the required --profile bu-nprd --region us-east-1 prefix: \$*" >&2
+  exit 1
+fi
+
+case "\${args[4]:-} \${args[5]:-}" in
   "sts get-caller-identity")
-    echo '{"Account":"770203350335","Arn":"arn:aws:sts::770203350335:assumed-role/fake/test"}'
+    if [[ "\$identity_exit" != "0" ]]; then
+      echo "An error occurred (ExpiredToken) when calling the GetCallerIdentity operation" >&2
+      exit "\$identity_exit"
+    fi
+    echo "{\\"Account\\":\\"\$account\\",\\"Arn\\":\\"arn:aws:sts::\$account:assumed-role/fake/test\\"}"
     ;;
   "ecs describe-clusters")
     echo '{"status":"ACTIVE","runningTasks":0,"activeServices":0}'
@@ -89,7 +127,12 @@ case "\$1 \$2" in
     ;;
 esac
 FAKE_AWS_EOF
-chmod +x "$FAKE_AWS_DIR/aws"
+  chmod +x "$dir/aws"
+}
+
+FAKE_AWS_DIR="$TMP_TEST_DIR/fake-aws-bin"
+AWS_CALL_LOG="$TMP_TEST_DIR/aws-calls.log"
+write_fake_aws "$FAKE_AWS_DIR" "$AWS_CALL_LOG"
 
 AWS_OUTPUT="$(PATH="$FAKE_AWS_DIR:/usr/bin:/bin" "$TARGET" --aws 2>&1)"
 AWS_EXIT=$?
@@ -100,7 +143,13 @@ DISALLOWED_FOUND="no"
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   case "$line" in
-    "sts get-caller-identity"*|"ecs describe-clusters"*|"ecs list-task-definitions"*|"ecs describe-task-definition"*|"ecs list-tasks"*)
+    "configure list-profiles"*)
+      ;;
+    "--profile bu-nprd --region us-east-1 sts get-caller-identity"*| \
+    "--profile bu-nprd --region us-east-1 ecs describe-clusters"*| \
+    "--profile bu-nprd --region us-east-1 ecs list-task-definitions"*| \
+    "--profile bu-nprd --region us-east-1 ecs describe-task-definition"*| \
+    "--profile bu-nprd --region us-east-1 ecs list-tasks"*)
       ;;
     *)
       DISALLOWED_FOUND="yes: $line"
@@ -113,6 +162,125 @@ assert_not_contains "--aws mode never calls run-task" "$(cat "$AWS_CALL_LOG")" "
 assert_not_contains "--aws mode never calls register-task-definition" "$(cat "$AWS_CALL_LOG")" "register-task-definition"
 assert_not_contains "--aws mode never calls secretsmanager" "$(cat "$AWS_CALL_LOG")" "secretsmanager"
 assert_not_contains "--aws mode never calls update-service" "$(cat "$AWS_CALL_LOG")" "update-service"
+
+# --- Test 2b: every single AWS call carries the correct profile/region --
+
+EVERY_CALL_HAS_PROFILE="yes"
+CALL_COUNT=0
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  CALL_COUNT=$((CALL_COUNT + 1))
+  case "$line" in
+    "configure list-profiles"*)
+      # The one legitimate exception - discovering whether the profile
+      # exists at all necessarily happens before it can be passed.
+      ;;
+    "--profile bu-nprd --region us-east-1 "*)
+      ;;
+    *)
+      EVERY_CALL_HAS_PROFILE="no: $line"
+      ;;
+  esac
+done < "$AWS_CALL_LOG"
+assert_eq "every non-discovery AWS call carries --profile bu-nprd --region us-east-1" "yes" "$EVERY_CALL_HAS_PROFILE"
+if [[ "$CALL_COUNT" -lt 2 ]]; then
+  echo "FAIL: sanity check - expected multiple AWS calls in the log, got $CALL_COUNT" >&2
+  FAILURES=$((FAILURES + 1))
+fi
+
+# --- Test 2c: default/personal credentials are never used ---------------
+#
+# A bare `aws` call (no --profile at all) would silently fall through to
+# the ambient default credential chain - exactly the bug being fixed.
+# The fake `aws` above already rejects any call missing the exact
+# --profile bu-nprd --region us-east-1 prefix (other than the profile-
+# discovery call), so a passing Test 2/2b run already proves this - this
+# test additionally asserts no call is missing --profile outright, using
+# a fake that would happily succeed for a bare call so a regression
+# can't hide behind the strict fake's own rejection above.
+LENIENT_AWS_DIR="$TMP_TEST_DIR/fake-aws-lenient-bin"
+LENIENT_CALL_LOG="$TMP_TEST_DIR/aws-calls-lenient.log"
+mkdir -p "$LENIENT_AWS_DIR"
+: > "$LENIENT_CALL_LOG"
+cat > "$LENIENT_AWS_DIR/aws" <<LENIENT_AWS_EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$LENIENT_CALL_LOG"
+case "\$*" in
+  *"configure list-profiles"*) echo "bu-nprd" ;;
+  *"sts get-caller-identity"*) echo '{"Account":"770203350335","Arn":"arn:test"}' ;;
+  *"ecs describe-clusters"*) echo '{"status":"ACTIVE"}' ;;
+  *"ecs list-task-definitions"*) echo "arn:test"; echo "None" ;;
+  *"ecs describe-task-definition"*) echo '{}' ;;
+  *"ecs list-tasks"*) echo '[]' ;;
+  *) exit 1 ;;
+esac
+LENIENT_AWS_EOF
+chmod +x "$LENIENT_AWS_DIR/aws"
+
+PATH="$LENIENT_AWS_DIR:/usr/bin:/bin" "$TARGET" --aws >/dev/null 2>&1 || true
+
+NO_BARE_CALL_FOUND="yes"
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  case "$line" in
+    "configure list-profiles"*) ;;
+    "--profile bu-nprd --region us-east-1 "*) ;;
+    *) NO_BARE_CALL_FOUND="no: found a call without the profile/region prefix: $line" ;;
+  esac
+done < "$LENIENT_CALL_LOG"
+assert_eq "no AWS call is ever made without --profile bu-nprd --region us-east-1 (default credentials never used)" "yes" "$NO_BARE_CALL_FOUND"
+
+# --- Test 2d: account mismatch stops further AWS inspection -------------
+
+MISMATCH_AWS_DIR="$TMP_TEST_DIR/fake-aws-mismatch-bin"
+MISMATCH_CALL_LOG="$TMP_TEST_DIR/aws-calls-mismatch.log"
+write_fake_aws "$MISMATCH_AWS_DIR" "$MISMATCH_CALL_LOG"
+
+MISMATCH_OUTPUT="$(FAKE_AWS_ACCOUNT="589744711110" PATH="$MISMATCH_AWS_DIR:/usr/bin:/bin" "$TARGET" --aws 2>&1)"
+MISMATCH_EXIT=$?
+assert_eq "account mismatch still exits 0 (report completes)" "0" "$MISMATCH_EXIT"
+assert_contains "account mismatch reports the wrong resolved account" "$MISMATCH_OUTPUT" "589744711110"
+assert_contains "account mismatch explicitly says AWS verification stopped" "$MISMATCH_OUTPUT" "STOPPING AWS verification"
+assert_contains "account mismatch report still reaches the end" "$MISMATCH_OUTPUT" "End of report."
+
+MISMATCH_CALLS="$(cat "$MISMATCH_CALL_LOG")"
+assert_contains "account mismatch still calls sts get-caller-identity" "$MISMATCH_CALLS" "sts get-caller-identity"
+assert_not_contains "account mismatch never calls ecs describe-clusters" "$MISMATCH_CALLS" "ecs describe-clusters"
+assert_not_contains "account mismatch never calls ecs list-task-definitions" "$MISMATCH_CALLS" "ecs list-task-definitions"
+assert_not_contains "account mismatch never calls ecs list-tasks" "$MISMATCH_CALLS" "ecs list-tasks"
+
+# --- Test 2e: expired/missing credentials produce a clear buaws warning -
+
+EXPIRED_AWS_DIR="$TMP_TEST_DIR/fake-aws-expired-bin"
+EXPIRED_CALL_LOG="$TMP_TEST_DIR/aws-calls-expired.log"
+write_fake_aws "$EXPIRED_AWS_DIR" "$EXPIRED_CALL_LOG"
+
+EXPIRED_OUTPUT="$(FAKE_AWS_IDENTITY_EXIT="254" PATH="$EXPIRED_AWS_DIR:/usr/bin:/bin" "$TARGET" --aws 2>&1)"
+EXPIRED_EXIT=$?
+assert_eq "expired credentials still exits 0 (report completes)" "0" "$EXPIRED_EXIT"
+assert_contains "expired credentials tell the user to run buaws" "$EXPIRED_OUTPUT" "buaws"
+assert_contains "expired credentials explicitly mention expired/missing" "$EXPIRED_OUTPUT" "expired"
+assert_contains "expired credentials report still reaches the end" "$EXPIRED_OUTPUT" "End of report."
+
+EXPIRED_CALLS="$(cat "$EXPIRED_CALL_LOG")"
+assert_not_contains "expired credentials never reach ecs describe-clusters" "$EXPIRED_CALLS" "ecs describe-clusters"
+
+# --- Test 2f: missing bu-nprd profile also produces a clear buaws warning
+
+NOPROFILE_AWS_DIR="$TMP_TEST_DIR/fake-aws-noprofile-bin"
+NOPROFILE_CALL_LOG="$TMP_TEST_DIR/aws-calls-noprofile.log"
+write_fake_aws "$NOPROFILE_AWS_DIR" "$NOPROFILE_CALL_LOG"
+
+NOPROFILE_OUTPUT="$(FAKE_AWS_PROFILES="default some-other-profile" PATH="$NOPROFILE_AWS_DIR:/usr/bin:/bin" "$TARGET" --aws 2>&1)"
+NOPROFILE_EXIT=$?
+assert_eq "missing bu-nprd profile still exits 0 (report completes)" "0" "$NOPROFILE_EXIT"
+assert_contains "missing bu-nprd profile tells the user to run buaws" "$NOPROFILE_OUTPUT" "buaws"
+assert_contains "missing bu-nprd profile names the profile explicitly" "$NOPROFILE_OUTPUT" "bu-nprd"
+assert_contains "missing bu-nprd profile report still reaches the end" "$NOPROFILE_OUTPUT" "End of report."
+
+NOPROFILE_CALLS="$(cat "$NOPROFILE_CALL_LOG")"
+assert_not_contains "missing bu-nprd profile never calls sts get-caller-identity" "$NOPROFILE_CALLS" "sts get-caller-identity"
+assert_not_contains "missing bu-nprd profile never calls ecs describe-clusters" "$NOPROFILE_CALLS" "ecs describe-clusters"
 
 # --- Test 3: --oracle invokes only the staging runner's --test ----------
 
