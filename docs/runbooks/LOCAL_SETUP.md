@@ -28,6 +28,24 @@ either of those, the tunnel is not targeting BU's environment.
 
 Leave this terminal running once the tunnel is up.
 
+**If no bastion exists, this tunnel is simply unavailable - that does
+NOT mean dev RDS is unreachable.** ECS Fargate tasks (cluster
+`research-archive-platform-dev-etl`, task family
+`research-archive-platform-dev-loader`) already run inside the same VPC
+as RDS with a direct security-group rule, and reach it via
+`POSTGRES_SECRET_ID` without any tunnel at all - see
+`docs/runbooks/UNATTENDED_FARGATE_ETL_LOADS.md` and `CLAUDE.md`'s
+"Authoritative data location" section for the ECS route (`scripts/run-award-loader.sh`,
+etc.), which is the correct fallback for database investigation/one-off
+ETL work when this tunnel can't be opened. Never provision a bastion or
+substitute personal infrastructure to work around this.
+
+Local Homebrew Postgres (started by `scripts/run-local.sh`) is **not**
+the authoritative dev database and can be silently stale relative to RDS
+- do not use it to validate deployed data, reconciliation counts, or
+ETL completeness. It's for local unit/integration testing only, and
+results from it must be labeled as local test data.
+
 -------------------------------------------------------------------------------
 
 ## 3. Environment

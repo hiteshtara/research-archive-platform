@@ -69,6 +69,69 @@ run config committed to this repo). `application-local.yml` is what makes AI
 features work locally with the deterministic stub provider and disables Cognito
 auth in favor of permit-all (`app.security.enabled=false`).
 
+## Authoritative data location: AWS RDS, not local Postgres
+
+The dev **PostgreSQL** database of record is AWS RDS
+(`research-archive-platform-dev-postgres...rds.amazonaws.com`, Terraform
+output `database_endpoint`), inside this project's own VPC
+(`vpc-0590614d7cfcdedf6`). `scripts/run-local.sh`'s Homebrew Postgres is a
+disposable local copy for local dev/testing only — **never use it to
+validate deployed data, ETL completeness, reconciliation counts, or
+"is this loaded" questions**; it can silently be a stale snapshot from a
+much earlier point in time than dev RDS (verified 2026-08-13: local was
+still at schema migration V053 and a 2026-08-01 Award snapshot, while dev
+RDS had since been repopulated from Oracle staging on 2026-08-12 — see
+`docs/runbooks/UNATTENDED_FARGATE_ETL_LOADS.md`). If local Postgres is used
+for something (isolated unit/integration testing only), label results
+explicitly as local test data, never as dev/production state.
+
+**The established path for Research Archive database investigation and
+one-off ETL execution is an ECS Fargate task, not a local SSM tunnel.**
+Cluster `research-archive-platform-dev-etl`, task family
+`research-archive-platform-dev-loader`, logs at
+`/ecs/research-archive-platform-dev-loader`. The cluster runs no
+persistent service (`activeServicesCount: 0`) and no EC2 instances exist in
+its VPC — every task is a one-off `run-task` launch, typically via
+`scripts/run-award-loader.sh` (Award) / `scripts/run-award-attachment-loader.sh`
+(attachments), which build the `containerOverrides` command via
+`etl/scripts/build_award_ecs_overrides.py` and never touch Terraform-managed
+state. The task receives Postgres/Oracle connectivity via
+`POSTGRES_SECRET_ID`/`ORACLE_SECRET_ID` (Secrets Manager ARNs, resolved to
+real credentials only inside the running container — never a plaintext
+`ORACLE_PASSWORD`/`POSTGRES_PASSWORD` env var). RDS lives in the same VPC as
+the loader (`module "rds" { vpc_id = module.vpc.vpc_id }` in
+`terraform/environments/dev/main.tf`) with a direct security-group rule, so
+it needs no VPC peering; Oracle staging is reached via the peering
+connection documented in `docs/ORACLE_STAGING_CONNECTIVITY.md`. CloudWatch
+already has real historical evidence of successful `--load-award-id`
+(including `--dry-run`) runs from this exact path (e.g. `run_id
+0ed7001c-...`, 2026-08-03, dry-run, and multiple real committed runs
+2026-08-04/05) — this is a proven, working route, not a novel one.
+
+**A missing local bastion blocks only `scripts/start-db-tunnel.sh` (the
+Mac-to-RDS SSM tunnel) — it says nothing about whether RDS is reachable
+from ECS,** which is a separate, already-working network path. Never
+provision a bastion/EC2 instance, substitute personal infrastructure, or
+change networking/security-group configuration to work around this without
+explicit approval — treat it as a hard stop, not something to route around.
+
+**Oracle** (staging by default; production only with explicit
+authorization) is queried read-only from a BU-VPN-connected local Mac using
+the Keychain-backed runners in the separate sibling project
+`~/projects/bu-huron-data-exchange/scripts/` (`kc_staging_query.py` /
+`kc_prod_readonly_query.py` — not part of this repo). Credentials come from
+macOS Keychain (service `bu-kuali-stg`, account `KCOEUS` for staging) —
+never display, log, copy, commit, or request an Oracle password in chat.
+
+Before ever reporting Oracle, AWS, RDS, or another BU resource as
+inaccessible: verify you're on the actual local Mac (not an assumed
+sandbox), check this section and `docs/runbooks/LOCAL_SETUP.md` for the
+documented path, verify AWS identity (`aws sts get-caller-identity`,
+expect account `770203350335`), inspect the real ECS task
+definitions/CloudWatch logs, and distinguish "the local tunnel is
+unavailable" from "ECS cannot reach it either" before concluding anything
+is actually blocked.
+
 ## Architecture
 
 ### Data flow and the read-only boundary
