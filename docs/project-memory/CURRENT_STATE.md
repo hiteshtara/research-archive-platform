@@ -13,22 +13,49 @@ Keep entries short. Each commit entry should be verifiable independently
 *why* a commit exists and what state it left things in, not a
 substitute for `git log`.
 
-## Local commits (not yet pushed, as of 2026-08-13)
+## Commits — pushed and deployed as of 2026-08-13
 
 | Commit | Summary | Status |
 |---|---|---|
-| `bb22466` | Award Custom Data API/UI feature (repository, service, controller, DTO, frontend client/type/component, nav entry, tests) | Code complete, tests pass, **not deployed**. Dev RDS already has the underlying data (see `4bc9adb` below) — deploying this commit is what's actually needed next, not another data load. |
+| `bb22466` | Award Custom Data API/UI feature (repository, service, controller, DTO, frontend client/type/component, nav entry, tests) | **Deployed** — API task-def `research-archive-platform-dev-api:52` (image `20260813T180142Z-5576a3c`), UI Amplify job `55` (`SUCCEED`). Dev RDS already had the underlying data (see `4bc9adb` below); this commit was the only missing piece. |
 | `876e023` | `CLAUDE.md` + `docs/runbooks/LOCAL_SETUP.md`: documents AWS RDS as the authoritative dev database, ECS Fargate as the supported access path, and the missing-bastion-blocks-only-the-local-tunnel distinction | Documentation only, no code behavior change |
 | `f7c8028` | Removed `scripts/start-db-tunnel.sh` + `api/scripts/dev.sh` (unsupported local SSM tunnel to dev RDS — no EC2 bastion exists) and updated every active reference to point at the ECS route instead | Documentation/script removal only |
 | `4bc9adb` | `docs/architecture/AWARD_CUSTOM_DATA_DESIGN.md`: records verified Oracle staging vs. dev RDS Award Custom Data counts | Documentation only |
+| `5576a3c` | `scripts/restore-project-context.sh` + `docs/project-memory/CURRENT_STATE.md` (this file) | Tooling only |
 
-To check whether a commit above is contained in the current branch or
-exists on the configured remote:
+All five are on `bu/main`, `origin/main`, and local `main` (all three refs
+verified identical, `5576a3c...`, as of the push below).
+
+To check whether a commit above is contained in the current branch or a
+remote:
 
 ```bash
-git branch --contains <hash>          # local branch containment
-git log origin/main..<hash> 2>/dev/null && echo "not yet on origin/main"
+git branch --contains <hash>              # local branch containment
+git merge-base --is-ancestor <hash> bu/main && echo "on bu/main"
+git merge-base --is-ancestor <hash> origin/main && echo "on origin/main"
 ```
+
+## Git remotes — two of them, do not assume which one anything uses
+
+- `bu` → `git@github.com:bu-ist/research-archive-platform.git` — the BU
+  source-of-record remote.
+- `origin` → `git@github.com:hiteshtara/research-archive-platform.git` —
+  a personal-account remote.
+- **The Amplify UI app (`d288p9gmoteftb`) is connected to `origin`
+  (`hiteshtara/research-archive-platform`), not `bu`** — verified via
+  `aws amplify get-app --query 'app.repository'`, not assumed. A commit
+  only pushed to `bu` is invisible to Amplify.
+- **Before every UI deployment, inspect the live Amplify repository
+  connection (`aws amplify get-app`) and confirm the target commit
+  exists on that exact remote** (`git merge-base --is-ancestor <hash>
+  <remote>/main`) — do not assume Amplify follows whatever remote the
+  local branch's Git upstream happens to track (as of 2026-08-13, local
+  `main`'s tracked upstream is `bu/main`, which is *not* what Amplify
+  watches).
+- The API (ECS) has no equivalent "connected repo" concept — its image
+  is built and pushed from whatever commit a human/agent has checked
+  out locally when `ops/deploy-api.sh` runs (see below), independent of
+  either remote's state at that moment.
 
 ## Verified Award Custom Data facts (as of 2026-08-13)
 
@@ -62,10 +89,58 @@ can change independently of this file.
 - **Conclusion: no Award Custom Data (or broader Award) load is required
   for this family.** What's missing is deploying `bb22466`'s API/UI code.
 
+## Deployment architecture — verified 2026-08-13, not assumed
+
+`clean committed source → local Docker build → BU non-production ECR →
+ECS Fargate` is the real, established, and *only* API deployment path
+for this project right now:
+
+- API images are built on a developer Mac using `ops/deploy-api.sh`
+  (`mvn clean package -DskipTests` + `docker build`). The build must run
+  against a **clean committed worktree** (e.g. `git worktree add
+  --detach <path> <commit>`), never the live working directory directly
+  — the live tree routinely has uncommitted changes that must not leak
+  into a release image.
+- Images are pushed to BU non-production ECR
+  (`770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api`).
+- ECS task definitions use immutable `<timestamp>-<short-sha>` tags
+  (e.g. `20260813T180142Z-5576a3c`) — never `:latest` for what's actually
+  deployed, even though `ops/deploy-api.sh` also pushes a mutable
+  `:latest` tag as a side effect (**recorded as technical debt, not
+  fixed** — the task definition never references `:latest`, so it
+  doesn't block anything; left unchanged deliberately during the
+  2026-08-13 release rather than touching the script mid-release).
+- Containers run only in BU non-production ECS Fargate
+  (`research-archive-platform-dev-api` cluster/service). No local
+  application container and no local database are ever part of the
+  deployed runtime — the build step itself also never touches a
+  database (pure Maven + Docker build, no DB connection).
+- **No AWS CodeBuild project or CI-based deployment pipeline exists for
+  this project as of 2026-08-13** — verified via `aws codebuild
+  list-projects` (57 projects in the account, all belonging to unrelated
+  BU services) and `.github/workflows/ci.yml` (tests only: `mvn test` /
+  `npm test`+`lint`+`build` / `uv run pytest` — no Docker build, no ECR
+  push, no deploy step). An AWS-native build pipeline (CodeBuild or
+  similar) is potential future work, not current functionality — do not
+  document or assume one exists until it's actually built.
+- UI deploys go through the existing Amplify app, which auto-triggers a
+  build on push to its connected branch (see remotes section above) —
+  starting a job manually is usually unnecessary once the right remote
+  has the commit.
+
 ## Open items
 
-- `bb22466` has not been pushed or deployed.
-- The reconciliation above covers Award `204713-00117` specifically, not
-  a full-population diff — the underlying counts (267,386/40,926/
-  6,328,084) suggest full correspondence, but no full key-level diff
-  across every Award has been run.
+- The reconciliation in this file covers Award `204713-00117`/`204713-00088`
+  specifically, not a full-population diff — the underlying counts
+  (267,386/40,926/6,328,084) suggest full correspondence, but no full
+  key-level diff across every Award has been run.
+- `ops/deploy-api.sh` still pushes a mutable `:latest` ECR tag alongside
+  the immutable one — harmless (nothing references it) but worth
+  removing in a future, non-release-blocking cleanup.
+- The Payment, Reports & Terms redesign (Payment/Invoice, Special
+  Approval, Closeout subsections; separating Report Terms from Sponsor
+  Terms in the UI) is scoped but not started — deliberately excluded
+  from the 2026-08-13 Custom Data release. Report Terms themselves are
+  *not* missing — `AwardTermsSection.tsx` already renders both Sponsor
+  and Report Terms (built in `61eaff5`, already live before this
+  release); the gap is presentation/grouping, not missing data or code.

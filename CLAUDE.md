@@ -147,6 +147,27 @@ definitions/CloudWatch logs, and distinguish "the local tunnel is
 unavailable" from "ECS cannot reach it either" before concluding anything
 is actually blocked.
 
+**Deployment**: `clean committed source → local Docker build → BU
+non-production ECR → ECS Fargate` (`ops/deploy-api.sh`, run against a
+clean detached worktree at the exact commit being released, never the
+live working directory) is the real, established, and only API
+deployment path — no AWS CodeBuild/CI-based pipeline exists (verified
+2026-08-13: zero CodeBuild projects belong to this repo; `.github/workflows/ci.yml`
+runs tests only). This is normal, expected, and documented — not a
+workaround to be avoided or replaced with a fictitious "AWS-native"
+alternative.
+
+**Two git remotes exist** — `bu` (`bu-ist/research-archive-platform`,
+the BU source-of-record) and `origin` (`hiteshtara/research-archive-platform`,
+a personal account). **The Amplify UI app is connected to `origin`, not
+`bu`** (verified via `aws amplify get-app --query 'app.repository'`, not
+assumed) — a commit pushed only to `bu` is invisible to Amplify. Before
+any UI deployment, check the live Amplify repository connection and
+confirm the target commit exists on that exact remote; never assume
+Amplify follows whatever remote the local branch's Git upstream happens
+to track. See `docs/project-memory/CURRENT_STATE.md` for the full,
+current deployment-architecture record.
+
 ## Architecture
 
 ### Data flow and the read-only boundary
