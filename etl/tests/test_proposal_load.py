@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import inspect
+import sys
 import unittest
+import unittest.mock
 
 import pandas as pd
 
@@ -923,6 +926,141 @@ class ParseArgsTest(unittest.TestCase):
         self.assertIsNone(args.show_batch)
         self.assertIsNone(args.limit)
         self.assertFalse(args.dry_run)
+        self.assertFalse(args.migrate_only)
+
+    def test_migrate_only_parses(self) -> None:
+        args = parse_args(["--migrate-only"])
+        self.assertTrue(args.migrate_only)
+
+    def test_migrate_only_is_mutually_exclusive_with_create_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--migrate-only", "--create-batch", "5"])
+
+    def test_migrate_only_is_mutually_exclusive_with_load_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--migrate-only", "--load-batch", "1"])
+
+    def test_migrate_only_is_mutually_exclusive_with_show_batch(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--migrate-only", "--show-batch", "1"])
+
+    def test_migrate_only_is_mutually_exclusive_with_proposal_number(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--migrate-only", "--proposal-number", "205"])
+
+    def test_migrate_only_rejects_dry_run(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--migrate-only", "--dry-run"])
+
+
+class MigrateOnlyTest(unittest.TestCase):
+    """--migrate-only: apply pending migrations and exit - no Oracle
+    connection, no batch created/modified, no Proposal data read or
+    written. Mirrors load_awards_from_csv.py's own --migrate-only (see
+    that module's equivalent test coverage) - the safe way to land a
+    schema-only change (V075) separately from any real batch
+    operation."""
+
+    def _patched_main(self, argv: list[str]):
+        """Patches every function main() could reach, runs main() with
+        the given argv, and returns the mock dict so each test asserts
+        exactly what it cares about. Real Oracle/Postgres/AWS are never
+        touched - this is a pure call-graph test."""
+        patches = {
+            "create_postgres_engine": unittest.mock.patch.object(
+                load_proposals_from_csv, "create_postgres_engine"
+            ),
+            "apply_migrations": unittest.mock.patch.object(
+                load_proposals_from_csv, "apply_migrations"
+            ),
+            "OracleDataSource": unittest.mock.patch.object(
+                load_proposals_from_csv, "OracleDataSource"
+            ),
+            "_run_create_proposal_batch": unittest.mock.patch.object(
+                load_proposals_from_csv, "_run_create_proposal_batch"
+            ),
+            "_run_load_proposal_batch": unittest.mock.patch.object(
+                load_proposals_from_csv, "_run_load_proposal_batch"
+            ),
+            "_run_show_proposal_batch": unittest.mock.patch.object(
+                load_proposals_from_csv, "_run_show_proposal_batch"
+            ),
+            "run_targeted_load": unittest.mock.patch.object(
+                load_proposals_from_csv, "run_targeted_load"
+            ),
+            "clear_existing_proposal_data": unittest.mock.patch.object(
+                load_proposals_from_csv, "clear_existing_proposal_data"
+            ),
+            "create_load_run": unittest.mock.patch.object(
+                load_proposals_from_csv, "create_load_run"
+            ),
+            "mark_load_complete": unittest.mock.patch.object(
+                load_proposals_from_csv, "mark_load_complete"
+            ),
+            "mark_load_failed": unittest.mock.patch.object(
+                load_proposals_from_csv, "mark_load_failed"
+            ),
+        }
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(lambda: [patcher.stop() for patcher in patches.values()])
+
+        argv_patch = unittest.mock.patch.object(sys, "argv", ["load_proposals_from_csv.py", *argv])
+        argv_patch.start()
+        self.addCleanup(argv_patch.stop)
+
+        load_proposals_from_csv.main()
+        return mocks
+
+    def test_migrate_only_calls_apply_migrations_exactly_once_and_exits(self) -> None:
+        mocks = self._patched_main(["--migrate-only"])
+        mocks["apply_migrations"].assert_called_once()
+        mocks["create_postgres_engine"].assert_called_once()
+
+    def test_migrate_only_never_touches_oracle(self) -> None:
+        mocks = self._patched_main(["--migrate-only"])
+        mocks["OracleDataSource"].assert_not_called()
+
+    def test_migrate_only_never_creates_or_loads_a_batch(self) -> None:
+        mocks = self._patched_main(["--migrate-only"])
+        mocks["_run_create_proposal_batch"].assert_not_called()
+        mocks["_run_load_proposal_batch"].assert_not_called()
+        mocks["_run_show_proposal_batch"].assert_not_called()
+        mocks["run_targeted_load"].assert_not_called()
+
+    def test_migrate_only_never_calls_clear_existing_proposal_data(self) -> None:
+        # The destructive no-verb path - migrate_only must return before
+        # main() ever reaches it.
+        mocks = self._patched_main(["--migrate-only"])
+        mocks["clear_existing_proposal_data"].assert_not_called()
+        mocks["create_load_run"].assert_not_called()
+        mocks["mark_load_complete"].assert_not_called()
+        mocks["mark_load_failed"].assert_not_called()
+
+    def test_ecs_setup_skips_oracle_validation_for_migrate_only(self) -> None:
+        arguments = argparse.Namespace(migrate_only=True, show_batch=None)
+
+        with unittest.mock.patch.object(
+            load_proposals_from_csv, "configure_structured_logging"
+        ), unittest.mock.patch.object(
+            load_proposals_from_csv.boto3, "client"
+        ), unittest.mock.patch.object(
+            load_proposals_from_csv, "validate_aws_identity",
+            return_value={"account": "770203350335"},
+        ), unittest.mock.patch.object(
+            load_proposals_from_csv, "configure_ecs_environment"
+        ) as configure_ecs_environment, unittest.mock.patch.object(
+            load_proposals_from_csv, "create_postgres_engine"
+        ), unittest.mock.patch.object(
+            load_proposals_from_csv, "validate_postgres_reachable"
+        ), unittest.mock.patch.object(
+            load_proposals_from_csv, "validate_oracle_reachable"
+        ) as validate_oracle_reachable:
+            load_proposals_from_csv._run_ecs_setup(arguments, "run-id")
+
+        validate_oracle_reachable.assert_not_called()
+        self.assertFalse(
+            configure_ecs_environment.call_args.kwargs["include_oracle"]
+        )
 
 
 if __name__ == "__main__":

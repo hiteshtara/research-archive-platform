@@ -55,6 +55,7 @@ set -euo pipefail
 #   scripts/run-proposal-loader.sh --show-batch BATCH_ID
 #   scripts/run-proposal-loader.sh --load-proposal-number PROPOSAL_NUMBER \
 #       [--load-proposal-number PROPOSAL_NUMBER ...]
+#   scripts/run-proposal-loader.sh --migrate-only
 #   scripts/run-proposal-loader.sh ... --image-uri URI
 #
 # --create-batch N: select N genuinely new, archive-aware Proposal
@@ -71,6 +72,12 @@ set -euo pipefail
 #   families (repeatable) - a deliberate, manual, idempotent reload,
 #   outside the batch framework entirely.
 #
+# --migrate-only: apply pending database migrations and exit - no
+#   Oracle connection, no batch created or modified, no Proposal data
+#   read/written. Mirrors run-award-loader.sh's own --migrate-only -
+#   the safe way to land a schema-only change (e.g. V075) separately
+#   from any real batch operation. PostgreSQL-only, like --show-batch.
+#
 # --image-uri <full-ecr-image-uri>: reuse an already-built-and-pushed
 #   image instead of building/pushing a new one.
 #
@@ -86,6 +93,9 @@ set -euo pipefail
 #
 #   # Deliberate targeted reload of one family, outside the batch framework:
 #   scripts/run-proposal-loader.sh --load-proposal-number 205
+#
+#   # Apply a schema-only migration, nothing else:
+#   scripts/run-proposal-loader.sh --migrate-only
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -105,6 +115,7 @@ LOAD_BATCH=""
 SHOW_BATCH=""
 PROPOSAL_NUMBERS=()
 DRY_RUN=false
+MIGRATE_ONLY=false
 IMAGE_URI_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
@@ -114,6 +125,7 @@ while [[ $# -gt 0 ]]; do
     --show-batch) SHOW_BATCH="$2"; shift 2 ;;
     --load-proposal-number) PROPOSAL_NUMBERS+=("$2"); shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --migrate-only) MIGRATE_ONLY=true; shift ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -128,14 +140,20 @@ ACTIVE_VERBS=()
 [[ -n "$LOAD_BATCH" ]] && ACTIVE_VERBS+=(--load-batch)
 [[ -n "$SHOW_BATCH" ]] && ACTIVE_VERBS+=(--show-batch)
 [[ "${#PROPOSAL_NUMBERS[@]}" -gt 0 ]] && ACTIVE_VERBS+=(--load-proposal-number)
+[[ "$MIGRATE_ONLY" == true ]] && ACTIVE_VERBS+=(--migrate-only)
 
 if [[ "${#ACTIVE_VERBS[@]}" -eq 0 ]]; then
-  echo "ERROR: one of --create-batch, --load-batch, --show-batch, --load-proposal-number is required" >&2
+  echo "ERROR: one of --create-batch, --load-batch, --show-batch, --load-proposal-number, --migrate-only is required" >&2
   exit 1
 fi
 
 if [[ "${#ACTIVE_VERBS[@]}" -gt 1 ]]; then
   echo "ERROR: ${ACTIVE_VERBS[*]} cannot be combined - choose one at a time" >&2
+  exit 1
+fi
+
+if [[ "$MIGRATE_ONLY" == true && "$DRY_RUN" == true ]]; then
+  echo "ERROR: --migrate-only cannot be combined with --dry-run" >&2
   exit 1
 fi
 
@@ -239,6 +257,7 @@ COMMAND_ARGS=(python3 load_proposals_from_csv.py --ecs)
 for number in "${PROPOSAL_NUMBERS[@]:-}"; do
   [[ -n "$number" ]] && COMMAND_ARGS+=(--load-proposal-number "$number")
 done
+[[ "$MIGRATE_ONLY" == true ]] && COMMAND_ARGS+=(--migrate-only)
 [[ "$DRY_RUN" == true ]] && COMMAND_ARGS+=(--dry-run)
 
 COMMAND_JSON="$(printf '%s\n' "${COMMAND_ARGS[@]}" | jq -R . | jq -s .)"

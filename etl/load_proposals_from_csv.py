@@ -391,6 +391,17 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--migrate-only",
+        action="store_true",
+        help=(
+            "Apply pending database migrations and exit - no Oracle "
+            "connection, no batch created or modified, no Proposal data "
+            "read/written. Mirrors load_awards_from_csv.py's own "
+            "--migrate-only. The safe way to land a schema-only change "
+            "(e.g. V075) separately from any real batch operation."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -411,14 +422,19 @@ def parse_args(
             args.create_batch,
             args.load_batch,
             args.show_batch,
+            args.migrate_only,
         )
         if value
     )
     if exclusive_count > 1:
         parser.error(
             "--proposal-number/--load-proposal-number, --create-batch, "
-            "--load-batch, and --show-batch are mutually exclusive"
+            "--load-batch, --show-batch, and --migrate-only are "
+            "mutually exclusive"
         )
+
+    if args.migrate_only and args.dry_run:
+        parser.error("--migrate-only cannot be combined with --dry-run")
 
     return args
 
@@ -2713,10 +2729,11 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> None:
     """--ecs mode setup, mirroring load_awards_from_csv.py's own
     _run_ecs_setup in shape and order: structured logging, AWS task-role
     identity via STS, Secrets Manager credential resolution (Oracle
-    skipped for --show-batch, which is PostgreSQL-only), then a
-    PostgreSQL reachability check and - unless --show-batch - an Oracle
-    reachability check. Aborts immediately (lets the raised exception
-    propagate) if any step fails."""
+    skipped for --show-batch and --migrate-only, neither of which ever
+    touches Oracle), then a PostgreSQL reachability check and - unless
+    --show-batch/--migrate-only - an Oracle reachability check. Aborts
+    immediately (lets the raised exception propagate) if any step
+    fails."""
     configure_structured_logging(run_id)
     logger.bind(stage="startup").info(
         "Starting in --ecs mode: run_id={}", run_id
@@ -2732,14 +2749,16 @@ def _run_ecs_setup(arguments: argparse.Namespace, run_id: str) -> None:
 
     configure_ecs_environment(
         secrets_client,
-        include_oracle=arguments.show_batch is None,
+        include_oracle=(
+            arguments.show_batch is None and not arguments.migrate_only
+        ),
     )
 
     engine = create_postgres_engine()
     validate_postgres_reachable(engine)
     logger.bind(stage="startup").info("PostgreSQL reachable")
 
-    if arguments.show_batch is not None:
+    if arguments.show_batch is not None or arguments.migrate_only:
         return
 
     validate_oracle_reachable(_connect_oracle)
@@ -2753,6 +2772,12 @@ def main() -> None:
 
     if arguments.ecs:
         _run_ecs_setup(arguments, run_id)
+
+    if arguments.migrate_only:
+        engine = create_postgres_engine()
+        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        logger.info("Migrations applied (--migrate-only) - exiting")
+        return
 
     if arguments.create_batch is not None:
         engine = create_postgres_engine()
