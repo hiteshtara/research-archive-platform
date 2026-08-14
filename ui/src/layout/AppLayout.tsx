@@ -29,8 +29,9 @@ import {
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
-import { currentUser, hasAttachmentAccess, logout } from "../auth";
+import { currentUser, logout } from "../auth";
 import { sidebarNavigationItems } from "../features/navigation/navigationPresentation.mjs";
+import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 
 // The only sidebar entry gated on Cognito group membership (rather than
 // a build-time flag like EXPLORER_ENABLED below) - see
@@ -95,9 +96,7 @@ const navigation: NavigationEntry[] = [
 export function AppLayout() {
   const [signedInUser, setSignedInUser] = useState("Signed in");
   const [signingOut, setSigningOut] = useState(false);
-  // Starts false (fail closed) - the link only appears once the group
-  // check actually resolves true, never optimistically.
-  const [attachmentAccess, setAttachmentAccess] = useState(false);
+  const attachmentAccess = useAttachmentAccess();
 
   useEffect(() => {
     let active = true;
@@ -123,15 +122,7 @@ export function AppLayout() {
       }
     }
 
-    async function loadAttachmentAccess() {
-      const authorized = await hasAttachmentAccess();
-      if (active) {
-        setAttachmentAccess(authorized);
-      }
-    }
-
     void loadUser();
-    void loadAttachmentAccess();
 
     return () => {
       active = false;

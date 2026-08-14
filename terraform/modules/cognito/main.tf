@@ -85,3 +85,24 @@ resource "aws_cognito_user_pool_domain" "hosted_ui" {
   domain       = var.hosted_ui_domain_prefix
   user_pool_id = aws_cognito_user_pool.this.id
 }
+
+# The single authorization gate every attachment endpoint checks
+# (AttachmentAuthorizationService, via the cognito:groups JWT claim ->
+# ROLE_ArchiveAttachmentViewer mapping already in SecurityConfiguration -
+# no API code change needed to pick up membership here). Business-record
+# access is unaffected by this group - see
+# docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md for the full
+# product decision and reconciliation this depends on.
+resource "aws_cognito_user_group" "archive_attachment_viewer" {
+  name         = "ArchiveAttachmentViewer"
+  user_pool_id = aws_cognito_user_pool.this.id
+  description  = "Members may list, view, and download Award/Proposal/Subaward/Negotiation attachments and use the Archived File Finder. All other authenticated users keep normal business-record access; only attachment endpoints are gated by this group."
+}
+
+resource "aws_cognito_user_in_group" "archive_attachment_viewer_members" {
+  for_each = toset(var.attachment_viewer_usernames)
+
+  user_pool_id = aws_cognito_user_pool.this.id
+  group_name   = aws_cognito_user_group.archive_attachment_viewer.name
+  username     = each.value
+}

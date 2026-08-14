@@ -23,10 +23,9 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 
-import { hasAttachmentAccess } from "../auth";
 import {
   downloadNegotiationAttachment,
   getNegotiationActivities,
@@ -48,6 +47,7 @@ import {
   resolveNegotiationAssociationDisplayKind,
 } from "../features/common/relationshipCardPresentation.mjs";
 import { resolveRestrictedLabel } from "../features/negotiation/negotiationAttachmentPresentation.mjs";
+import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 import type {
   NegotiationActivity,
   NegotiationAttachment,
@@ -133,21 +133,7 @@ function NegotiationWorkspaceContent({
   const [pendingAttachmentId, setPendingAttachmentId] = useState<
     number | null
   >(null);
-  // Frontend convenience only - see auth.ts's hasAttachmentAccess. The
-  // real boundary is the backend's own 403; this only decides whether
-  // to bother firing the query and what to show in its place.
-  const [attachmentAccess, setAttachmentAccess] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void hasAttachmentAccess().then((authorized) => {
-      if (active) {
-        setAttachmentAccess(authorized);
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const attachmentAccess = useAttachmentAccess();
   const parsedNegotiationId = Number(negotiationId);
   const validNegotiationId =
     Number.isSafeInteger(parsedNegotiationId) && parsedNegotiationId > 0;

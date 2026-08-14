@@ -375,6 +375,12 @@ variable "cognito_allow_admin_password_auth" {
   default     = false
 }
 
+variable "cognito_attachment_viewer_usernames" {
+  description = "Cognito usernames (sub/UUID, not email - see modules/cognito's own variable doc) to add to the ArchiveAttachmentViewer group, the sole gate for every attachment endpoint. Only used when manage_cognito = true."
+  type        = list(string)
+  default     = []
+}
+
 #
 # Amplify / UI hosting
 #

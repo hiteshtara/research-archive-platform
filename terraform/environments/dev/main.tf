@@ -219,6 +219,8 @@ module "cognito" {
   deletion_protection       = var.cognito_deletion_protection
   mfa_configuration         = var.cognito_mfa_configuration
   allow_admin_password_auth = var.cognito_allow_admin_password_auth
+
+  attachment_viewer_usernames = var.cognito_attachment_viewer_usernames
 }
 
 locals {
@@ -282,6 +284,16 @@ locals {
   ))
 }
 
+locals {
+  # Single source of truth for the UI-side Explorer flag, so it can be
+  # asserted against the API-side APP_EXPLORER_ENABLED below rather than
+  # drifting silently the way it did in the 2026-08-10 investigation
+  # (VITE_EXPLORER_ENABLED=true + APP_EXPLORER_ENABLED unset -> the nav/
+  # route rendered but every request 404'd, masked as a 403 until the
+  # /error permitAll fix). Never set in test/prod.
+  explorer_enabled_ui = true
+}
+
 module "amplify" {
   count  = var.manage_amplify ? 1 : 0
   source = "../../modules/amplify"
@@ -306,7 +318,7 @@ module "amplify" {
     # hidden entirely (nav item + route) unless this matches the API's
     # own APP_EXPLORER_ENABLED. See docs/ARCHIVE_EXPLORER.md. Never set
     # in test/prod.
-    VITE_EXPLORER_ENABLED     = "true"
+    VITE_EXPLORER_ENABLED     = local.explorer_enabled_ui ? "true" : "false"
   }
 }
 
@@ -404,6 +416,24 @@ module "api_service" {
   additional_secrets = var.enable_openai_secret ? {
     OPENAI_API_KEY = "${module.openai_secret[0].openai_secret_arn}:apiKey::"
   } : {}
+}
+
+# Hard-fails plan/apply if the UI's Explorer flag is on while the API's
+# isn't - the exact drift that caused the 2026-08-10 Proposal Explorer
+# investigation. Zero-side-effect (terraform_data has no real resource
+# behind it); only its precondition matters.
+resource "terraform_data" "explorer_flags_match" {
+  input = local.explorer_enabled_ui
+
+  lifecycle {
+    precondition {
+      condition = (
+        !local.explorer_enabled_ui
+        || try(var.additional_api_environment_variables["APP_EXPLORER_ENABLED"], "false") == "true"
+      )
+      error_message = "local.explorer_enabled_ui (VITE_EXPLORER_ENABLED) is true but additional_api_environment_variables[\"APP_EXPLORER_ENABLED\"] is not \"true\" - the UI would show the Explorer nav/route while the API's ExplorerController never registers, so every request 404s. Set APP_EXPLORER_ENABLED = \"true\" in terraform.tfvars to match, or turn off explorer_enabled_ui."
+    }
+  }
 }
 
 resource "aws_route53_record" "api" {

@@ -22,3 +22,8 @@ output "hosted_ui_domain" {
   description = "Cognito Hosted UI domain, if created."
   value       = var.hosted_ui_domain_prefix == null ? null : "https://${aws_cognito_user_pool_domain.hosted_ui[0].domain}.auth.${var.aws_region}.amazoncognito.com"
 }
+
+output "attachment_viewer_group_name" {
+  description = "Name of the Cognito group AttachmentAuthorizationService checks for (ArchiveAttachmentViewer)."
+  value       = aws_cognito_user_group.archive_attachment_viewer.name
+}

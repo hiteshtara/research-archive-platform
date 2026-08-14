@@ -32,6 +32,7 @@ import {
   hasAnyAttachments,
 } from "../../features/award/awardSectionsPresentation.mjs";
 import type { AttachmentTypeCategory } from "../../features/award/awardSectionsPresentation.mjs";
+import { useAttachmentAccess } from "../../hooks/useAttachmentAccess";
 import type { AwardAttachmentV1 } from "../../types/api";
 import { EmptyState } from "../common/EmptyState";
 import { ErrorState } from "../common/ErrorState";
@@ -57,6 +58,7 @@ const PAGE_SIZE = 25;
 // proxy endpoint - the underlying S3 bucket/key is never exposed to
 // this component or the network tab.
 export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
+  const attachmentAccess = useAttachmentAccess();
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -79,6 +81,7 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
     queryKey: ["award-attachments-v1", awardId, page],
     queryFn: ({ signal }) =>
       getAwardAttachmentsV1(awardId, { page, size: PAGE_SIZE }, signal),
+    enabled: attachmentAccess,
   });
 
   useEffect(() => {
@@ -107,6 +110,12 @@ export function AwardAttachmentsSection({ awardId }: { awardId: number }) {
     } finally {
       setDownloadingId(null);
     }
+  }
+
+  if (!attachmentAccess) {
+    return (
+      <ErrorState message="Access denied. Viewing Award attachments requires membership in the ArchiveAttachmentViewer group - contact an administrator if you believe this is wrong." />
+    );
   }
 
   if (attachmentsQuery.isLoading) {

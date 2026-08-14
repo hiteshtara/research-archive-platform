@@ -33,6 +33,7 @@ import {
   formatByteSize as formatSize,
 } from "../../features/award/awardSectionsPresentation.mjs";
 import type { AttachmentTypeCategory } from "../../features/award/awardSectionsPresentation.mjs";
+import { useAttachmentAccess } from "../../hooks/useAttachmentAccess";
 import type { ProposalAttachmentV1 } from "../../types/api";
 import { EmptyState } from "../common/EmptyState";
 import { ErrorState } from "../common/ErrorState";
@@ -62,6 +63,7 @@ export function ProposalAttachmentsSection({
 }: {
   proposalId: number;
 }) {
+  const attachmentAccess = useAttachmentAccess();
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [previewingId, setPreviewingId] = useState<number | null>(null);
@@ -69,6 +71,7 @@ export function ProposalAttachmentsSection({
   const attachmentsQuery = useQuery({
     queryKey: ["proposal-attachments-v1", proposalId],
     queryFn: ({ signal }) => getProposalAttachmentsV1(proposalId, signal),
+    enabled: attachmentAccess,
   });
 
   async function handleDownload(attachmentId: number, fileName: string) {
@@ -110,6 +113,12 @@ export function ProposalAttachmentsSection({
     } finally {
       setPreviewingId(null);
     }
+  }
+
+  if (!attachmentAccess) {
+    return (
+      <ErrorState message="Access denied. Viewing Proposal attachments requires membership in the ArchiveAttachmentViewer group - contact an administrator if you believe this is wrong." />
+    );
   }
 
   if (attachmentsQuery.isLoading) {

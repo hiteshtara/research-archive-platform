@@ -72,6 +72,25 @@ variable "mfa_configuration" {
   }
 }
 
+variable "attachment_viewer_usernames" {
+  description = <<-EOT
+    Cognito usernames (the pool's own generated sub/UUID username - see
+    `aws cognito-idp list-users`, not the email alias, since this pool
+    uses username_attributes = ["email"] which makes email an alias
+    rather than the real username) to add to the ArchiveAttachmentViewer
+    group. This group is the sole gate AttachmentAuthorizationService
+    checks (server-side, via the cognito:groups JWT claim already mapped
+    to a Spring authority) for every Award/Proposal/Subaward/Negotiation
+    attachment endpoint and the cross-domain Archived File Finder search
+    - see docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md.
+    Keep this list explicit and reviewed in a Terraform plan before
+    apply - it is the actual attachment-access allowlist for this
+    environment, not a default-open convenience.
+    EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "allow_admin_password_auth" {
   description = <<-EOT
     Adds ALLOW_ADMIN_USER_PASSWORD_AUTH to the app client's explicit_auth_flows,

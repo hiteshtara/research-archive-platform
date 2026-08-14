@@ -62,6 +62,7 @@ import type {
   ExplorerCrossLink,
   ExplorerResourceKey,
 } from "../features/explorer/explorerPresentation.d.mts";
+import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 
 type ExplorerData =
   | ExplorerAward
@@ -366,21 +367,31 @@ function ResourceResult({
 }
 
 export function ExplorerPage() {
+  const attachmentAccess = useAttachmentAccess();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const resourceKey = (searchParams.get("resource") ||
     "award") as ExplorerResourceKey;
   const urlIdentifier = searchParams.get("identifier") ?? "";
+  const isAttachmentsResource = resourceKey === "attachments";
+  const attachmentsResourceDenied = isAttachmentsResource && !attachmentAccess;
 
   const [identifierInput, setIdentifierInput] = useState(urlIdentifier);
   const [view, setView] = useState<"structured" | "json">("structured");
 
   const definition = resourceDefinition(resourceKey) ?? RESOURCE_DEFINITIONS[0];
+  // "attachments" is hidden from the dropdown entirely for a user
+  // without the group - a dev-only-tool convenience, same as every
+  // other attachment-hiding spot; the real gate is the backend 403 the
+  // underlying endpoint already enforces.
+  const selectableResourceDefinitions = attachmentAccess
+    ? RESOURCE_DEFINITIONS
+    : RESOURCE_DEFINITIONS.filter((entry) => entry.key !== "attachments");
 
   const explorerQuery = useQuery({
     queryKey: ["explorer", resourceKey, urlIdentifier],
     queryFn: ({ signal }) => FETCHERS[resourceKey](urlIdentifier, signal),
-    enabled: urlIdentifier.trim().length > 0,
+    enabled: urlIdentifier.trim().length > 0 && !attachmentsResourceDenied,
   });
 
   function navigateTo(
@@ -435,7 +446,7 @@ export function ExplorerPage() {
               }}
               sx={{ minWidth: 220 }}
             >
-              {RESOURCE_DEFINITIONS.map((entry) => (
+              {selectableResourceDefinitions.map((entry) => (
                 <MenuItem key={entry.key} value={entry.key}>
                   {entry.label}
                 </MenuItem>
@@ -503,13 +514,21 @@ export function ExplorerPage() {
           <Divider />
 
           <Box sx={{ p: 3 }}>
-            {explorerQuery.isLoading && (
+            {attachmentsResourceDenied && (
+              <Alert severity="warning">
+                Access denied. Looking up attachments requires membership
+                in the ArchiveAttachmentViewer group - contact an
+                administrator if you believe this is wrong.
+              </Alert>
+            )}
+
+            {!attachmentsResourceDenied && explorerQuery.isLoading && (
               <Box sx={{ display: "grid", placeItems: "center", py: 6 }}>
                 <CircularProgress />
               </Box>
             )}
 
-            {explorerQuery.isError && (
+            {!attachmentsResourceDenied && explorerQuery.isError && (
               <Alert severity="error">
                 {explorerQuery.error instanceof ApiRequestError &&
                 explorerQuery.error.status === 404
@@ -518,7 +537,8 @@ export function ExplorerPage() {
               </Alert>
             )}
 
-            {explorerQuery.data !== undefined &&
+            {!attachmentsResourceDenied &&
+              explorerQuery.data !== undefined &&
               (view === "json" ? (
                 <Box
                   component="pre"

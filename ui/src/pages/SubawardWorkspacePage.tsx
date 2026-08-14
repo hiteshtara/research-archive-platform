@@ -51,6 +51,7 @@ import {
   resolveAttachmentLabel,
   sumAmendmentTotals,
 } from "../features/subaward/subawardAmountsPresentation.mjs";
+import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 
 // Template Info, Reports, Notepad, and Notifications are intentionally not
 // in the primary tab bar (Subaward v1 scope decision) - their ETL/API/DTOs
@@ -173,6 +174,7 @@ function SubawardWorkspaceContent({
   const [amountsViewMode, setAmountsViewMode] = useState<
     "timeline" | "technical"
   >("timeline");
+  const attachmentAccess = useAttachmentAccess();
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -202,7 +204,7 @@ function SubawardWorkspaceContent({
   });
   const attachmentsQuery = useQuery({
     queryKey: ["subaward-attachments", parsedSubawardId],
-    enabled: validSubawardId && activeTab === 4,
+    enabled: validSubawardId && activeTab === 4 && attachmentAccess,
     queryFn: () => getSubawardAttachments(parsedSubawardId),
   });
   const customDataQuery = useQuery({
@@ -588,23 +590,30 @@ function SubawardWorkspaceContent({
 
           {activeTab === 4 && (
             <Stack spacing={3}>
+              {!attachmentAccess && (
+                <ErrorState message="Access denied. Viewing Subaward attachment metadata requires membership in the ArchiveAttachmentViewer group - contact an administrator if you believe this is wrong." />
+              )}
               {downloadError && (
                 <ErrorState
                   message={downloadError}
                   onClose={() => setDownloadError(null)}
                 />
               )}
-              {attachmentsQuery.isLoading && <LoadingState />}
-              {attachmentsQuery.isError && (
+              {attachmentAccess && attachmentsQuery.isLoading && (
+                <LoadingState />
+              )}
+              {attachmentAccess && attachmentsQuery.isError && (
                 <ErrorState message="Unable to load Subaward attachment metadata." />
               )}
-              {!attachmentsQuery.isLoading &&
+              {attachmentAccess &&
+                !attachmentsQuery.isLoading &&
                 !attachmentsQuery.isError &&
                 (attachmentsQuery.data?.length ?? 0) === 0 && (
                   <EmptyState message="No attachment metadata is archived for this Subaward record." />
                 )}
 
-              {attachmentsQuery.data &&
+              {attachmentAccess &&
+                attachmentsQuery.data &&
                 attachmentsQuery.data.length > 0 &&
                 groupAttachmentsByType(attachmentsQuery.data).map((group) => (
                   <Box key={group.typeLabel}>
