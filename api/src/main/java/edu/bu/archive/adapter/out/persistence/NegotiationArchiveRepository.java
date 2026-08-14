@@ -308,7 +308,8 @@ public class NegotiationArchiveRepository {
                         archive_status = 'ARCHIVED'
                         AND s3_bucket IS NOT NULL AND s3_bucket <> ''
                         AND s3_key IS NOT NULL AND s3_key <> ''
-                    ) AS downloadable
+                    ) AS downloadable,
+                    legacy_restricted_flag AS restricted_flag
                 FROM archive.archived_attachment
                 WHERE module_code = 'NEGOTIATION'
                   AND parent_record_id = :negotiationId

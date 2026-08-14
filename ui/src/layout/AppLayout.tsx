@@ -29,8 +29,16 @@ import {
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
-import { currentUser, logout } from "../auth";
+import { currentUser, hasAttachmentAccess, logout } from "../auth";
 import { sidebarNavigationItems } from "../features/navigation/navigationPresentation.mjs";
+
+// The only sidebar entry gated on Cognito group membership (rather than
+// a build-time flag like EXPLORER_ENABLED below) - see
+// AttachmentAuthorizationService and
+// docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md. Hiding
+// this is a UX convenience only: every attachment endpoint re-checks
+// the real group server-side regardless of whether this link is shown.
+const ATTACHMENT_GATED_PATH = "/archived-files";
 
 const drawerWidth = 250;
 
@@ -87,6 +95,9 @@ const navigation: NavigationEntry[] = [
 export function AppLayout() {
   const [signedInUser, setSignedInUser] = useState("Signed in");
   const [signingOut, setSigningOut] = useState(false);
+  // Starts false (fail closed) - the link only appears once the group
+  // check actually resolves true, never optimistically.
+  const [attachmentAccess, setAttachmentAccess] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -112,12 +123,24 @@ export function AppLayout() {
       }
     }
 
+    async function loadAttachmentAccess() {
+      const authorized = await hasAttachmentAccess();
+      if (active) {
+        setAttachmentAccess(authorized);
+      }
+    }
+
     void loadUser();
+    void loadAttachmentAccess();
 
     return () => {
       active = false;
     };
   }, []);
+
+  const visibleNavigation = attachmentAccess
+    ? navigation
+    : navigation.filter((item) => item.path !== ATTACHMENT_GATED_PATH);
 
   async function handleSignOut() {
     try {
@@ -246,7 +269,7 @@ export function AppLayout() {
         </Typography>
 
         <List sx={{ px: 1.5 }}>
-          {navigation.map((item) => (
+          {visibleNavigation.map((item) => (
             <ListItemButton
               key={item.path}
               component={NavLink}

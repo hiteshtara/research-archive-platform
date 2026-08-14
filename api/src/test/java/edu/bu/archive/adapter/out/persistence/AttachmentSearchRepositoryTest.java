@@ -449,6 +449,148 @@ class AttachmentSearchRepositoryTest {
                 .count()).isEqualTo(1);
     }
 
+    // --- searchNegotiationAttachments/countSearchNegotiationAttachments ---
+
+    @Test
+    void searchNegotiationAttachmentsMatchesOnExactDocumentNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AttachmentSearchRepository(jdbc).searchNegotiationAttachments(
+                "231427", "", null, null, "all", "ORDER BY n.document_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains(":recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber)")
+                .contains("FROM archive.archived_attachment aa")
+                .contains("JOIN archive.negotiation n ON n.negotiation_id = aa.parent_record_id")
+                .contains("aa.module_code = 'NEGOTIATION'");
+        verifyParam(statement, "recordNumber", "231427");
+    }
+
+    @Test
+    void searchNegotiationAttachmentsExactNegotiationIdFilterUsesTheNullSafeCast() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AttachmentSearchRepository(jdbc).searchNegotiationAttachments(
+                "", "", 374L, null, "all", "ORDER BY n.document_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("CAST(:recordId AS BIGINT) IS NULL OR n.negotiation_id = :recordId");
+        verifyParam(statement, "recordId", 374L);
+    }
+
+    @Test
+    void searchNegotiationAttachmentsHistoricalVersionFilterExcludesEverything() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AttachmentSearchRepository(jdbc).searchNegotiationAttachments(
+                "", "", 374L, null, "historical", "ORDER BY n.document_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains(":versionFilter <> 'historical'");
+        verifyParam(statement, "versionFilter", "historical");
+    }
+
+    @Test
+    void searchNegotiationAttachmentsNeverSelectsS3OrOtherStorageColumns() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AttachmentSearchRepository(jdbc).searchNegotiationAttachments(
+                "231427", "", null, null, "all", "ORDER BY n.document_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .doesNotContain("s3_bucket AS")
+                .doesNotContain("AS s3_bucket")
+                .doesNotContain("s3_key AS")
+                .doesNotContain("AS s3_key")
+                .doesNotContain("source_file_id")
+                .doesNotContain("legacy_restricted_flag")
+                .doesNotContain("error_message");
+    }
+
+    @Test
+    void searchNegotiationAttachmentsAlwaysReturnsNullFileIdAndTrueCurrentVersion() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AttachmentSearchRepository(jdbc).searchNegotiationAttachments(
+                "231427", "", null, null, "all", "ORDER BY n.document_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("CAST(NULL AS BIGINT) AS file_id")
+                .contains("TRUE AS current_version");
+    }
+
+    @Test
+    void countSearchAllAttachmentsUnionsAllThreeDomainsInOneQuery() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query = mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(0L);
+
+        new AttachmentSearchRepository(jdbc).countSearchAllAttachments("879423", "", "all");
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("archive.award_attachment")
+                .contains("archive.proposal_attachment")
+                .contains("aa2.module_code = 'NEGOTIATION'");
+        assertThat(sql.split("UNION ALL", -1).length - 1).isEqualTo(2);
+    }
+
     private void verifyParam(JdbcClient.StatementSpec statement, String name, Object value) {
         org.mockito.Mockito.verify(statement).param(name, value);
     }

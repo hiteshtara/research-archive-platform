@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.in.web;
 
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.service.AttachmentSearchService;
 import edu.bu.archive.config.SecurityConfiguration;
 
@@ -25,7 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(AttachmentSearchController.class)
 @Import({
         SecurityConfiguration.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        AttachmentAuthorizationService.class
 })
 @TestPropertySource(properties = {
         "app.security.enabled=true",

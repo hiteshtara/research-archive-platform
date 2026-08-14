@@ -6,6 +6,7 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.application.negotiation.NegotiationArchiveService;
 import edu.bu.archive.application.negotiation.NegotiationAttachmentDownload;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,9 @@ class NegotiationArchiveControllerTest {
     void setUp() {
         service = mock(NegotiationArchiveService.class);
         NegotiationArchiveController controller =
-                new NegotiationArchiveController(service);
+                new NegotiationArchiveController(
+                        service, mock(AttachmentAuthorizationService.class)
+                );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -104,7 +107,7 @@ class NegotiationArchiveControllerTest {
         NegotiationAttachmentResponse attachment =
                 new NegotiationAttachmentResponse(
                         1L, 9952L, "notice.pdf", "application/pdf",
-                        100L, "abc123", "ARCHIVED", null, null, true
+                        100L, "abc123", "ARCHIVED", null, null, true, "N"
                 );
         when(service.findAttachments(101L))
                 .thenReturn(List.of(attachment));

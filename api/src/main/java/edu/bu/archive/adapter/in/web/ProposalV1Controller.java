@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalUnitsResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionSummaryResponse;
 import edu.bu.archive.application.proposal.ProposalArchiveV1Service;
 import edu.bu.archive.application.proposal.ProposalAttachmentDownload;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -24,6 +25,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -56,9 +58,14 @@ import java.util.List;
 public class ProposalV1Controller {
 
     private final ProposalArchiveV1Service service;
+    private final AttachmentAuthorizationService attachmentAuthorizationService;
 
-    public ProposalV1Controller(ProposalArchiveV1Service service) {
+    public ProposalV1Controller(
+            ProposalArchiveV1Service service,
+            AttachmentAuthorizationService attachmentAuthorizationService
+    ) {
         this.service = service;
+        this.attachmentAuthorizationService = attachmentAuthorizationService;
     }
 
     @Operation(
@@ -157,8 +164,11 @@ public class ProposalV1Controller {
     @GetMapping("/{proposalId}/attachments")
     public ResponseEntity<ProposalAttachmentsResponse> attachments(
             @PathVariable
-            long proposalId
+            long proposalId,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         return ResponseEntity.ok(service.findAttachments(proposalId));
     }
 
@@ -177,8 +187,11 @@ public class ProposalV1Controller {
             long proposalId,
 
             @PathVariable
-            long attachmentId
+            long attachmentId,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         ProposalAttachmentDownload download =
                 service.downloadAttachment(proposalId, attachmentId);
 

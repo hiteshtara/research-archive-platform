@@ -1,4 +1,4 @@
-export type RecordType = "ALL" | "AWARD" | "PROPOSAL";
+export type RecordType = "ALL" | "AWARD" | "PROPOSAL" | "NEGOTIATION";
 
 export interface RecordTypeOption {
   value: RecordType;
@@ -84,4 +84,5 @@ export function dispatchArchivedFileDownload<T>(
   attachmentId: number,
   downloadAward: (parentId: number, attachmentId: number) => Promise<T>,
   downloadProposal: (parentId: number, attachmentId: number) => Promise<T>,
+  downloadNegotiation: (parentId: number, attachmentId: number) => Promise<T>,
 ): Promise<T>;

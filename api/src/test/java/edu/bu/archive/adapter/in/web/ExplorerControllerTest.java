@@ -14,6 +14,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSponsorContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.application.award.ExplorerService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,9 @@ class ExplorerControllerTest {
     @BeforeEach
     void setUp() {
         service = mock(ExplorerService.class);
-        ExplorerController controller = new ExplorerController(service);
+        ExplorerController controller = new ExplorerController(
+                service, mock(AttachmentAuthorizationService.class)
+        );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())

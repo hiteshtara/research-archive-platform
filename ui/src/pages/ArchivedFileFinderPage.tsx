@@ -23,6 +23,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ApiRequestError,
   downloadAwardAttachmentV1,
+  downloadNegotiationAttachment,
   downloadProposalAttachmentV1,
   searchArchivedFiles,
 } from "../api/client";
@@ -122,7 +123,11 @@ export function ArchivedFileFinderPage() {
     queryFn: ({ signal }) =>
       searchArchivedFiles(
         {
-          recordType: applied.recordType as "ALL" | "AWARD" | "PROPOSAL",
+          recordType: applied.recordType as
+            | "ALL"
+            | "AWARD"
+            | "PROPOSAL"
+            | "NEGOTIATION",
           recordNumber: applied.recordNumber,
           documentNumber: applied.documentNumber,
           recordId: applied.recordId,
@@ -192,6 +197,12 @@ export function ArchivedFileFinderPage() {
           ),
         (parentId, attachmentId) =>
           downloadProposalAttachmentV1(
+            parentId,
+            attachmentId,
+            result.fileName ?? "attachment",
+          ),
+        (parentId, attachmentId) =>
+          downloadNegotiationAttachment(
             parentId,
             attachmentId,
             result.fileName ?? "attachment",

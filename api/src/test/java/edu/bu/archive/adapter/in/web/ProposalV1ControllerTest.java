@@ -11,6 +11,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalUnitsResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionSummaryResponse;
 import edu.bu.archive.application.proposal.ProposalArchiveV1Service;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,9 @@ class ProposalV1ControllerTest {
     @BeforeEach
     void setUp() {
         service = mock(ProposalArchiveV1Service.class);
-        ProposalV1Controller controller = new ProposalV1Controller(service);
+        ProposalV1Controller controller = new ProposalV1Controller(
+                service, mock(AttachmentAuthorizationService.class)
+        );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())

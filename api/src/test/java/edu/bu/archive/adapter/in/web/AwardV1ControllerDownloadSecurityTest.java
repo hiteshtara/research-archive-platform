@@ -3,14 +3,17 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
 import edu.bu.archive.application.award.AwardContactService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.config.SecurityConfiguration;
 
 import java.io.ByteArrayInputStream;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -20,44 +23,26 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /*
- * Regression coverage for the Award attachment download route's
- * authorization behavior specifically - added after a live report of
- * HTTP 403 "insufficient_scope" on GET
- * /api/v1/awards/{awardId}/attachments/{attachmentId}/download.
- *
- * That symptom was investigated and NOT reproduced: SecurityConfiguration
- * applies exactly one rule to every /api/** route, including this one -
- * .requestMatchers("/api/**").authenticated() - with no
- * .hasAuthority(...)/.hasRole(...)/@PreAuthorize/scope requirement
- * anywhere in this codebase (verified by full-tree grep) or in the
- * Cognito app client's allowed_oauth_scopes (openid/email/profile only -
- * no custom resource server/scope is even defined). A real CloudWatch
- * log line for the exact reported request timestamp confirms the
- * request passed both authentication and Spring Security's
- * AuthorizationFilter and reached AwardArchiveService.downloadAttachment,
- * which then failed for an unrelated reason (a missing
- * ARCHIVE_DOCUMENTS_BUCKET environment variable in S3AwardAttachmentStorage
- * - a deployment configuration gap, out of scope here per "do not change
- * S3").
- *
- * This test proves the download route's actual, current authorization
- * behavior: authentication is required (401 without a token) and no
- * additional scope/role is required beyond it (200 for any authenticated
- * user, identical to every other /api/** route) - i.e. it already uses
- * the same archive-read permission as the rest of the Award API, not a
- * stricter one. There is no "genuinely unauthorized but authenticated"
- * tier in this app's authorization model to test a 403 against - every
- * authenticated caller has the same single permission level for every
- * /api/** route (see SecurityConfiguration) - so no such case exists to
- * assert without inventing a rule that isn't there.
+ * Regression coverage for the Award attachment routes' authorization
+ * behavior. Originally documented that this app had no
+ * "authenticated but insufficiently privileged" tier at all - that is
+ * no longer true: AttachmentAuthorizationService now requires the
+ * ArchiveAttachmentViewer group (mapped from the Cognito cognito:groups
+ * claim to ROLE_ArchiveAttachmentViewer by
+ * SecurityConfiguration.jwtAuthenticationConverter()) for every
+ * attachment endpoint specifically - every other /api/** route is
+ * unaffected and keeps the original plain-authenticated rule. See
+ * docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md.
  */
 @WebMvcTest(AwardV1Controller.class)
 @Import({
         SecurityConfiguration.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        AttachmentAuthorizationService.class
 })
 @TestPropertySource(properties = {
         "app.security.enabled=true",
@@ -78,6 +63,13 @@ class AwardV1ControllerDownloadSecurityTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor
+            attachmentViewer() {
+        return jwt().authorities(new SimpleGrantedAuthority(
+                AttachmentAuthorizationService.ATTACHMENT_VIEWER_AUTHORITY
+        ));
+    }
+
     @Test
     void downloadWithoutAuthenticationIsRejected() throws Exception {
         mockMvc.perform(
@@ -87,7 +79,18 @@ class AwardV1ControllerDownloadSecurityTest {
     }
 
     @Test
-    void authenticatedUserCanDownloadAttachment() throws Exception {
+    void authenticatedUserWithoutAttachmentGroupIsRejected() throws Exception {
+        mockMvc.perform(
+                        get("/api/v1/awards/1833767/attachments/306557/download")
+                                .with(jwt())
+                )
+                .andExpect(status().isForbidden());
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
+    @Test
+    void authenticatedAttachmentViewerCanDownloadAttachment() throws Exception {
         when(service.downloadAttachment(1833767L, 306557L))
                 .thenReturn(new AwardAttachmentDownload(
                         "agreement.pdf",
@@ -98,7 +101,7 @@ class AwardV1ControllerDownloadSecurityTest {
 
         var initial = mockMvc.perform(
                         get("/api/v1/awards/1833767/attachments/306557/download")
-                                .with(jwt())
+                                .with(attachmentViewer())
                 )
                 .andExpect(status().isOk())
                 .andReturn();
@@ -113,6 +116,45 @@ class AwardV1ControllerDownloadSecurityTest {
         // intermittently throws ConcurrentModificationException from
         // HeaderWriterFilter racing the async dispatch thread.
         mockMvc.perform(asyncDispatch(initial))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void listWithoutAuthenticationIsRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/awards/1833767/attachments"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void listWithoutAttachmentGroupIsRejectedAndLeaksNoMetadata()
+            throws Exception {
+        mockMvc.perform(
+                        get("/api/v1/awards/1833767/attachments")
+                                .with(jwt())
+                )
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(
+                        org.hamcrest.Matchers.not(
+                                org.hamcrest.Matchers.containsString(
+                                        "agreement.pdf"
+                                )
+                        )
+                ));
+
+        org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
+    @Test
+    void listWithAttachmentGroupSucceeds() throws Exception {
+        when(service.findAttachments(1833767L, 0, 25))
+                .thenReturn(new edu.bu.archive.adapter.in.web.dto.PageResponse<>(
+                        List.of(), 0, 25, 0L, 0, true, true
+                ));
+
+        mockMvc.perform(
+                        get("/api/v1/awards/1833767/attachments")
+                                .with(attachmentViewer())
+                )
                 .andExpect(status().isOk());
     }
 }

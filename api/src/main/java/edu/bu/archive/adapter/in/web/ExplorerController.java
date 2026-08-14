@@ -10,6 +10,7 @@ import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitAdministratorResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerUnitResponse;
 import edu.bu.archive.application.award.ExplorerService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -22,6 +23,7 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -59,9 +61,14 @@ import java.util.List;
 public class ExplorerController {
 
     private final ExplorerService service;
+    private final AttachmentAuthorizationService attachmentAuthorizationService;
 
-    public ExplorerController(ExplorerService service) {
+    public ExplorerController(
+            ExplorerService service,
+            AttachmentAuthorizationService attachmentAuthorizationService
+    ) {
         this.service = service;
+        this.attachmentAuthorizationService = attachmentAuthorizationService;
     }
 
     @Operation(summary = "Look up an Award's current version by award_number")
@@ -163,8 +170,10 @@ public class ExplorerController {
     @Operation(summary = "List an Award's attachment metadata (capped at 50)")
     @GetMapping("/attachments")
     public ResponseEntity<List<AwardAttachmentResponse>> attachments(
-            @RequestParam @Positive long awardId
+            @RequestParam @Positive long awardId,
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         return ResponseEntity.ok(service.findAttachments(awardId));
     }
 

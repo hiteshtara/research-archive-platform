@@ -727,4 +727,212 @@ class AttachmentSearchServiceTest {
                 anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt()
         );
     }
+
+    // --- Negotiation search ---
+
+    private static final AttachmentSearchRow NEGOTIATION_ROW = new AttachmentSearchRow(
+            374L, "231427", null, "JANE NEGOTIATOR", null,
+            "231427", 501L, null, "agreement.pdf",
+            null, null, 42_000L, "application/pdf",
+            "ARCHIVED", true, true
+    );
+
+    @Test
+    void negotiationNumberExactSearchUsesTheDocumentNumberColumn() {
+        when(repository.countSearchNegotiationAttachments(
+                eq("231427"), anyString(), isNull(), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchNegotiationAttachments(
+                eq("231427"), anyString(), isNull(), isNull(), eq("all"), anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(NEGOTIATION_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "NEGOTIATION", "231427", null, null, null, null, null, null, "all", 0, 25
+        );
+
+        assertThat(result.content()).hasSize(1);
+        AttachmentSearchResultResponse row = result.content().get(0);
+        assertThat(row.recordType()).isEqualTo("NEGOTIATION");
+        assertThat(row.parentNumber()).isEqualTo("231427");
+        assertThat(row.fileId()).isNull();
+        verifyNoInteractions(awardArchiveService);
+    }
+
+    @Test
+    void negotiationIdExactSearch() {
+        when(repository.countSearchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all"), anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(NEGOTIATION_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "NEGOTIATION", null, null, null, "374", null, null, null, "all", 0, 25
+        );
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).parentId()).isEqualTo(374L);
+    }
+
+    @Test
+    void negotiationAttachmentIdExactSearchWithRecordTypeNegotiation() {
+        when(repository.countSearchNegotiationAttachments(
+                anyString(), anyString(), isNull(), eq(501L), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchNegotiationAttachments(
+                anyString(), anyString(), isNull(), eq(501L), eq("all"), anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(NEGOTIATION_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "NEGOTIATION", null, null, null, null, null, "501", null, "all", 0, 25
+        );
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).attachmentId()).isEqualTo(501L);
+    }
+
+    @Test
+    void negotiationRejectsAllBlankIdentifiers() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        "NEGOTIATION", "", null, "  ", null, null, null, null, "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("At least one identifier");
+
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void fileIdWithRecordTypeNegotiationIsRejected() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        "NEGOTIATION", "231427", null, null, null, null, null, "5001", "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fileId")
+                .hasMessageContaining("NEGOTIATION");
+
+        verifyNoInteractions(repository, awardArchiveService);
+    }
+
+    @Test
+    void neverInvokesAwardArchiveServiceForANegotiationOnlySearch() {
+        when(repository.countSearchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all")
+        )).thenReturn(0L);
+        when(repository.searchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all"), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        service.searchAttachments(
+                "NEGOTIATION", null, null, null, "374", null, null, null, "all", 0, 25
+        );
+
+        verify(awardArchiveService, never()).searchAttachments(
+                anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyInt(), anyInt()
+        );
+    }
+
+    @Test
+    void negotiationHistoricalVersionFilterMatchesNoRowsSinceThereIsNoVersionChain() {
+        when(repository.countSearchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("historical")
+        )).thenReturn(0L);
+        when(repository.searchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("historical"), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "NEGOTIATION", null, null, null, "374", null, null, null, "historical", 0, 25
+        );
+
+        assertThat(result.totalElements()).isZero();
+    }
+
+    // --- Negotiation availability mapping (three-value vocabulary, no "pending" state) ---
+
+    @Test
+    void negotiationMissingNeverMapsToPendingUpload() {
+        AttachmentSearchRow missing = new AttachmentSearchRow(
+                374L, "231427", null, "JANE NEGOTIATOR", null,
+                "231427", 502L, null, "unavailable.pdf",
+                null, null, 1000L, "application/pdf",
+                "MISSING", false, true
+        );
+        when(repository.countSearchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all"), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(missing));
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "NEGOTIATION", null, null, null, "374", null, null, null, "all", 0, 25
+        );
+
+        assertThat(result.content().get(0).availabilityStatus())
+                .isEqualTo("Source file unavailable");
+    }
+
+    @Test
+    void negotiationFailedMapsToFailed() {
+        AttachmentSearchRow failed = new AttachmentSearchRow(
+                374L, "231427", null, "JANE NEGOTIATOR", null,
+                "231427", 503L, null, "failed.pdf",
+                null, null, 1000L, "application/pdf",
+                "FAILED", false, true
+        );
+        when(repository.countSearchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchNegotiationAttachments(
+                anyString(), anyString(), eq(374L), isNull(), eq("all"), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(failed));
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "NEGOTIATION", null, null, null, "374", null, null, null, "all", 0, 25
+        );
+
+        assertThat(result.content().get(0).availabilityStatus()).isEqualTo("Failed");
+    }
+
+    // --- Mixed ALL search now spans three domains ---
+
+    @Test
+    void mixedAllSearchReturnsAwardProposalAndNegotiationResults() {
+        MixedAttachmentSearchRow awardRow = new MixedAttachmentSearchRow(
+                "AWARD", 3047454L, "200086-00001", "Award Title", "PI", 165,
+                "879423", 9001L, 5001L, "Notice of Award.pdf", "Notice of Award",
+                null, 1_800_000L, "application/pdf", "UPLOADED", true, true
+        );
+        MixedAttachmentSearchRow proposalRow = new MixedAttachmentSearchRow(
+                "PROPOSAL", 7125L, "2975", "Proposal Title", "PI", 4,
+                "879423", 501508L, null, "Notice.pdf", "Notice",
+                null, 1_800_000L, "application/pdf", "UPLOADED", true, true
+        );
+        MixedAttachmentSearchRow negotiationRow = new MixedAttachmentSearchRow(
+                "NEGOTIATION", 374L, "879423", null, "JANE NEGOTIATOR", null,
+                "879423", 501L, null, "agreement.pdf", null,
+                null, 42_000L, "application/pdf", "ARCHIVED", true, true
+        );
+        when(repository.countSearchAllAttachments(anyString(), anyString(), eq("all")))
+                .thenReturn(3L);
+        when(repository.searchAllAttachments(
+                anyString(), anyString(), eq("all"), anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(awardRow, proposalRow, negotiationRow));
+
+        PageResponse<AttachmentSearchResultResponse> result = service.searchAttachments(
+                "ALL", "879423", null, "879423", null, null, null, null, "all", 0, 25
+        );
+
+        assertThat(result.content()).hasSize(3);
+        assertThat(result.content())
+                .extracting(AttachmentSearchResultResponse::recordType)
+                .containsExactly("AWARD", "PROPOSAL", "NEGOTIATION");
+        verifyNoInteractions(awardArchiveService);
+    }
 }

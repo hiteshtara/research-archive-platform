@@ -2,6 +2,7 @@ package edu.bu.archive.config;
 
 import edu.bu.archive.adapter.in.web.ExplorerController;
 import edu.bu.archive.application.award.ExplorerService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -17,6 +18,10 @@ class ExplorerFeatureFlagTest {
                     .withBean(
                             ExplorerService.class,
                             () -> mock(ExplorerService.class)
+                    )
+                    .withBean(
+                            AttachmentAuthorizationService.class,
+                            AttachmentAuthorizationService::new
                     );
 
     @Test

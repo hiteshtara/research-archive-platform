@@ -9,6 +9,7 @@ import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionDetailResp
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardContactService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,10 @@ class TimeAndMoneyControllerTest {
         service = mock(AwardArchiveService.class);
         AwardContactService contactService = mock(AwardContactService.class);
         AwardV1Controller controller =
-                new AwardV1Controller(service, contactService);
+                new AwardV1Controller(
+                        service, contactService,
+                        mock(AttachmentAuthorizationService.class)
+                );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())

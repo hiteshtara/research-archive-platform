@@ -43,20 +43,21 @@ function readSource(relativePath) {
 
 // --- RECORD_TYPE_OPTIONS / recordTypeLabel --------------------------------
 
-test("RECORD_TYPE_OPTIONS offers exactly All records, Awards, and Proposals - no Subaward/Negotiation this phase", () => {
+test("RECORD_TYPE_OPTIONS offers exactly All records, Awards, Proposals, and Negotiations - no Subaward this phase", () => {
   assert.deepEqual(
     RECORD_TYPE_OPTIONS.map((option) => option.value),
-    ["ALL", "AWARD", "PROPOSAL"],
+    ["ALL", "AWARD", "PROPOSAL", "NEGOTIATION"],
   );
   assert.deepEqual(
     RECORD_TYPE_OPTIONS.map((option) => option.label),
-    ["All records", "Awards", "Proposals"],
+    ["All records", "Awards", "Proposals", "Negotiations"],
   );
 });
 
 test("recordTypeLabel names each real recordType and falls back honestly for an unknown one", () => {
   assert.equal(recordTypeLabel("AWARD"), "Awards");
   assert.equal(recordTypeLabel("PROPOSAL"), "Proposals");
+  assert.equal(recordTypeLabel("NEGOTIATION"), "Negotiations");
   assert.equal(recordTypeLabel("ALL"), "All records");
   assert.equal(recordTypeLabel("SUBAWARD"), "SUBAWARD");
 });
@@ -79,6 +80,12 @@ test("visibleFieldsForRecordType hides File ID for PROPOSAL - Award-only, no saf
   assert.ok(!fields.includes("fileId"));
 });
 
+test("visibleFieldsForRecordType hides File ID for NEGOTIATION - no comparable numeric identifier exists", () => {
+  const fields = visibleFieldsForRecordType("NEGOTIATION");
+  assert.deepEqual(fields, ["recordNumber", "documentNumber", "recordId", "attachmentId"]);
+  assert.ok(!fields.includes("fileId"));
+});
+
 test("visibleFieldsForRecordType only offers recordNumber/documentNumber for ALL - recordId/attachmentId/fileId are domain-ambiguous", () => {
   assert.deepEqual(visibleFieldsForRecordType("ALL"), ["recordNumber", "documentNumber"]);
 });
@@ -86,12 +93,14 @@ test("visibleFieldsForRecordType only offers recordNumber/documentNumber for ALL
 test("recordNumberFieldLabel names the field per recordType", () => {
   assert.equal(recordNumberFieldLabel("AWARD"), "Award number");
   assert.equal(recordNumberFieldLabel("PROPOSAL"), "Proposal number");
+  assert.equal(recordNumberFieldLabel("NEGOTIATION"), "Negotiation number");
   assert.equal(recordNumberFieldLabel("ALL"), "Record number");
 });
 
 test("recordIdFieldLabel names the field per recordType", () => {
   assert.equal(recordIdFieldLabel("AWARD"), "Award ID");
   assert.equal(recordIdFieldLabel("PROPOSAL"), "Proposal ID");
+  assert.equal(recordIdFieldLabel("NEGOTIATION"), "Negotiation ID");
 });
 
 // --- hasAnyIdentifierSupplied (recordType-aware) --------------------------
@@ -128,6 +137,17 @@ test("hasAnyIdentifierSupplied ignores fileId for PROPOSAL - it is not a visible
   assert.equal(
     hasAnyIdentifierSupplied({ recordType: "PROPOSAL", fileId: "5001" }),
     false,
+  );
+});
+
+test("hasAnyIdentifierSupplied ignores fileId for NEGOTIATION - it is not a visible field there", () => {
+  assert.equal(
+    hasAnyIdentifierSupplied({ recordType: "NEGOTIATION", fileId: "5001" }),
+    false,
+  );
+  assert.equal(
+    hasAnyIdentifierSupplied({ recordType: "NEGOTIATION", recordNumber: "231427" }),
+    true,
   );
 });
 
@@ -230,6 +250,13 @@ test("resolveRecordViewPath opens the exact Proposal version for a PROPOSAL resu
   );
 });
 
+test("resolveRecordViewPath opens the Negotiation record for a NEGOTIATION result", () => {
+  assert.equal(
+    resolveRecordViewPath({ recordType: "NEGOTIATION", parentId: 374 }),
+    "/negotiations/374",
+  );
+});
+
 test("resolveRecordViewPath returns null rather than guessing when parentId is missing", () => {
   assert.equal(resolveRecordViewPath({ recordType: "AWARD", parentId: null }), null);
 });
@@ -291,15 +318,53 @@ test("a PROPOSAL result calls only the Proposal downloader, with the correct par
   assert.equal(award.calls.length, 0);
 });
 
+test("a NEGOTIATION result calls only the Negotiation downloader, with the correct parentId and attachmentId", async () => {
+  const award = spy("award-ok");
+  const proposal = spy("proposal-ok");
+  const negotiation = spy("negotiation-ok");
+
+  const result = await dispatchArchivedFileDownload(
+    "NEGOTIATION",
+    374,
+    501,
+    award,
+    proposal,
+    negotiation,
+  );
+
+  assert.equal(result, "negotiation-ok");
+  assert.deepEqual(negotiation.calls, [[374, 501]]);
+  assert.equal(award.calls.length, 0);
+  assert.equal(proposal.calls.length, 0);
+});
+
 test("IDs are passed through without conversion or swapping - parentId and attachmentId never trade places", async () => {
   const award = spy("ok");
   const proposal = spy("ok");
+  const negotiation = spy("ok");
 
-  await dispatchArchivedFileDownload("AWARD", 111, 222, award, proposal);
+  await dispatchArchivedFileDownload("AWARD", 111, 222, award, proposal, negotiation);
   assert.deepEqual(award.calls[0], [111, 222]);
 
-  await dispatchArchivedFileDownload("PROPOSAL", 333, 444, award, proposal);
+  await dispatchArchivedFileDownload("PROPOSAL", 333, 444, award, proposal, negotiation);
   assert.deepEqual(proposal.calls[0], [333, 444]);
+
+  await dispatchArchivedFileDownload("NEGOTIATION", 555, 666, award, proposal, negotiation);
+  assert.deepEqual(negotiation.calls[0], [555, 666]);
+});
+
+test("a Negotiation downloader failure propagates to the caller rather than being swallowed", async () => {
+  const failure = new Error("Negotiation download failed: 403");
+  const award = spy("award-ok");
+  const proposal = spy("proposal-ok");
+  const negotiation = spy(failure);
+
+  await assert.rejects(
+    () => dispatchArchivedFileDownload("NEGOTIATION", 1, 2, award, proposal, negotiation),
+    /Negotiation download failed: 403/,
+  );
+  assert.equal(award.calls.length, 0);
+  assert.equal(proposal.calls.length, 0);
 });
 
 test("an Award downloader failure propagates to the caller rather than being swallowed", async () => {

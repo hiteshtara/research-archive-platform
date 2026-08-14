@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.service.AttachmentSearchService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -13,6 +14,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -65,35 +67,44 @@ import org.springframework.web.bind.annotation.RestController;
 public class AttachmentSearchController {
 
     private final AttachmentSearchService service;
+    private final AttachmentAuthorizationService attachmentAuthorizationService;
 
-    public AttachmentSearchController(AttachmentSearchService service) {
+    public AttachmentSearchController(
+            AttachmentSearchService service,
+            AttachmentAuthorizationService attachmentAuthorizationService
+    ) {
         this.service = service;
+        this.attachmentAuthorizationService = attachmentAuthorizationService;
     }
 
     @Operation(
-            summary = "Search archived Award and/or Proposal attachment files",
+            summary = "Search archived Award, Proposal, and/or Negotiation attachment files",
             description = "recordType selects the domain: AWARD (default "
                     + "when omitted, for backward compatibility with "
-                    + "Phase 1), PROPOSAL, or ALL (a single database-level "
-                    + "union across both, restricted to recordNumber/"
-                    + "documentNumber/versionFilter - recordId/"
-                    + "attachmentId/fileId are ambiguous across domains "
-                    + "and rejected with ALL). At least one identifier is "
-                    + "required - an all-blank request is rejected with "
-                    + "400, never treated as \"match everything\". Every "
-                    + "supplied filter is an exact match, combined with "
-                    + "AND. One result row per authoritative attachment "
-                    + "relationship."
+                    + "Phase 1), PROPOSAL, NEGOTIATION, or ALL (a single "
+                    + "database-level union across all three, restricted "
+                    + "to recordNumber/documentNumber/versionFilter - "
+                    + "recordId/attachmentId/fileId are ambiguous across "
+                    + "domains and rejected with ALL). At least one "
+                    + "identifier is required - an all-blank request is "
+                    + "rejected with 400, never treated as \"match "
+                    + "everything\". Every supplied filter is an exact "
+                    + "match, combined with AND. One result row per "
+                    + "authoritative attachment relationship. Every "
+                    + "Negotiation attachment result also carries the "
+                    + "legacy Kuali RESTRICTED value as informational "
+                    + "metadata only - it never affects whether a result "
+                    + "is returned or downloadable."
     )
     @ApiResponse(responseCode = "200", description = "A page of matching archived files.")
     @ApiResponse(responseCode = "400", description = "No identifier supplied, an identifier is not a valid whole number, an identifier is ambiguous for the given recordType, or page/size out of range.")
     @GetMapping("/search")
     public ResponseEntity<PageResponse<AttachmentSearchResultResponse>> search(
-            @Parameter(description = "ALL, AWARD, or PROPOSAL. Defaults to AWARD when omitted.")
+            @Parameter(description = "ALL, AWARD, PROPOSAL, or NEGOTIATION. Defaults to AWARD when omitted.")
             @RequestParam(required = false)
             String recordType,
 
-            @Parameter(description = "Exact Award number or Proposal number, per recordType. Canonical name; awardNumber is a temporary alias.")
+            @Parameter(description = "Exact Award number, Proposal number, or Negotiation workflow document number, per recordType. Canonical name; awardNumber is a temporary alias.")
             @RequestParam(required = false)
             String recordNumber,
 
@@ -101,11 +112,11 @@ public class AttachmentSearchController {
             @RequestParam(required = false)
             String awardNumber,
 
-            @Parameter(description = "Exact workflow document number match (Award's own KEW number, or Proposal's own document_number).")
+            @Parameter(description = "Exact workflow document number match (Award's own KEW number, Proposal's own document_number, or Negotiation's own document_number - the same value as recordNumber for NEGOTIATION, which has no separate business number).")
             @RequestParam(required = false)
             String documentNumber,
 
-            @Parameter(description = "Exact Award ID or Proposal ID, per recordType. Canonical name; awardId is a temporary alias.")
+            @Parameter(description = "Exact Award ID, Proposal ID, or Negotiation ID, per recordType. Canonical name; awardId is a temporary alias.")
             @RequestParam(required = false)
             String recordId,
 
@@ -113,11 +124,11 @@ public class AttachmentSearchController {
             @RequestParam(required = false)
             String awardId,
 
-            @Parameter(description = "Exact attachment relationship ID match. Requires an explicit (or defaulted) recordType of AWARD or PROPOSAL - rejected with recordType=ALL.")
+            @Parameter(description = "Exact attachment relationship ID match. Requires an explicit (or defaulted) recordType of AWARD, PROPOSAL, or NEGOTIATION - rejected with recordType=ALL.")
             @RequestParam(required = false)
             String attachmentId,
 
-            @Parameter(description = "Exact file_id match. Award-specific - rejected for recordType=PROPOSAL or ALL.")
+            @Parameter(description = "Exact file_id match. Award-specific - rejected for recordType=PROPOSAL, NEGOTIATION, or ALL.")
             @RequestParam(required = false)
             String fileId,
 
@@ -134,8 +145,11 @@ public class AttachmentSearchController {
             @RequestParam(defaultValue = "25")
             @Min(1)
             @Max(100)
-            int size
+            int size,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         return ResponseEntity.ok(
                 service.searchAttachments(
                         recordType, recordNumber, awardNumber, documentNumber,

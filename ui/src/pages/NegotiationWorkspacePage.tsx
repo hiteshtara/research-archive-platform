@@ -23,9 +23,10 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 
+import { hasAttachmentAccess } from "../auth";
 import {
   downloadNegotiationAttachment,
   getNegotiationActivities,
@@ -46,6 +47,7 @@ import {
   resolveNegotiationAssociationArchived,
   resolveNegotiationAssociationDisplayKind,
 } from "../features/common/relationshipCardPresentation.mjs";
+import { resolveRestrictedLabel } from "../features/negotiation/negotiationAttachmentPresentation.mjs";
 import type {
   NegotiationActivity,
   NegotiationAttachment,
@@ -131,6 +133,21 @@ function NegotiationWorkspaceContent({
   const [pendingAttachmentId, setPendingAttachmentId] = useState<
     number | null
   >(null);
+  // Frontend convenience only - see auth.ts's hasAttachmentAccess. The
+  // real boundary is the backend's own 403; this only decides whether
+  // to bother firing the query and what to show in its place.
+  const [attachmentAccess, setAttachmentAccess] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void hasAttachmentAccess().then((authorized) => {
+      if (active) {
+        setAttachmentAccess(authorized);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const parsedNegotiationId = Number(negotiationId);
   const validNegotiationId =
     Number.isSafeInteger(parsedNegotiationId) && parsedNegotiationId > 0;
@@ -164,7 +181,7 @@ function NegotiationWorkspaceContent({
 
   const attachmentsQuery = useQuery({
     queryKey: ["negotiation-attachments", parsedNegotiationId],
-    enabled: validNegotiationId && activeTab === 3,
+    enabled: validNegotiationId && activeTab === 3 && attachmentAccess,
     queryFn: () => getNegotiationAttachments(parsedNegotiationId),
   });
 
@@ -509,17 +526,22 @@ function NegotiationWorkspaceContent({
 
           {activeTab === 3 && (
             <Stack spacing={2}>
+              {!attachmentAccess && (
+                <ErrorState message="Access denied. Viewing Negotiation attachments requires membership in the ArchiveAttachmentViewer group - contact an administrator if you believe this is wrong." />
+              )}
               {actionError && (
                 <ErrorState
                   message={actionError}
                   onClose={() => setActionError(null)}
                 />
               )}
-              {attachmentsQuery.isLoading && <LoadingState />}
-              {attachmentsQuery.isError && (
+              {attachmentAccess && attachmentsQuery.isLoading && (
+                <LoadingState />
+              )}
+              {attachmentAccess && attachmentsQuery.isError && (
                 <ErrorState message="Unable to load Negotiation attachments." />
               )}
-              {attachmentsQuery.data && (
+              {attachmentAccess && attachmentsQuery.data && (
                 <>
                   <Typography sx={{ fontWeight: 700 }}>
                     {attachmentsQuery.data.length.toLocaleString()} attachments
@@ -559,6 +581,7 @@ function NegotiationWorkspaceContent({
                                     <TableCell>Type</TableCell>
                                     <TableCell>Size</TableCell>
                                     <TableCell>Status</TableCell>
+                                    <TableCell>Restricted</TableCell>
                                     <TableCell>Updated</TableCell>
                                     <TableCell align="right">
                                       Actions
@@ -593,6 +616,16 @@ function NegotiationWorkspaceContent({
                                           }
                                           label={attachment.archiveStatus}
                                         />
+                                      </TableCell>
+                                      <TableCell>
+                                        <Typography
+                                          variant="body2"
+                                          color="text.secondary"
+                                        >
+                                          {resolveRestrictedLabel(
+                                            attachment.restrictedFlag,
+                                          )}
+                                        </Typography>
                                       </TableCell>
                                       <TableCell>
                                         {display(

@@ -8,6 +8,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetVersionResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardContactService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,10 @@ class AwardBudgetControllerTest {
         service = mock(AwardArchiveService.class);
         AwardContactService contactService = mock(AwardContactService.class);
         AwardV1Controller controller =
-                new AwardV1Controller(service, contactService);
+                new AwardV1Controller(
+                        service, contactService,
+                        mock(AttachmentAuthorizationService.class)
+                );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())

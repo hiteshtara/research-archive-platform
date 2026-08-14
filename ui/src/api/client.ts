@@ -676,7 +676,7 @@ export function getAwardTimeAndMoneyDocumentV1(
 // is no separate/unified download call for this feature.
 export function searchArchivedFiles(
   parameters: {
-    recordType?: "ALL" | "AWARD" | "PROPOSAL";
+    recordType?: "ALL" | "AWARD" | "PROPOSAL" | "NEGOTIATION";
     recordNumber?: string;
     documentNumber?: string;
     recordId?: string;

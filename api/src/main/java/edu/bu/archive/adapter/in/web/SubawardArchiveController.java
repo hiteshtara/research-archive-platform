@@ -12,6 +12,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardPageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardReportResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.subaward.SubawardArchiveService;
 import edu.bu.archive.application.subaward.SubawardAttachmentDownload;
 
@@ -19,6 +20,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -34,11 +36,14 @@ import java.util.List;
 public class SubawardArchiveController {
 
     private final SubawardArchiveService service;
+    private final AttachmentAuthorizationService attachmentAuthorizationService;
 
     public SubawardArchiveController(
-            SubawardArchiveService service
+            SubawardArchiveService service,
+            AttachmentAuthorizationService attachmentAuthorizationService
     ) {
         this.service = service;
+        this.attachmentAuthorizationService = attachmentAuthorizationService;
     }
 
     @GetMapping
@@ -98,8 +103,11 @@ public class SubawardArchiveController {
     @GetMapping("/{subawardId}/attachments")
     public ResponseEntity<List<SubawardAttachmentResponse>> attachments(
             @PathVariable
-            long subawardId
+            long subawardId,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         return ResponseEntity.ok(service.findAttachments(subawardId));
     }
 
@@ -110,8 +118,11 @@ public class SubawardArchiveController {
             @PathVariable
             long subawardId,
             @PathVariable
-            long attachmentId
+            long attachmentId,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         SubawardAttachmentDownload download =
                 service.downloadAttachment(subawardId, attachmentId);
         StreamingResponseBody body = output -> {

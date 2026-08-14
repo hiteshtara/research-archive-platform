@@ -1,5 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
+import edu.bu.archive.exception.AttachmentAccessDeniedException;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 
@@ -51,6 +53,30 @@ public class GlobalExceptionHandler {
                         body(
                                 HttpStatus.NOT_FOUND,
                                 "NOT_FOUND",
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * Authenticated (already past Spring Security's 401 gate) but not a
+     * member of the ArchiveAttachmentViewer group - see
+     * AttachmentAuthorizationService. Deliberately its own handler
+     * (not left to Spring Security's default AccessDeniedHandler) so
+     * the response body matches this API's own error-body shape.
+     */
+    @ExceptionHandler(AttachmentAccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAttachmentAccessDenied(
+            AttachmentAccessDeniedException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                "ATTACHMENT_ACCESS_DENIED",
                                 exception.getMessage(),
                                 request
                         )

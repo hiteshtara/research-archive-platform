@@ -1282,6 +1282,11 @@ export interface NegotiationAttachment {
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
   downloadable: boolean;
+  // Legacy Kuali RESTRICTED value ("Y"/"N", or an unexpected/other raw
+  // value, or null when unavailable) - informational only, never an
+  // access-control signal. See
+  // docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md.
+  restrictedFlag: string | null;
 }
 
 export interface NegotiationAssociatedRecord {

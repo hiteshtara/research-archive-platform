@@ -167,16 +167,137 @@ public class AttachmentSearchRepository {
     }
 
     /*
-     * recordType=ALL: a single database-level UNION ALL across Award
-     * and Proposal, one deterministic ORDER BY applied to the combined
-     * set (never two independently paginated lists merged client-side).
-     * Deliberately restricted to recordNumber/documentNumber/
-     * versionFilter only - recordId/attachmentId/fileId are rejected by
-     * AttachmentSearchService before this method is ever called, since
-     * an Award recordId and a Proposal recordId are independent numeric
-     * spaces that could otherwise collide ambiguously. record_type is
-     * a literal per branch, not derived - the one field a single-domain
-     * query doesn't need but a mixed one must carry on every row.
+     * Negotiation has no domain-specific attachment table (see
+     * NegotiationArchiveRepository.findAttachments's own comment) - this
+     * joins the shared archive.archived_attachment (module_code =
+     * 'NEGOTIATION') straight to archive.negotiation on
+     * parent_record_id = negotiation_id, the exact same relationship
+     * NegotiationArchiveRepository.findAttachments/findArchivedAttachment
+     * already use, so downloadable here can never disagree with what the
+     * real download endpoint enforces.
+     *
+     * Negotiation has no separate "record number" distinct from its own
+     * workflow document_number (unlike Award/Proposal, which have a
+     * business number distinct from their KEW document number) - see
+     * docs/architecture/NEGOTIATION_ARCHIVE_COVERAGE.md's "business
+     * grain" note. recordNumber and documentNumber therefore both filter
+     * the same document_number column here; supplying either alone is
+     * sufficient, and supplying both simply ANDs the same comparison
+     * twice (harmless).
+     *
+     * title/document_type have no Negotiation-level or
+     * archived_attachment-level equivalent - left NULL rather than
+     * fabricated. principal_investigator is populated from
+     * negotiator_full_name (the Negotiation's negotiator, not a PI -
+     * Negotiation has no PI concept of its own) since this shared result
+     * shape needs some value in that column; never a fabricated person.
+     * fileId is intentionally never populated (CAST(NULL...)) -
+     * Negotiation's own file identifier (source_file_id) is a VARCHAR
+     * Oracle blob key, not a comparable numeric id, structurally the
+     * same reasoning Proposal's fileId rejection already established -
+     * AttachmentSearchService rejects the fileId parameter for
+     * recordType=NEGOTIATION before this method is ever called.
+     *
+     * Negotiation has no version chain (business grain and historical
+     * grain are the same thing - one row per real Negotiation) -
+     * current_version is unconditionally TRUE, and "historical" matches
+     * zero rows rather than fabricating a non-existent prior version.
+     */
+    public List<AttachmentSearchRow> searchNegotiationAttachments(
+            String recordNumber,
+            String documentNumber,
+            Long recordId,
+            Long attachmentId,
+            String versionFilter,
+            String sortSql,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    n.negotiation_id AS parent_id,
+                    n.document_number AS parent_number,
+                    CAST(NULL AS TEXT) AS title,
+                    n.negotiator_full_name AS principal_investigator,
+                    CAST(NULL AS INTEGER) AS sequence_number,
+                    n.document_number AS workflow_document_number,
+                    aa.archived_attachment_id AS attachment_id,
+                    CAST(NULL AS BIGINT) AS file_id,
+                    aa.original_file_name AS file_name,
+                    CAST(NULL AS TEXT) AS document_type,
+                    aa.source_update_timestamp AS source_date,
+                    aa.byte_size AS file_size_bytes,
+                    aa.content_type,
+                    aa.archive_status AS upload_status,
+                    (
+                        aa.archive_status = 'ARCHIVED'
+                        AND aa.s3_bucket IS NOT NULL AND aa.s3_bucket <> ''
+                        AND aa.s3_key IS NOT NULL AND aa.s3_key <> ''
+                    ) AS downloadable,
+                    TRUE AS current_version
+                FROM archive.archived_attachment aa
+                JOIN archive.negotiation n ON n.negotiation_id = aa.parent_record_id
+                WHERE aa.module_code = 'NEGOTIATION'
+                  AND (:recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber))
+                  AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
+                  AND (CAST(:recordId AS BIGINT) IS NULL OR n.negotiation_id = :recordId)
+                  AND (CAST(:attachmentId AS BIGINT) IS NULL OR aa.archived_attachment_id = :attachmentId)
+                  AND (:versionFilter <> 'historical')
+                """ + sortSql + """
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("recordNumber", recordNumber)
+                .param("documentNumber", documentNumber)
+                .param("recordId", recordId)
+                .param("attachmentId", attachmentId)
+                .param("versionFilter", versionFilter)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AttachmentSearchRow.class)
+                .list();
+    }
+
+    public long countSearchNegotiationAttachments(
+            String recordNumber,
+            String documentNumber,
+            Long recordId,
+            Long attachmentId,
+            String versionFilter
+    ) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.archived_attachment aa
+                JOIN archive.negotiation n ON n.negotiation_id = aa.parent_record_id
+                WHERE aa.module_code = 'NEGOTIATION'
+                  AND (:recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber))
+                  AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
+                  AND (CAST(:recordId AS BIGINT) IS NULL OR n.negotiation_id = :recordId)
+                  AND (CAST(:attachmentId AS BIGINT) IS NULL OR aa.archived_attachment_id = :attachmentId)
+                  AND (:versionFilter <> 'historical')
+                """)
+                .param("recordNumber", recordNumber)
+                .param("documentNumber", documentNumber)
+                .param("recordId", recordId)
+                .param("attachmentId", attachmentId)
+                .param("versionFilter", versionFilter)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    /*
+     * recordType=ALL: a single database-level UNION ALL across Award,
+     * Proposal, and Negotiation, one deterministic ORDER BY applied to
+     * the combined set (never independently paginated lists merged
+     * client-side). Deliberately restricted to recordNumber/
+     * documentNumber/versionFilter only - recordId/attachmentId/fileId
+     * are rejected by AttachmentSearchService before this method is
+     * ever called, since each domain's recordId is an independent
+     * numeric space that could otherwise collide ambiguously.
+     * record_type is a literal per branch, not derived - the one field
+     * a single-domain query doesn't need but a mixed one must carry on
+     * every row.
      */
     public List<MixedAttachmentSearchRow> searchAllAttachments(
             String recordNumber,
@@ -279,6 +400,37 @@ public class AttachmentSearchRepository {
                             OR (:versionFilter = 'current' AND pv.proposal_id = current_pv.proposal_id)
                             OR (:versionFilter = 'historical' AND pv.proposal_id != current_pv.proposal_id)
                       )
+
+                    UNION ALL
+
+                    SELECT
+                        'NEGOTIATION' AS record_type,
+                        n.negotiation_id AS parent_id,
+                        n.document_number AS parent_number,
+                        CAST(NULL AS TEXT) AS title,
+                        n.negotiator_full_name AS principal_investigator,
+                        CAST(NULL AS INTEGER) AS sequence_number,
+                        n.document_number AS workflow_document_number,
+                        aa2.archived_attachment_id AS attachment_id,
+                        CAST(NULL AS BIGINT) AS file_id,
+                        aa2.original_file_name AS file_name,
+                        CAST(NULL AS TEXT) AS document_type,
+                        aa2.source_update_timestamp AS source_date,
+                        aa2.byte_size AS file_size_bytes,
+                        aa2.content_type,
+                        aa2.archive_status AS upload_status,
+                        (
+                            aa2.archive_status = 'ARCHIVED'
+                            AND aa2.s3_bucket IS NOT NULL AND aa2.s3_bucket <> ''
+                            AND aa2.s3_key IS NOT NULL AND aa2.s3_key <> ''
+                        ) AS downloadable,
+                        TRUE AS current_version
+                    FROM archive.archived_attachment aa2
+                    JOIN archive.negotiation n ON n.negotiation_id = aa2.parent_record_id
+                    WHERE aa2.module_code = 'NEGOTIATION'
+                      AND (:recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber))
+                      AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
+                      AND (:versionFilter <> 'historical')
                 ) combined
                 """ + sortSql + """
                 LIMIT :limit OFFSET :offset
@@ -332,6 +484,16 @@ public class AttachmentSearchRepository {
                             OR (:versionFilter = 'current' AND pv.proposal_id = current_pv.proposal_id)
                             OR (:versionFilter = 'historical' AND pv.proposal_id != current_pv.proposal_id)
                       )
+
+                    UNION ALL
+
+                    SELECT n.negotiation_id
+                    FROM archive.archived_attachment aa2
+                    JOIN archive.negotiation n ON n.negotiation_id = aa2.parent_record_id
+                    WHERE aa2.module_code = 'NEGOTIATION'
+                      AND (:recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber))
+                      AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
+                      AND (:versionFilter <> 'historical')
                 ) combined
                 """)
                 .param("recordNumber", recordNumber)

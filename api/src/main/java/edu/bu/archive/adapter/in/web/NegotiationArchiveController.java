@@ -11,11 +11,13 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationWorkspaceRespons
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.application.negotiation.NegotiationArchiveService;
 import edu.bu.archive.application.negotiation.NegotiationAttachmentDownload;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,11 +33,14 @@ import java.util.List;
 public class NegotiationArchiveController {
 
     private final NegotiationArchiveService service;
+    private final AttachmentAuthorizationService attachmentAuthorizationService;
 
     public NegotiationArchiveController(
-            NegotiationArchiveService service
+            NegotiationArchiveService service,
+            AttachmentAuthorizationService attachmentAuthorizationService
     ) {
         this.service = service;
+        this.attachmentAuthorizationService = attachmentAuthorizationService;
     }
 
     @GetMapping
@@ -108,8 +113,11 @@ public class NegotiationArchiveController {
     @GetMapping("/{negotiationId}/attachments")
     public ResponseEntity<List<NegotiationAttachmentResponse>> attachments(
             @PathVariable
-            long negotiationId
+            long negotiationId,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         return ResponseEntity.ok(
                 service.findAttachments(negotiationId)
         );
@@ -121,8 +129,11 @@ public class NegotiationArchiveController {
             long negotiationId,
 
             @PathVariable
-            long attachmentId
+            long attachmentId,
+
+            Authentication authentication
     ) {
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         NegotiationAttachmentDownload download =
                 service.downloadAttachment(negotiationId, attachmentId);
 

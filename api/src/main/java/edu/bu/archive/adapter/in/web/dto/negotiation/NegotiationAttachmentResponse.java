@@ -12,6 +12,17 @@ import java.time.LocalDateTime;
  * attachment collection is nested under NegotiationActivity, not
  * Negotiation itself - proven live 2026-08-06, see
  * docs/architecture/NEGOTIATION_ARCHIVE_COVERAGE.md).
+ *
+ * restrictedFlag is the legacy KCOEUS.NEGOTIATION_ATTACHMENT.RESTRICTED
+ * value ('Y'/'N', or null for attachments predating that column's
+ * capture) - preserved verbatim from
+ * archive.archived_attachment.legacy_restricted_flag (V076). It is
+ * informational only: it never gates listing, viewing, or downloading -
+ * see docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md for the
+ * product decision. downloadable already reflects the real, separate
+ * reason a file may be unavailable (no archived S3 object - most
+ * commonly because the source Oracle BLOB was never captured at all,
+ * per that same design doc's Oracle-side reconciliation).
  */
 public record NegotiationAttachmentResponse(
         Long attachmentId,
@@ -23,6 +34,7 @@ public record NegotiationAttachmentResponse(
         String archiveStatus,
         LocalDateTime sourceUpdateTimestamp,
         String sourceUpdateUser,
-        boolean downloadable
+        boolean downloadable,
+        String restrictedFlag
 ) {
 }

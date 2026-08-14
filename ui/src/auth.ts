@@ -84,3 +84,24 @@ export async function accessToken(): Promise<string | null> {
     return null;
   }
 }
+
+// Frontend-side convenience only, mirroring what
+// AttachmentAuthorizationService actually enforces server-side
+// (ArchiveAttachmentViewer -> ROLE_ArchiveAttachmentViewer). This is
+// used to hide navigation/UI affordances a user can't use anyway, never
+// as the real access-control boundary - every attachment endpoint
+// re-checks the real Cognito group on every request regardless of what
+// this returns. A missing/malformed cognito:groups claim, or any
+// failure resolving the session, is treated as "no access" (fails
+// closed, never open).
+const ATTACHMENT_VIEWER_GROUP = "ArchiveAttachmentViewer";
+
+export async function hasAttachmentAccess(): Promise<boolean> {
+  try {
+    const session = await fetchAuthSession();
+    const groups = session.tokens?.accessToken?.payload?.["cognito:groups"];
+    return Array.isArray(groups) && groups.includes(ATTACHMENT_VIEWER_GROUP);
+  } catch {
+    return false;
+  }
+}

@@ -35,6 +35,7 @@ public class AttachmentSearchService {
     private static final String RECORD_TYPE_ALL = "ALL";
     private static final String RECORD_TYPE_AWARD = "AWARD";
     private static final String RECORD_TYPE_PROPOSAL = "PROPOSAL";
+    private static final String RECORD_TYPE_NEGOTIATION = "NEGOTIATION";
 
     private static final String ATTACHMENT_SEARCH_SORT =
             "ORDER BY parent_number, sequence_number, attachment_id\n";
@@ -71,9 +72,10 @@ public class AttachmentSearchService {
         String safeDocumentNumber = documentNumber == null ? "" : documentNumber.trim();
         String safeFileId = fileId == null ? "" : fileId.trim();
 
-        if (RECORD_TYPE_PROPOSAL.equals(safeRecordType) && !safeFileId.isEmpty()) {
+        if (!RECORD_TYPE_AWARD.equals(safeRecordType) && !safeFileId.isEmpty()) {
             throw new IllegalArgumentException(
-                    "fileId is Award-specific and cannot be used with recordType=PROPOSAL"
+                    "fileId is Award-specific and cannot be used with recordType="
+                            + safeRecordType
             );
         }
 
@@ -92,6 +94,10 @@ public class AttachmentSearchService {
 
         return switch (safeRecordType) {
             case RECORD_TYPE_PROPOSAL -> searchProposal(
+                    safeRecordNumber, safeDocumentNumber, safeRecordId,
+                    attachmentId, versionFilter, page, size
+            );
+            case RECORD_TYPE_NEGOTIATION -> searchNegotiation(
                     safeRecordNumber, safeDocumentNumber, safeRecordId,
                     attachmentId, versionFilter, page, size
             );
@@ -147,6 +153,56 @@ public class AttachmentSearchService {
                         safeVersionFilter, ATTACHMENT_SEARCH_SORT, safeSize, offset
                 ).stream()
                         .map(row -> toResult(RECORD_TYPE_PROPOSAL, row))
+                        .toList();
+
+        return new PageResponse<>(
+                content, safePage, safeSize, totalElements,
+                pageMetadata.totalPages(), pageMetadata.first(), pageMetadata.last()
+        );
+    }
+
+    private PageResponse<AttachmentSearchResultResponse> searchNegotiation(
+            String recordNumber,
+            String documentNumber,
+            String recordId,
+            String attachmentId,
+            String versionFilter,
+            int page,
+            int size
+    ) {
+        Long safeRecordId = parseIdentifier(recordId, "Negotiation ID");
+        Long safeAttachmentId = parseIdentifier(attachmentId, "Attachment ID");
+        String safeVersionFilter = normalizeVersionFilter(versionFilter);
+
+        if (recordNumber.isEmpty()
+                && documentNumber.isEmpty()
+                && safeRecordId == null
+                && safeAttachmentId == null) {
+            throw new IllegalArgumentException(
+                    "At least one identifier (recordNumber, documentNumber, "
+                            + "recordId, or attachmentId) must be supplied"
+            );
+        }
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countSearchNegotiationAttachments(
+                recordNumber, documentNumber, safeRecordId, safeAttachmentId,
+                safeVersionFilter
+        );
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        int offset = safePage * safeSize;
+
+        List<AttachmentSearchResultResponse> content =
+                repository.searchNegotiationAttachments(
+                        recordNumber, documentNumber, safeRecordId, safeAttachmentId,
+                        safeVersionFilter, ATTACHMENT_SEARCH_SORT, safeSize, offset
+                ).stream()
+                        .map(row -> toResult(RECORD_TYPE_NEGOTIATION, row))
                         .toList();
 
         return new PageResponse<>(
@@ -268,6 +324,19 @@ public class AttachmentSearchService {
      * MISSING_SOURCE/FAILED are exercised only by tests today - this
      * still maps them correctly for whenever a non-uploaded state
      * exists.
+     *
+     * Negotiation is a third, narrower vocabulary again -
+     * archive.archived_attachment.archive_status only ever has three
+     * values (ARCHIVED/MISSING/FAILED - see V020's own CHECK
+     * constraint), with no separate "not yet requested/pending" state at
+     * all: MISSING covers both "never attempted" and "source Oracle BLOB
+     * was never captured" (the dominant real case - see
+     * docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md's
+     * reconciliation, 26,581 of 28,923 real attachments). Deliberately
+     * never maps a Negotiation status to "Pending upload" - that state
+     * genuinely does not exist for this domain, so pretending one of the
+     * other two literals means "pending" would be a fabrication, not a
+     * mapping.
      */
     private static String resolveAvailabilityStatus(
             String recordType,
@@ -276,6 +345,11 @@ public class AttachmentSearchService {
     ) {
         if (downloadable) {
             return "Available";
+        }
+        if (RECORD_TYPE_NEGOTIATION.equals(recordType)) {
+            return "FAILED".equals(uploadStatus)
+                    ? "Failed"
+                    : "Source file unavailable";
         }
         String pendingLiteral = RECORD_TYPE_PROPOSAL.equals(recordType)
                 ? "NOT_REQUESTED"
@@ -296,9 +370,11 @@ public class AttachmentSearchService {
         String upper = recordType.trim().toUpperCase();
         if (!RECORD_TYPE_ALL.equals(upper)
                 && !RECORD_TYPE_AWARD.equals(upper)
-                && !RECORD_TYPE_PROPOSAL.equals(upper)) {
+                && !RECORD_TYPE_PROPOSAL.equals(upper)
+                && !RECORD_TYPE_NEGOTIATION.equals(upper)) {
             throw new IllegalArgumentException(
-                    "recordType must be one of ALL, AWARD, PROPOSAL: " + recordType
+                    "recordType must be one of ALL, AWARD, PROPOSAL, NEGOTIATION: "
+                            + recordType
             );
         }
         return upper;

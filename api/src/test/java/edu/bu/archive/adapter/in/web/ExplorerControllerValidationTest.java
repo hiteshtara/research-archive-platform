@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.application.award.ExplorerService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.config.SecurityConfiguration;
 
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(ExplorerController.class)
 @Import({
         SecurityConfiguration.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        AttachmentAuthorizationService.class
 })
 @TestPropertySource(properties = {
         "app.explorer.enabled=true",

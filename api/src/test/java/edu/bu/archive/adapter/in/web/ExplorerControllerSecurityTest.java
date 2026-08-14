@@ -2,17 +2,23 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.application.award.ExplorerService;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.config.SecurityConfiguration;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.util.List;
+
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -31,7 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(ExplorerController.class)
 @Import({
         SecurityConfiguration.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        AttachmentAuthorizationService.class
 })
 @TestPropertySource(properties = {
         "app.explorer.enabled=true",
@@ -72,6 +79,32 @@ class ExplorerControllerSecurityTest {
                         get("/api/v1/explorer/awards")
                                 .param("awardNumber", "100012-00002")
                                 .with(jwt())
+                )
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void attachmentsWithoutAttachmentGroupIsRejected() throws Exception {
+        mockMvc.perform(
+                        get("/api/v1/explorer/attachments")
+                                .param("awardId", "985585")
+                                .with(jwt())
+                )
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void attachmentsWithAttachmentGroupSucceeds() throws Exception {
+        when(service.findAttachments(985585L)).thenReturn(List.of());
+
+        mockMvc.perform(
+                        get("/api/v1/explorer/attachments")
+                                .param("awardId", "985585")
+                                .with(jwt().authorities(new SimpleGrantedAuthority(
+                                        AttachmentAuthorizationService.ATTACHMENT_VIEWER_AUTHORITY
+                                )))
                 )
                 .andExpect(status().isOk());
     }

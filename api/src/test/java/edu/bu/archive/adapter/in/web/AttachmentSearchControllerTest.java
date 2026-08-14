@@ -2,6 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.service.AttachmentSearchService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -26,7 +27,9 @@ class AttachmentSearchControllerTest {
     @BeforeEach
     void setUp() {
         service = mock(AttachmentSearchService.class);
-        AttachmentSearchController controller = new AttachmentSearchController(service);
+        AttachmentSearchController controller = new AttachmentSearchController(
+                service, mock(AttachmentAuthorizationService.class)
+        );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())

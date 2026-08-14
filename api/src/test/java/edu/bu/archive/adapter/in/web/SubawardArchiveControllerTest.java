@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardPageResponse;
+import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.subaward.SubawardArchiveService;
 import edu.bu.archive.application.subaward.SubawardAttachmentDownload;
 
@@ -30,7 +31,9 @@ class SubawardArchiveControllerTest {
     void setUp() {
         service = mock(SubawardArchiveService.class);
         SubawardArchiveController controller =
-                new SubawardArchiveController(service);
+                new SubawardArchiveController(
+                        service, mock(AttachmentAuthorizationService.class)
+                );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())

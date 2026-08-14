@@ -12,12 +12,13 @@
 // a replacement for server-side validation, only to disable the
 // Search action / show a field before a round trip would fail).
 
-export const RECORD_TYPES = ["ALL", "AWARD", "PROPOSAL"];
+export const RECORD_TYPES = ["ALL", "AWARD", "PROPOSAL", "NEGOTIATION"];
 
 export const RECORD_TYPE_OPTIONS = [
   { value: "ALL", label: "All records" },
   { value: "AWARD", label: "Awards" },
   { value: "PROPOSAL", label: "Proposals" },
+  { value: "NEGOTIATION", label: "Negotiations" },
 ];
 
 export function recordTypeLabel(recordType) {
@@ -29,11 +30,11 @@ export function recordTypeLabel(recordType) {
 // drives both what the UI renders and what hasAnyIdentifierSupplied
 // checks. ALL never shows recordId/attachmentId/fileId (ambiguous
 // across domains - the backend rejects them with recordType=ALL).
-// PROPOSAL never shows fileId (Award-specific - Proposal's own file
-// identifier, file_data_id, is a different concept entirely: an Oracle
-// blob key, not a numeric id, and is never exposed to the client).
+// PROPOSAL/NEGOTIATION never show fileId (Award-specific - neither
+// Proposal's file_data_id nor Negotiation's source_file_id is a
+// comparable numeric id, and neither is ever exposed to the client).
 export function visibleFieldsForRecordType(recordType) {
-  if (recordType === "PROPOSAL") {
+  if (recordType === "PROPOSAL" || recordType === "NEGOTIATION") {
     return ["recordNumber", "documentNumber", "recordId", "attachmentId"];
   }
   if (recordType === "ALL") {
@@ -49,11 +50,20 @@ export function recordNumberFieldLabel(recordType) {
   if (recordType === "PROPOSAL") {
     return "Proposal number";
   }
+  if (recordType === "NEGOTIATION") {
+    return "Negotiation number";
+  }
   return "Record number";
 }
 
 export function recordIdFieldLabel(recordType) {
-  return recordType === "PROPOSAL" ? "Proposal ID" : "Award ID";
+  if (recordType === "PROPOSAL") {
+    return "Proposal ID";
+  }
+  if (recordType === "NEGOTIATION") {
+    return "Negotiation ID";
+  }
+  return "Award ID";
 }
 
 // At least one exact identifier - among the fields actually visible
@@ -78,6 +88,9 @@ export function archivedFileResultsCountLabel(totalElements) {
 export function archivedFileSearchErrorMessage(status) {
   if (status === 401) {
     return "Your session has expired. Sign in again to search archived files.";
+  }
+  if (status === 403) {
+    return "Access denied. Searching archived files requires membership in the ArchiveAttachmentViewer group - contact an administrator if you believe this is wrong.";
   }
   if (status === 400) {
     return "That search could not be understood. Check the identifiers and try again.";
@@ -131,6 +144,9 @@ export function resolveRecordViewPath(result) {
   if (result.recordType === "PROPOSAL") {
     return `/proposals/dashboard/${result.parentId}`;
   }
+  if (result.recordType === "NEGOTIATION") {
+    return `/negotiations/${result.parentId}`;
+  }
   return null;
 }
 
@@ -161,12 +177,16 @@ export function dispatchArchivedFileDownload(
   attachmentId,
   downloadAward,
   downloadProposal,
+  downloadNegotiation,
 ) {
   if (recordType === "AWARD") {
     return downloadAward(parentId, attachmentId);
   }
   if (recordType === "PROPOSAL") {
     return downloadProposal(parentId, attachmentId);
+  }
+  if (recordType === "NEGOTIATION") {
+    return downloadNegotiation(parentId, attachmentId);
   }
   return Promise.reject(
     new Error(`Unsupported record type for download: ${recordType}`),

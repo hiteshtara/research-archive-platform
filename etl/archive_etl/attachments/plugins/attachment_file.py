@@ -183,6 +183,7 @@ class AttachmentFilePlugin(AttachmentPlugin):
                 archived_timestamp,
                 error_message,
                 source_metadata,
+                legacy_restricted_flag,
                 manifest_updated_at
             )
             VALUES (
@@ -206,6 +207,7 @@ class AttachmentFilePlugin(AttachmentPlugin):
                 :archived_timestamp,
                 :error_message,
                 CAST(:source_metadata AS JSONB),
+                :legacy_restricted_flag,
                 :manifest_updated_at
             )
             ON CONFLICT (module_code, source_attachment_id) DO UPDATE SET
@@ -229,6 +231,7 @@ class AttachmentFilePlugin(AttachmentPlugin):
                 archived_timestamp = EXCLUDED.archived_timestamp,
                 error_message = EXCLUDED.error_message,
                 source_metadata = EXCLUDED.source_metadata,
+                legacy_restricted_flag = EXCLUDED.legacy_restricted_flag,
                 manifest_updated_at = EXCLUDED.manifest_updated_at
             """
         )
@@ -310,5 +313,12 @@ class AttachmentFilePlugin(AttachmentPlugin):
                 source_metadata,
                 sort_keys=True,
             ),
+            # Promoted out of source_metadata into its own typed column
+            # (V076) for reliable API access - never overwrites/removes
+            # the JSONB value above, which stays the source of truth.
+            # Only Negotiation attachments currently carry a "restricted"
+            # attribute; every other module's row gets NULL here, same
+            # as the migration's own backfill.
+            "legacy_restricted_flag": row.get("restricted"),
             "manifest_updated_at": row["manifest_updated_at"],
         }
