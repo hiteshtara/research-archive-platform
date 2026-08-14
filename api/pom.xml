@@ -115,6 +115,26 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!--
+          Real Postgres schema-shaped integration tests (see
+          NegotiationArchiveRepositorySchemaIntegrationTest) - a mocked
+          JdbcClient only verifies SQL text/param binding, never that a
+          selected/joined column actually exists. Added 2026-08-14 after
+          a live 500 (column "legacy_restricted_flag" does not exist)
+          reached dev RDS undetected because every existing repository
+          test mocks JdbcClient.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
