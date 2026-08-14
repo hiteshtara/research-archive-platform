@@ -35,6 +35,7 @@ import {
   archivedFileResultKey,
   archivedFileResultsCountLabel,
   archivedFileSearchErrorMessage,
+  dispatchArchivedFileDownload,
   formatSourceDateLabel,
   hasAnyIdentifierSupplied,
   parseRecordTypeParam,
@@ -179,19 +180,23 @@ export function ArchivedFileFinderPage() {
     setDownloadError(null);
     setDownloadingKey(key);
     try {
-      if (result.recordType === "PROPOSAL") {
-        await downloadProposalAttachmentV1(
-          result.parentId,
-          result.attachmentId,
-          result.fileName ?? "attachment",
-        );
-      } else {
-        await downloadAwardAttachmentV1(
-          result.parentId,
-          result.attachmentId,
-          result.fileName ?? "attachment",
-        );
-      }
+      await dispatchArchivedFileDownload(
+        result.recordType,
+        result.parentId,
+        result.attachmentId,
+        (parentId, attachmentId) =>
+          downloadAwardAttachmentV1(
+            parentId,
+            attachmentId,
+            result.fileName ?? "attachment",
+          ),
+        (parentId, attachmentId) =>
+          downloadProposalAttachmentV1(
+            parentId,
+            attachmentId,
+            result.fileName ?? "attachment",
+          ),
+      );
     } catch (error) {
       setDownloadError(
         error instanceof Error ? error.message : "Download failed.",

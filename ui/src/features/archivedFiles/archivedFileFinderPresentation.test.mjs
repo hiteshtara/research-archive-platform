@@ -7,6 +7,7 @@ import {
   archivedFileResultKey,
   archivedFileResultsCountLabel,
   archivedFileSearchErrorMessage,
+  dispatchArchivedFileDownload,
   formatSourceDateLabel,
   hasAnyIdentifierSupplied,
   parseRecordTypeParam,
@@ -19,6 +20,19 @@ import {
   resolveRecordViewPath,
   visibleFieldsForRecordType,
 } from "./archivedFileFinderPresentation.mjs";
+
+function spy(returnValue) {
+  const calls = [];
+  const fn = (...args) => {
+    calls.push(args);
+    if (returnValue instanceof Error) {
+      return Promise.reject(returnValue);
+    }
+    return Promise.resolve(returnValue);
+  };
+  fn.calls = calls;
+  return fn;
+}
 
 function readSource(relativePath) {
   return readFileSync(
@@ -239,6 +253,106 @@ test("parseVersionFilterParam accepts current/historical case-insensitively and 
   assert.equal(parseVersionFilterParam("HISTORICAL"), "historical");
   assert.equal(parseVersionFilterParam(null), "all");
   assert.equal(parseVersionFilterParam("not-a-real-filter"), "all");
+});
+
+// --- dispatchArchivedFileDownload (Award/Proposal download dispatch) -----
+
+test("an AWARD result calls only the Award downloader, with the correct parentId and attachmentId", async () => {
+  const award = spy("award-ok");
+  const proposal = spy("proposal-ok");
+
+  const result = await dispatchArchivedFileDownload(
+    "AWARD",
+    3047454,
+    9001,
+    award,
+    proposal,
+  );
+
+  assert.equal(result, "award-ok");
+  assert.deepEqual(award.calls, [[3047454, 9001]]);
+  assert.equal(proposal.calls.length, 0);
+});
+
+test("a PROPOSAL result calls only the Proposal downloader, with the correct parentId and attachmentId", async () => {
+  const award = spy("award-ok");
+  const proposal = spy("proposal-ok");
+
+  const result = await dispatchArchivedFileDownload(
+    "PROPOSAL",
+    1092721,
+    31173,
+    award,
+    proposal,
+  );
+
+  assert.equal(result, "proposal-ok");
+  assert.deepEqual(proposal.calls, [[1092721, 31173]]);
+  assert.equal(award.calls.length, 0);
+});
+
+test("IDs are passed through without conversion or swapping - parentId and attachmentId never trade places", async () => {
+  const award = spy("ok");
+  const proposal = spy("ok");
+
+  await dispatchArchivedFileDownload("AWARD", 111, 222, award, proposal);
+  assert.deepEqual(award.calls[0], [111, 222]);
+
+  await dispatchArchivedFileDownload("PROPOSAL", 333, 444, award, proposal);
+  assert.deepEqual(proposal.calls[0], [333, 444]);
+});
+
+test("an Award downloader failure propagates to the caller rather than being swallowed", async () => {
+  const failure = new Error("Award download failed: 503");
+  const award = spy(failure);
+  const proposal = spy("proposal-ok");
+
+  await assert.rejects(
+    () => dispatchArchivedFileDownload("AWARD", 1, 2, award, proposal),
+    /Award download failed: 503/,
+  );
+  assert.equal(proposal.calls.length, 0);
+});
+
+test("a Proposal downloader failure propagates to the caller rather than being swallowed", async () => {
+  const failure = new Error("Proposal download failed: 401");
+  const award = spy("award-ok");
+  const proposal = spy(failure);
+
+  await assert.rejects(
+    () => dispatchArchivedFileDownload("PROPOSAL", 1, 2, award, proposal),
+    /Proposal download failed: 401/,
+  );
+  assert.equal(award.calls.length, 0);
+});
+
+test("an unsupported record type fails safely - rejects without calling either downloader", async () => {
+  const award = spy("award-ok");
+  const proposal = spy("proposal-ok");
+
+  await assert.rejects(
+    () => dispatchArchivedFileDownload("SUBAWARD", 1, 2, award, proposal),
+    /Unsupported record type/,
+  );
+  assert.equal(award.calls.length, 0);
+  assert.equal(proposal.calls.length, 0);
+});
+
+test("a missing record type fails safely - rejects without calling either downloader", async () => {
+  const award = spy("award-ok");
+  const proposal = spy("proposal-ok");
+
+  await assert.rejects(
+    () => dispatchArchivedFileDownload(null, 1, 2, award, proposal),
+    /Unsupported record type/,
+  );
+  assert.equal(award.calls.length, 0);
+  assert.equal(proposal.calls.length, 0);
+
+  await assert.rejects(
+    () => dispatchArchivedFileDownload(undefined, 1, 2, award, proposal),
+    /Unsupported record type/,
+  );
 });
 
 // --- Route/nav wiring (static source inspection - no component-render harness) ---

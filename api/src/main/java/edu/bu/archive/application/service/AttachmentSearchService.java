@@ -66,8 +66,8 @@ public class AttachmentSearchService {
             int size
     ) {
         String safeRecordType = normalizeRecordType(recordType);
-        String safeRecordNumber = firstNonBlank(recordNumber, awardNumberAlias);
-        String safeRecordId = firstNonBlank(recordId, awardIdAlias);
+        String safeRecordNumber = resolveAliasedParam(recordNumber, awardNumberAlias, "recordNumber/awardNumber");
+        String safeRecordId = resolveAliasedParam(recordId, awardIdAlias, "recordId/awardId");
         String safeDocumentNumber = documentNumber == null ? "" : documentNumber.trim();
         String safeFileId = fileId == null ? "" : fileId.trim();
 
@@ -312,14 +312,27 @@ public class AttachmentSearchService {
         return "all";
     }
 
-    private static String firstNonBlank(String preferred, String alias) {
-        if (preferred != null && !preferred.isBlank()) {
-            return preferred.trim();
+    /*
+     * recordNumber/recordId are the canonical names; awardNumber/awardId
+     * are deprecated aliases for the same value, not a second independent
+     * filter - so a caller supplying both must mean the same thing by
+     * both. If they genuinely disagree, silently preferring one would
+     * hide a caller bug (e.g. a stale bookmarked URL merged with a new
+     * form field) behind a search that quietly runs on the wrong
+     * identifier - reject it instead.
+     */
+    private static String resolveAliasedParam(String preferred, String alias, String paramLabel) {
+        String safePreferred = preferred == null ? "" : preferred.trim();
+        String safeAlias = alias == null ? "" : alias.trim();
+        if (safePreferred.isEmpty()) {
+            return safeAlias;
         }
-        if (alias != null && !alias.isBlank()) {
-            return alias.trim();
+        if (safeAlias.isEmpty() || safeAlias.equals(safePreferred)) {
+            return safePreferred;
         }
-        return preferred == null ? "" : preferred;
+        throw new IllegalArgumentException(
+                paramLabel + " values conflict: '" + safePreferred + "' vs '" + safeAlias + "'"
+        );
     }
 
     private static Long parseIdentifier(String value, String label) {

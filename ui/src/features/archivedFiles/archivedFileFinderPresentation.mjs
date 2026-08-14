@@ -143,3 +143,32 @@ export function parseVersionFilterParam(value) {
   const lower = (value ?? "").toLowerCase();
   return lower === "current" || lower === "historical" ? lower : "all";
 }
+
+// The one place recordType decides which download client function runs -
+// extracted out of ArchivedFileFinderPage.tsx's handleDownload so it is a
+// plain, independently unit-testable function (no component-render
+// harness exists in this codebase). downloadAward/downloadProposal are
+// injected rather than imported so a test can pass spies instead of the
+// real authenticated API client calls - the caller (the page) is
+// responsible for currying in fileName/whatever else its real downloader
+// needs, so this function's own contract stays exactly recordType +
+// parentId + attachmentId in, exactly one downloader call out. Never
+// catches - a downloader's rejection propagates to the caller unchanged,
+// so the page's existing try/catch error handling still applies.
+export function dispatchArchivedFileDownload(
+  recordType,
+  parentId,
+  attachmentId,
+  downloadAward,
+  downloadProposal,
+) {
+  if (recordType === "AWARD") {
+    return downloadAward(parentId, attachmentId);
+  }
+  if (recordType === "PROPOSAL") {
+    return downloadProposal(parentId, attachmentId);
+  }
+  return Promise.reject(
+    new Error(`Unsupported record type for download: ${recordType}`),
+  );
+}

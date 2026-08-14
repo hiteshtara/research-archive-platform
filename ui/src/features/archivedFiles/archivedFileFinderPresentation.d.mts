@@ -77,3 +77,11 @@ export function parseRecordTypeParam(value: string | null): RecordType;
 export function parseVersionFilterParam(
   value: string | null,
 ): "all" | "current" | "historical";
+
+export function dispatchArchivedFileDownload<T>(
+  recordType: string | null | undefined,
+  parentId: number,
+  attachmentId: number,
+  downloadAward: (parentId: number, attachmentId: number) => Promise<T>,
+  downloadProposal: (parentId: number, attachmentId: number) => Promise<T>,
+): Promise<T>;

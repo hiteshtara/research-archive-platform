@@ -120,20 +120,68 @@ class AttachmentSearchServiceTest {
     }
 
     @Test
-    void canonicalRecordNumberTakesPrecedenceOverLegacyAwardNumberAlias() {
+    void recordNumberAndAwardNumberAliasWithTheSameValueAreAccepted() {
         PageResponse<AttachmentSearchResultResponse> page =
                 new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true);
         when(awardArchiveService.searchAttachments(
-                "canonical-value", "", "", null, "", "all", 0, 25
+                "200086-00001", "", "", null, "", "all", 0, 25
         )).thenReturn(page);
 
         service.searchAttachments(
-                "AWARD", "canonical-value", "legacy-value", null, null, null, null, null, "all", 0, 25
+                "AWARD", "200086-00001", "200086-00001", null, null, null, null, null, "all", 0, 25
         );
 
         verify(awardArchiveService).searchAttachments(
-                "canonical-value", "", "", null, "", "all", 0, 25
+                "200086-00001", "", "", null, "", "all", 0, 25
         );
+    }
+
+    @Test
+    void conflictingRecordNumberAndAwardNumberAliasValuesAreRejected() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        "AWARD", "canonical-value", "legacy-value", null, null, null, null, null, "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("recordNumber/awardNumber")
+                .hasMessageContaining("canonical-value")
+                .hasMessageContaining("legacy-value");
+
+        verifyNoInteractions(awardArchiveService, repository);
+    }
+
+    @Test
+    void recordIdAndAwardIdAliasWithTheSameValueAreAccepted() {
+        when(repository.countSearchProposalAttachments(
+                anyString(), anyString(), eq(7125L), isNull(), eq("all")
+        )).thenReturn(0L);
+        when(repository.searchProposalAttachments(
+                anyString(), anyString(), eq(7125L), isNull(), eq("all"), anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        service.searchAttachments(
+                "PROPOSAL", null, null, null, "7125", "7125", null, null, "all", 0, 25
+        );
+
+        verify(repository).countSearchProposalAttachments(
+                anyString(), anyString(), eq(7125L), isNull(), eq("all")
+        );
+    }
+
+    @Test
+    void conflictingRecordIdAndAwardIdAliasValuesAreRejected() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        "PROPOSAL", "2975", null, null, "7125", "9999", null, null, "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("recordId/awardId")
+                .hasMessageContaining("7125")
+                .hasMessageContaining("9999");
+
+        verifyNoInteractions(awardArchiveService, repository);
     }
 
     @Test
