@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static edu.bu.archive.testsupport.NegotiationFixtures.negotiationRow;
+import static edu.bu.archive.testsupport.NegotiationFixtures.negotiationRow420;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -47,6 +48,56 @@ class NegotiationArchiveRepositoryTest {
 
         assertThat(result).contains(expected);
         verify(statement).param("negotiationId", 101L);
+    }
+
+    /*
+     * Real fixture: negotiation_id=420, associated_document_id="419" -
+     * two different Oracle columns/values, live-verified 2026-08-14.
+     * findById must look up by negotiation_id only - the SQL text must
+     * never filter on associated_document_id, and requesting 420 must
+     * bind exactly 420, never the coincidentally-close 419.
+     */
+    @Test
+    void findByIdLooksUpByNegotiationIdNeverAssociatedDocumentId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<NegotiationRowResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        NegotiationRowResponse expected = negotiationRow420();
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("negotiationId", 420L))
+                .thenReturn(statement);
+        when(statement.query(NegotiationRowResponse.class))
+                .thenReturn(query);
+        when(query.optional()).thenReturn(Optional.of(expected));
+
+        NegotiationArchiveRepository repository =
+                new NegotiationArchiveRepository(jdbc);
+
+        Optional<NegotiationRowResponse> result =
+                repository.findById(420L);
+
+        assertThat(result).contains(expected);
+        assertThat(result.orElseThrow().negotiationId()).isEqualTo(420L);
+        assertThat(result.orElseThrow().associatedDocumentId())
+                .isEqualTo("419");
+        assertThat(result.orElseThrow().negotiationId())
+                .isNotEqualTo(
+                        Long.parseLong(
+                                result.orElseThrow().associatedDocumentId()
+                        )
+                );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("WHERE negotiation_id = :negotiationId")
+                .doesNotContain("associated_document_id = :negotiationId");
+        verify(statement).param("negotiationId", 420L);
+        verify(statement, org.mockito.Mockito.never())
+                .param("negotiationId", 419L);
     }
 
     @Test

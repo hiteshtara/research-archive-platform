@@ -80,20 +80,20 @@ test("visibleFieldsForRecordType hides File ID for PROPOSAL - Award-only, no saf
   assert.ok(!fields.includes("fileId"));
 });
 
-test("visibleFieldsForRecordType hides File ID for NEGOTIATION - no comparable numeric identifier exists", () => {
+test("visibleFieldsForRecordType hides both File ID and recordNumber for NEGOTIATION - no separate Negotiation number exists in Kuali", () => {
   const fields = visibleFieldsForRecordType("NEGOTIATION");
-  assert.deepEqual(fields, ["recordNumber", "documentNumber", "recordId", "attachmentId"]);
+  assert.deepEqual(fields, ["documentNumber", "recordId", "attachmentId"]);
   assert.ok(!fields.includes("fileId"));
+  assert.ok(!fields.includes("recordNumber"));
 });
 
 test("visibleFieldsForRecordType only offers recordNumber/documentNumber for ALL - recordId/attachmentId/fileId are domain-ambiguous", () => {
   assert.deepEqual(visibleFieldsForRecordType("ALL"), ["recordNumber", "documentNumber"]);
 });
 
-test("recordNumberFieldLabel names the field per recordType", () => {
+test("recordNumberFieldLabel names the field per recordType - no Negotiation number label since NEGOTIATION never shows this field", () => {
   assert.equal(recordNumberFieldLabel("AWARD"), "Award number");
   assert.equal(recordNumberFieldLabel("PROPOSAL"), "Proposal number");
-  assert.equal(recordNumberFieldLabel("NEGOTIATION"), "Negotiation number");
   assert.equal(recordNumberFieldLabel("ALL"), "Record number");
 });
 
@@ -101,6 +101,30 @@ test("recordIdFieldLabel names the field per recordType", () => {
   assert.equal(recordIdFieldLabel("AWARD"), "Award ID");
   assert.equal(recordIdFieldLabel("PROPOSAL"), "Proposal ID");
   assert.equal(recordIdFieldLabel("NEGOTIATION"), "Negotiation ID");
+});
+
+// --- Negotiation ID (420) must never be confused with the negotiation's
+// associated_document_id (419) - a different value entirely, describing
+// whatever record this negotiation is associated with, not the
+// negotiation itself. Live-verified fixture, 2026-08-14. ------------------
+
+test("Negotiation ID 420 is never mapped to associated document/association ID 419: field visibility", () => {
+  const fields = visibleFieldsForRecordType("NEGOTIATION");
+  // recordId is the only Negotiation ID search field; recordNumber
+  // (which never existed as a distinct concept) stays absent, so there
+  // is exactly one place a numeric Negotiation ID can be entered.
+  assert.deepEqual(fields, ["documentNumber", "recordId", "attachmentId"]);
+});
+
+test("Negotiation ID 420 is never mapped to associated document/association ID 419: view routing uses recordId/parentId, never associatedDocumentId", () => {
+  assert.equal(
+    resolveRecordViewPath({ recordType: "NEGOTIATION", parentId: 420 }),
+    "/negotiations/420",
+  );
+  assert.notEqual(
+    resolveRecordViewPath({ recordType: "NEGOTIATION", parentId: 420 }),
+    "/negotiations/419",
+  );
 });
 
 // --- hasAnyIdentifierSupplied (recordType-aware) --------------------------
@@ -140,13 +164,17 @@ test("hasAnyIdentifierSupplied ignores fileId for PROPOSAL - it is not a visible
   );
 });
 
-test("hasAnyIdentifierSupplied ignores fileId for NEGOTIATION - it is not a visible field there", () => {
+test("hasAnyIdentifierSupplied ignores fileId and recordNumber for NEGOTIATION - neither is a visible field there", () => {
   assert.equal(
     hasAnyIdentifierSupplied({ recordType: "NEGOTIATION", fileId: "5001" }),
     false,
   );
   assert.equal(
     hasAnyIdentifierSupplied({ recordType: "NEGOTIATION", recordNumber: "231427" }),
+    false,
+  );
+  assert.equal(
+    hasAnyIdentifierSupplied({ recordType: "NEGOTIATION", recordId: "420" }),
     true,
   );
 });

@@ -6,8 +6,11 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
+import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
 
 import org.junit.jupiter.api.Test;
+
+import static edu.bu.archive.testsupport.NegotiationFixtures.negotiationRow420;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -96,6 +99,31 @@ class NegotiationAttachmentContractTest {
                 objectMapper.writeValueAsString(notRestrictedButMissing);
         assertThat(restrictedJson).contains("\"restrictedFlag\":\"Y\"");
         assertThat(notRestrictedJson).contains("\"restrictedFlag\":\"N\"");
+    }
+
+    /*
+     * Real fixture: negotiation_id=420, associated_document_id="419" -
+     * live-verified 2026-08-14 in Oracle staging. negotiationId and
+     * associatedDocumentId are distinct fields on NegotiationRowResponse
+     * with distinct real values - this guards against a future rename/
+     * refactor ever collapsing them into one field or swapping which
+     * value backs which name.
+     */
+    @Test
+    void negotiationRowNeverConfusesNegotiationIdWithAssociatedDocumentId()
+            throws Exception {
+        NegotiationRowResponse row = negotiationRow420();
+
+        JsonNode node = objectMapper.valueToTree(row);
+        assertThat(node.get("negotiationId").asLong()).isEqualTo(420L);
+        assertThat(node.get("associatedDocumentId").asText())
+                .isEqualTo("419");
+        assertThat(node.has("negotiationAssociationId"))
+                .as("no field named 'negotiationAssociationId' should "
+                        + "ever exist - the real value is "
+                        + "associatedDocumentId, interpreted per "
+                        + "negotiationAssociationTypeCode")
+                .isFalse();
     }
 
     private void assertFieldNames(Object value, Set<String> expected)

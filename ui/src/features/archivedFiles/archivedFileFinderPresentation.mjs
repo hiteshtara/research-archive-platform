@@ -33,8 +33,24 @@ export function recordTypeLabel(recordType) {
 // PROPOSAL/NEGOTIATION never show fileId (Award-specific - neither
 // Proposal's file_data_id nor Negotiation's source_file_id is a
 // comparable numeric id, and neither is ever exposed to the client).
+//
+// NEGOTIATION never shows recordNumber either - unlike Award/Proposal,
+// Kuali has no separate "Negotiation number" business identifier.
+// KCOEUS.NEGOTIATION's own business identifier is NEGOTIATION_ID (the
+// same value recordId already searches); the only other per-record
+// value is document_number, already covered by the Workflow document
+// number field. Do not confuse this with associated_document_id (a
+// different value, describing whatever record negotiationAsscTypeId
+// says this negotiation is associated with, e.g. an Award or Proposal
+// number) - see NegotiationRowResponse.associatedDocumentId, never
+// used as a search identifier here. Live-verified 2026-08-14:
+// negotiation_id 420 has document_number "367821" and
+// associated_document_id "419" - three different values.
 export function visibleFieldsForRecordType(recordType) {
-  if (recordType === "PROPOSAL" || recordType === "NEGOTIATION") {
+  if (recordType === "NEGOTIATION") {
+    return ["documentNumber", "recordId", "attachmentId"];
+  }
+  if (recordType === "PROPOSAL") {
     return ["recordNumber", "documentNumber", "recordId", "attachmentId"];
   }
   if (recordType === "ALL") {
@@ -49,9 +65,6 @@ export function recordNumberFieldLabel(recordType) {
   }
   if (recordType === "PROPOSAL") {
     return "Proposal number";
-  }
-  if (recordType === "NEGOTIATION") {
-    return "Negotiation number";
   }
   return "Record number";
 }

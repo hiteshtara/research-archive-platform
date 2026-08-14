@@ -261,24 +261,26 @@ export function ArchivedFileFinderPage() {
                 </Select>
               </FormControl>
 
-              <TextField
-                label={recordNumberFieldLabel(draft.recordType)}
-                value={draft.recordNumber}
-                onChange={(event) => updateDraft("recordNumber", event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    runSearch();
-                  }
-                }}
-                sx={{ minWidth: 180 }}
-                slotProps={{
-                  input: {
-                    startAdornment: (
-                      <SearchOutlined fontSize="small" sx={{ mr: 1, color: "action.active" }} />
-                    ),
-                  },
-                }}
-              />
+              {visibleFields.includes("recordNumber") && (
+                <TextField
+                  label={recordNumberFieldLabel(draft.recordType)}
+                  value={draft.recordNumber}
+                  onChange={(event) => updateDraft("recordNumber", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      runSearch();
+                    }
+                  }}
+                  sx={{ minWidth: 180 }}
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <SearchOutlined fontSize="small" sx={{ mr: 1, color: "action.active" }} />
+                      ),
+                    },
+                  }}
+                />
+              )}
 
               <TextField
                 label="Workflow document number"

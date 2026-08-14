@@ -498,6 +498,40 @@ class AttachmentSearchRepositoryTest {
         verifyParam(statement, "recordId", 374L);
     }
 
+    /*
+     * Real fixture: negotiation_id=420, associated_document_id="419" -
+     * live-verified 2026-08-14 in Oracle staging (see
+     * NegotiationFixtures.negotiationRow420). recordId=420 must bind
+     * n.negotiation_id, never n.associated_document_id - the SQL text
+     * must never reference associated_document_id as a search
+     * predicate, and the bound value must be exactly 420, never 419.
+     */
+    @Test
+    void searchNegotiationAttachmentsNegotiationId420IsNeverConfusedWithAssociatedDocumentId419() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AttachmentSearchRepository(jdbc).searchNegotiationAttachments(
+                "", "", 420L, null, "all", "ORDER BY n.document_number\n", 25, 0
+        );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("n.negotiation_id = :recordId")
+                .doesNotContain("associated_document_id");
+        verifyParam(statement, "recordId", 420L);
+        org.mockito.Mockito.verify(statement, org.mockito.Mockito.never())
+                .param("recordId", 419L);
+    }
+
     @Test
     void searchNegotiationAttachmentsHistoricalVersionFilterExcludesEverything() {
         JdbcClient jdbc = mock(JdbcClient.class);
