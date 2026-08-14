@@ -86,6 +86,64 @@ class NegotiationArchiveRepositoryTest {
     }
 
     @Test
+    void findNegotiationsPrioritizesAnExactIdOrDocumentNumberMatch() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<NegotiationSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(NegotiationSummaryResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        NegotiationArchiveRepository repository =
+                new NegotiationArchiveRepository(jdbc);
+
+        repository.findNegotiations("420", 25, 0);
+
+        String sql = firstSql(jdbc);
+
+        assertThat(sql)
+                .contains(
+                        "CASE WHEN CAST(negotiation_id AS TEXT) = :query"
+                )
+                .contains("CASE WHEN document_number = :query");
+        assertThat(sql.indexOf("CASE WHEN CAST(negotiation_id AS TEXT)"))
+                .isLessThan(sql.indexOf("source_update_timestamp DESC"));
+    }
+
+    @Test
+    void findNegotiationsOmitsTheExactMatchCaseWhenQueryIsBlank() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<NegotiationSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(NegotiationSummaryResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        NegotiationArchiveRepository repository =
+                new NegotiationArchiveRepository(jdbc);
+
+        repository.findNegotiations(null, 25, 0);
+
+        String sql = firstSql(jdbc);
+
+        assertThat(sql).doesNotContain("CASE WHEN");
+        verify(statement, org.mockito.Mockito.never())
+                .param(org.mockito.ArgumentMatchers.eq("query"), any());
+    }
+
+    @Test
     void findNotificationsUsesTheVerifiedParentColumn() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =

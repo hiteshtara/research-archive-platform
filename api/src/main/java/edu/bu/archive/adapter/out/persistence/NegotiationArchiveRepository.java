@@ -101,6 +101,7 @@ public class NegotiationArchiveRepository {
                 FROM archive.negotiation
                 """ + filter + """
                 ORDER BY
+                """ + orderBy(normalizedQuery) + """
                     source_update_timestamp DESC NULLS LAST,
                     negotiation_id DESC
                 LIMIT :limit
@@ -114,6 +115,27 @@ public class NegotiationArchiveRepository {
                 .param("offset", offset)
                 .query(NegotiationSummaryResponse.class)
                 .list();
+    }
+
+    /*
+     * An exact negotiation_id or document_number match is prioritized
+     * ahead of the broad ILIKE substring matches the WHERE clause also
+     * allows (e.g. searching "420" also matches negotiation_id 14200 or
+     * a document_number containing "420") - otherwise a record a user
+     * searched for by its exact ID can be pushed past the first page by
+     * unrelated substring matches with a more recent
+     * source_update_timestamp. Only applies when a query is present;
+     * :query is unbound (and this CASE unreachable) on the empty-query
+     * "browse all" path.
+     */
+    private String orderBy(String normalizedQuery) {
+        return normalizedQuery.isEmpty()
+                ? ""
+                : """
+                CASE WHEN CAST(negotiation_id AS TEXT) = :query
+                        THEN 0 ELSE 1 END,
+                CASE WHEN document_number = :query THEN 0 ELSE 1 END,
+                """;
     }
 
     public Optional<NegotiationRowResponse> findById(
