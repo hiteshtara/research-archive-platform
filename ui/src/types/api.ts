@@ -1131,7 +1131,13 @@ export interface ProposalCommentsV1 {
 // version, resolved server-side, and is what a client navigates to -
 // no separate resolve-by-number call needed. relationshipActive
 // mirrors AWARD_FUNDING_PROPOSALS.ACTIVE - inactive relationships are
-// still returned, never dropped.
+// still returned, never dropped. sourceRelationshipId
+// (award_funding_proposal_id, AWARD_FUNDING_PROPOSALS' own real Oracle
+// PK) traces this row back to its exact source - two rows can
+// legitimately be visually identical otherwise (see V075, which
+// dropped the archive-side natural-key uniqueness that used to block
+// this); the UI groups those for display without ever discarding
+// either underlying row.
 export interface ProposalFundedAwardV1 {
   awardNumber: string;
   awardTitle: string | null;
@@ -1142,6 +1148,7 @@ export interface ProposalFundedAwardV1 {
   relationshipActive: boolean;
   exactLinkedAwardId: number | null;
   navigableCurrentAwardId: number | null;
+  sourceRelationshipId: number | null;
 }
 
 // archive.proposal_custom_data LEFT JOINed to the shared

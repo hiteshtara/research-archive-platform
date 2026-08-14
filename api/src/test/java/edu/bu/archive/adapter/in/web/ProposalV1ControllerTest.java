@@ -158,7 +158,7 @@ class ProposalV1ControllerTest {
         ProposalFundedAwardResponse fundedAward =
                 new ProposalFundedAwardResponse(
                         "200268-00001", "Title", "Closed", 2, 1, 5, true,
-                        148155L, 605555L
+                        148155L, 605555L, 148183L
                 );
         when(service.findFundedAwards(2986L))
                 .thenReturn(List.of(fundedAward));

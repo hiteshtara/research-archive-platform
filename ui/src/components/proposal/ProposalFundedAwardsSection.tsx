@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { getProposalFundedAwardsV1 } from "../../api/client";
 import {
   buildFundedAwardMetaText,
+  fundedAwardSourceCountLabel,
+  groupFundedAwardsBySourceRelationship,
   RELATIONSHIP_ACTION_LABEL,
   resolveRelationshipCardState,
 } from "../../features/common/relationshipCardPresentation.mjs";
@@ -24,6 +26,14 @@ import { StatusPill } from "../common/StatusPill";
 // separate resolve call needed. The exact historical award linked at
 // submission time (exactLinkedAwardId/linkedAwardVersion) is kept for
 // audit but never rendered as visible text.
+//
+// The API can legitimately return two rows that are visually identical
+// (same Award, same active state, same displayed metadata) but trace
+// back to two distinct Oracle source rows - see V075 and
+// relationshipCardPresentation.mjs's groupFundedAwardsBySourceRelationship.
+// Those are grouped into a single card with a small "N archived
+// relationship records" label; the underlying rows are never deleted
+// or merged server-side, only grouped here for display.
 export function ProposalFundedAwardsSection({
   proposalId,
 }: {
@@ -53,12 +63,18 @@ export function ProposalFundedAwardsSection({
     );
   }
 
+  const groupedFundedAwards = groupFundedAwardsBySourceRelationship(fundedAwards);
+
   return (
     <Stack spacing={1.5}>
-      {fundedAwards.map((fundedAward, index) => {
+      {groupedFundedAwards.map((fundedAward, index) => {
         const { archived } = resolveRelationshipCardState(
           fundedAward.navigableCurrentAwardId,
         );
+        const countLabel = fundedAwardSourceCountLabel(fundedAward.sourceCount);
+        const metaText = [buildFundedAwardMetaText(fundedAward), countLabel]
+          .filter(Boolean)
+          .join(" · ");
 
         return (
           <RelationshipCard
@@ -70,7 +86,7 @@ export function ProposalFundedAwardsSection({
             statusLabel={
               <StatusPill status={fundedAward.awardStatus} domain="award" />
             }
-            metaText={buildFundedAwardMetaText(fundedAward)}
+            metaText={metaText}
             buttonLabel={RELATIONSHIP_ACTION_LABEL.award}
             href={
               archived

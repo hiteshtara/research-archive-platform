@@ -125,3 +125,63 @@ export function buildFundedAwardMetaText(fundedAward) {
     ` · Proposal version ${fundedAward.proposalVersion ?? "—"}`
   );
 }
+
+// Presentation-only grouping key for Funded Awards: every field a card
+// actually displays. Two archive.proposal_award rows can legitimately
+// be visually identical (same exact linked Award, same Award number,
+// same relationship-active state, same displayed Award metadata) while
+// still being genuinely distinct source rows - V075 dropped the
+// archive-side natural-key uniqueness that used to make this
+// impossible (real fixture: Proposal family 2975, award_id 462515,
+// two Oracle award_funding_proposal_id rows 501508/511830).
+// sourceRelationshipId is deliberately excluded from the key - it's
+// the one field allowed to differ within a group.
+function fundedAwardGroupKey(fundedAward) {
+  return [
+    fundedAward.awardNumber,
+    fundedAward.awardTitle,
+    fundedAward.awardStatus,
+    fundedAward.proposalVersion,
+    fundedAward.linkedAwardVersion,
+    fundedAward.currentAwardVersion,
+    fundedAward.relationshipActive,
+    fundedAward.exactLinkedAwardId,
+    fundedAward.navigableCurrentAwardId,
+  ].join("|");
+}
+
+// Groups the API's one-row-per-source-relationship list into one entry
+// per visually distinct card, in first-seen order (so a family with no
+// duplicates renders identically to before this grouping existed).
+// Never drops a sourceRelationshipId - every one is preserved in
+// sourceRelationshipIds, so the underlying archive rows stay fully
+// traceable even though only one card is shown.
+export function groupFundedAwardsBySourceRelationship(fundedAwards) {
+  const groups = new Map();
+
+  for (const fundedAward of fundedAwards) {
+    const key = fundedAwardGroupKey(fundedAward);
+    if (!groups.has(key)) {
+      groups.set(key, { fundedAward, sourceRelationshipIds: [] });
+    }
+    groups.get(key).sourceRelationshipIds.push(fundedAward.sourceRelationshipId);
+  }
+
+  return Array.from(groups.values()).map(
+    ({ fundedAward, sourceRelationshipIds }) => ({
+      ...fundedAward,
+      sourceRelationshipIds,
+      sourceCount: sourceRelationshipIds.length,
+    }),
+  );
+}
+
+// Only shown when a card actually represents more than one archived
+// source row - an ordinary (non-duplicate) relationship never gets
+// this label, matching its exact pre-grouping appearance.
+export function fundedAwardSourceCountLabel(sourceCount) {
+  if (sourceCount <= 1) {
+    return null;
+  }
+  return `${sourceCount} archived relationship records`;
+}

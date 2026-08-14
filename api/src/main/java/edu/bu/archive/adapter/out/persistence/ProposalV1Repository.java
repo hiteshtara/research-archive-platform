@@ -347,6 +347,13 @@ public class ProposalV1Repository {
      * used throughout this codebase (e.g. AwardArchiveRepository.
      * findCurrent) - so the API response carries the ID a client
      * navigates to directly, never requiring a second resolve call.
+     *
+     * pa.award_funding_proposal_id (sourceRelationshipId) is included
+     * so a client can distinguish/group two rows that are otherwise
+     * visually identical - see V075, which allowed genuine natural-key
+     * duplicates in archive.proposal_award to coexist. This method
+     * still returns one row per real relationship row, unchanged -
+     * grouping is a presentation concern, not done here.
      */
     public List<ProposalFundedAwardResponse> findFundedAwardRows(
             String proposalNumber
@@ -361,7 +368,8 @@ public class ProposalV1Repository {
                     current_award.sequence_number AS current_award_version,
                     pa.active AS relationship_active,
                     pa.award_id AS exact_linked_award_id,
-                    current_award.award_id AS navigable_current_award_id
+                    current_award.award_id AS navigable_current_award_id,
+                    pa.award_funding_proposal_id AS source_relationship_id
                 FROM archive.proposal_version pv
                 JOIN archive.proposal_award pa
                     ON pa.proposal_id = pv.proposal_id

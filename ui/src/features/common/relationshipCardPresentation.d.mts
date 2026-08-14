@@ -40,3 +40,29 @@ export function buildFundedAwardMetaText(fundedAward: {
   linkedAwardVersion: number | null;
   proposalVersion: number | null;
 }): string;
+
+export interface FundedAwardGroupable {
+  awardNumber: string;
+  awardTitle: string | null;
+  awardStatus: string | null;
+  proposalVersion: number | null;
+  linkedAwardVersion: number | null;
+  currentAwardVersion: number | null;
+  relationshipActive: boolean;
+  exactLinkedAwardId: number | null;
+  navigableCurrentAwardId: number | null;
+  sourceRelationshipId: number | null;
+}
+
+export interface GroupedFundedAward extends FundedAwardGroupable {
+  sourceRelationshipIds: (number | null)[];
+  sourceCount: number;
+}
+
+export function groupFundedAwardsBySourceRelationship(
+  fundedAwards: FundedAwardGroupable[],
+): GroupedFundedAward[];
+
+export function fundedAwardSourceCountLabel(
+  sourceCount: number,
+): string | null;

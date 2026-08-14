@@ -1,0 +1,32 @@
+-- Corrective migration: uq_proposal_award (proposal_id, award_id,
+-- award_number), added at V015's initial table creation - before
+-- award_funding_proposal_id (AWARD_FUNDING_PROPOSALS' own real Oracle
+-- PK) even existed as a column - silently contradicts the explicit
+-- design decision V058 later made: "the exact awardId<->proposalId row
+-- (never reduced to a number/family relationship) is now preserved
+-- with the real Oracle AWARD_FUNDING_PROPOSAL_ID as the UPSERT key"
+-- (see V058's own commit message and
+-- etl/tests/test_proposal_load.py::
+-- test_deduplicates_by_the_real_award_funding_proposal_id_not_by_the_tuple,
+-- which already asserts two rows sharing (proposal_id, award_id) but
+-- with different award_funding_proposal_id values must both survive -
+-- a pandas-level unit test the leftover Postgres constraint below the
+-- loader silently defeated).
+--
+-- Live-verified in Oracle staging (AWARD_FUNDING_PROPOSALS): two real,
+-- distinct rows (award_funding_proposal_id 501508 and 511830, 13 days
+-- apart, both ACTIVE='Y', distinct OBJ_ID) share
+-- (proposal_id=7125, award_id=462515) - Proposal family 2975. A second
+-- family (4120) has an equivalent pair. Nothing in the source data
+-- distinguishes one as authoritative over the other, so this archive's
+-- own exact-source-preservation principle requires keeping both, not
+-- guessing which one to drop.
+--
+-- award_funding_proposal_id remains the real Oracle primary key and
+-- keeps its own uq_proposal_award_funding_proposal_id unique index
+-- (V059) unchanged - that is the correct, and only, uniqueness this
+-- table should enforce. This migration touches no rows - it is a pure
+-- constraint drop, nothing is deduplicated, updated, or deleted.
+
+ALTER TABLE archive.proposal_award
+    DROP CONSTRAINT IF EXISTS uq_proposal_award;

@@ -191,6 +191,19 @@ public class ProposalArchiveRepository {
                 .list();
     }
 
+    /*
+     * row_rank's tiebreaker is award_funding_proposal_id DESC (added
+     * alongside V075, which dropped uq_proposal_award and allowed
+     * genuine natural-key duplicates - e.g. Proposal family 2975/
+     * award_id 462515 - to coexist as real, distinct
+     * archive.proposal_award rows). Without it, two rows sharing the
+     * same (award_id, proposal_id) tie on the existing ORDER BY and
+     * which one row_rank = 1 picks becomes plan-dependent, not stable
+     * across query re-execution. This does not change which award_id
+     * values are shown or this method's existing "collapse to one row
+     * per award_id" behavior - it only makes an already-existing tie
+     * deterministic.
+     */
     public List<ProposalAwardResponse> findAwards(
             String proposalNumber
     ) {
@@ -202,7 +215,9 @@ public class ProposalArchiveRepository {
                         relationship.award_number,
                         ROW_NUMBER() OVER (
                             PARTITION BY relationship.award_id
-                            ORDER BY relationship.proposal_id DESC
+                            ORDER BY
+                                relationship.proposal_id DESC,
+                                relationship.award_funding_proposal_id DESC
                         ) AS row_rank
                     FROM archive.proposal_award relationship
                     INNER JOIN archive.proposal_version proposal

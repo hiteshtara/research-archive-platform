@@ -5,6 +5,8 @@ import {
   RELATIONSHIP_ACTION_LABEL,
   buildFundedAwardMetaText,
   buildFundingProposalMetaText,
+  fundedAwardSourceCountLabel,
+  groupFundedAwardsBySourceRelationship,
   resolveFundingProposalCardSubtitle,
   resolveFundingProposalCardTitle,
   resolveNegotiationAssociationArchived,
@@ -276,5 +278,106 @@ test("buildFundedAwardMetaText adds the version-mismatch note when the linked ve
       proposalVersion: 2,
     }),
     "Current version 5 (linked at version 2) · Proposal version 2",
+  );
+});
+
+// --- groupFundedAwardsBySourceRelationship / fundedAwardSourceCountLabel -
+// --- (V075: archive.proposal_award can legitimately hold two distinct ---
+// --- source rows - award_funding_proposal_id 501508/511830 - for the ----
+// --- same real-world relationship. Real fixture: Proposal family 2975, --
+// --- award_id 462515.) ---------------------------------------------------
+
+const OLDER_SOURCE_ROW = {
+  awardNumber: "201498-00001",
+  awardTitle: "Coulter Translational Partnership",
+  awardStatus: "Active",
+  proposalVersion: 1,
+  linkedAwardVersion: 1,
+  currentAwardVersion: 1,
+  relationshipActive: true,
+  exactLinkedAwardId: 462515,
+  navigableCurrentAwardId: 462515,
+  sourceRelationshipId: 501508,
+};
+
+const NEWER_SOURCE_ROW = {
+  ...OLDER_SOURCE_ROW,
+  sourceRelationshipId: 511830,
+};
+
+test("groupFundedAwardsBySourceRelationship collapses two visually identical source rows into one group, preserving both source ids", () => {
+  const grouped = groupFundedAwardsBySourceRelationship([
+    OLDER_SOURCE_ROW,
+    NEWER_SOURCE_ROW,
+  ]);
+
+  assert.equal(grouped.length, 1);
+  assert.equal(grouped[0].sourceCount, 2);
+  assert.deepEqual(grouped[0].sourceRelationshipIds, [501508, 511830]);
+});
+
+test("groupFundedAwardsBySourceRelationship never collapses two different Award relationships", () => {
+  const differentAward = {
+    ...OLDER_SOURCE_ROW,
+    awardNumber: "100694-00001",
+    exactLinkedAwardId: 357410,
+    navigableCurrentAwardId: 357410,
+    sourceRelationshipId: 501691,
+  };
+
+  const grouped = groupFundedAwardsBySourceRelationship([
+    OLDER_SOURCE_ROW,
+    differentAward,
+  ]);
+
+  assert.equal(grouped.length, 2);
+});
+
+test("groupFundedAwardsBySourceRelationship never collapses an active relationship with an inactive one, even for the same Award", () => {
+  const inactiveTwin = {
+    ...OLDER_SOURCE_ROW,
+    relationshipActive: false,
+    sourceRelationshipId: 999999,
+  };
+
+  const grouped = groupFundedAwardsBySourceRelationship([
+    OLDER_SOURCE_ROW,
+    inactiveTwin,
+  ]);
+
+  assert.equal(grouped.length, 2);
+});
+
+test("groupFundedAwardsBySourceRelationship leaves an ordinary (non-duplicate) family exactly as before - one group per row, in the original order", () => {
+  const first = { ...OLDER_SOURCE_ROW, sourceRelationshipId: 1 };
+  const second = {
+    ...OLDER_SOURCE_ROW,
+    awardNumber: "100100-00001",
+    exactLinkedAwardId: 10,
+    navigableCurrentAwardId: 10,
+    sourceRelationshipId: 2,
+  };
+
+  const grouped = groupFundedAwardsBySourceRelationship([first, second]);
+
+  assert.equal(grouped.length, 2);
+  assert.equal(grouped[0].awardNumber, "201498-00001");
+  assert.equal(grouped[1].awardNumber, "100100-00001");
+  assert.equal(grouped[0].sourceCount, 1);
+  assert.equal(grouped[1].sourceCount, 1);
+});
+
+test("fundedAwardSourceCountLabel is null for an ordinary single-source card - existing behavior must not change", () => {
+  assert.equal(fundedAwardSourceCountLabel(1), null);
+});
+
+test("fundedAwardSourceCountLabel names the exact count for a grouped card", () => {
+  assert.equal(
+    fundedAwardSourceCountLabel(2),
+    "2 archived relationship records",
+  );
+  assert.equal(
+    fundedAwardSourceCountLabel(3),
+    "3 archived relationship records",
   );
 });
