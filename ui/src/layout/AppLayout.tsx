@@ -3,6 +3,7 @@ import {
   ArchiveOutlined,
   DashboardOutlined,
   DescriptionOutlined,
+  FindInPageOutlined,
   GavelOutlined,
   HandshakeOutlined,
   HistoryOutlined,
@@ -45,6 +46,7 @@ const NAV_ICONS: Record<string, React.ReactNode> = {
   proposals: <DescriptionOutlined />,
   negotiations: <HandshakeOutlined />,
   subawards: <GavelOutlined />,
+  archivedFiles: <FindInPageOutlined />,
   globalSearch: <SearchOutlined />,
 };
 

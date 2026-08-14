@@ -7,6 +7,7 @@ import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
 import { AwardSearchPage } from "./pages/award/AwardSearchPage";
 import { AwardVersionSearchPage } from "./pages/award/AwardVersionSearchPage";
 
+import { ArchivedFileFinderPage } from "./pages/ArchivedFileFinderPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
@@ -102,6 +103,11 @@ export default function App() {
         <Route
           path="documents"
           element={<DocumentsPage />}
+        />
+
+        <Route
+          path="archived-files"
+          element={<ArchivedFileFinderPage />}
         />
 
         <Route

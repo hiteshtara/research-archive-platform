@@ -16,6 +16,8 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryCardRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
+import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.AwardAttachmentStorage;
 
@@ -792,6 +794,392 @@ class AwardArchiveServiceTest {
                 sortSqlCaptor.capture(), anyInt(), anyInt()
         );
         assertThat(sortSqlCaptor.getValue()).contains("av.sequence_number DESC");
+    }
+
+    // --- searchAttachments (Archived File Finder, Phase 1: Award only) ---
+    //
+    // Fixture below is the real, live-verified Award 200086-00001
+    // (sequence 165, award_id 3047454, document 879423) already used as
+    // the regression fixture for the Historical Award Records fix this
+    // session - reused here rather than inventing a new one.
+
+    private static final AttachmentSearchRow AVAILABLE_ROW = new AttachmentSearchRow(
+            3047454L, "200086-00001", "Coulter Foundation Translational "
+            + "Partners in Biomedical Engineering", "PI NAME", 165,
+            "879423", 9001L, 5001L, "Notice of Award.pdf",
+            "Notice of Award", null, 1_800_000L, "application/pdf",
+            "UPLOADED", true, true
+    );
+
+    @Test
+    void searchAttachmentsByExactAwardNumberPassesItThroughUnchanged() {
+        when(repository.countSearchAwardAttachments(
+                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all"),
+                anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(AVAILABLE_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                "200086-00001", null, null, null, null, "all", 0, 25
+        );
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).parentNumber()).isEqualTo("200086-00001");
+        assertThat(page.content().get(0).recordType()).isEqualTo("AWARD");
+    }
+
+    @Test
+    void searchAttachmentsByExactWorkflowDocumentNumberPassesItThroughUnchanged() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), eq("879423"), isNull(), isNull(), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                anyString(), eq("879423"), isNull(), isNull(), isNull(), eq("all"),
+                anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(AVAILABLE_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, "879423", null, null, null, "all", 0, 25
+        );
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).workflowDocumentNumber()).isEqualTo("879423");
+    }
+
+    @Test
+    void searchAttachmentsByExactAwardIdParsesAndPassesItThrough() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(AVAILABLE_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, "3047454", null, null, "all", 0, 25
+        );
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).parentId()).isEqualTo(3047454L);
+    }
+
+    @Test
+    void searchAttachmentsByExactAttachmentIdParsesAndPassesItThrough() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), isNull(), eq(9001L), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), isNull(), eq(9001L), isNull(), eq("all"),
+                anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(AVAILABLE_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, null, "9001", null, "all", 0, 25
+        );
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).attachmentId()).isEqualTo(9001L);
+    }
+
+    @Test
+    void searchAttachmentsByExactFileIdParsesAndPassesItThrough() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), isNull(), isNull(), eq(5001L), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), isNull(), isNull(), eq(5001L), eq("all"),
+                anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(AVAILABLE_ROW));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, null, null, "5001", "all", 0, 25
+        );
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).fileId()).isEqualTo(5001L);
+    }
+
+    @Test
+    void searchAttachmentsCombinesMultipleFiltersAndPassesAllThroughTogether() {
+        when(repository.countSearchAwardAttachments(
+                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current"),
+                anyString(), eq(25), eq(0)
+        )).thenReturn(List.of(AVAILABLE_ROW));
+
+        service.searchAttachments(
+                "200086-00001", "879423", "3047454", null, null, "current", 0, 25
+        );
+
+        verify(repository).countSearchAwardAttachments(
+                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current")
+        );
+        verify(repository).searchAwardAttachments(
+                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current"),
+                anyString(), eq(25), eq(0)
+        );
+    }
+
+    @Test
+    void searchAttachmentsNormalizesAnUnrecognizedVersionFilterToAll() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        )).thenReturn(0L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        service.searchAttachments(
+                null, null, "3047454", null, null, "not-a-real-filter", 0, 25
+        );
+
+        verify(repository).countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        );
+    }
+
+    @Test
+    void searchAttachmentsHistoricalFilterIsPassedThroughAsGiven() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical")
+        )).thenReturn(0L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of());
+
+        service.searchAttachments(
+                null, null, "3047454", null, null, "historical", 0, 25
+        );
+
+        verify(repository).countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical")
+        );
+    }
+
+    @Test
+    void searchAttachmentsPaginationIsStableAndDeterministic() {
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        )).thenReturn(60L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), eq(25), eq(50)
+        )).thenReturn(List.of());
+        ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, "3047454", null, null, "all", 2, 25
+        );
+
+        verify(repository).searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                sortSqlCaptor.capture(), eq(25), eq(50)
+        );
+        assertThat(sortSqlCaptor.getValue())
+                .contains("av.award_number")
+                .contains("av.sequence_number")
+                .contains("aa.award_attachment_id");
+        assertThat(page.page()).isEqualTo(2);
+        assertThat(page.totalElements()).isEqualTo(60L);
+        assertThat(page.totalPages()).isEqualTo(3);
+    }
+
+    @Test
+    void searchAttachmentsRejectsAllBlankIdentifiersWithoutReachingTheRepository() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        "", "  ", null, null, null, "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("At least one identifier");
+
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void searchAttachmentsRejectsANonNumericAwardIdWithoutReachingTheRepository() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        null, null, "not-a-number", null, null, "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Award ID")
+                .hasMessageContaining("not-a-number");
+
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void searchAttachmentsRejectsANonNumericAttachmentIdWithoutReachingTheRepository() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        null, null, null, "not-a-number", null, "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Attachment ID")
+                .hasMessageContaining("not-a-number");
+
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void searchAttachmentsRejectsANonNumericFileIdWithoutReachingTheRepository() {
+        assertThatThrownBy(() ->
+                service.searchAttachments(
+                        null, null, null, null, "not-a-number", "all", 0, 25
+                )
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("File ID")
+                .hasMessageContaining("not-a-number");
+
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void searchAttachmentsMarksAPendingUploadAsNotDownloadableWithTheRightLabel() {
+        AttachmentSearchRow pending = new AttachmentSearchRow(
+                3047454L, "200086-00001", "Title", "PI", 165, "879423",
+                9002L, 5002L, "Budget.xlsx", "Budget", null, 42_000L,
+                "application/vnd.ms-excel", "PENDING", false, true
+        );
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(pending));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, "3047454", null, null, "all", 0, 25
+        );
+
+        AttachmentSearchResultResponse result = page.content().get(0);
+        assertThat(result.downloadable()).isFalse();
+        assertThat(result.availabilityStatus()).isEqualTo("Pending upload");
+    }
+
+    @Test
+    void searchAttachmentsMarksAFailedUploadAsNotDownloadableWithTheRightLabel() {
+        AttachmentSearchRow failed = new AttachmentSearchRow(
+                3047454L, "200086-00001", "Title", "PI", 165, "879423",
+                9003L, 5003L, "Correspondence.pdf", "Correspondence", null,
+                10_000L, "application/pdf", "FAILED", false, true
+        );
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        )).thenReturn(1L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(failed));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, "3047454", null, null, "all", 0, 25
+        );
+
+        assertThat(page.content().get(0).availabilityStatus()).isEqualTo("Failed");
+        assertThat(page.content().get(0).downloadable()).isFalse();
+    }
+
+    @Test
+    void searchAttachmentsMarksASkippedOrMissingSourceAsUnavailableNeverInventingAStatus() {
+        AttachmentSearchRow skipped = new AttachmentSearchRow(
+                3047454L, "200086-00001", "Title", "PI", 165, "879423",
+                9004L, 5004L, "Old Fax.tif", "Correspondence", null, null,
+                null, "SKIPPED", false, true
+        );
+        AttachmentSearchRow noFileAtAll = new AttachmentSearchRow(
+                3047454L, "200086-00001", "Title", "PI", 165, "879423",
+                9005L, null, null, null, null, null, null, null, false, true
+        );
+        when(repository.countSearchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
+        )).thenReturn(2L);
+        when(repository.searchAwardAttachments(
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(skipped, noFileAtAll));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                null, null, "3047454", null, null, "all", 0, 25
+        );
+
+        assertThat(page.content())
+                .extracting(AttachmentSearchResultResponse::availabilityStatus)
+                .containsExactly("Source file unavailable", "Source file unavailable");
+        assertThat(page.content())
+                .extracting(AttachmentSearchResultResponse::downloadable)
+                .containsExactly(false, false);
+    }
+
+    @Test
+    void searchAttachmentsNeverExposesS3OrFileDataIdentifiersInTheResponse() {
+        // AttachmentSearchResultResponse structurally has no s3Bucket/
+        // s3Key/fileDataId field at all - this test proves it by
+        // reflection, so the guarantee survives even if a future editor
+        // adds fields to the record without reading this comment.
+        var fieldNames = java.util.Arrays.stream(
+                AttachmentSearchResultResponse.class.getRecordComponents()
+        ).map(java.lang.reflect.RecordComponent::getName).toList();
+
+        assertThat(fieldNames)
+                .noneMatch(name -> name.toLowerCase().contains("bucket"))
+                .noneMatch(name -> name.toLowerCase().contains("s3key"))
+                .noneMatch(name -> name.toLowerCase().contains("filedataid"))
+                .noneMatch(name -> name.toLowerCase().contains("storagepath"));
+    }
+
+    @Test
+    void searchAttachmentsPreservesEachAuthoritativeRelationshipForASharedPhysicalFile() {
+        // Two different award_attachment rows (different attachmentId,
+        // different parent award_id) legitimately sharing the same
+        // fileId - Award's own real physical-file deduplication (see
+        // archive.attachment_object's own header comment). Must produce
+        // two distinct results, never collapsed into one.
+        AttachmentSearchRow onOlderVersion = new AttachmentSearchRow(
+                3035516L, "200086-00001", "Title", "PI", 164, "876054",
+                8001L, 5001L, "Notice of Award.pdf", "Notice of Award",
+                null, 1_800_000L, "application/pdf", "UPLOADED", true, false
+        );
+        AttachmentSearchRow onCurrentVersion = new AttachmentSearchRow(
+                3047454L, "200086-00001", "Title", "PI", 165, "879423",
+                9001L, 5001L, "Notice of Award.pdf", "Notice of Award",
+                null, 1_800_000L, "application/pdf", "UPLOADED", true, true
+        );
+        when(repository.countSearchAwardAttachments(
+                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all")
+        )).thenReturn(2L);
+        when(repository.searchAwardAttachments(
+                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all"),
+                anyString(), anyInt(), anyInt()
+        )).thenReturn(List.of(onOlderVersion, onCurrentVersion));
+
+        PageResponse<AttachmentSearchResultResponse> page = service.searchAttachments(
+                "200086-00001", null, null, null, null, "all", 0, 25
+        );
+
+        assertThat(page.content()).hasSize(2);
+        assertThat(page.content())
+                .extracting(AttachmentSearchResultResponse::fileId)
+                .containsExactly(5001L, 5001L);
+        assertThat(page.content())
+                .extracting(AttachmentSearchResultResponse::attachmentId)
+                .containsExactly(8001L, 9001L);
+        assertThat(page.content())
+                .extracting(AttachmentSearchResultResponse::sequenceNumber)
+                .containsExactly(164, 165);
     }
 
     private AwardSummaryCardRow summaryCard(String awardNumber) {

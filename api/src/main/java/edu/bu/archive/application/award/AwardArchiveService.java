@@ -1,5 +1,7 @@
 package edu.bu.archive.application.award;
 
+import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
+import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
@@ -813,16 +815,157 @@ public class AwardArchiveService {
      * repository layer or surface as a 500.
      */
     private static Long parseAwardId(String awardId) {
-        if (awardId == null || awardId.isBlank()) {
+        return parseIdentifier(awardId, "Award ID");
+    }
+
+    /*
+     * Shared by every exact-numeric-identifier filter across this
+     * service (awardId, and - for Archived File Finder below -
+     * attachmentId/fileId): blank means "no filter" (matching every
+     * other optional filter's own empty-string convention), non-blank
+     * but non-numeric is a genuine client error mapped to 400 by
+     * GlobalExceptionHandler, never a 500. label makes the error message
+     * name the actual field a caller got wrong.
+     */
+    private static Long parseIdentifier(String value, String label) {
+        if (value == null || value.isBlank()) {
             return null;
         }
         try {
-            return Long.parseLong(awardId.trim());
+            return Long.parseLong(value.trim());
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException(
-                    "Award ID must be a valid whole number: " + awardId
+                    label + " must be a valid whole number: " + value
             );
         }
+    }
+
+    private static final String ATTACHMENT_SEARCH_SORT =
+            "ORDER BY av.award_number, av.sequence_number, aa.award_attachment_id\n";
+
+    /*
+     * Archived File Finder (Phase 1: Award only). At least one exact
+     * identifier is required - a search with every filter blank would
+     * otherwise scan every archived Award attachment, which is never a
+     * legitimate use of this endpoint (unlike the free-text q searches
+     * elsewhere in this service, which are allowed to be broad).
+     * recordType is hardcoded "AWARD" here, not read from anywhere - see
+     * AttachmentSearchResultResponse's own header comment for why.
+     */
+    public PageResponse<AttachmentSearchResultResponse> searchAttachments(
+            String awardNumber,
+            String documentNumber,
+            String awardId,
+            String attachmentId,
+            String fileId,
+            String versionFilter,
+            int page,
+            int size
+    ) {
+        String safeAwardNumber = awardNumber == null ? "" : awardNumber.trim();
+        String safeDocumentNumber = documentNumber == null ? "" : documentNumber.trim();
+        Long safeAwardId = parseIdentifier(awardId, "Award ID");
+        Long safeAttachmentId = parseIdentifier(attachmentId, "Attachment ID");
+        Long safeFileId = parseIdentifier(fileId, "File ID");
+        String safeVersionFilter = normalizeVersionFilter(versionFilter);
+
+        if (safeAwardNumber.isEmpty()
+                && safeDocumentNumber.isEmpty()
+                && safeAwardId == null
+                && safeAttachmentId == null
+                && safeFileId == null) {
+            throw new IllegalArgumentException(
+                    "At least one identifier (awardNumber, documentNumber, "
+                            + "awardId, attachmentId, or fileId) must be supplied"
+            );
+        }
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countSearchAwardAttachments(
+                safeAwardNumber, safeDocumentNumber, safeAwardId,
+                safeAttachmentId, safeFileId, safeVersionFilter
+        );
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        int offset = safePage * safeSize;
+
+        List<AttachmentSearchResultResponse> content =
+                repository.searchAwardAttachments(
+                        safeAwardNumber, safeDocumentNumber, safeAwardId,
+                        safeAttachmentId, safeFileId, safeVersionFilter,
+                        ATTACHMENT_SEARCH_SORT, safeSize, offset
+                ).stream()
+                        .map(AwardArchiveService::toAttachmentSearchResult)
+                        .toList();
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
+    }
+
+    private static AttachmentSearchResultResponse toAttachmentSearchResult(
+            AttachmentSearchRow row
+    ) {
+        return new AttachmentSearchResultResponse(
+                "AWARD",
+                row.parentId(),
+                row.parentNumber(),
+                row.title(),
+                row.principalInvestigator(),
+                row.sequenceNumber(),
+                row.workflowDocumentNumber(),
+                row.attachmentId(),
+                row.fileId(),
+                row.fileName(),
+                row.documentType(),
+                row.sourceDate(),
+                row.fileSizeBytes(),
+                row.contentType(),
+                resolveAvailabilityStatus(row.uploadStatus(), row.downloadable()),
+                row.downloadable(),
+                row.currentVersion()
+        );
+    }
+
+    /*
+     * Exhaustive, deterministic mapping from the real
+     * archive.attachment_object.upload_status value (PENDING/SKIPPED/
+     * UPLOADED/FAILED, or null when an award_attachment row has no
+     * resolvable file_id at all) to exactly one of four human-readable
+     * labels - never invents a status the source data doesn't actually
+     * support. "Source file unavailable" covers SKIPPED (a file that
+     * structurally never had a blob to upload - see V035's own migration
+     * comment), a missing file_id, and any unrecognized value alike,
+     * since all three mean the same thing to a user: nothing to
+     * download. downloadable (computed in SQL with the exact expression
+     * downloadAttachment enforces server-side) decides "Available"
+     * before uploadStatus is even consulted, so this can never disagree
+     * with what the real download endpoint would do.
+     */
+    private static String resolveAvailabilityStatus(
+            String uploadStatus,
+            boolean downloadable
+    ) {
+        if (downloadable) {
+            return "Available";
+        }
+        if ("PENDING".equals(uploadStatus)) {
+            return "Pending upload";
+        }
+        if ("FAILED".equals(uploadStatus)) {
+            return "Failed";
+        }
+        return "Source file unavailable";
     }
 
     private static String normalizeVersionFilter(String versionFilter) {

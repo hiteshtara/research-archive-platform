@@ -15,6 +15,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardUnitDetailsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerPersonResponse;
 import edu.bu.archive.adapter.in.web.dto.explorer.ExplorerRolodexResponse;
@@ -1396,6 +1397,308 @@ class AwardArchiveRepositoryTest {
                 .contains("acd.award_id = :awardId")
                 .doesNotContain("award_sponsor_term")
                 .doesNotContain("award_report_term");
+    }
+
+    // --- searchAwardAttachments/countSearchAwardAttachments (Archived File Finder, Phase 1) ---
+
+    @Test
+    void searchAwardAttachmentsMatchesOnExactAwardNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "200086-00001", "", null, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        verify(statement).param("awardNumber", "200086-00001");
+        assertThat(firstSql(jdbc))
+                .contains(":awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber)");
+    }
+
+    @Test
+    void searchAwardAttachmentsMatchesOnExactWorkflowDocumentNumber() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "", "879423", null, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        verify(statement).param("documentNumber", "879423");
+        assertThat(firstSql(jdbc))
+                .contains(":documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber)")
+                .doesNotContain("aa.document_id");
+    }
+
+    @Test
+    void searchAwardAttachmentsExactAwardIdFilterUsesTheNullSafeCast() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "", "", 3047454L, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        verify(statement).param("awardId", 3047454L);
+        assertThat(firstSql(jdbc))
+                .contains("CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId");
+    }
+
+    @Test
+    void searchAwardAttachmentsMatchesOnExactAttachmentId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "", "", null, 9001L, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        verify(statement).param("attachmentId", 9001L);
+        assertThat(firstSql(jdbc))
+                .contains("CAST(:attachmentId AS BIGINT) IS NULL OR aa.award_attachment_id = :attachmentId");
+    }
+
+    @Test
+    void searchAwardAttachmentsMatchesOnExactFileId() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "", "", null, null, 5001L, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        verify(statement).param("fileId", 5001L);
+        assertThat(firstSql(jdbc))
+                .contains("CAST(:fileId AS BIGINT) IS NULL OR aa.file_id = :fileId");
+    }
+
+    @Test
+    void searchAwardAttachmentsCombinesEveryFilterWithAndNeverOr() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "200086-00001", "879423", 3047454L, null, null, "current",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        String sql = firstSql(jdbc);
+        assertThat(sql).doesNotContain(" OR UPPER(av.award_number) = UPPER(:awardNumber)) OR ");
+        assertThat(sql.split("WHERE", 2)[1]).doesNotContain("\nOR ");
+        verify(statement).param("awardNumber", "200086-00001");
+        verify(statement).param("documentNumber", "879423");
+        verify(statement).param("awardId", 3047454L);
+        verify(statement).param("versionFilter", "current");
+    }
+
+    @Test
+    void searchAwardAttachmentsVersionFilterSupportsAllCurrentAndHistorical() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "", "", 3047454L, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains(":versionFilter = 'all'")
+                .contains(":versionFilter = 'current' AND av.is_primary_current = TRUE")
+                .contains(":versionFilter = 'historical' AND av.is_primary_current = FALSE");
+    }
+
+    @Test
+    void searchAwardAttachmentsOrderingAndPaginationAreStableAndDeterministic() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "200086-00001", "", null, null, null, "all",
+                "ORDER BY av.award_number, av.sequence_number, aa.award_attachment_id\n",
+                25, 50
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("ORDER BY av.award_number, av.sequence_number, aa.award_attachment_id")
+                .contains("LIMIT :limit OFFSET :offset");
+        verify(statement).param("limit", 25);
+        verify(statement).param("offset", 50);
+    }
+
+    @Test
+    void searchAwardAttachmentsNeverSelectsS3OrFileDataIdColumns() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "200086-00001", "", null, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        // s3_bucket/s3_key legitimately appear inside the downloadable
+        // boolean expression (never as a raw exposed value) - the real
+        // guarantee is that neither is ever aliased out as its own
+        // result column, and file_data_id is never referenced at all.
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .doesNotContain("s3_bucket AS")
+                .doesNotContain("AS s3_bucket")
+                .doesNotContain("s3_key AS")
+                .doesNotContain("AS s3_key")
+                .doesNotContain("file_data_id");
+    }
+
+    @Test
+    void searchAwardAttachmentsSelectsFromAwardAttachmentNotAttachmentObjectPreservingOneRowPerRelationship() {
+        // FROM archive.award_attachment (never attachment_object) is what
+        // guarantees a physical file shared across multiple Award
+        // versions produces one result row per authoritative
+        // award_attachment relationship rather than being collapsed.
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "200086-00001", "", null, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_attachment aa")
+                .contains("LEFT JOIN archive.attachment_object ao")
+                .contains("ON ao.file_id = aa.file_id");
+    }
+
+    @Test
+    void searchAwardAttachmentsPiLateralJoinIsCappedAtOneRowSoItCanNeverMultiplyResults() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AttachmentSearchRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AttachmentSearchRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).searchAwardAttachments(
+                "200086-00001", "", null, null, null, "all",
+                "ORDER BY av.award_number\n", 25, 0
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("LEFT JOIN LATERAL (")
+                .contains("FROM archive.award_person ap")
+                .contains("LIMIT 1")
+                .contains(") pi ON TRUE");
+    }
+
+    @Test
+    void countSearchAwardAttachmentsAppliesTheSameFiltersAsSearch() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query = mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(1L);
+
+        long total = new AwardArchiveRepository(jdbc).countSearchAwardAttachments(
+                "200086-00001", "", null, null, null, "all"
+        );
+
+        assertThat(total).isEqualTo(1L);
+        assertThat(firstSql(jdbc))
+                .contains("SELECT COUNT(*)")
+                .contains("FROM archive.award_attachment aa")
+                .contains(":awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber)");
     }
 
     private String firstSql(JdbcClient jdbc) {

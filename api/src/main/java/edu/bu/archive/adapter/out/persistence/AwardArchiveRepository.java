@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAttachmentResponse;
@@ -1947,6 +1948,152 @@ public class AwardArchiveRepository {
                 WHERE award_id = :awardId
                 """)
                 .param("awardId", awardId)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    /*
+     * --- Archived File Finder (Phase 1: Award only) -----------------------
+     *
+     * FROM archive.award_attachment, never archive.attachment_object -
+     * this guarantees exactly one result row per authoritative
+     * award_attachment relationship, even when the same physical file_id
+     * is legitimately referenced by more than one Award version (Award's
+     * own real deduplication - see attachment_object's own header
+     * comment). attachment_object is only ever LEFT JOINed (1:1 on its
+     * own primary key file_id, so it can never multiply rows), and the
+     * PI LATERAL join below is capped at LIMIT 1 - the same pattern
+     * already proven in searchAwardVersions/searchAwards - so no join in
+     * this query can ever multiply the award_attachment row it started
+     * from, regardless of how many archive.award_person rows an Award
+     * has.
+     *
+     * Every identifier filter is a plain exact-match sentinel
+     * ('' or NULL means "no filter"), combined with AND only - there is
+     * deliberately no free-text/general-query parameter in Phase 1, so
+     * there is nothing that could veto an exact identifier match the way
+     * the Historical Award Records q/awardNumber interaction once did.
+     * documentNumber resolves against archive.award_version
+     * .workflow_document_number (the Award's own KEW document number),
+     * not archive.award_attachment.document_id (a different, per-
+     * attachment Oracle column never independently verified - see V035's
+     * own header comment) - a researcher searching "the Award's workflow
+     * document number" means the former.
+     *
+     * downloadable uses the exact same SQL expression already used by
+     * findAttachments/downloadAttachment above, so this result can never
+     * claim downloadable=true for a row the real download endpoint would
+     * reject. Never selects s3_bucket/s3_key/file_data_id.
+     */
+    public List<AttachmentSearchRow> searchAwardAttachments(
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            Long attachmentId,
+            Long fileId,
+            String versionFilter,
+            String sortSql,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    av.award_id AS parent_id,
+                    av.award_number AS parent_number,
+                    av.title,
+                    pi.full_name AS principal_investigator,
+                    av.sequence_number,
+                    av.workflow_document_number,
+                    aa.award_attachment_id AS attachment_id,
+                    aa.file_id,
+                    ao.file_name,
+                    aa.type_code AS document_type,
+                    aa.oracle_update_timestamp AS source_date,
+                    ao.file_size_bytes,
+                    ao.content_type,
+                    ao.upload_status,
+                    (
+                        ao.upload_status = 'UPLOADED'
+                        AND ao.s3_bucket IS NOT NULL AND ao.s3_bucket <> ''
+                        AND ao.s3_key IS NOT NULL AND ao.s3_key <> ''
+                    ) AS downloadable,
+                    av.is_primary_current AS current_version
+                FROM archive.award_attachment aa
+                JOIN archive.award_version av ON av.award_id = aa.award_id
+                LEFT JOIN archive.attachment_object ao
+                    ON ao.file_id = aa.file_id
+                LEFT JOIN LATERAL (
+                    SELECT ap.full_name
+                    FROM archive.award_person ap
+                    WHERE ap.award_id = av.award_id
+                    ORDER BY
+                        CASE
+                            WHEN UPPER(TRIM(ap.contact_role_code)) = 'PI'
+                            THEN 0
+                            ELSE 1
+                        END,
+                        ap.full_name NULLS LAST,
+                        ap.award_person_id
+                    LIMIT 1
+                ) pi ON TRUE
+                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
+                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
+                  AND (CAST(:attachmentId AS BIGINT) IS NULL OR aa.award_attachment_id = :attachmentId)
+                  AND (CAST(:fileId AS BIGINT) IS NULL OR aa.file_id = :fileId)
+                  AND (
+                        :versionFilter = 'all'
+                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
+                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
+                  )
+                """ + sortSql + """
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("awardNumber", awardNumber)
+                .param("documentNumber", documentNumber)
+                .param("awardId", awardId)
+                .param("attachmentId", attachmentId)
+                .param("fileId", fileId)
+                .param("versionFilter", versionFilter)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(AttachmentSearchRow.class)
+                .list();
+    }
+
+    public long countSearchAwardAttachments(
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            Long attachmentId,
+            Long fileId,
+            String versionFilter
+    ) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.award_attachment aa
+                JOIN archive.award_version av ON av.award_id = aa.award_id
+                LEFT JOIN archive.attachment_object ao
+                    ON ao.file_id = aa.file_id
+                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
+                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
+                  AND (CAST(:attachmentId AS BIGINT) IS NULL OR aa.award_attachment_id = :attachmentId)
+                  AND (CAST(:fileId AS BIGINT) IS NULL OR aa.file_id = :fileId)
+                  AND (
+                        :versionFilter = 'all'
+                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
+                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
+                  )
+                """)
+                .param("awardNumber", awardNumber)
+                .param("documentNumber", documentNumber)
+                .param("awardId", awardId)
+                .param("attachmentId", attachmentId)
+                .param("fileId", fileId)
+                .param("versionFilter", versionFilter)
                 .query(Long.class)
                 .single();
 

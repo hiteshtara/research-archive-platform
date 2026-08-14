@@ -21,6 +21,11 @@ export const sidebarNavigationItems = [
   { key: "proposals", label: "Proposals", path: "/proposals" },
   { key: "negotiations", label: "Negotiations", path: "/negotiations" },
   { key: "subawards", label: "Subawards", path: "/subawards" },
+  {
+    key: "archivedFiles",
+    label: "Archived File Finder",
+    path: "/archived-files",
+  },
   { key: "globalSearch", label: "Global Search", path: "/search" },
 ];
 

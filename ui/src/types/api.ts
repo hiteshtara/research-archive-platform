@@ -661,6 +661,36 @@ export interface AwardAttachmentV1 {
 export interface AwardAttachmentPageResponse
   extends PageResponse<AwardAttachmentV1> {}
 
+// --- Archived File Finder (Phase 1: Award only, GET /api/v1/attachments/search) ---
+// recordType is always "AWARD" today - Phase 2 (Proposal) is expected to
+// be an additive value, not a breaking change to this shape. Never
+// carries an s3Bucket/s3Key/fileDataId/storage-path field - downloading
+// goes through the existing downloadAwardAttachmentV1 proxy-stream call
+// using this result's own parentId/attachmentId, not a URL in this
+// response.
+export interface ArchivedFileSearchResult {
+  recordType: string;
+  parentId: number | null;
+  parentNumber: string | null;
+  title: string | null;
+  principalInvestigator: string | null;
+  sequenceNumber: number | null;
+  workflowDocumentNumber: string | null;
+  attachmentId: number | null;
+  fileId: number | null;
+  fileName: string | null;
+  documentType: string | null;
+  sourceDate: string | null;
+  fileSizeBytes: number | null;
+  contentType: string | null;
+  availabilityStatus: string;
+  downloadable: boolean;
+  currentVersion: boolean;
+}
+
+export interface ArchivedFileSearchPageResponse
+  extends PageResponse<ArchivedFileSearchResult> {}
+
 // --- Time and Money (see docs/architecture/AWARD_TIME_AND_MONEY_DESIGN.md) ---
 //
 // Summary is scoped to one exact awardId (the version being viewed),
