@@ -315,12 +315,12 @@ public class NegotiationArchiveRepository {
     ) {
         return jdbc.sql("""
                 SELECT
-                    archived_attachment_id,
+                    archived_attachment_id AS attachment_id,
                     CAST(source_metadata->>'activity_id' AS BIGINT)
                         AS activity_id,
-                    original_file_name,
+                    original_file_name AS file_name,
                     content_type,
-                    byte_size,
+                    byte_size AS file_size,
                     archive_status,
                     source_update_timestamp,
                     source_metadata->>'source_update_user'
