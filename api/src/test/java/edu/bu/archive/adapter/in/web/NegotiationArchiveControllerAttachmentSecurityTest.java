@@ -87,11 +87,13 @@ class NegotiationArchiveControllerAttachmentSecurityTest {
             throws Exception {
         NegotiationAttachmentResponse restricted = new NegotiationAttachmentResponse(
                 1L, 9921L, "restricted.pdf", "application/pdf",
-                100L, "abc123", "MISSING", null, null, false, "Y"
+                100L, "MISSING", null, null, false, "Y",
+                201L, "39001", "Restricted example"
         );
         NegotiationAttachmentResponse notRestricted = new NegotiationAttachmentResponse(
                 2L, 9942L, "open.pdf", "application/pdf",
-                100L, "def456", "ARCHIVED", null, null, true, "N"
+                100L, "ARCHIVED", null, null, true, "N",
+                202L, "39002", "Open example"
         );
         when(service.findAttachments(374L))
                 .thenReturn(List.of(restricted, notRestricted));

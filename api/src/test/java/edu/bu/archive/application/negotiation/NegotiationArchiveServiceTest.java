@@ -286,7 +286,8 @@ class NegotiationArchiveServiceTest {
     ) {
         return new NegotiationAttachmentResponse(
                 attachmentId, activityId, "file.pdf", "application/pdf",
-                100L, "abc123", "ARCHIVED", null, null, true, "N"
+                100L, "ARCHIVED", null, null, true, "N",
+                301L, "42001", "Test attachment"
         );
     }
 

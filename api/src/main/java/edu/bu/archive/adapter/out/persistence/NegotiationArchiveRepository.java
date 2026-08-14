@@ -321,7 +321,6 @@ public class NegotiationArchiveRepository {
                     original_file_name,
                     content_type,
                     byte_size,
-                    sha256,
                     archive_status,
                     source_update_timestamp,
                     source_metadata->>'source_update_user'
@@ -331,7 +330,10 @@ public class NegotiationArchiveRepository {
                         AND s3_bucket IS NOT NULL AND s3_bucket <> ''
                         AND s3_key IS NOT NULL AND s3_key <> ''
                     ) AS downloadable,
-                    legacy_restricted_flag AS restricted_flag
+                    legacy_restricted_flag AS restricted_flag,
+                    source_attachment_id AS oracle_attachment_id,
+                    source_file_id AS oracle_file_id,
+                    description
                 FROM archive.archived_attachment
                 WHERE module_code = 'NEGOTIATION'
                   AND parent_record_id = :negotiationId

@@ -24,3 +24,44 @@ export function resolveRestrictedLabel(restrictedFlag) {
   // silently coerced into Y/N, so a future real value is never hidden.
   return `Legacy Kuali RESTRICTED value: ${restrictedFlag}`;
 }
+
+// The description is the primary, human-meaningful label (e.g. "Kotton
+// Proteostasis") - fileName is just the archived file's on-disk name,
+// often uninformative. When description is missing/blank, fall back to
+// the raw Oracle attachment ID rather than showing nothing, since that
+// ID is still a stable way for a user to identify the record with staff
+// who have Oracle/Kuali access.
+export function resolveAttachmentDisplayLabel(attachment) {
+  const description = attachment?.description;
+  if (typeof description === "string" && description.trim() !== "") {
+    return description;
+  }
+  const oracleAttachmentId = attachment?.oracleAttachmentId;
+  if (oracleAttachmentId !== null && oracleAttachmentId !== undefined) {
+    return `Attachment ${oracleAttachmentId}`;
+  }
+  return "Untitled attachment";
+}
+
+// Secondary metadata line: Oracle-native identifiers a user can quote
+// back to support staff, never storage internals (S3 bucket/key,
+// checksum, BLOB id).
+export function resolveAttachmentIdentifierSummary(attachment) {
+  const parts = [];
+  if (attachment?.activityId !== null && attachment?.activityId !== undefined) {
+    parts.push(`Activity ${attachment.activityId}`);
+  }
+  if (
+    attachment?.oracleAttachmentId !== null &&
+    attachment?.oracleAttachmentId !== undefined
+  ) {
+    parts.push(`Attachment ${attachment.oracleAttachmentId}`);
+  }
+  if (
+    typeof attachment?.oracleFileId === "string" &&
+    attachment.oracleFileId.trim() !== ""
+  ) {
+    parts.push(`File ${attachment.oracleFileId}`);
+  }
+  return parts.join(" · ");
+}

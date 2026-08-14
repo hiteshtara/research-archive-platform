@@ -198,7 +198,11 @@ class NegotiationArchiveRepositoryTest {
                 .contains("module_code = 'NEGOTIATION'")
                 .contains("parent_record_id = :negotiationId")
                 .contains("source_metadata->>'activity_id'")
-                .contains("source_metadata->>'source_update_user'");
+                .contains("source_metadata->>'source_update_user'")
+                .contains("source_attachment_id AS oracle_attachment_id")
+                .contains("source_file_id AS oracle_file_id")
+                .contains("description")
+                .doesNotContain("sha256");
         verify(statement).param("negotiationId", 101L);
     }
 

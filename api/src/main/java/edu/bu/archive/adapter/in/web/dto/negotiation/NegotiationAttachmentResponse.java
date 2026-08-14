@@ -13,6 +13,18 @@ import java.time.LocalDateTime;
  * Negotiation itself - proven live 2026-08-06, see
  * docs/architecture/NEGOTIATION_ARCHIVE_COVERAGE.md).
  *
+ * oracleAttachmentId/oracleFileId are the raw source identifiers
+ * (archive.archived_attachment.source_attachment_id/source_file_id) -
+ * distinct from attachmentId above, which stays the Postgres surrogate
+ * download-route key. description is the legacy Kuali free-text label
+ * (e.g. "Kotton Proteostasis") - the fileName field is the archived
+ * file's actual filename, a different value. All three are already
+ * populated on every row by the ETL (attachment_file.py's
+ * _postgres_values) - this DTO previously just never selected them.
+ * Intentionally no s3Bucket/s3Key/checksum/BLOB identifier here - those
+ * are storage internals, not user-facing metadata (checksum/sha256 was
+ * exposed here before and has been removed as part of this change).
+ *
  * restrictedFlag is the legacy KCOEUS.NEGOTIATION_ATTACHMENT.RESTRICTED
  * value ('Y'/'N', or null for attachments predating that column's
  * capture) - preserved verbatim from
@@ -30,11 +42,13 @@ public record NegotiationAttachmentResponse(
         String fileName,
         String contentType,
         Long fileSize,
-        String checksum,
         String archiveStatus,
         LocalDateTime sourceUpdateTimestamp,
         String sourceUpdateUser,
         boolean downloadable,
-        String restrictedFlag
+        String restrictedFlag,
+        Long oracleAttachmentId,
+        String oracleFileId,
+        String description
 ) {
 }

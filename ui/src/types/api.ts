@@ -1277,7 +1277,6 @@ export interface NegotiationAttachment {
   fileName: string | null;
   contentType: string | null;
   fileSize: number | null;
-  checksum: string | null;
   archiveStatus: string;
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;
@@ -1287,6 +1286,13 @@ export interface NegotiationAttachment {
   // access-control signal. See
   // docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md.
   restrictedFlag: string | null;
+  // Raw Oracle source identifiers - distinct from attachmentId above,
+  // which is the internal Postgres surrogate used for download routes.
+  oracleAttachmentId: number | null;
+  oracleFileId: string | null;
+  // Legacy Kuali free-text label (e.g. "Kotton Proteostasis") - not the
+  // same value as fileName.
+  description: string | null;
 }
 
 export interface NegotiationAssociatedRecord {

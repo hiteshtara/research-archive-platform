@@ -46,7 +46,11 @@ import {
   resolveNegotiationAssociationArchived,
   resolveNegotiationAssociationDisplayKind,
 } from "../features/common/relationshipCardPresentation.mjs";
-import { resolveRestrictedLabel } from "../features/negotiation/negotiationAttachmentPresentation.mjs";
+import {
+  resolveRestrictedLabel,
+  resolveAttachmentDisplayLabel,
+  resolveAttachmentIdentifierSummary,
+} from "../features/negotiation/negotiationAttachmentPresentation.mjs";
 import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 import type {
   NegotiationActivity,
@@ -563,7 +567,7 @@ function NegotiationWorkspaceContent({
                                         sx={{ verticalAlign: "middle" }}
                                       />
                                     </TableCell>
-                                    <TableCell>File</TableCell>
+                                    <TableCell>Description</TableCell>
                                     <TableCell>Type</TableCell>
                                     <TableCell>Size</TableCell>
                                     <TableCell>Status</TableCell>
@@ -582,7 +586,33 @@ function NegotiationWorkspaceContent({
                                     >
                                       <TableCell />
                                       <TableCell>
-                                        {display(attachment.fileName)}
+                                        <Typography variant="body2">
+                                          {resolveAttachmentDisplayLabel(
+                                            attachment,
+                                          )}
+                                        </Typography>
+                                        {attachment.fileName && (
+                                          <Typography
+                                            variant="caption"
+                                            color="text.secondary"
+                                            sx={{ display: "block" }}
+                                          >
+                                            {attachment.fileName}
+                                          </Typography>
+                                        )}
+                                        {resolveAttachmentIdentifierSummary(
+                                          attachment,
+                                        ) && (
+                                          <Typography
+                                            variant="caption"
+                                            color="text.secondary"
+                                            sx={{ display: "block" }}
+                                          >
+                                            {resolveAttachmentIdentifierSummary(
+                                              attachment,
+                                            )}
+                                          </Typography>
+                                        )}
                                       </TableCell>
                                       <TableCell>
                                         {display(attachment.contentType)}

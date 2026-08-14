@@ -107,7 +107,8 @@ class NegotiationArchiveControllerTest {
         NegotiationAttachmentResponse attachment =
                 new NegotiationAttachmentResponse(
                         1L, 9952L, "notice.pdf", "application/pdf",
-                        100L, "abc123", "ARCHIVED", null, null, true, "N"
+                        100L, "ARCHIVED", null, null, true, "N",
+                        101L, "24828", "Kotton Proteostasis"
                 );
         when(service.findAttachments(101L))
                 .thenReturn(List.of(attachment));
