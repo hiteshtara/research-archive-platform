@@ -2,7 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
-import edu.bu.archive.application.award.AwardArchiveService;
+import edu.bu.archive.application.service.AttachmentSearchService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,12 +20,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class AttachmentSearchControllerTest {
 
-    private AwardArchiveService service;
+    private AttachmentSearchService service;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        service = mock(AwardArchiveService.class);
+        service = mock(AttachmentSearchService.class);
         AttachmentSearchController controller = new AttachmentSearchController(service);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
@@ -44,7 +44,7 @@ class AttachmentSearchControllerTest {
         PageResponse<AttachmentSearchResultResponse> page =
                 new PageResponse<>(List.of(result), 0, 25, 1L, 1, true, true);
         when(service.searchAttachments(
-                "200086-00001", null, null, null, null, "all", 0, 25
+                null, null, "200086-00001", null, null, null, null, null, "all", 0, 25
         )).thenReturn(page);
 
         mockMvc.perform(
@@ -59,14 +59,14 @@ class AttachmentSearchControllerTest {
                 .andExpect(jsonPath("$.content[0].downloadable").value(true));
 
         verify(service).searchAttachments(
-                "200086-00001", null, null, null, null, "all", 0, 25
+                null, null, "200086-00001", null, null, null, null, null, "all", 0, 25
         );
     }
 
     @Test
     void searchReturns400NotAServerErrorWhenNoIdentifierIsSupplied() throws Exception {
         when(service.searchAttachments(
-                null, null, null, null, null, "all", 0, 25
+                null, null, null, null, null, null, null, null, "all", 0, 25
         )).thenThrow(new IllegalArgumentException(
                 "At least one identifier (awardNumber, documentNumber, "
                         + "awardId, attachmentId, or fileId) must be supplied"
@@ -80,7 +80,7 @@ class AttachmentSearchControllerTest {
     @Test
     void searchReturns400NotAServerErrorForAnInvalidNumericAwardId() throws Exception {
         when(service.searchAttachments(
-                null, null, "not-a-number", null, null, "all", 0, 25
+                null, null, null, null, null, "not-a-number", null, null, "all", 0, 25
         )).thenThrow(new IllegalArgumentException(
                 "Award ID must be a valid whole number: not-a-number"
         ));
@@ -105,7 +105,7 @@ class AttachmentSearchControllerTest {
         PageResponse<AttachmentSearchResultResponse> page =
                 new PageResponse<>(List.of(pending), 0, 25, 1L, 1, true, true);
         when(service.searchAttachments(
-                "200086-00001", null, null, null, null, "all", 0, 25
+                null, null, "200086-00001", null, null, null, null, null, "all", 0, 25
         )).thenReturn(page);
 
         mockMvc.perform(
@@ -128,7 +128,7 @@ class AttachmentSearchControllerTest {
         PageResponse<AttachmentSearchResultResponse> page =
                 new PageResponse<>(List.of(result), 0, 25, 1L, 1, true, true);
         when(service.searchAttachments(
-                "200086-00001", null, null, null, null, "all", 0, 25
+                null, null, "200086-00001", null, null, null, null, null, "all", 0, 25
         )).thenReturn(page);
 
         mockMvc.perform(
@@ -140,5 +140,66 @@ class AttachmentSearchControllerTest {
                 .andExpect(jsonPath("$.content[0].s3Key").doesNotExist())
                 .andExpect(jsonPath("$.content[0].fileDataId").doesNotExist())
                 .andExpect(jsonPath("$.content[0].storagePath").doesNotExist());
+    }
+
+    @Test
+    void searchByExactProposalNumberReturnsAPageOfResults() throws Exception {
+        AttachmentSearchResultResponse result = new AttachmentSearchResultResponse(
+                "PROPOSAL", 7125L, "2975", "Title", "PI NAME", 4,
+                "879423", 501508L, null, "Notice.pdf",
+                "Notice", null, 1_800_000L, "application/pdf",
+                "Available", true, true
+        );
+        PageResponse<AttachmentSearchResultResponse> page =
+                new PageResponse<>(List.of(result), 0, 25, 1L, 1, true, true);
+        when(service.searchAttachments(
+                "PROPOSAL", "2975", null, null, null, null, null, null, "all", 0, 25
+        )).thenReturn(page);
+
+        mockMvc.perform(
+                        get("/api/v1/attachments/search")
+                                .param("recordType", "PROPOSAL")
+                                .param("recordNumber", "2975")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].recordType").value("PROPOSAL"))
+                .andExpect(jsonPath("$.content[0].parentNumber").value("2975"))
+                .andExpect(jsonPath("$.content[0].fileId").doesNotExist());
+
+        verify(service).searchAttachments(
+                "PROPOSAL", "2975", null, null, null, null, null, null, "all", 0, 25
+        );
+    }
+
+    @Test
+    void searchWithRecordTypeAllForwardsToTheService() throws Exception {
+        AttachmentSearchResultResponse awardResult = new AttachmentSearchResultResponse(
+                "AWARD", 3047454L, "200086-00001", "Title", "PI", 165,
+                "879423", 9001L, 5001L, "Notice of Award.pdf",
+                "Notice of Award", null, 1_800_000L, "application/pdf",
+                "Available", true, true
+        );
+        AttachmentSearchResultResponse proposalResult = new AttachmentSearchResultResponse(
+                "PROPOSAL", 7125L, "2975", "Title", "PI", 4,
+                "879423", 501508L, null, "Notice.pdf",
+                "Notice", null, 1_800_000L, "application/pdf",
+                "Available", true, true
+        );
+        PageResponse<AttachmentSearchResultResponse> page = new PageResponse<>(
+                List.of(awardResult, proposalResult), 0, 25, 2L, 1, true, true
+        );
+        when(service.searchAttachments(
+                "ALL", "879423", null, "879423", null, null, null, null, "all", 0, 25
+        )).thenReturn(page);
+
+        mockMvc.perform(
+                        get("/api/v1/attachments/search")
+                                .param("recordType", "ALL")
+                                .param("recordNumber", "879423")
+                                .param("documentNumber", "879423")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].recordType").value("AWARD"))
+                .andExpect(jsonPath("$.content[1].recordType").value("PROPOSAL"));
     }
 }

@@ -9,7 +9,15 @@ import {
   archivedFileSearchErrorMessage,
   formatSourceDateLabel,
   hasAnyIdentifierSupplied,
+  parseRecordTypeParam,
+  parseVersionFilterParam,
+  RECORD_TYPE_OPTIONS,
+  recordIdFieldLabel,
+  recordNumberFieldLabel,
+  recordTypeLabel,
   resolveAvailabilityChipColor,
+  resolveRecordViewPath,
+  visibleFieldsForRecordType,
 } from "./archivedFileFinderPresentation.mjs";
 
 function readSource(relativePath) {
@@ -19,29 +27,113 @@ function readSource(relativePath) {
   );
 }
 
-test("hasAnyIdentifierSupplied is false when every filter is blank or whitespace", () => {
+// --- RECORD_TYPE_OPTIONS / recordTypeLabel --------------------------------
+
+test("RECORD_TYPE_OPTIONS offers exactly All records, Awards, and Proposals - no Subaward/Negotiation this phase", () => {
+  assert.deepEqual(
+    RECORD_TYPE_OPTIONS.map((option) => option.value),
+    ["ALL", "AWARD", "PROPOSAL"],
+  );
+  assert.deepEqual(
+    RECORD_TYPE_OPTIONS.map((option) => option.label),
+    ["All records", "Awards", "Proposals"],
+  );
+});
+
+test("recordTypeLabel names each real recordType and falls back honestly for an unknown one", () => {
+  assert.equal(recordTypeLabel("AWARD"), "Awards");
+  assert.equal(recordTypeLabel("PROPOSAL"), "Proposals");
+  assert.equal(recordTypeLabel("ALL"), "All records");
+  assert.equal(recordTypeLabel("SUBAWARD"), "SUBAWARD");
+});
+
+// --- visibleFieldsForRecordType / field labels (dynamic form fields) -----
+
+test("visibleFieldsForRecordType shows Record ID/Attachment ID/File ID for AWARD", () => {
+  assert.deepEqual(visibleFieldsForRecordType("AWARD"), [
+    "recordNumber",
+    "documentNumber",
+    "recordId",
+    "attachmentId",
+    "fileId",
+  ]);
+});
+
+test("visibleFieldsForRecordType hides File ID for PROPOSAL - Award-only, no safe equivalent", () => {
+  const fields = visibleFieldsForRecordType("PROPOSAL");
+  assert.deepEqual(fields, ["recordNumber", "documentNumber", "recordId", "attachmentId"]);
+  assert.ok(!fields.includes("fileId"));
+});
+
+test("visibleFieldsForRecordType only offers recordNumber/documentNumber for ALL - recordId/attachmentId/fileId are domain-ambiguous", () => {
+  assert.deepEqual(visibleFieldsForRecordType("ALL"), ["recordNumber", "documentNumber"]);
+});
+
+test("recordNumberFieldLabel names the field per recordType", () => {
+  assert.equal(recordNumberFieldLabel("AWARD"), "Award number");
+  assert.equal(recordNumberFieldLabel("PROPOSAL"), "Proposal number");
+  assert.equal(recordNumberFieldLabel("ALL"), "Record number");
+});
+
+test("recordIdFieldLabel names the field per recordType", () => {
+  assert.equal(recordIdFieldLabel("AWARD"), "Award ID");
+  assert.equal(recordIdFieldLabel("PROPOSAL"), "Proposal ID");
+});
+
+// --- hasAnyIdentifierSupplied (recordType-aware) --------------------------
+
+test("hasAnyIdentifierSupplied is false when every visible filter is blank or whitespace", () => {
   assert.equal(
     hasAnyIdentifierSupplied({
-      awardNumber: "",
+      recordType: "AWARD",
+      recordNumber: "",
       documentNumber: "  ",
-      awardId: undefined,
-      attachmentId: undefined,
-      fileId: undefined,
+      recordId: "",
+      attachmentId: "",
+      fileId: "",
     }),
     false,
   );
 });
 
-test("hasAnyIdentifierSupplied is true when only awardNumber is supplied", () => {
+test("hasAnyIdentifierSupplied is true when only recordNumber is supplied", () => {
   assert.equal(
-    hasAnyIdentifierSupplied({ awardNumber: "200086-00001" }),
+    hasAnyIdentifierSupplied({ recordType: "AWARD", recordNumber: "200086-00001" }),
     true,
   );
 });
 
-test("hasAnyIdentifierSupplied is true when only a numeric-identifier field is supplied", () => {
-  assert.equal(hasAnyIdentifierSupplied({ fileId: "5001" }), true);
+test("hasAnyIdentifierSupplied is true when only fileId is supplied for AWARD", () => {
+  assert.equal(
+    hasAnyIdentifierSupplied({ recordType: "AWARD", fileId: "5001" }),
+    true,
+  );
 });
+
+test("hasAnyIdentifierSupplied ignores fileId for PROPOSAL - it is not a visible field there", () => {
+  assert.equal(
+    hasAnyIdentifierSupplied({ recordType: "PROPOSAL", fileId: "5001" }),
+    false,
+  );
+});
+
+test("hasAnyIdentifierSupplied ignores recordId/attachmentId/fileId for ALL - only recordNumber/documentNumber count", () => {
+  assert.equal(
+    hasAnyIdentifierSupplied({
+      recordType: "ALL",
+      recordId: "123",
+      attachmentId: "456",
+      fileId: "789",
+    }),
+    false,
+  );
+  assert.equal(
+    hasAnyIdentifierSupplied({ recordType: "ALL", recordNumber: "879423" }),
+    true,
+  );
+});
+
+// --- archivedFileResultsCountLabel / archivedFileSearchErrorMessage ------
 
 test("archivedFileResultsCountLabel pluralizes correctly", () => {
   assert.equal(archivedFileResultsCountLabel(0), "0 files found");
@@ -61,6 +153,8 @@ test("archivedFileSearchErrorMessage distinguishes an expired session from a bad
   assert.match(archivedFileSearchErrorMessage(undefined), /could not be reached/);
 });
 
+// --- resolveAvailabilityChipColor (shared by both domains) ---------------
+
 test("resolveAvailabilityChipColor maps every real server-derived status to a distinct color", () => {
   assert.equal(resolveAvailabilityChipColor("Available"), "success");
   assert.equal(resolveAvailabilityChipColor("Pending upload"), "warning");
@@ -72,9 +166,11 @@ test("resolveAvailabilityChipColor falls back to default for an unrecognized sta
   assert.equal(resolveAvailabilityChipColor("Some New Status Never Seen Live"), "default");
 });
 
-test("archivedFileResultKey combines parentId and attachmentId so a shared physical file across two Award versions never collides", () => {
-  const onOlderVersion = { parentId: 3035516, attachmentId: 8001 };
-  const onCurrentVersion = { parentId: 3047454, attachmentId: 9001 };
+// --- archivedFileResultKey (recordType-aware to avoid cross-domain id collisions) ---
+
+test("archivedFileResultKey combines recordType, parentId, and attachmentId so a shared physical file across two Award versions never collides", () => {
+  const onOlderVersion = { recordType: "AWARD", parentId: 3035516, attachmentId: 8001 };
+  const onCurrentVersion = { recordType: "AWARD", parentId: 3047454, attachmentId: 9001 };
 
   assert.notEqual(
     archivedFileResultKey(onOlderVersion),
@@ -82,10 +178,20 @@ test("archivedFileResultKey combines parentId and attachmentId so a shared physi
   );
 });
 
+test("archivedFileResultKey never collides an Award result with a Proposal result sharing the same numeric ids", () => {
+  const awardResult = { recordType: "AWARD", parentId: 100, attachmentId: 200 };
+  const proposalResult = { recordType: "PROPOSAL", parentId: 100, attachmentId: 200 };
+
+  assert.notEqual(
+    archivedFileResultKey(awardResult),
+    archivedFileResultKey(proposalResult),
+  );
+});
+
 test("archivedFileResultKey never throws on null identifiers", () => {
   assert.equal(
-    archivedFileResultKey({ parentId: null, attachmentId: null }),
-    "unknown-unknown",
+    archivedFileResultKey({ recordType: null, parentId: null, attachmentId: null }),
+    "unknown-unknown-unknown",
   );
 });
 
@@ -94,9 +200,49 @@ test("formatSourceDateLabel falls back to an honest label rather than inventing 
   assert.equal(formatSourceDateLabel("2026-08-04T12:00:00"), "2026-08-04T12:00:00");
 });
 
-// No component-render harness exists in this project, so route/nav
-// wiring is verified by static source inspection - same approach
-// documentsPresentation.test.mjs uses for App.tsx's /documents route.
+// --- resolveRecordViewPath (routes automatically per recordType) ---------
+
+test("resolveRecordViewPath opens the exact Award version for an AWARD result", () => {
+  assert.equal(
+    resolveRecordViewPath({ recordType: "AWARD", parentId: 3047454 }),
+    "/awards/3047454",
+  );
+});
+
+test("resolveRecordViewPath opens the exact Proposal version for a PROPOSAL result", () => {
+  assert.equal(
+    resolveRecordViewPath({ recordType: "PROPOSAL", parentId: 7125 }),
+    "/proposals/dashboard/7125",
+  );
+});
+
+test("resolveRecordViewPath returns null rather than guessing when parentId is missing", () => {
+  assert.equal(resolveRecordViewPath({ recordType: "AWARD", parentId: null }), null);
+});
+
+test("resolveRecordViewPath returns null for an unrecognized recordType rather than guessing a route", () => {
+  assert.equal(resolveRecordViewPath({ recordType: "SUBAWARD", parentId: 1 }), null);
+});
+
+// --- URL parameter parsing (serialization/restoration) -------------------
+
+test("parseRecordTypeParam accepts ALL/AWARD/PROPOSAL case-insensitively and defaults to ALL", () => {
+  assert.equal(parseRecordTypeParam("AWARD"), "AWARD");
+  assert.equal(parseRecordTypeParam("award"), "AWARD");
+  assert.equal(parseRecordTypeParam("proposal"), "PROPOSAL");
+  assert.equal(parseRecordTypeParam(null), "ALL");
+  assert.equal(parseRecordTypeParam("SUBAWARD"), "ALL");
+});
+
+test("parseVersionFilterParam accepts current/historical case-insensitively and defaults to all", () => {
+  assert.equal(parseVersionFilterParam("current"), "current");
+  assert.equal(parseVersionFilterParam("HISTORICAL"), "historical");
+  assert.equal(parseVersionFilterParam(null), "all");
+  assert.equal(parseVersionFilterParam("not-a-real-filter"), "all");
+});
+
+// --- Route/nav wiring (static source inspection - no component-render harness) ---
+
 test("App.tsx routes /archived-files to ArchivedFileFinderPage", () => {
   const source = readSource("../../App.tsx");
   const routeBlock = source.match(/path="archived-files"[\s\S]{0,80}/)?.[0];
@@ -104,12 +250,14 @@ test("App.tsx routes /archived-files to ArchivedFileFinderPage", () => {
   assert.match(routeBlock, /ArchivedFileFinderPage/);
 });
 
-test("sidebarNavigationItems includes an Archived File Finder entry pointing at /archived-files", () => {
+test("sidebarNavigationItems includes exactly one Archived File Finder entry pointing at /archived-files - no separate Award/Proposal/Subaward nav items", () => {
   const source = readSource("../navigation/navigationPresentation.mjs");
   assert.match(
     source,
     /label:\s*"Archived File Finder"[\s\S]{0,20}path:\s*"\/archived-files"/,
   );
+  const occurrences = source.match(/path:\s*"\/archived-files"/g) ?? [];
+  assert.equal(occurrences.length, 1);
 });
 
 test("AppLayout.tsx assigns an icon to the archivedFiles nav key", () => {

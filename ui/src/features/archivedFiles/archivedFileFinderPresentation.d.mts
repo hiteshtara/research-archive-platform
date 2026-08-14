@@ -1,13 +1,42 @@
-export interface ArchivedFileSearchFilters {
-  awardNumber?: string;
-  documentNumber?: string;
-  awardId?: string;
-  attachmentId?: string;
-  fileId?: string;
+export type RecordType = "ALL" | "AWARD" | "PROPOSAL";
+
+export interface RecordTypeOption {
+  value: RecordType;
+  label: string;
+}
+
+export const RECORD_TYPES: RecordType[];
+export const RECORD_TYPE_OPTIONS: RecordTypeOption[];
+
+export function recordTypeLabel(recordType: string): string;
+
+export type ArchivedFileFinderField =
+  | "recordNumber"
+  | "documentNumber"
+  | "recordId"
+  | "attachmentId"
+  | "fileId";
+
+export function visibleFieldsForRecordType(
+  recordType: string,
+): ArchivedFileFinderField[];
+
+export function recordNumberFieldLabel(recordType: string): string;
+
+export function recordIdFieldLabel(recordType: string): string;
+
+export interface ArchivedFileFinderFilters {
+  recordType: string;
+  recordNumber: string;
+  documentNumber: string;
+  recordId: string;
+  attachmentId: string;
+  fileId: string;
+  versionFilter: string;
 }
 
 export function hasAnyIdentifierSupplied(
-  filters: ArchivedFileSearchFilters,
+  filters: ArchivedFileFinderFilters,
 ): boolean;
 
 export function archivedFileResultsCountLabel(
@@ -29,6 +58,7 @@ export function resolveAvailabilityChipColor(
 ): AvailabilityChipColor;
 
 export function archivedFileResultKey(result: {
+  recordType: string | null;
   parentId: number | null;
   attachmentId: number | null;
 }): string;
@@ -36,3 +66,14 @@ export function archivedFileResultKey(result: {
 export function formatSourceDateLabel(
   sourceDate: string | null,
 ): string;
+
+export function resolveRecordViewPath(result: {
+  recordType: string | null;
+  parentId: number | null;
+}): string | null;
+
+export function parseRecordTypeParam(value: string | null): RecordType;
+
+export function parseVersionFilterParam(
+  value: string | null,
+): "all" | "current" | "historical";

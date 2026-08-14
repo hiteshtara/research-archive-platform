@@ -658,20 +658,28 @@ export function getAwardTimeAndMoneyDocumentV1(
   );
 }
 
-// --- Archived File Finder (Phase 1: Award only, /api/v1/attachments/search) ---
+// --- Archived File Finder (Phase 2: Award + Proposal + recordType=ALL, ---
+// --- /api/v1/attachments/search) -------------------------------------------
 // Every filter is an exact-match identifier, combined with AND - there
 // is deliberately no free-text query parameter here (unlike
 // searchDocumentExplorer/searchAwardVersionsV1's `q`), so nothing can
 // veto an exact identifier the way the Historical Award Records q/
-// awardNumber interaction once did. Download reuses
-// downloadAwardAttachmentV1 below as-is via each result's own
-// parentId/attachmentId - there is no separate download call for this
-// feature.
+// awardNumber interaction once did. recordNumber/recordId are the
+// canonical parameter names (Award number/ID or Proposal number/ID,
+// per recordType); the backend also still accepts the Phase 1
+// awardNumber/awardId names as aliases, but this client always sends
+// the canonical names now that both exist. recordId/attachmentId/
+// fileId are omitted entirely for recordType=ALL, matching the
+// backend's own rejection of them as domain-ambiguous. Download
+// reuses downloadAwardAttachmentV1/downloadProposalAttachmentV1 below
+// as-is via each result's own recordType/parentId/attachmentId - there
+// is no separate/unified download call for this feature.
 export function searchArchivedFiles(
   parameters: {
-    awardNumber?: string;
+    recordType?: "ALL" | "AWARD" | "PROPOSAL";
+    recordNumber?: string;
     documentNumber?: string;
-    awardId?: string;
+    recordId?: string;
     attachmentId?: string;
     fileId?: string;
     versionFilter?: "all" | "current" | "historical";
@@ -680,26 +688,30 @@ export function searchArchivedFiles(
   } = {},
   signal?: AbortSignal,
 ): Promise<import("../types/api").ArchivedFileSearchPageResponse> {
+  const recordType = parameters.recordType ?? "ALL";
   const searchParameters = new URLSearchParams({
+    recordType,
     versionFilter: parameters.versionFilter ?? "all",
     page: String(parameters.page ?? 0),
     size: String(parameters.size ?? 25),
   });
 
-  if (parameters.awardNumber?.trim()) {
-    searchParameters.set("awardNumber", parameters.awardNumber.trim());
+  if (parameters.recordNumber?.trim()) {
+    searchParameters.set("recordNumber", parameters.recordNumber.trim());
   }
   if (parameters.documentNumber?.trim()) {
     searchParameters.set("documentNumber", parameters.documentNumber.trim());
   }
-  if (parameters.awardId?.trim()) {
-    searchParameters.set("awardId", parameters.awardId.trim());
-  }
-  if (parameters.attachmentId?.trim()) {
-    searchParameters.set("attachmentId", parameters.attachmentId.trim());
-  }
-  if (parameters.fileId?.trim()) {
-    searchParameters.set("fileId", parameters.fileId.trim());
+  if (recordType !== "ALL") {
+    if (parameters.recordId?.trim()) {
+      searchParameters.set("recordId", parameters.recordId.trim());
+    }
+    if (parameters.attachmentId?.trim()) {
+      searchParameters.set("attachmentId", parameters.attachmentId.trim());
+    }
+    if (recordType === "AWARD" && parameters.fileId?.trim()) {
+      searchParameters.set("fileId", parameters.fileId.trim());
+    }
   }
 
   return request(

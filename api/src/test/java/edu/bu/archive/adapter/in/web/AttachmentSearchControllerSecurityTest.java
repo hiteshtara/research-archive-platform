@@ -2,7 +2,7 @@ package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
-import edu.bu.archive.application.award.AwardArchiveService;
+import edu.bu.archive.application.service.AttachmentSearchService;
 import edu.bu.archive.config.SecurityConfiguration;
 
 import org.junit.jupiter.api.Test;
@@ -45,7 +45,7 @@ class AttachmentSearchControllerSecurityTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private AwardArchiveService service;
+    private AttachmentSearchService service;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -68,12 +68,43 @@ class AttachmentSearchControllerSecurityTest {
                 "Available", true, true
         );
         when(service.searchAttachments(
-                "200086-00001", null, null, null, null, "all", 0, 25
+                null, null, "200086-00001", null, null, null, null, null, "all", 0, 25
         )).thenReturn(new PageResponse<>(List.of(result), 0, 25, 1L, 1, true, true));
 
         mockMvc.perform(
                         get("/api/v1/attachments/search")
                                 .param("awardNumber", "200086-00001")
+                                .with(jwt())
+                )
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void proposalSearchAlsoRequiresAuthentication() throws Exception {
+        mockMvc.perform(
+                        get("/api/v1/attachments/search")
+                                .param("recordType", "PROPOSAL")
+                                .param("recordNumber", "2975")
+                )
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void authenticatedUserCanSearchProposal() throws Exception {
+        AttachmentSearchResultResponse result = new AttachmentSearchResultResponse(
+                "PROPOSAL", 7125L, "2975", "Title", "PI NAME", 4,
+                "879423", 501508L, null, "Notice.pdf",
+                "Notice", null, 1_800_000L, "application/pdf",
+                "Available", true, true
+        );
+        when(service.searchAttachments(
+                "PROPOSAL", "2975", null, null, null, null, null, null, "all", 0, 25
+        )).thenReturn(new PageResponse<>(List.of(result), 0, 25, 1L, 1, true, true));
+
+        mockMvc.perform(
+                        get("/api/v1/attachments/search")
+                                .param("recordType", "PROPOSAL")
+                                .param("recordNumber", "2975")
                                 .with(jwt())
                 )
                 .andExpect(status().isOk());

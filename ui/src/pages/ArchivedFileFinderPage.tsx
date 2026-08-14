@@ -17,12 +17,13 @@ import {
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   ApiRequestError,
   downloadAwardAttachmentV1,
+  downloadProposalAttachmentV1,
   searchArchivedFiles,
 } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
@@ -36,66 +37,138 @@ import {
   archivedFileSearchErrorMessage,
   formatSourceDateLabel,
   hasAnyIdentifierSupplied,
+  parseRecordTypeParam,
+  parseVersionFilterParam,
+  RECORD_TYPE_OPTIONS,
+  recordIdFieldLabel,
+  recordNumberFieldLabel,
+  recordTypeLabel,
   resolveAvailabilityChipColor,
+  resolveRecordViewPath,
+  visibleFieldsForRecordType,
 } from "../features/archivedFiles/archivedFileFinderPresentation.mjs";
 import type { ArchivedFileSearchResult } from "../types/api";
 
 const PAGE_SIZE = 25;
 
-const EMPTY_FILTERS = {
-  awardNumber: "",
+function filtersFromParams(searchParams: URLSearchParams) {
+  return {
+    recordType: parseRecordTypeParam(searchParams.get("recordType")),
+    recordNumber: searchParams.get("recordNumber") ?? "",
+    documentNumber: searchParams.get("documentNumber") ?? "",
+    recordId: searchParams.get("recordId") ?? "",
+    attachmentId: searchParams.get("attachmentId") ?? "",
+    fileId: searchParams.get("fileId") ?? "",
+    versionFilter: parseVersionFilterParam(searchParams.get("versionFilter")),
+  };
+}
+
+type Filters = ReturnType<typeof filtersFromParams>;
+
+const EMPTY_FILTERS: Filters = {
+  recordType: "ALL",
+  recordNumber: "",
   documentNumber: "",
-  awardId: "",
+  recordId: "",
   attachmentId: "",
   fileId: "",
-  versionFilter: "all" as "all" | "current" | "historical",
+  versionFilter: "all",
 };
 
-// Archived File Finder (Phase 1: Award only, exact-identifier only) -
-// finds archived attachment FILES via GET /api/v1/attachments/search,
+// Archived File Finder - exact-identifier search across archived Award
+// and Proposal attachment files via GET /api/v1/attachments/search,
 // deliberately separate from Kuali Documents (DocumentsPage), which
-// searches business RECORDS by free-text query and never touches
-// attachment tables. Phase 1 is available only under the application's
-// existing authenticated archive-staff access model - the same flat
-// "any authenticated user" rule every other page already uses; this is
-// not a researcher/PI-facing access tier.
+// searches business RECORDS by free-text query, never touching
+// attachment tables. One page, one nav item, for every recordType -
+// Subaward/Negotiation are not part of this phase. Phase 1/2 alike are
+// available only under the application's existing authenticated
+// archive-staff access model - the same flat "any authenticated user"
+// rule every other page already uses; this is not a researcher/
+// PI-facing access tier.
+//
+// Applied search state lives in the URL's own search params (mirroring
+// AwardVersionSearchPage's convention) so a search stays refreshable/
+// shareable and survives browser back/forward; draft state is local
+// until Search is clicked, matching this page's own Phase 1 "explicit
+// Search action" requirement rather than AwardVersionSearchPage's
+// live-as-you-type behavior.
 export function ArchivedFileFinderPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [draft, setDraft] = useState(EMPTY_FILTERS);
-  const [applied, setApplied] = useState(EMPTY_FILTERS);
-  const [page, setPage] = useState(0);
+  const applied = filtersFromParams(searchParams);
+  const page = Number(searchParams.get("page") ?? "0") || 0;
+
+  const [draft, setDraft] = useState<Filters>(applied);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  // Keeps the form fields in sync with browser back/forward, not just
+  // the query that runs - otherwise navigating back would silently
+  // restore old results without visibly restoring the filters that
+  // produced them.
+  useEffect(() => {
+    setDraft(filtersFromParams(searchParams));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const hasSearched = hasAnyIdentifierSupplied(applied);
+  const visibleFields = visibleFieldsForRecordType(draft.recordType);
 
   const searchQuery = useQuery({
     queryKey: ["archived-file-finder", applied, page],
     queryFn: ({ signal }) =>
-      searchArchivedFiles({ ...applied, page, size: PAGE_SIZE }, signal),
+      searchArchivedFiles(
+        {
+          recordType: applied.recordType as "ALL" | "AWARD" | "PROPOSAL",
+          recordNumber: applied.recordNumber,
+          documentNumber: applied.documentNumber,
+          recordId: applied.recordId,
+          attachmentId: applied.attachmentId,
+          fileId: applied.fileId,
+          versionFilter: applied.versionFilter as "all" | "current" | "historical",
+          page,
+          size: PAGE_SIZE,
+        },
+        signal,
+      ),
     enabled: hasSearched,
   });
 
   function runSearch() {
     if (!hasAnyIdentifierSupplied(draft)) {
       setValidationError(
-        "Enter at least one identifier (Award number, workflow document " +
-          "number, Award ID, Attachment ID, or File ID) before searching.",
+        "Enter at least one identifier before searching.",
       );
       return;
     }
     setValidationError(null);
-    setApplied(draft);
-    setPage(0);
+    const next = new URLSearchParams();
+    next.set("recordType", draft.recordType);
+    if (draft.recordNumber.trim()) next.set("recordNumber", draft.recordNumber.trim());
+    if (draft.documentNumber.trim()) next.set("documentNumber", draft.documentNumber.trim());
+    if (draft.recordId.trim()) next.set("recordId", draft.recordId.trim());
+    if (draft.attachmentId.trim()) next.set("attachmentId", draft.attachmentId.trim());
+    if (draft.fileId.trim()) next.set("fileId", draft.fileId.trim());
+    next.set("versionFilter", draft.versionFilter);
+    setSearchParams(next);
   }
 
   function clearFilters() {
     setDraft(EMPTY_FILTERS);
-    setApplied(EMPTY_FILTERS);
     setValidationError(null);
-    setPage(0);
+    setSearchParams(new URLSearchParams());
+  }
+
+  function setPage(nextPage: number) {
+    const next = new URLSearchParams(searchParams);
+    next.set("page", String(nextPage));
+    setSearchParams(next);
+  }
+
+  function updateDraft<K extends keyof Filters>(field: K, value: Filters[K]) {
+    setDraft((current) => ({ ...current, [field]: value }));
   }
 
   async function handleDownload(result: ArchivedFileSearchResult) {
@@ -106,11 +179,19 @@ export function ArchivedFileFinderPage() {
     setDownloadError(null);
     setDownloadingKey(key);
     try {
-      await downloadAwardAttachmentV1(
-        result.parentId,
-        result.attachmentId,
-        result.fileName ?? "attachment",
-      );
+      if (result.recordType === "PROPOSAL") {
+        await downloadProposalAttachmentV1(
+          result.parentId,
+          result.attachmentId,
+          result.fileName ?? "attachment",
+        );
+      } else {
+        await downloadAwardAttachmentV1(
+          result.parentId,
+          result.attachmentId,
+          result.fileName ?? "attachment",
+        );
+      }
     } catch (error) {
       setDownloadError(
         error instanceof Error ? error.message : "Download failed.",
@@ -120,9 +201,10 @@ export function ArchivedFileFinderPage() {
     }
   }
 
-  function viewAward(result: ArchivedFileSearchResult) {
-    if (result.parentId !== null) {
-      navigate(`/awards/${result.parentId}`);
+  function viewRecord(result: ArchivedFileSearchResult) {
+    const path = resolveRecordViewPath(result);
+    if (path) {
+      navigate(path);
     }
   }
 
@@ -133,9 +215,9 @@ export function ArchivedFileFinderPage() {
       <Box>
         <Typography variant="h4">Archived File Finder</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-          Search for archived Award attachment files by exact identifier.
-          This is separate from Kuali Documents, which searches business
-          records rather than files.
+          Search for archived Award and Proposal attachment files by
+          exact identifier. This is separate from Kuali Documents,
+          which searches business records rather than files.
         </Typography>
       </Box>
 
@@ -143,15 +225,30 @@ export function ArchivedFileFinderPage() {
         <CardContent>
           <Stack spacing={2}>
             <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap" }}>
+              <FormControl sx={{ minWidth: 160 }}>
+                <InputLabel id="archived-file-record-type-label">
+                  Record type
+                </InputLabel>
+                <Select
+                  labelId="archived-file-record-type-label"
+                  label="Record type"
+                  value={draft.recordType}
+                  onChange={(event: SelectChangeEvent) =>
+                    updateDraft("recordType", event.target.value as Filters["recordType"])
+                  }
+                >
+                  {RECORD_TYPE_OPTIONS.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
               <TextField
-                label="Award number"
-                value={draft.awardNumber}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    awardNumber: event.target.value,
-                  }))
-                }
+                label={recordNumberFieldLabel(draft.recordType)}
+                value={draft.recordNumber}
+                onChange={(event) => updateDraft("recordNumber", event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     runSearch();
@@ -170,12 +267,7 @@ export function ArchivedFileFinderPage() {
               <TextField
                 label="Workflow document number"
                 value={draft.documentNumber}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    documentNumber: event.target.value,
-                  }))
-                }
+                onChange={(event) => updateDraft("documentNumber", event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     runSearch();
@@ -184,50 +276,47 @@ export function ArchivedFileFinderPage() {
                 sx={{ minWidth: 200 }}
               />
 
-              <TextField
-                label="Award ID"
-                value={draft.awardId}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, awardId: event.target.value }))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    runSearch();
-                  }
-                }}
-                sx={{ minWidth: 140 }}
-              />
+              {visibleFields.includes("recordId") && (
+                <TextField
+                  label={recordIdFieldLabel(draft.recordType)}
+                  value={draft.recordId}
+                  onChange={(event) => updateDraft("recordId", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      runSearch();
+                    }
+                  }}
+                  sx={{ minWidth: 140 }}
+                />
+              )}
 
-              <TextField
-                label="Attachment ID"
-                value={draft.attachmentId}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    attachmentId: event.target.value,
-                  }))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    runSearch();
-                  }
-                }}
-                sx={{ minWidth: 140 }}
-              />
+              {visibleFields.includes("attachmentId") && (
+                <TextField
+                  label="Attachment ID"
+                  value={draft.attachmentId}
+                  onChange={(event) => updateDraft("attachmentId", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      runSearch();
+                    }
+                  }}
+                  sx={{ minWidth: 140 }}
+                />
+              )}
 
-              <TextField
-                label="File ID"
-                value={draft.fileId}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, fileId: event.target.value }))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    runSearch();
-                  }
-                }}
-                sx={{ minWidth: 140 }}
-              />
+              {visibleFields.includes("fileId") && (
+                <TextField
+                  label="File ID"
+                  value={draft.fileId}
+                  onChange={(event) => updateDraft("fileId", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      runSearch();
+                    }
+                  }}
+                  sx={{ minWidth: 140 }}
+                />
+              )}
 
               <FormControl sx={{ minWidth: 160 }}>
                 <InputLabel id="archived-file-version-filter-label">
@@ -238,13 +327,10 @@ export function ArchivedFileFinderPage() {
                   label="Version"
                   value={draft.versionFilter}
                   onChange={(event: SelectChangeEvent) =>
-                    setDraft((current) => ({
-                      ...current,
-                      versionFilter: event.target.value as
-                        | "all"
-                        | "current"
-                        | "historical",
-                    }))
+                    updateDraft(
+                      "versionFilter",
+                      event.target.value as Filters["versionFilter"],
+                    )
                   }
                 >
                   <MenuItem value="all">All versions</MenuItem>
@@ -306,7 +392,8 @@ export function ArchivedFileFinderPage() {
                   const isDownloading = downloadingKey === key;
                   const canDownload =
                     result.downloadable && result.attachmentId !== null;
-                  const canViewAward = result.parentId !== null;
+                  const viewPath = resolveRecordViewPath(result);
+                  const canView = viewPath !== null;
 
                   return (
                     <Card key={key} variant="outlined">
@@ -320,16 +407,23 @@ export function ArchivedFileFinderPage() {
                         }}
                       >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography sx={{ fontWeight: 700 }} noWrap>
-                            {result.fileName ?? "Unnamed file"}
-                          </Typography>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={result.recordType ?? "UNKNOWN"}
+                            />
+                            <Typography sx={{ fontWeight: 700 }} noWrap>
+                              {result.fileName ?? "Unnamed file"}
+                            </Typography>
+                          </Stack>
 
                           <Typography
                             variant="body2"
                             color="text.secondary"
                             sx={{ mt: 0.25 }}
                           >
-                            {result.parentNumber ?? "Unknown Award"}
+                            {result.parentNumber ?? "Unknown record"}
                             {result.sequenceNumber !== null
                               ? ` · Sequence ${result.sequenceNumber}`
                               : ""}
@@ -362,17 +456,21 @@ export function ArchivedFileFinderPage() {
 
                         <Stack direction="row" spacing={0.5}>
                           <Tooltip
-                            title={canViewAward ? "View Award" : "Award unavailable"}
+                            title={
+                              canView
+                                ? `View ${recordTypeLabel(result.recordType ?? "")}`
+                                : "Record unavailable"
+                            }
                           >
                             <span>
                               <IconButton
                                 size="small"
-                                disabled={!canViewAward}
-                                onClick={() => viewAward(result)}
+                                disabled={!canView}
+                                onClick={() => viewRecord(result)}
                                 aria-label={
-                                  canViewAward
-                                    ? `View Award ${result.parentNumber ?? ""}`
-                                    : "View Award unavailable"
+                                  canView
+                                    ? `View ${result.parentNumber ?? ""}`
+                                    : "View unavailable"
                                 }
                               >
                                 <VisibilityOutlined fontSize="small" />

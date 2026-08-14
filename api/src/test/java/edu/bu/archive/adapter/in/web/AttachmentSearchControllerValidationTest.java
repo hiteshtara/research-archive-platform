@@ -1,6 +1,6 @@
 package edu.bu.archive.adapter.in.web;
 
-import edu.bu.archive.application.award.AwardArchiveService;
+import edu.bu.archive.application.service.AttachmentSearchService;
 import edu.bu.archive.config.SecurityConfiguration;
 
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ class AttachmentSearchControllerValidationTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private AwardArchiveService service;
+    private AttachmentSearchService service;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
