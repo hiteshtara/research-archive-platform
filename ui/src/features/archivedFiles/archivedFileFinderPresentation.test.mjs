@@ -18,6 +18,7 @@ import {
   recordTypeLabel,
   resolveAvailabilityChipColor,
   resolveRecordViewPath,
+  versionFilterVisibleForRecordType,
   visibleFieldsForRecordType,
 } from "./archivedFileFinderPresentation.mjs";
 
@@ -125,6 +126,64 @@ test("Negotiation ID 420 is never mapped to associated document/association ID 4
     resolveRecordViewPath({ recordType: "NEGOTIATION", parentId: 420 }),
     "/negotiations/419",
   );
+});
+
+// --- versionFilterVisibleForRecordType (Negotiation has no version chain) -
+
+test("versionFilterVisibleForRecordType hides the Version filter for NEGOTIATION - archive.negotiation has no version chain and 'historical' always matches zero rows server-side", () => {
+  assert.equal(versionFilterVisibleForRecordType("NEGOTIATION"), false);
+});
+
+test("versionFilterVisibleForRecordType keeps the Version filter for every versioned record type", () => {
+  assert.equal(versionFilterVisibleForRecordType("AWARD"), true);
+  assert.equal(versionFilterVisibleForRecordType("PROPOSAL"), true);
+  assert.equal(versionFilterVisibleForRecordType("ALL"), true);
+});
+
+// --- Comprehensive fixture regression test - real, live-verified Oracle
+// staging row (2026-08-14): negotiation_id=420, activity_id=10134,
+// attachment_id=101, file_id=24828, description="Kotton Proteostasis",
+// restricted="N", associated_document_id=419 (a different value/column
+// entirely - see the guard tests above). Exercises every
+// Archived-File-Finder-facing presentation function this fixture
+// touches in one place, so a future regression in any one of them shows
+// up against the exact real record this whole investigation was about. -
+
+test("fixture regression: negotiation_id=420 end-to-end through every Archived File Finder presentation function it touches", () => {
+  const fixture = {
+    recordType: "NEGOTIATION",
+    negotiationId: 420,
+    associatedDocumentId: 419,
+    activityId: 10134,
+    attachmentId: 101,
+    fileId: 24828,
+    description: "Kotton Proteostasis",
+    restrictedFlag: "N",
+  };
+
+  // Only recordId (mapped to NEGOTIATION.NEGOTIATION_ID) is a visible
+  // search field - never a separate "Negotiation number", never
+  // associatedDocumentId.
+  assert.deepEqual(visibleFieldsForRecordType(fixture.recordType), [
+    "documentNumber",
+    "recordId",
+    "attachmentId",
+  ]);
+  assert.equal(recordIdFieldLabel(fixture.recordType), "Negotiation ID");
+
+  // Version filtering is hidden - this fixture's negotiation has no
+  // version chain to filter.
+  assert.equal(versionFilterVisibleForRecordType(fixture.recordType), false);
+
+  // Routing uses negotiationId (420), never associatedDocumentId (419).
+  assert.equal(
+    resolveRecordViewPath({
+      recordType: fixture.recordType,
+      parentId: fixture.negotiationId,
+    }),
+    `/negotiations/${fixture.negotiationId}`,
+  );
+  assert.notEqual(fixture.negotiationId, fixture.associatedDocumentId);
 });
 
 // --- hasAnyIdentifierSupplied (recordType-aware) --------------------------

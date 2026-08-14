@@ -25,6 +25,8 @@ export function recordNumberFieldLabel(recordType: string): string;
 
 export function recordIdFieldLabel(recordType: string): string;
 
+export function versionFilterVisibleForRecordType(recordType: string): boolean;
+
 export interface ArchivedFileFinderFilters {
   recordType: string;
   recordNumber: string;

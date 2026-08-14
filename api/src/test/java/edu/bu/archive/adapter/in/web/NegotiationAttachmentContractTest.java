@@ -126,6 +126,64 @@ class NegotiationAttachmentContractTest {
                 .isFalse();
     }
 
+    /*
+     * Comprehensive fixture regression test - the real, live-verified
+     * Oracle staging row (2026-08-14): negotiation_id=420,
+     * activity_id=10134, attachment_id=101, file_id=24828,
+     * description="Kotton Proteostasis", restricted="N",
+     * associated_document_id=419 (a different value/column entirely -
+     * see negotiationRowNeverConfusesNegotiationIdWithAssociatedDocumentId
+     * above). Exercises the row and its attachment together in one
+     * place, so a future regression in either shows up against the
+     * exact real record this whole investigation was about.
+     */
+    @Test
+    void fixtureRegressionNegotiation420EndToEnd() throws Exception {
+        final long negotiationId = 420L;
+        final long associatedDocumentId = 419L;
+        final long activityId = 10134L;
+        final long oracleAttachmentId = 101L;
+        final String oracleFileId = "24828";
+        final String description = "Kotton Proteostasis";
+        final String restrictedFlag = "N";
+
+        NegotiationRowResponse row = negotiationRow420();
+        assertThat(row.negotiationId()).isEqualTo(negotiationId);
+        assertThat(Long.parseLong(row.associatedDocumentId()))
+                .isEqualTo(associatedDocumentId);
+        assertThat(row.negotiationId()).isNotEqualTo(associatedDocumentId);
+
+        NegotiationAttachmentResponse attachment =
+                new NegotiationAttachmentResponse(
+                        negotiationId, activityId,
+                        "kotton-proteostasis.pdf", "application/pdf",
+                        1024L, "ARCHIVED",
+                        LocalDateTime.of(2015, 7, 24, 0, 0), "jlrevvy",
+                        true, restrictedFlag,
+                        oracleAttachmentId, oracleFileId, description
+                );
+
+        assertThat(attachment.activityId()).isEqualTo(activityId);
+        assertThat(attachment.oracleAttachmentId())
+                .isEqualTo(oracleAttachmentId);
+        assertThat(attachment.oracleFileId()).isEqualTo(oracleFileId);
+        assertThat(attachment.description()).isEqualTo(description);
+        assertThat(attachment.restrictedFlag()).isEqualTo(restrictedFlag);
+
+        JsonNode node = objectMapper.valueToTree(attachment);
+        assertThat(node.get("description").asText()).isEqualTo(
+                "Kotton Proteostasis"
+        );
+        assertThat(node.get("restrictedFlag").asText()).isEqualTo("N");
+
+        String json = objectMapper.writeValueAsString(attachment);
+        assertThat(json).doesNotContainIgnoringCase("s3Bucket");
+        assertThat(json).doesNotContainIgnoringCase("s3Key");
+        assertThat(json).doesNotContainIgnoringCase("checksum");
+        assertThat(json).doesNotContainIgnoringCase("sha256");
+        assertThat(json).doesNotContainIgnoringCase("blob");
+    }
+
     private void assertFieldNames(Object value, Set<String> expected)
             throws Exception {
         JsonNode node = objectMapper.valueToTree(value);

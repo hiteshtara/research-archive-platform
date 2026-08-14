@@ -59,6 +59,17 @@ export function visibleFieldsForRecordType(recordType) {
   return ["recordNumber", "documentNumber", "recordId", "attachmentId", "fileId"];
 }
 
+// Negotiation has no version chain at all - archive.negotiation is one
+// row per real Negotiation, current_version is unconditionally TRUE
+// server-side, and AttachmentSearchRepository's own NEGOTIATION branch
+// makes "historical" match zero rows by design (see its SQL comment).
+// Showing the Version filter for Negotiation would let a user select
+// "Historical versions only" and always get an empty, misleading
+// result for a filter that doesn't apply to this record type at all.
+export function versionFilterVisibleForRecordType(recordType) {
+  return recordType !== "NEGOTIATION";
+}
+
 export function recordNumberFieldLabel(recordType) {
   if (recordType === "AWARD") {
     return "Award number";

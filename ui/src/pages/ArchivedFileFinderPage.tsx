@@ -47,6 +47,7 @@ import {
   recordTypeLabel,
   resolveAvailabilityChipColor,
   resolveRecordViewPath,
+  versionFilterVisibleForRecordType,
   visibleFieldsForRecordType,
 } from "../features/archivedFiles/archivedFileFinderPresentation.mjs";
 import type { ArchivedFileSearchResult } from "../types/api";
@@ -336,26 +337,28 @@ export function ArchivedFileFinderPage() {
                 />
               )}
 
-              <FormControl sx={{ minWidth: 160 }}>
-                <InputLabel id="archived-file-version-filter-label">
-                  Version
-                </InputLabel>
-                <Select
-                  labelId="archived-file-version-filter-label"
-                  label="Version"
-                  value={draft.versionFilter}
-                  onChange={(event: SelectChangeEvent) =>
-                    updateDraft(
-                      "versionFilter",
-                      event.target.value as Filters["versionFilter"],
-                    )
-                  }
-                >
-                  <MenuItem value="all">All versions</MenuItem>
-                  <MenuItem value="current">Current version only</MenuItem>
-                  <MenuItem value="historical">Historical versions only</MenuItem>
-                </Select>
-              </FormControl>
+              {versionFilterVisibleForRecordType(draft.recordType) && (
+                <FormControl sx={{ minWidth: 160 }}>
+                  <InputLabel id="archived-file-version-filter-label">
+                    Version
+                  </InputLabel>
+                  <Select
+                    labelId="archived-file-version-filter-label"
+                    label="Version"
+                    value={draft.versionFilter}
+                    onChange={(event: SelectChangeEvent) =>
+                      updateDraft(
+                        "versionFilter",
+                        event.target.value as Filters["versionFilter"],
+                      )
+                    }
+                  >
+                    <MenuItem value="all">All versions</MenuItem>
+                    <MenuItem value="current">Current version only</MenuItem>
+                    <MenuItem value="historical">Historical versions only</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
             </Stack>
 
             <Stack direction="row" spacing={1}>
