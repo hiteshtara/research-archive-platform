@@ -186,17 +186,21 @@ counts change continuously.
   has no blob for these 6 files) = 127,758/127,758, 0 real pending, 0
   failed. S3 reconciliation clean (0 mismatches). All 103
   `AWARD_ATTACHMENT`/`PHYSICAL_FILE` batches are `COMPLETED`.
-- **Proposal attachment processing is active**, not stalled — ECS task
-  `a315e91b4c364901b5db3d4e5a4403ca` (task-def
+- **Proposal attachment processing is complete, not still running** —
+  corrected 2026-08-15 (was previously documented here as "active").
+  ECS task `a315e91b4c364901b5db3d4e5a4403ca` (task-def
   `research-archive-platform-dev-loader:192`, command
   `attachment_orchestrator.py --ecs --modules award,proposal`), started
-  2026-08-12T15:04:44-04:00, still `RUNNING` and making fresh progress
-  (~2,000 files uploaded every ~6 minutes, 0 failed, S3 reconciliation
-  clean on every batch). `archive.proposal_attachment` had 165,177
-  `UPLOADED` / 240,602 `NOT_REQUESTED` / 405,779 total as of the
-  2026-08-13 investigation — the `NOT_REQUESTED` remainder is real
-  outstanding work this task is actively draining, not stale/missing
-  data.
+  2026-08-12T15:04:44-04:00, ran through 72 Proposal binary batches and
+  printed its final orchestration summary at 2026-08-14T02:55:52Z: this
+  run alone uploaded 149,248 Proposal files (0 failed, 0
+  missing-source-content), and its last reconciliation batch checked
+  all 405,779 `archive.proposal_attachment` rows clean (0 mismatches).
+  The task no longer appears in `aws ecs describe-tasks`/`list-tasks`
+  (past ECS's stopped-task retention window as of 2026-08-15) —
+  completion is evidenced via its final CloudWatch log line, not a live
+  ECS task state. Retained here as completed history, not current
+  activity; do not re-launch a follow-up task for this work.
 - **Do not launch a retry or a second loader/orchestrator task.** No
   failed items exist in either domain (0 `FAILED` in
   `attachment_object`/`proposal_attachment`), so there is nothing to
@@ -308,6 +312,56 @@ MISSING to ARCHIVED for that one row only). **The full 26,572-row
 backfill has not run** - paused pending explicit approval. Do not mark
 the 9 genuinely-missing rows as archived; do not reprocess the 2,342
 already-correct inline rows unnecessarily when it does run.
+
+## Live AWS/Amplify state — verified 2026-08-15 (14:04 EDT), not assumed
+
+**These are point-in-time verified facts** (`AWS_PROFILE=bu-nprd`,
+account `770203350335` confirmed via `aws sts get-caller-identity`
+before every call below). Re-verify before relying on them beyond
+historical context.
+
+**Persistent resources (always-on):**
+- API: ECS service `research-archive-platform-dev-api` (cluster of the
+  same name) — 1 desired / 1 running task
+  (`eb5a912c47ae4366a2a6d71d3b1804fd`).
+- Database: RDS `research-archive-platform-dev-postgres`
+  (`db.t4g.micro`, Postgres) — status `available`.
+
+**Scheduled/one-off resources (not always-on — do not read a zero
+running-task count here as a problem):**
+- ETL: cluster `research-archive-platform-dev-etl` — 0 running tasks.
+  Expected: this cluster runs no persistent service
+  (`activeServicesCount: 0`); every task is a one-off `run-task`
+  launch (loader runs, the Subaward nightly sync below, etc.), so an
+  idle cluster between runs is normal, not a fault.
+- Subaward nightly sync: EventBridge Scheduler
+  `research-archive-platform-dev-subaward-nightly` — `State: ENABLED`,
+  `cron(0 2 * * ? *)`, timezone `America/New_York` (2:00 AM ET daily).
+  Target: task-definition
+  `research-archive-platform-dev-loader:222`, image
+  `research-archive-platform-dev-loader:20260815T021447Z-42f5d19`,
+  command `python3 load_subawards_from_csv.py --ecs --sync-all`,
+  task-level override `cpu=1024/memory=3072` (the fix from the initial
+  full-load OOM, see above). Next expected execution: **2026-08-16
+  02:00 America/New_York** (computed from the cron expression against
+  the current time, 2026-08-15 14:04 EDT — EventBridge Scheduler has no
+  API to read a precomputed "next fire time" directly).
+- Proposal attachment task `a315e91b4c364901b5db3d4e5a4403ca`: confirmed
+  **completed**, not running — see the corrected bullet in "Verified
+  Award/Proposal attachment loading facts" above.
+
+**Amplify UI (`d288p9gmoteftb`, connected to `origin` per the remotes
+section above):**
+- Branch `main`, latest job **71**, status `SUCCEED`, commit
+  `ed7a2111f2feca0d00d71d8e5f3037f7542c5df9` ("fix(negotiation): resolve
+  externally-stored attachment BLOBs, not just inline"), built
+  2026-08-15T10:34:38-04:00–10:36:08-04:00.
+- Local `main` HEAD as of this check (`6c0b174`, "fix(ops): harden
+  CloudShell analyst credential helpers and document workflow") is
+  **not yet on `origin/main`** (`git merge-base --is-ancestor` returns
+  false) — it is therefore not deployed to Amplify. This is expected,
+  not a gap: push to `origin/main` first if that commit needs to reach
+  the live UI.
 
 ## Open items
 
