@@ -6,6 +6,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from archive_etl.attachments.models import AttachmentRecord
+from archive_etl.attachments.oracle_blob import (
+    InlineOrExternalBlobReader,
+    OracleBlobReader,
+)
 from archive_etl.attachments.plugins.attachment_file import (
     AttachmentFilePlugin,
 )
@@ -14,6 +18,11 @@ from archive_etl.attachments.plugins.attachment_file import (
 class NegotiationAttachmentPlugin(AttachmentFilePlugin):
     module_name = "negotiation"
     postgres_module_code = "NEGOTIATION"
+    # Overrides AttachmentFilePlugin's "FILE_ID" - a Negotiation row can
+    # have a FILE_ID and still be genuinely missing (neither
+    # ATTACHMENT_FILE.FILE_DATA nor FILE_DATA.DATA has content), so
+    # "FILE_ID is missing" would be misleading here.
+    file_reference_label = "INLINE/EXTERNAL blob"
     source_identifier_fields = {
         "attachment_id": "attachment_id",
         "activity_id": "parent_activity_id",
@@ -43,6 +52,35 @@ class NegotiationAttachmentPlugin(AttachmentFilePlugin):
     def selected_record_id(self, args: argparse.Namespace) -> int | None:
         return args.negotiation_id
 
+    def create_blob_reader(
+        self,
+        attempts: int,
+        chunk_size: int,
+    ) -> OracleBlobReader:
+        # Negotiation attachments are stored inline (ATTACHMENT_FILE.
+        # FILE_DATA) for some rows and externally (FILE_DATA.DATA, via
+        # FILE_DATA_ID) for others - decided per physical file, not per
+        # module - so this overrides AttachmentFilePlugin's inherited
+        # inline-only default. See file_data_id() below for how each
+        # record's reference is built; see oracle_blob.py's
+        # InlineOrExternalBlobReader docstring for the full rationale.
+        return InlineOrExternalBlobReader(attempts, chunk_size)
+
+    def file_data_id(self, record: AttachmentRecord) -> str | None:
+        # Overrides AttachmentPlugin.file_data_id (base.py), which
+        # process_attachment() calls to get the reference it passes to
+        # the blob reader - deliberately NOT the same value as
+        # record.file_data_id itself, which stays the plain
+        # ATTACHMENT_FILE.FILE_ID for manifest_values()/Postgres
+        # source_file_id (record.file_data_id is read directly there,
+        # bypassing this method - see attachment_file.py's
+        # manifest_values). This only changes what the READER receives.
+        return InlineOrExternalBlobReader.encode_reference(
+            record.attributes.get("blob_source"),
+            file_id=record.file_data_id,
+            file_data_id=record.attributes.get("attachment_file_data_id"),
+        )
+
     def iter_records(
         self,
         path: Path,
@@ -51,8 +89,8 @@ class NegotiationAttachmentPlugin(AttachmentFilePlugin):
     ) -> Iterator[AttachmentRecord]:
         required = {
             "attachment_id", "activity_id", "negotiation_id", "file_id",
-            "file_name", "content_type", "description", "restricted",
-            "update_timestamp",
+            "file_data_id", "file_name", "content_type", "blob_source",
+            "description", "restricted", "update_timestamp",
         }
         emitted = 0
         with path.open(newline="", encoding="utf-8-sig") as stream:
@@ -106,11 +144,22 @@ class NegotiationAttachmentPlugin(AttachmentFilePlugin):
                             row["update_timestamp"].strip() or None,
                         "source_update_user":
                             row.get("update_user", "").strip() or None,
+                        # The real KCOEUS.ATTACHMENT_FILE.FILE_DATA_ID
+                        # (a UUID string - never int()-coerced), needed
+                        # by file_data_id() above to resolve an
+                        # EXTERNAL-sourced physical file via FILE_DATA.
+                        # Attribute name kept as "attachment_file_data_id"
+                        # (not renamed to "file_data_id") to avoid
+                        # colliding with AttachmentRecord's own
+                        # file_data_id field, which carries FILE_ID here,
+                        # not FILE_DATA_ID.
                         "attachment_file_data_id":
-                            row.get(
-                                "attachment_file_data_id",
-                                "",
-                            ).strip()
+                            row.get("file_data_id", "").strip() or None,
+                        "blob_source":
+                            row.get("blob_source", "").strip().upper()
+                            or None,
+                        "file_size_bytes":
+                            row.get("file_size_bytes", "").strip()
                             or None,
                         "attachment_file_sequence_number":
                             row.get(
