@@ -26,6 +26,27 @@ substitute for `git log`.
 All five are on `bu/main`, `origin/main`, and local `main` (all three refs
 verified identical, `5576a3c...`, as of the push below).
 
+## Commits — pushed and deployed as of 2026-08-14 (Negotiation attachments)
+
+| Commit | Summary | Status |
+|---|---|---|
+| `85886b9` | Centralized `AttachmentAuthorizationService` (Cognito `ArchiveAttachmentViewer` group) across Award/Proposal/Subaward/Negotiation; Negotiation attachment support; `V076` migration | Code + migration file, not yet applied at commit time |
+| `7f7194e` | Frontend attachment-section hiding completed for every domain; `ArchiveAttachmentViewer` Cognito group Terraform | **Deployed to Amplify** (job `65`, `SUCCEED`) ahead of the API - see "two incidents" below for why that split mattered |
+| `bb24ab6` | Negotiation search: exact negotiation_id/document_number match ranks first (previously ordinary substring search could bury an exact ID past page 1) | Code |
+| `a4a31cc` | Exposes `oracleAttachmentId`/`oracleFileId`/`description` on `NegotiationAttachmentResponse`; drops `checksum` (storage internal, never user-facing) | Code |
+| `43c8427` | Archived File Finder: removes the nonexistent "Negotiation number" field (Negotiation ID is the only business identifier - see `docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md`); guards Negotiation ID (420) vs Association ID (419) | Code |
+| `a406adf` | Hides the Version filter for Negotiation (no version chain exists) | Code |
+| `3e4a144` | `NegotiationArchiveRepositorySchemaIntegrationTest` - real Postgres via Testcontainers, all committed migrations applied, real repository SQL | Test-only |
+| `43859c2` | Fixes `findAttachments`'s three unaliased SELECT columns (`archived_attachment_id`/`original_file_name`/`byte_size`) that broke row-mapping for every Negotiation with real attachment rows - see the design doc's "two incidents" section | Code + regression tests seeded with real fixture rows |
+
+**Deployed**: API task-definition revision **59** (health `200 UP`),
+Amplify job `66` (`SUCCEED`, commit `a406adf`) then unchanged through
+`3e4a144`/`43859c2` (test/backend-only, no UI change - no new Amplify
+build needed or triggered for those two). `V076` applied to dev RDS via
+the ETL loader's `--migrate-only` mode (schema-only - see the design
+doc for the full incident writeup and why the previously-registered
+loader image had to be rebuilt first).
+
 To check whether a commit above is contained in the current branch or a
 remote:
 
@@ -190,3 +211,19 @@ for this project right now:
   *not* missing — `AwardTermsSection.tsx` already renders both Sponsor
   and Report Terms (built in `61eaff5`, already live before this
   release); the gap is presentation/grouping, not missing data or code.
+- **`database/migrations/V071__extend_search_embedding_for_evidence_documents.sql`
+  is an unresolved reproducibility gap, discovered 2026-08-14, not
+  repaired.** It is completely uncommitted (`git log --all` shows zero
+  history for it) yet is already marked applied in dev RDS's
+  `public.schema_migration` (`version = 71`) — some commit's DDL effect
+  reached dev RDS and the commit itself later disappeared from git
+  history. A fresh clone cannot currently reconstruct dev RDS's real
+  schema from git history alone. Unrelated to Negotiation attachments;
+  tracked here only because it was found while verifying `V076` was the
+  sole pending migration for that release — see
+  `docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md`'s "Tracked,
+  unresolved" section for the full writeup and where to start if picked
+  up. `V073__extend_subaward_attachment_archive_status.sql` is the same
+  kind of uncommitted local file but is *correctly* unapplied (never
+  shipped in any image) — no gap there, just don't commit it as a
+  side effect of unrelated work.

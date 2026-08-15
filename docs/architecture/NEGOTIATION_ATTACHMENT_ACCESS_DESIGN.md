@@ -151,3 +151,177 @@ group membership is the only gate.
 - Never assume Award/Proposal/Subaward attachment access predates this
   design's group requirement - as of this change, it does not; all four
   domains are gated identically.
+
+## Data model: how an attachment links back to its Negotiation
+
+```
+NEGOTIATION_ATTACHMENT.ACTIVITY_ID
+    -> NEGOTIATION_ACTIVITY.NEGOTIATION_ACTIVITY_ID
+    -> NEGOTIATION_ACTIVITY.NEGOTIATION_ID
+```
+
+An attachment never references its Negotiation directly in Oracle - it
+hangs off the attachment's parent `NEGOTIATION_ACTIVITY` row, which in
+turn belongs to exactly one `NEGOTIATION`. The archive schema mirrors
+this: `archive.archived_attachment.source_metadata->>'activity_id'`
+(exposed as `activityId` in `NegotiationAttachmentResponse`) is the
+`NEGOTIATION_ACTIVITY_ID`, and `archive.archived_attachment.parent_record_id`
+is the `NEGOTIATION_ID` directly (denormalized at load time - the
+generic `archived_attachment` table does not itself join through
+`negotiation_activity`).
+
+**Negotiation ID is the sole business identifier.** `NEGOTIATION.NEGOTIATION_ID`
+(and, in the archive, `archive.negotiation.negotiation_id`) is what
+Archived File Finder's "Negotiation ID" field searches
+(`AttachmentSearchRepository.searchNegotiationAttachments`'s
+`n.negotiation_id = :recordId`) and what every UI route
+(`/negotiations/{id}`) and API path (`/api/negotiations/{id}/...`) key
+on. **Negotiation Association ID is a different value entirely** -
+`NEGOTIATION.ASSOCIATED_DOCUMENT_ID` (`archive.negotiation.associated_document_id`),
+interpreted per `NEGOTIATION_ASSC_TYPE_ID`/`negotiationAssociationTypeCode`
+(e.g. `AWD`→an Award number, `IP`→a Proposal number, `NO`→no
+association at all). It identifies whatever record the Negotiation is
+*associated with*, not the Negotiation itself, and must never be
+substituted for Negotiation ID in a query, a route, a test fixture, or
+a UI label - see the fixture below for how close the two values can
+coincidentally be.
+
+## Reference fixture (real, live-verified 2026-08-14 - Oracle staging
+## and dev RDS, exact match)
+
+```
+negotiation_id       = 420
+association_id       = 419   (a different field/value - see above; never
+                               confused with negotiation_id in code or tests)
+activity_id           = 10134
+attachment_id          = 101   (source_attachment_id / oracleAttachmentId)
+file_id                 = 24828  (source_file_id / oracleFileId)
+description              = "Kotton Proteostasis"
+restricted                = "N"
+```
+
+Used throughout `NegotiationArchiveRepositoryTest`,
+`NegotiationAttachmentContractTest`, and
+`NegotiationArchiveRepositorySchemaIntegrationTest` as the canonical
+real-data regression fixture - prefer extending coverage with this
+exact record over inventing a new synthetic one, so a real production
+row keeps getting exercised by the suite.
+
+## Oracle/RDS population (live-verified 2026-08-14, post-`V076`,
+## post-alias-fix - see "Two incidents" below)
+
+| Metric | Count |
+|---|---|
+| Total attachment metadata rows (`archive.archived_attachment`, all `NEGOTIATION`) | 28,923 |
+| `legacy_restricted_flag = 'N'` | 8,517 |
+| `legacy_restricted_flag = 'Y'` | 20,406 |
+| `archive_status = 'ARCHIVED'` (real binary present) | 2,342 |
+| `archive_status = 'MISSING'` (source Oracle BLOB never captured) | 26,581 |
+
+All four counts are exact row-level reconciliations against Oracle
+staging (0 mismatches, 0 orphaned parents) - not estimates. Every `Y`
+row is `MISSING` (0 of 20,406 have a real BLOB); the 2,342 downloadable
+rows are all `N`. This is a permanent source-data gap, not a load
+defect - see "Reconciliation findings" above.
+
+## Two incidents, same release, both fixed and deployed (2026-08-14)
+
+Deploying the API before its dependent migration reached dev RDS, then
+fixing that, surfaced a second, unrelated bug - useful to read together
+since both produced the same symptom (a 500 on
+`GET /api/negotiations/{id}/attachments`) from two independent causes.
+
+**Root cause #1 - migration never applied.** The API expected
+`archive.archived_attachment.legacy_restricted_flag` to exist
+(`NegotiationArchiveRepository.findAttachments`'s
+`legacy_restricted_flag AS restricted_flag`), but `V076` had only been
+committed, not applied - **API startup does not run migrations** (see
+CLAUDE.md's "Migrations are not run by Spring Boot"; this is that fact's
+concrete failure mode, not a new mechanism). Fixed by running the ETL
+loader's `--migrate-only` mode from a freshly built image containing
+`V076` (the previously-registered loader image predated the commit
+that added it - loader images do not auto-rebuild when a migration is
+merely committed).
+
+**Root cause #2 - three unaliased SELECT columns.** Once `V076` was
+applied, the same endpoint kept failing for every Negotiation with real
+attachment rows while succeeding for one with zero rows - the
+signature of a row-mapping bug, not a SQL bug.
+`NegotiationArchiveRepository.findAttachments` selected
+`archived_attachment_id`, `original_file_name`, and `byte_size`
+**without aliases**, but `NegotiationAttachmentResponse`'s record
+components are `attachmentId`/`fileName`/`fileSize`. Spring's
+`JdbcClient` row mapper only does underscore/camelCase conversion
+between a ResultSet column and a DTO property - it cannot infer an
+arbitrarily different name - so it threw `PSQLException: The column
+name attachment_id was not found in this ResultSet`, but **only once a
+real row existed to map** (an empty `ResultSet` never calls
+`RowMapper.mapRow()` at all, which is exactly why this went undetected
+through every mocked-`JdbcClient` test and even through this session's
+own first real-schema integration test, which queried an empty table).
+Fixed with three aliases, no SQL logic change:
+
+```sql
+archived_attachment_id AS attachment_id
+original_file_name AS file_name
+byte_size AS file_size
+```
+
+**Testing rule this incident established**: a repository schema
+integration test must seed and map **at least one real row** through
+the actual `RowMapper` - an empty-result test proves the SQL is
+syntactically valid against the real schema, but cannot detect a
+ResultSet-to-DTO mapping failure, since the mapper is never invoked for
+zero rows. `NegotiationArchiveRepositorySchemaIntegrationTest` now
+seeds three regression fixtures for exactly this reason:
+
+- **negotiation_id=257** - zero attachments (the real "empty is
+  correct" case - proves the endpoint doesn't error just because a
+  Negotiation happens to have no attachments).
+- **negotiation_id=420** - one attachment (the reference fixture
+  above; every field asserted against its real value).
+- **negotiation_id=786** - five attachments across two activities
+  (`10293`, `10294`) - proves multi-row mapping and the
+  `ORDER BY activity_id, archived_attachment_id` ordering, not just a
+  single lucky row.
+
+## Deployment verification record (2026-08-14, both incidents' fixes)
+
+- API task-definition revision **59** (following revision 58's V076-
+  only fix, itself following revision 57's pre-fix build), service
+  stable.
+- `GET /actuator/health` → `200 {"status":"UP"}`.
+- Unauthenticated attachment requests → `401` (unchanged throughout
+  both incidents).
+- Authenticated, not in `ArchiveAttachmentViewer` → `403
+  ATTACHMENT_ACCESS_DENIED`, zero metadata in the response body
+  (unchanged throughout).
+- Authorized (`ArchiveAttachmentViewer` member) browser verification:
+  successful - negotiation 420 loads its attachment, matching the
+  reference fixture above.
+
+## Tracked, unresolved: two stray local migration files (not part of
+## this release, not repaired here)
+
+Discovered while confirming `V076` was the only pending migration -
+both are local-only and were never committed to any branch
+(`git log --all` shows zero history for either), so neither was ever
+shipped in a deployed loader image.
+
+- **`V073__extend_subaward_attachment_archive_status.sql`** -
+  uncommitted and correctly unapplied on dev RDS (confirmed via
+  `pg_get_constraintdef`: the live constraint is still in its
+  pre-`V073` form, no partial application). Harmless as long as it
+  stays uncommitted; unrelated to Negotiation.
+- **`V071__extend_search_embedding_for_evidence_documents.sql`** - the
+  actual open concern. Uncommitted, yet **already marked applied** in
+  dev RDS's `public.schema_migration` (`version = 71` present). Some
+  commit's DDL effect reached dev RDS and then the commit itself
+  disappeared from git history (most plausibly a squash/rebase/reset)
+  - a reproducibility gap: a fresh clone cannot currently reconstruct
+  dev RDS's real schema from git history alone. Not investigated or
+  repaired as part of this release (out of scope - semantic search/
+  evidence indexing, not Negotiation). If picked up later: start with
+  `git reflog`/dangling-commit search for a lost commit touching this
+  exact filename before deciding whether to formally commit, reconstruct,
+  or drop it.

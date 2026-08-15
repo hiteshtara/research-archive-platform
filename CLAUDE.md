@@ -197,6 +197,18 @@ tracks applied versions in `public.schema_migration` and is invoked from the
 `load_*` scripts. If you add a migration, it takes effect via the ETL loaders,
 not via `mvn spring-boot:run`.
 
+**Deploying API code that depends on a new migration does not apply that
+migration — verify it landed on the target database first.** A real
+2026-08-14 incident: `V076` was committed alongside repository code that
+selected its new column, the API was deployed, and it 500'd in
+production until `V076` was separately applied via the ETL loader's
+`--migrate-only` mode. The registered ECS loader task definition also
+does not rebuild itself when a new migration is merely committed —
+confirm the loader image's source commit is a descendant of the
+migration-adding commit (`git merge-base --is-ancestor <migration-commit>
+<image-commit>`) before assuming `--migrate-only` will find anything to
+apply.
+
 ### Hexagonal layout is only fully implemented for IRB
 The package layout (`adapter/in/web`, `adapter/out/*`, `application/*`,
 `domain/model/*`) suggests ports-and-adapters throughout, but in practice only
