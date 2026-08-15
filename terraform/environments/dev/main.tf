@@ -193,6 +193,29 @@ module "loader_ecs" {
   log_retention_days = var.loader_log_retention_days
 }
 
+# Detached, unattended nightly Subaward business-data sync - see
+# docs/runbooks/SUBAWARD_NIGHTLY_SYNC.md. Runs the existing loader image
+# as a one-off ECS Fargate RunTask (never a persistent service), on the
+# same cluster/subnets/security group as every other one-off loader
+# invocation - creates no EC2, NAT gateway, VPC endpoint, or public
+# database access.
+module "subaward_sync_schedule" {
+  source = "../../modules/subaward_sync_schedule"
+
+  project_name = var.project_name
+  environment  = var.environment
+  aws_region   = var.aws_region
+  account_id   = data.aws_caller_identity.current.account_id
+
+  ecs_cluster_arn        = module.loader_ecs.cluster_arn
+  task_definition_family = module.loader_ecs.task_definition_family
+  execution_role_arn     = module.loader_ecs.execution_role_arn
+  task_role_arn          = module.loader_ecs.loader_task_role_arn
+  private_subnet_ids     = module.vpc.private_subnet_ids
+  security_group_id      = module.loader_ecs.loader_security_group_id
+  log_group_name         = "/ecs/${var.project_name}-${var.environment}-loader"
+}
+
 module "api_ecr" {
   source = "../../modules/api_ecr"
 
