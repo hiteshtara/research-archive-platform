@@ -87,7 +87,21 @@ resource "aws_scheduler_schedule" "subaward_nightly" {
       }
     }
 
+    # Task-level cpu/memory override (not a task-definition change, so it
+    # never affects any other loader invocation sharing this family) -
+    # the shared task definition's default 512/1024 OOM-killed (exit 137)
+    # a real --sync-all run of the full ~3,265-family population: every
+    # one of the 11 Subaward datasets is read into memory in full before
+    # the per-family UPSERT loop starts (custom_data alone was ~1.0M
+    # rows), which the default size cannot hold. Mirrors the identical,
+    # already-proven fix for the Award backfill - see
+    # docs/runbooks/UNATTENDED_FARGATE_ETL_LOADS.md's "CPU/memory sizing"
+    # section - via the same mechanism (task-level override, not a
+    # task-definition bump, so every other loader invocation keeps its
+    # smaller/cheaper default).
     input = jsonencode({
+      cpu    = "1024"
+      memory = "3072"
       containerOverrides = [
         {
           name    = var.container_name
