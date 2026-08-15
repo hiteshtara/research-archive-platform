@@ -422,6 +422,42 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--sync-all",
+        action="store_true",
+        help=(
+            "Read every Oracle SUBAWARD_CODE family and UPSERT it into "
+            "Postgres (never TRUNCATE) - same idempotent per-family "
+            "transaction machinery as --load-subaward-code, applied to "
+            "the full population. Intended for unattended/nightly "
+            "execution: guarded by a non-blocking PostgreSQL advisory "
+            "lock, exits nonzero on any family failure or an unresolved "
+            "post-sync reconciliation gap. Mutually exclusive with the "
+            "other operation flags."
+        ),
+    )
+    parser.add_argument(
+        "--reconcile-only",
+        action="store_true",
+        help=(
+            "Read-only comparison of Oracle's SUBAWARD_CODE population "
+            "against archive.subaward - writes nothing. Exits nonzero if "
+            "Oracle has codes the archive is missing. Mutually exclusive "
+            "with the other operation flags."
+        ),
+    )
+    parser.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help=(
+            "DESTRUCTIVE: TRUNCATE every Subaward archive table and "
+            "reload the entire dataset from Oracle. Must be given "
+            "explicitly - there is no default/no-verb path that does "
+            "this. Never used by scheduled/nightly execution; use "
+            "--sync-all there instead. Mutually exclusive with the "
+            "other operation flags."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -432,15 +468,31 @@ def parse_args(
     )
     arguments = parser.parse_args(arguments)
 
-    selectors = sum((
-        bool(arguments.subaward_code),
-        bool(arguments.subaward_id),
-        arguments.max_families is not None,
-    ))
-    if selectors > 1:
+    active_modes = [
+        name
+        for name, active in (
+            ("--load-subaward-code", bool(arguments.subaward_code)),
+            ("--load-subaward-id", bool(arguments.subaward_id)),
+            ("--max-families", arguments.max_families is not None),
+            ("--sync-all", arguments.sync_all),
+            ("--reconcile-only", arguments.reconcile_only),
+            ("--full-refresh", arguments.full_refresh),
+        )
+        if active
+    ]
+    if len(active_modes) > 1:
         parser.error(
-            "--load-subaward-code, --load-subaward-id, and "
-            "--max-families are mutually exclusive"
+            "--load-subaward-code, --load-subaward-id, --max-families, "
+            "--sync-all, --reconcile-only, and --full-refresh are "
+            "mutually exclusive: " + ", ".join(active_modes)
+        )
+    if not active_modes and arguments.limit is None:
+        parser.error(
+            "an explicit operation is required: one of "
+            "--load-subaward-code, --load-subaward-id, --max-families, "
+            "--sync-all, --reconcile-only, --full-refresh, or --limit "
+            "(bounded dry run of the --full-refresh read/transform "
+            "path). There is no default/no-verb behavior."
         )
 
     return arguments
@@ -720,7 +772,135 @@ def resolve_target_subaward_codes(
     return None
 
 
-def run_targeted_load(target_codes: list[str]) -> dict[str, object]:
+# Fixed, arbitrary bigint identifying the Subaward sync's advisory lock -
+# scoped to this one PostgreSQL session key so at most one --sync-all can
+# ever hold it at a time. Not derived from anything; just needs to be
+# stable and not collide with another lock user in this codebase.
+SUBAWARD_SYNC_ADVISORY_LOCK_KEY = 837_402_615_902
+
+
+def _try_acquire_sync_lock(connection: Connection) -> bool:
+    return bool(
+        connection.execute(
+            text("SELECT pg_try_advisory_lock(:key)"),
+            {"key": SUBAWARD_SYNC_ADVISORY_LOCK_KEY},
+        ).scalar_one()
+    )
+
+
+def _release_sync_lock(connection: Connection) -> None:
+    connection.execute(
+        text("SELECT pg_advisory_unlock(:key)"),
+        {"key": SUBAWARD_SYNC_ADVISORY_LOCK_KEY},
+    )
+
+
+def reconcile_subaward_codes(engine: Engine) -> dict[str, object]:
+    """Read-only comparison of Oracle's full SUBAWARD_CODE population
+    against archive.subaward's - writes nothing. oracle_only codes are
+    genuinely missing from the archive (a real gap). rds_only codes exist
+    in the archive but have disappeared from Oracle since they were
+    loaded - reported as a warning only, never deleted: this archive
+    intentionally retains historical rows that no longer exist upstream
+    (see clear_existing_data's absence from --sync-all)."""
+    subawards_spec = _dataset_by_key("subawards")
+    oracle_codes = set(
+        OracleDataSource(subawards_spec.oracle_path)
+        .read()["subaward_code"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    with engine.connect() as connection:
+        rds_codes = set(
+            connection.execute(
+                text("SELECT DISTINCT subaward_code FROM archive.subaward")
+            )
+            .scalars()
+            .all()
+        )
+
+    oracle_only = sorted(oracle_codes - rds_codes)
+    rds_only = sorted(rds_codes - oracle_codes)
+
+    logger.info(
+        "Reconciliation: oracle={:,} rds={:,} oracle_only={:,} rds_only={:,}",
+        len(oracle_codes),
+        len(rds_codes),
+        len(oracle_only),
+        len(rds_only),
+    )
+    if oracle_only:
+        logger.warning(
+            "Subaward codes in Oracle but missing from archive.subaward "
+            "({:,}): {}",
+            len(oracle_only),
+            oracle_only[:50],
+        )
+    if rds_only:
+        logger.warning(
+            "Subaward codes in archive.subaward but no longer in Oracle "
+            "({:,}) - retained, never deleted: {}",
+            len(rds_only),
+            rds_only[:50],
+        )
+
+    return {
+        "oracle_count": len(oracle_codes),
+        "rds_count": len(rds_codes),
+        "oracle_only": oracle_only,
+        "rds_only": rds_only,
+    }
+
+
+def run_sync_all() -> dict[str, object]:
+    """Full Oracle-to-Postgres Subaward sync: every SUBAWARD_CODE family,
+    via the same idempotent per-family UPSERT transaction machinery as
+    run_targeted_load (never TRUNCATE, never touches
+    subaward_attachment_archive). Guarded by a non-blocking PostgreSQL
+    advisory lock (SUBAWARD_SYNC_ADVISORY_LOCK_KEY) so at most one sync
+    runs at a time; a concurrent invocation exits cleanly without doing
+    any work rather than racing the one already running."""
+    engine = create_postgres_engine()
+    apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+
+    lock_connection = engine.connect()
+    try:
+        if not _try_acquire_sync_lock(lock_connection):
+            logger.warning(
+                "Another Subaward sync already holds the advisory lock - "
+                "exiting without doing any work"
+            )
+            return {"skipped": True, "reason": "lock_held"}
+
+        subawards_spec = _dataset_by_key("subawards")
+        all_codes = sorted(
+            OracleDataSource(subawards_spec.oracle_path)
+            .read()["subaward_code"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        logger.info(
+            "--sync-all: {:,} Subaward families in Oracle", len(all_codes)
+        )
+
+        result = run_targeted_load(all_codes, engine=engine)
+        result["reconciliation"] = reconcile_subaward_codes(engine)
+        return result
+    finally:
+        try:
+            _release_sync_lock(lock_connection)
+        finally:
+            lock_connection.close()
+
+
+def run_targeted_load(
+    target_codes: list[str],
+    engine: Engine | None = None,
+) -> dict[str, object]:
     """Loads exactly the given Subaward families (every version and all
     child rows sharing each SUBAWARD_CODE) via an idempotent per-row
     UPSERT (archive_etl.reference_data._upsert_rows), one Postgres
@@ -755,8 +935,9 @@ def run_targeted_load(target_codes: list[str]) -> dict[str, object]:
         ),
     )
 
-    engine = create_postgres_engine()
-    apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+    if engine is None:
+        engine = create_postgres_engine()
+        apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
 
     totals = {
         spec.table_name: {"inserted": 0, "updated": 0, "unchanged": 0}
@@ -842,6 +1023,30 @@ def main() -> None:
     if arguments.ecs:
         _run_ecs_setup()
 
+    if arguments.reconcile_only:
+        engine = create_postgres_engine()
+        result = reconcile_subaward_codes(engine)
+        if result["oracle_only"]:
+            raise SystemExit(
+                f"Reconciliation gap: {len(result['oracle_only'])} "
+                "Subaward code(s) exist in Oracle but not "
+                "archive.subaward"
+            )
+        return
+
+    if arguments.sync_all:
+        result = run_sync_all()
+        if result.get("skipped"):
+            return
+        reconciliation = result["reconciliation"]
+        if result["failed"] or reconciliation["oracle_only"]:
+            raise SystemExit(
+                f"--sync-all did not fully converge: {result['failed']} "
+                f"family failure(s), {len(reconciliation['oracle_only'])} "
+                "code(s) still missing from archive.subaward"
+            )
+        return
+
     target_codes = resolve_target_subaward_codes(arguments)
     if target_codes is not None:
         if not target_codes:
@@ -901,6 +1106,11 @@ def main() -> None:
     with engine.begin() as connection:
         load_id = create_load_run(connection, total_rows)
 
+    # Reachable only when arguments.full_refresh is True - parse_args()
+    # requires an explicit --full-refresh, --sync-all, --reconcile-only, or
+    # a targeted selector, and every non-full-refresh path above already
+    # returned. There is no default/no-verb way to reach this TRUNCATE.
+    logger.warning("--full-refresh: truncating and reloading every Subaward table")
     try:
         with engine.begin() as connection:
             clear_existing_data(connection)

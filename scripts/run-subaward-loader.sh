@@ -39,6 +39,8 @@ set -euo pipefail
 #   scripts/run-subaward-loader.sh --load-subaward-id ID [--attachments]
 #   scripts/run-subaward-loader.sh --max-families N [--attachments]
 #   scripts/run-subaward-loader.sh --attachments   (alone: every archived Subaward's attachments)
+#   scripts/run-subaward-loader.sh --sync-all
+#   scripts/run-subaward-loader.sh --reconcile-only
 #   scripts/run-subaward-loader.sh ... --image-uri URI
 #
 # --load-subaward-code CODE: load only the given Subaward family/families
@@ -50,6 +52,14 @@ set -euo pipefail
 #
 # --max-families N: load the first N families, ascending by
 #   SUBAWARD_CODE. Mutually exclusive with the two above.
+#
+# --sync-all: idempotent UPSERT of every Oracle Subaward family (never
+#   TRUNCATE) - the nightly/unattended mode. Advisory-lock guarded, exits
+#   nonzero on any family failure or unresolved reconciliation gap.
+#   Mutually exclusive with the selectors/--attachments/--reconcile-only.
+#
+# --reconcile-only: read-only Oracle-vs-archive.subaward comparison, no
+#   writes. Mutually exclusive with the selectors/--attachments/--sync-all.
 #
 # --attachments: after the main load succeeds, also fetch Subaward
 #   attachment metadata from Oracle for the same targeted families,
@@ -84,6 +94,8 @@ SUBAWARD_CODES=()
 SUBAWARD_IDS=()
 MAX_FAMILIES=""
 ATTACHMENTS=false
+SYNC_ALL=false
+RECONCILE_ONLY=false
 IMAGE_URI_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
@@ -92,6 +104,8 @@ while [[ $# -gt 0 ]]; do
     --load-subaward-id) SUBAWARD_IDS+=("$2"); shift 2 ;;
     --max-families) MAX_FAMILIES="$2"; shift 2 ;;
     --attachments) ATTACHMENTS=true; shift ;;
+    --sync-all) SYNC_ALL=true; shift ;;
+    --reconcile-only) RECONCILE_ONLY=true; shift ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -102,12 +116,19 @@ SELECTORS=0
 [[ "${#SUBAWARD_IDS[@]}" -gt 0 ]] && SELECTORS=$((SELECTORS + 1))
 [[ -n "$MAX_FAMILIES" ]] && SELECTORS=$((SELECTORS + 1))
 
-if [[ "$SELECTORS" -eq 0 && "$ATTACHMENTS" == false ]]; then
-  echo "ERROR: one of --load-subaward-code, --load-subaward-id, --max-families, or --attachments (alone, for every archived Subaward) is required" >&2
+if [[ "$SYNC_ALL" == true || "$RECONCILE_ONLY" == true ]]; then
+  if [[ "$SYNC_ALL" == true && "$RECONCILE_ONLY" == true ]]; then
+    echo "ERROR: --sync-all and --reconcile-only cannot be combined" >&2
+    exit 1
+  fi
+  if [[ "$SELECTORS" -gt 0 || "$ATTACHMENTS" == true ]]; then
+    echo "ERROR: --sync-all/--reconcile-only cannot be combined with --load-subaward-code, --load-subaward-id, --max-families, or --attachments" >&2
+    exit 1
+  fi
+elif [[ "$SELECTORS" -eq 0 && "$ATTACHMENTS" == false ]]; then
+  echo "ERROR: one of --load-subaward-code, --load-subaward-id, --max-families, --attachments (alone, for every archived Subaward), --sync-all, or --reconcile-only is required" >&2
   exit 1
-fi
-
-if [[ "$SELECTORS" -gt 1 ]]; then
+elif [[ "$SELECTORS" -gt 1 ]]; then
   echo "ERROR: --load-subaward-code, --load-subaward-id, and --max-families cannot be combined" >&2
   exit 1
 fi
@@ -186,13 +207,19 @@ echo "Registered: $NEW_REVISION_ARN"
 
 echo "=== Building command override ==="
 LOAD_ARGS=(python3 load_subawards_from_csv.py --ecs)
-for code in "${SUBAWARD_CODES[@]:-}"; do
-  [[ -n "$code" ]] && LOAD_ARGS+=(--load-subaward-code "$code")
-done
-for id in "${SUBAWARD_IDS[@]:-}"; do
-  [[ -n "$id" ]] && LOAD_ARGS+=(--load-subaward-id "$id")
-done
-[[ -n "$MAX_FAMILIES" ]] && LOAD_ARGS+=(--max-families "$MAX_FAMILIES")
+if [[ "$SYNC_ALL" == true ]]; then
+  LOAD_ARGS+=(--sync-all)
+elif [[ "$RECONCILE_ONLY" == true ]]; then
+  LOAD_ARGS+=(--reconcile-only)
+else
+  for code in "${SUBAWARD_CODES[@]:-}"; do
+    [[ -n "$code" ]] && LOAD_ARGS+=(--load-subaward-code "$code")
+  done
+  for id in "${SUBAWARD_IDS[@]:-}"; do
+    [[ -n "$id" ]] && LOAD_ARGS+=(--load-subaward-id "$id")
+  done
+  [[ -n "$MAX_FAMILIES" ]] && LOAD_ARGS+=(--max-families "$MAX_FAMILIES")
+fi
 
 join_shell_quoted() {
   local out=""
