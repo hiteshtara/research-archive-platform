@@ -56,6 +56,70 @@ git merge-base --is-ancestor <hash> bu/main && echo "on bu/main"
 git merge-base --is-ancestor <hash> origin/main && echo "on origin/main"
 ```
 
+## Commits — Subaward nightly sync (2026-08-15), ETL-only, no API/UI deploy
+
+| Commit | Summary | Status |
+|---|---|---|
+| `4ca4703` | `load_subawards_from_csv.py` `--sync-all`/`--reconcile-only`; removes the destructive no-verb default (an explicit operation is now required - `--full-refresh` gates the old TRUNCATE path); 23 new tests | Code + tests |
+| `42f5d19` | `terraform/modules/subaward_sync_schedule/`: EventBridge Scheduler (2am America/New_York), least-privilege IAM, CloudWatch alarms/SNS topic | Terraform, plan-reviewed, not yet applied at commit time |
+| *(pending)* | `main.tf`'s scheduler `input` gains a task-level `cpu=1024/memory=3072` override (the default 512/1024 OOM-killed a real full-population `--sync-all` run - see below); this doc | Terraform + docs |
+
+**Initial full load, completed 2026-08-15**: the business-data load
+deferred since the 2026-08-14 500-code pilot (see
+`project_award_custom_data_oracle_reconciliation`-adjacent memory) was
+finished via `--sync-all` rather than manual code-chunking, since
+`--sync-all` already provides the same per-family isolation more safely.
+Two attempts at the shared task definition's default size (512 CPU/1024
+MiB) were OOM-killed (exit 137) during the pre-loop full-population read
+(11 datasets, ~2M rows total, held in memory before the per-family
+UPSERT loop starts) - confirmed via direct reconciliation query that
+both left **zero** partial writes (per-family transactions mean the kill
+happened before any family's transaction began). Fixed with a
+task-level `cpu=1024/memory=3072` override (mirroring the identical,
+already-proven fix for the Award backfill in
+`docs/runbooks/UNATTENDED_FARGATE_ETL_LOADS.md`'s "CPU/memory sizing"
+section). Clean result:
+
+```text
+requested=3,265  completed=3,265  failed=0
+subaward             inserted=78,382  unchanged=10,436
+subaward_amount      inserted=168,293 unchanged=13,484
+subaward_contact     inserted=160,473 unchanged=25,277
+subaward_custom_data inserted=855,869 unchanged=155,621
+subaward_funding     inserted=6,530   unchanged=749
+subaward_attachment  inserted=419,723 unchanged=40,392
+subaward_notification inserted=28,785 unchanged=124
+subaward_template_info inserted=78,382 unchanged=10,436
+Reconciliation: oracle=3,265 rds=3,265 oracle_only=0 rds_only=0
+```
+
+Post-load verification: `archive.subaward` distinct codes/rows =
+3,265/88,818 (exact Oracle match), zero orphan child rows across all 7
+FK-linked child tables, zero duplicate `subaward_id` PKs,
+`archive.subaward_attachment_archive` (binaries - a separate pipeline,
+never touched by this loader) unchanged: 1,764 rows, checksum
+`65818048a5d00b7ada509f8e5e08c3c9` identical before and after.
+
+**Idempotency proven**: an immediate second `--sync-all` run (same
+image, task-def revision 222) reported `inserted=0 updated=0` on every
+table, `unchanged` exactly matching the first run's total row counts,
+and the identical clean reconciliation - confirms the UPSERT logic is
+genuinely idempotent, not just "ran without error."
+
+**Image/task-def revisions used**: ECR image
+`research-archive-platform-dev-loader:20260815T021447Z-42f5d19`
+(digest `sha256:ae65a464958a0acb1d96dc875279621751d46563bb9adae2dfb8cfd3cf73a360`),
+task-definition revisions 218 (initial, pre-memory-fix), 221 (first
+clean full load, 1024/3072), 222 (idempotency proof, 1024/3072).
+
+**Terraform scheduler**: not yet applied as of this entry - a scoped
+`terraform plan -target=module.subaward_sync_schedule` (10 to add, 0 to
+change/destroy, real dev backend) was reviewed, but the schedule's
+`input` needed the same `cpu`/`memory` override discovered above before
+being safe to enable unattended (the same OOM would otherwise recur
+every night). See `docs/runbooks/SUBAWARD_NIGHTLY_SYNC.md` for the full
+operational writeup.
+
 ## Git remotes — two of them, do not assume which one anything uses
 
 - `bu` → `git@github.com:bu-ist/research-archive-platform.git` — the BU

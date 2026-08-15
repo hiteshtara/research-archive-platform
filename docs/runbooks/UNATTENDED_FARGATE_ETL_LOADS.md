@@ -373,6 +373,38 @@ long-running staging extraction, since staging is not a frozen snapshot.
 
 ## Reusing this pattern
 
+### A related but distinct pattern: the Subaward nightly sync
+
+The **Subaward nightly sync** (`--sync-all`, see
+[SUBAWARD_NIGHTLY_SYNC.md](SUBAWARD_NIGHTLY_SYNC.md)) is *not* an
+application of this document's batch-orchestrator-loop pattern, despite
+solving a similar-sounding problem ("keep an ongoing recurring load
+running unattended"). The differences are deliberate:
+
+- **Scheduled recurring, not a one-time population load.** This runbook's
+  pattern is for a single large backfill that runs once (or is manually
+  re-launched); the Subaward sync runs automatically every night via
+  EventBridge Scheduler, forever, with no operator launch step at all.
+- **No custom orchestrator script, no base64/gzip command-override
+  encoding.** `--sync-all` is a normal, committed, tested CLI flag on
+  `load_subawards_from_csv.py` - the entire "orchestrator" is just
+  `python3 load_subawards_from_csv.py --ecs --sync-all`.
+- **No `etl_batch`/`etl_batch_item` batching at all.** Every Oracle
+  family is read and UPSERTed in one task run, family-by-family, each in
+  its own transaction - there is no batch-creation/resume step because
+  the full population comfortably fits in one task's read (a few minutes
+  for ~3,300 families as of 2026-08-14 - reconsider this pattern only if
+  Subaward's population grows enough to make a single-task full read
+  itself the bottleneck).
+- **Advisory lock prevents overlap the same way**, but as a guard against
+  the scheduled run overlapping a manual `--sync-all`/`--load-subaward-code`
+  invocation, not for the same reason (there's no long-running single
+  task to protect from being launched twice).
+
+Use this runbook's pattern for a new large one-time backfill; use
+`--sync-all`'s pattern for a domain's small enough ongoing population
+that just needs to stay in sync every night without an operator.
+
 ### For the attachment domain (built, 2026-08-12 - `etl/attachment_orchestrator.py`)
 
 The general shape applies directly - a create-step that selects the next N

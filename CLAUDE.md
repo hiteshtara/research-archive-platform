@@ -145,7 +145,13 @@ documented path, verify AWS identity (`aws sts get-caller-identity`,
 expect account `770203350335`), inspect the real ECS task
 definitions/CloudWatch logs, and distinguish "the local tunnel is
 unavailable" from "ECS cannot reach it either" before concluding anything
-is actually blocked.
+is actually blocked. Confirmed concretely 2026-08-14: with BU VPN
+disconnected on the local Mac (blocking `kc_staging_query.py`), an ECS
+loader task still read Oracle staging successfully via the VPC peering
+path above — the two are genuinely independent, not merely theoretically
+so. This is why unattended/scheduled ETL (e.g. the Subaward nightly sync,
+`docs/runbooks/SUBAWARD_NIGHTLY_SYNC.md`) runs on ECS and never depends
+on a Mac's VPN state at all.
 
 **Deployment**: `clean committed source → local Docker build → BU
 non-production ECR → ECS Fargate` (`ops/deploy-api.sh`, run against a
