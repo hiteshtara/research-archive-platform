@@ -259,6 +259,56 @@ for this project right now:
   starting a job manually is usually unnecessary once the right remote
   has the commit.
 
+## CloudShell analyst access and Negotiation external-BLOB fix (2026-08-15)
+
+**CloudShell analysis access is operational.** Zero-fixed-cost AWS
+CloudShell VPC environment access to dev RDS PostgreSQL as
+`archive_analyst` (read-only: `CONNECT`/`USAGE`/`SELECT`,
+`default_transaction_read_only = on`) works end to end - see
+`docs/runbooks/CLOUDSHELL_ANALYSIS.md` (architecture, one-time setup,
+the 2026-08-15 incident writeup) and
+`docs/runbooks/CLOUDSHELL_DATABASE_ACCESS.md` (step-by-step workflow +
+query cookbook, consolidated from a previously duplicated/corrupted
+draft). Direct Mac/VPN access to private RDS remains unavailable (this
+VPC has no BU VPN/TGW route - see
+`docs/runbooks/VPN_RDS_CONNECTIVITY_INVESTIGATION.md`); CloudShell is
+the approved interactive read-only path until that changes.
+
+`scripts/mac-show-analyst-password.sh` and
+`scripts/mac-generate-analyst-password.sh` were hardened and covered by
+`scripts/tests/test-mac-analyst-password-helpers.sh` (fully mocked - no
+live AWS, no real clipboard) after a live defect: a successful AWS call
+whose stderr got merged into stdout (`2>&1`) could silently corrupt the
+JSON being parsed, and the show-password script claimed success with no
+verification that `pbcopy` actually updated the clipboard. See
+`CLOUDSHELL_ANALYSIS.md`'s "Setup incident and password-helper
+hardening" section for the full factual writeup - no password or hash
+recorded anywhere.
+
+**Database findings** (from the CloudShell investigation, all
+re-queryable via `CLOUDSHELL_DATABASE_ACCESS.md`'s cookbook):
+`archive` schema had 113 base tables as of 2026-08-15. Attachment
+storage genuinely differs by domain (Award: `award_attachment` →
+`attachment_object`; Proposal: `proposal_attachment` owns its own
+upload status; Subaward: `subaward` → `subaward_attachment` →
+`subaward_attachment_archive`; Negotiation: `archived_attachment` via
+`module_code`/`parent_record_id` convention, no PostgreSQL FK) - see
+`docs/DECISIONS.md`/the architecture docs for why. Negotiation
+`source_attachment_id` duplicate count and parent-orphan count were both
+zero.
+
+**Negotiation external-BLOB fix** (commit `ed7a211`, pushed): the
+exporter never selected `ATTACHMENT_FILE.FILE_DATA_ID`, so 26,572 of
+28,923 Negotiation attachments (91.9%) were archived as MISSING despite
+having real, retrievable content in Oracle `FILE_DATA`. Fixed
+(`InlineOrExternalBlobReader`, 40 new/updated tests) and proven on
+exactly one fixture (Negotiation 12788, attachment 29373, File ID
+164229, 140,288 bytes, S3 checksum verified, PostgreSQL flipped from
+MISSING to ARCHIVED for that one row only). **The full 26,572-row
+backfill has not run** - paused pending explicit approval. Do not mark
+the 9 genuinely-missing rows as archived; do not reprocess the 2,342
+already-correct inline rows unnecessarily when it does run.
+
 ## Open items
 
 - The reconciliation in this file covers Award `204713-00117`/`204713-00088`
