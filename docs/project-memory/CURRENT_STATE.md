@@ -120,6 +120,192 @@ being safe to enable unattended (the same OOM would otherwise recur
 every night). See `docs/runbooks/SUBAWARD_NIGHTLY_SYNC.md` for the full
 operational writeup.
 
+### Subaward business data vs. Subaward attachment binaries — two separate completion states, do not conflate
+
+**Subaward business data (`archive.subaward` + its 7 FK-linked child
+tables): complete.** 3,265/3,265 distinct `subaward_code` families,
+88,818 historical `archive.subaward` rows (exact Oracle match), 0
+orphans, 0 duplicate PKs — see the full load results and idempotency
+proof above. This is the business/historical grain, the same category
+as Award's `award_number`/`award_version` distinction — never read it as
+covering attachment binaries too.
+
+**Subaward attachment binaries (`archive.subaward_attachment` metadata +
+`archive.subaward_attachment_archive` S3/archive state): metadata
+complete, binaries not started, and blocked on a real schema/code defect
+(see below) — updated 2026-08-15 with exact, live, ID-level
+reconciliation (two read-only ECS diagnostics, not the 2026-08-12
+preflight's pre-business-load estimate).**
+
+**Live-verified counts (2026-08-15, exact-attachment-ID reconciliation,
+not count subtraction):**
+- Oracle `SUBAWARD_ATTACHMENTS`: 460,115 rows / 460,115 distinct
+  `ATTACHMENT_ID` / 50,874 distinct `FILE_DATA_ID`. All 50,874 have a
+  valid, non-null `KCOEUS.FILE_DATA` blob — **0 genuinely missing**.
+- `archive.subaward_attachment` (metadata): 460,115 rows / 460,115
+  distinct `attachment_id` — **exact match with Oracle, 0 Oracle-only,
+  0 RDS-only.** Metadata is fully loaded (a side effect of the Subaward
+  `--sync-all` business-data run, whose own reported
+  `subaward_attachment inserted=419,723 unchanged=40,392` sums to
+  460,115).
+- `archive.subaward_attachment_archive`: 1,764 rows, all
+  `ARCHIVED` (0 `MISSING`/`FAILED`/`PENDING` — `PENDING` cannot exist
+  yet, V073 unapplied). 458,351 metadata rows have no archive row at
+  all; 0 archive rows are orphaned (no metadata row).
+- Subaward Code 3595 (pilot candidate): 150 metadata rows on both Oracle
+  and Postgres (exact match), 13 distinct physical files, **0 of the
+  150 have any archive row** (UI's "Not archived" is correct, not a
+  bug). 11 of the 13 physical files are referenced by more than one
+  attachment row (up to 24 references for one file).
+
+**A real, code-confirmed, never-yet-executed defect blocks the binary
+load as currently written — found by cross-reading
+`etl/archive_etl/attachments/plugins/subaward.py`,
+`etl/attachment_orchestrator.py`, and `database/migrations/V019`/`V073`,
+then confirmed empirically against the real 1,764 `ARCHIVED` rows:**
+
+- The **old** generic-plugin path (`SubawardAttachmentPlugin.s3_key()`)
+  keys S3 objects per *reference row*:
+  `{prefix}/{subaward_id}/{attachment_id}/{filename}` — one key per
+  `attachment_id`. This is what produced all 1,764 existing `ARCHIVED`
+  rows (empirically confirmed: 1,764 distinct `s3_key` values, 1
+  bucket, 0 S3 HEAD mismatches on size/sha256 — the existing rows are
+  internally correct, just architecturally per-reference).
+- The **new** orchestrator path (`subaward_binary_stage`) keys S3
+  objects per *physical file*: `{prefix}/{file_data_id}/{filename}` —
+  one key shared by every reference row with that `file_data_id` — and
+  writes it via a single bulk
+  `UPDATE archive.subaward_attachment_archive SET s3_bucket=..., s3_key=... WHERE file_data_id = :file_data_id`,
+  intentionally setting every sharing row to the *identical*
+  `(s3_bucket, s3_key)` pair (see the module's own docstring: "a file
+  referenced by many proposal/subaward versions is still only streamed
+  from Oracle and PUT to S3 once").
+- `subaward_attachment_archive` still carries
+  `ux_subaward_attachment_archive_object UNIQUE (s3_bucket, s3_key)`
+  (from `V019`, written when the table's only writer was the old
+  per-reference-key path). The instant the orchestrator's bulk `UPDATE`
+  touches a *second* row sharing a `file_data_id` — which is the
+  overwhelming majority of cases, not an edge case (11/13 physical
+  files in the 3595 pilot; 93/875 distinct files even in the small,
+  differently-sourced legacy 1,764 population) — Postgres raises
+  `duplicate key value violates unique constraint
+  "ux_subaward_attachment_archive_object"` and the whole batch UPDATE
+  rolls back. **This has never actually run against real data**
+  (Subaward execution has been deferred throughout; this is a defect in
+  written-but-never-executed code, not a regression).
+- Contrast with Proposal: `archive.proposal_attachment` (`V060`) has
+  **no** such unique constraint, and its own migration comment
+  documents the identical shared-`FILE_DATA_ID` pattern (149,432
+  distinct `FILE_DATA_ID` / 405,779 rows, ~2.7x reuse) working correctly
+  today — Subaward's schema is the outlier, not the orchestrator's
+  design intent.
+- **Intended final state, proven from code + the orchestrator's own
+  design, not assumed**: **(a)** — 460,115 archive rows (one per
+  reference, preserving the full historical/reference grain, matching
+  `subaward_attachment`'s own PK and FK), with `(s3_bucket, s3_key)`
+  legitimately repeating across rows that share a physical file. Not
+  (b) (would require re-keying `subaward_attachment_archive` to
+  `file_data_id`, a bigger, unnecessary schema change breaking its
+  existing 1:1 FK from `subaward_attachment`). Not (c) (would mean
+  ~9x redundant storage and directly contradicts the orchestrator's own
+  single-PUT-per-file code and docstring) — though (c) is exactly what
+  the *old* path already did for the 93 already-shared files among the
+  1,764 legacy rows; those are correct, already-verified, historical
+  artifacts and should **not** be retroactively touched/deduplicated by
+  any fix.
+
+**Full codebase audit (2026-08-15) — no unsafe `(s3_bucket, s3_key)`
+single-row assumption found anywhere.** Before implementing the fix,
+every reference to `ux_subaward_attachment_archive_object`, every
+`s3_bucket`/`s3_key` read/write, and the cross-domain search repository
+were checked:
+- The constraint name itself is referenced only in its own defining
+  migration (`V019`) — nowhere else in the codebase.
+- `SubawardArchiveRepository.findArchivedAttachment(subawardId,
+  attachmentId)` (the real download-path query) looks up by
+  `attachment_id` + `subaward_id` — never by bucket/key. Dropping the
+  constraint introduces zero new ambiguity here.
+- All four `mark_subaward_file_*` `UPDATE`s in
+  `etl/attachment_orchestrator.py` are keyed by `file_data_id` — never
+  bucket/key. No `DELETE` against this table exists anywhere.
+- `reconcile_batch`'s Subaward branch selects/loops per-row (never a
+  dict keyed by bucket/key that could silently collapse duplicates) —
+  correctly re-verifies every sharing row independently; minor
+  redundant `HEAD` calls for shared files, not a defect.
+- The generic plugin's `sync_postgres` UPSERT is keyed by `attachment_id`
+  (the PK).
+- `AttachmentSearchRepository` (the cross-domain global-search
+  repository) does not reference Subaward attachments at all.
+
+**Implemented, tested, committed locally (not applied/deployed/pushed)
+— 2026-08-15, superseding V073 entirely:**
+`database/migrations/V077__widen_subaward_attachment_archive_status_and_allow_shared_objects.sql`
+is a **new migration from the clean committed baseline** (highest
+committed version was `V076`), not a copy or rename of the uncommitted
+`V073__extend_subaward_attachment_archive_status.sql` — that file's
+ownership is unresolved (see "Open items" below) and is left untouched
+on disk; nothing in this commit depends on it existing. V077 does both
+fixes in one file: widens `archive_status` to
+`PENDING`/`UPLOADING`/`ARCHIVED`/`MISSING`/`FAILED` with `DEFAULT
+'PENDING'`, and `DROP CONSTRAINT IF EXISTS
+ux_subaward_attachment_archive_object`. Pure schema change — no
+`UPDATE`/`DELETE` of any existing row.
+
+Test coverage, all real-Postgres, all passing, none applied to dev RDS:
+- **Java** (`api/src/test/java/edu/bu/archive/adapter/out/persistence/SubawardAttachmentArchiveMigrationTest.java`,
+  9/9 passing, Testcontainers): full **git-tracked-only** migration
+  chain applies cleanly (deliberately excludes the untracked V071/V073
+  sitting in this working tree, so the test reflects what a clean
+  checkout would actually apply); widened `CHECK` accepts all five
+  states and still rejects an invalid one; `DEFAULT 'PENDING'` works;
+  two rows may now share one `(s3_bucket, s3_key)`; the `attachment_id`
+  `PRIMARY KEY` and both FKs (to `subaward`/`subaward_attachment`) are
+  still enforced; re-running V077 is idempotent (no error, no duplicate
+  constraint, `UNIQUE` constraint stays gone); a pre-V077 `ARCHIVED`
+  fixture row is byte-for-byte unchanged afterward.
+- **Python** (`etl/tests/test_v077_subaward_attachment_archive_migration.py`,
+  11/11 passing, real local Postgres, same git-tracked-only-chain
+  technique, mirrors `test_v075_proposal_award_natural_key_migration.py`'s
+  established pattern): the same migration-chain/constraint/preservation
+  proofs, **plus** a real-schema orchestrator integration test
+  (`SubawardBinaryStageSharedFileDataIdRealSchemaTest`) that runs the
+  actual `attachment_orchestrator.subaward_binary_stage` — the real
+  function, not a reimplementation — against a fully-migrated-through-V077
+  database, with only Oracle/S3 I/O simulated (mocked; every existing
+  orchestrator test mocks `mark_subaward_file_uploaded`/
+  `select_subaward_upload_candidates` themselves away, so none of them
+  previously exercised the real bulk `UPDATE` against a real constraint).
+  Three reference rows sharing one `file_data_id` → exactly one
+  simulated Oracle/S3 stream call → all three rows real-DB-verified
+  `ARCHIVED` with the identical shared `(s3_bucket, s3_key)` → an
+  immediate rerun performs zero additional uploads (0 candidates
+  selected at all, since already-`ARCHIVED` rows are filtered out at
+  the SQL level) → **no duplicate-key exception at any point** — this
+  exact call previously would have raised
+  `ux_subaward_attachment_archive_object` on the second matching row.
+
+**Fixture-level plan for Subaward Code 3595 (the concrete pilot
+candidate, not yet run):**
+
+| Metric | Expected value | Basis |
+|---|---|---|
+| Metadata reference rows | 150 | live-verified 2026-08-15, exact Oracle/RDS match |
+| Distinct physical files (`file_data_id`) | 13 | live-verified 2026-08-15 |
+| Archive rows after a first run | 150 (all `ARCHIVED`) | one row per existing metadata reference — design (a) |
+| New S3 `PUT`s (Oracle streams) | at most 13 — one per distinct physical file | `select_subaward_upload_candidates`'s `DISTINCT ON (file_data_id)` dedup, proven above |
+| Reused-from-S3 / already-archived | 0 on the first run (none of the 150 currently has an archive row) | live-verified 2026-08-15 |
+| `MISSING` (genuinely absent Oracle blob) | 0 | all 13 `FILE_DATA_ID`s live-verified to have a valid, non-null blob |
+| Rerun behavior | 0 new uploads, 0 candidates selected (not "skipped" — filtered out at the SQL level once `ARCHIVED`) | proven by `test_idempotent_rerun_performs_zero_additional_uploads` |
+
+Not run this session — this table is the plan to validate against, not
+a claim that it has already been executed.
+
+**Prerequisite for ANY load, updated**: V077 must be committed
+(done locally) and **applied to dev RDS** before any Subaward
+attachment binary work — not yet applied, not yet deployed. Re-verify
+directly (`SELECT * FROM archive.schema_migration WHERE version = 77`)
+before attempting any Subaward attachment load.
+
 ## Git remotes — two of them, do not assume which one anything uses
 
 - `bu` → `git@github.com:bu-ist/research-archive-platform.git` — the BU
@@ -275,7 +461,7 @@ the 2026-08-15 incident writeup) and
 query cookbook, consolidated from a previously duplicated/corrupted
 draft). Direct Mac/VPN access to private RDS remains unavailable (this
 VPC has no BU VPN/TGW route - see
-`docs/runbooks/VPN_RDS_CONNECTIVITY_INVESTIGATION.md`); CloudShell is
+`docs/archive/investigations/aws/VPN_RDS_CONNECTIVITY_INVESTIGATION.md`); CloudShell is
 the approved interactive read-only path until that changes.
 
 `scripts/mac-show-analyst-password.sh` and
@@ -394,4 +580,11 @@ section above):**
   up. `V073__extend_subaward_attachment_archive_status.sql` is the same
   kind of uncommitted local file but is *correctly* unapplied (never
   shipped in any image) — no gap there, just don't commit it as a
-  side effect of unrelated work.
+  side effect of unrelated work. **Superseded 2026-08-15**: a new,
+  separately-numbered `V077` (see the Subaward attachment section
+  above) implements V073's status-widening plus a second, independent
+  fix (dropping `ux_subaward_attachment_archive_object`) from the clean
+  committed baseline, deliberately without depending on V073. V073
+  itself is still left untouched on disk, unresolved, uncommitted — do
+  not delete it and do not commit it; its ownership is a separate,
+  still-open question from V077.
