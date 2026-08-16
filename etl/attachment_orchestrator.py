@@ -100,6 +100,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import time
 import uuid
 from pathlib import Path
@@ -835,19 +836,176 @@ def _loaded_subaward_ids(engine: Engine) -> list[int]:
         ]
 
 
+def _normalize_subaward_codes(codes: list[str] | None) -> list[str] | None:
+    """Sorted, deduped, whitespace-trimmed form used both when persisting
+    a batch's --subaward-code scope and when comparing a resume
+    candidate's stored scope against what's requested now - so
+    equivalent-but-differently-ordered/duplicated code lists are never
+    treated as a mismatch. None/empty means "unscoped" (existing,
+    unchanged behavior)."""
+    if not codes:
+        return None
+    normalized = sorted({str(code).strip() for code in codes if str(code).strip()})
+    return normalized or None
+
+
+def _resolve_subaward_ids_for_codes(
+    engine: Engine, subaward_codes: list[str]
+) -> dict[int, str]:
+    """Resolve each requested Subaward Code (the stable business
+    identifier - archive.subaward.subaward_code) to every
+    archive.subaward version (subaward_id) sharing it, via a
+    parameterized query - Subaward's version-vs-family split mirrors
+    Award's award_id-vs-award_number split (see CLAUDE.md's Award grain
+    rules). Returns {subaward_id: subaward_code} for every matching
+    version whether or not that version has itself been loaded into
+    archive.subaward's core table yet - the cross-scope safety check
+    below needs the full version set, not just the loaded subset (a
+    same-code sibling version that just hasn't been loaded yet is still
+    legitimately in scope)."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT subaward_id, subaward_code FROM archive.subaward "
+                "WHERE subaward_code = ANY(:codes)"
+            ),
+            {"codes": list(subaward_codes)},
+        ).fetchall()
+    return {int(row.subaward_id): str(row.subaward_code) for row in rows}
+
+
+def _batch_subaward_codes(engine: Engine, batch_id: int) -> list[str] | None:
+    """The --subaward-code scope a Subaward batch was created with (or
+    None for an unscoped batch, including every batch created before
+    this option existed - selection_parameters simply has no
+    'subaward_codes' key for those)."""
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT selection_parameters FROM archive.etl_batch WHERE batch_id = :b"),
+            {"b": batch_id},
+        ).fetchone()
+        if row is None or row.selection_parameters is None:
+            return None
+        return row.selection_parameters.get("subaward_codes")
+
+
+class SubawardCodeScopeMismatch(RuntimeError):
+    """An incomplete Subaward metadata batch already exists
+    (archive.etl_batch status=CREATED), but it was created under a
+    different --subaward-code scope than the one requested now. Never
+    silently resume it - that would finish writing metadata for a batch
+    whose membership was decided under a different (possibly much
+    broader, or entirely unrelated) scope, silently defeating a pilot's
+    whole purpose - and never silently create a second, parallel CREATED
+    batch for the same domain/entity_type either (exactly one CREATED
+    batch is expected per module - see _find_incomplete_batch). The
+    operator must resolve the existing batch first."""
+
+    def __init__(
+        self, *, batch_id: int, requested: list[str] | None, existing: list[str] | None
+    ) -> None:
+        self.batch_id = batch_id
+        self.requested = requested
+        self.existing = existing
+        super().__init__(
+            f"Incomplete Subaward attachment batch_id={batch_id} was created "
+            f"with --subaward-code scope {existing!r}, which does not match "
+            f"the requested scope {requested!r}. Resolve the existing batch "
+            "before running a differently-scoped request."
+        )
+
+
+class CrossScopeFileSharingError(RuntimeError):
+    """A physical file (file_data_id) selected for a --subaward-code-
+    scoped batch is also referenced, in Oracle, by a Subaward version
+    whose subaward_id falls outside every version of the requested
+    Subaward Code(s). Raised before any write - see
+    _run_create_subaward_attachment_batch, which checks this strictly
+    before batch_framework.create_batch. A targeted/pilot scope must
+    never silently archive a file that is inseparably shared with
+    out-of-scope Subaward data, even when byte-for-byte identical."""
+
+    def __init__(self, *, file_data_id: str, offending_subaward_ids: set[int]) -> None:
+        self.file_data_id = file_data_id
+        self.offending_subaward_ids = offending_subaward_ids
+        super().__init__(
+            f"file_data_id={file_data_id} is also referenced by "
+            f"subaward_id(s) {sorted(offending_subaward_ids)} outside the "
+            "requested --subaward-code scope"
+        )
+
+
+def _assert_no_cross_scope_file_sharing(
+    engine: Engine, file_data_ids: list[str], in_scope_subaward_ids: set[int]
+) -> None:
+    """Parameterized re-query of the same Oracle source
+    (SUBAWARD_ATTACHMENT_FILE_IDS_SQL), this time filtered by
+    file_data_id rather than subaward_id, to see every subaward_id - in
+    or out of scope - that references each candidate file. The initial
+    subaward_id-scoped scan can never see an out-of-scope reference on
+    its own, since it never asked Oracle about any subaward_id outside
+    the requested scope in the first place; this is a separate,
+    deliberate check for exactly that blind spot."""
+    if not file_data_ids:
+        return
+    raw = with_bounded_retry(
+        lambda: OracleDataSource(SUBAWARD_ATTACHMENT_FILE_IDS_SQL).read_filtered(
+            column="file_data_id", values=file_data_ids
+        ),
+        operation_name="subaward cross-scope file-sharing check",
+    )
+    if raw.empty:
+        return
+
+    offenders: dict[str, set[int]] = {}
+    for row in raw.itertuples(index=False):
+        subaward_id = int(row.subaward_id)
+        if subaward_id in in_scope_subaward_ids:
+            continue
+        offenders.setdefault(str(row.file_data_id), set()).add(subaward_id)
+
+    if offenders:
+        file_data_id = sorted(offenders)[0]
+        raise CrossScopeFileSharingError(
+            file_data_id=file_data_id, offending_subaward_ids=offenders[file_data_id]
+        )
+
+
 def _run_create_subaward_attachment_batch(
-    engine: Engine, requested_size: int, *, run_id: str | None = None
+    engine: Engine,
+    requested_size: int,
+    *,
+    run_id: str | None = None,
+    subaward_codes: list[str] | None = None,
 ) -> dict[str, Any]:
+    """subaward_codes (repeatable --subaward-code on the CLI) restricts
+    selection to files referenced by the resolved Subaward version IDs
+    for those codes (see _resolve_subaward_ids_for_codes), and fails -
+    before batch_framework.create_batch or any other write - if a
+    selected file is also referenced by a Subaward Code outside the
+    requested set (see _assert_no_cross_scope_file_sharing). Passing
+    None/empty (the default) preserves the exact prior unscoped
+    behavior: every loaded subaward_id is eligible, no cross-scope check
+    runs at all."""
     if requested_size <= 0:
         raise ValueError(f"requested_size must be positive, got {requested_size}")
 
     excluded = _subaward_excluded_file_data_ids(engine)
     loaded_subaward_ids = _loaded_subaward_ids(engine)
+
+    normalized_codes = _normalize_subaward_codes(subaward_codes)
+    resolved: dict[int, str] = {}
+    if normalized_codes:
+        resolved = _resolve_subaward_ids_for_codes(engine, normalized_codes)
+        scoped_subaward_ids = [sid for sid in loaded_subaward_ids if sid in resolved]
+    else:
+        scoped_subaward_ids = loaded_subaward_ids
+
     selected: list[str] = []
-    if loaded_subaward_ids:
+    if scoped_subaward_ids:
         raw = with_bounded_retry(
             lambda: OracleDataSource(SUBAWARD_ATTACHMENT_FILE_IDS_SQL).read_filtered(
-                column="subaward_id", values=loaded_subaward_ids
+                column="subaward_id", values=scoped_subaward_ids
             ),
             operation_name="subaward attachment file_data_id scan",
         )
@@ -862,14 +1020,24 @@ def _run_create_subaward_attachment_batch(
             if len(selected) >= requested_size:
                 break
 
+    if normalized_codes and selected:
+        _assert_no_cross_scope_file_sharing(engine, selected, set(resolved.keys()))
+
     result = batch_framework.create_batch(
         engine,
         domain=SUBAWARD_ATTACHMENT_DOMAIN,
         entity_type=SUBAWARD_ATTACHMENT_ENTITY_TYPE,
         requested_size=requested_size,
-        selection_strategy="ORACLE_SCAN_SUBAWARD_ID_SCOPED_FILE_DATA_ID_EXCL_LOADED",
+        selection_strategy=(
+            "ORACLE_SCAN_SUBAWARD_CODE_SCOPED_FILE_DATA_ID_EXCL_LOADED"
+            if normalized_codes
+            else "ORACLE_SCAN_SUBAWARD_ID_SCOPED_FILE_DATA_ID_EXCL_LOADED"
+        ),
         selected_keys=list(range(1, len(selected) + 1)),
-        selection_parameters={"file_data_ids": selected},
+        selection_parameters={
+            "file_data_ids": selected,
+            "subaward_codes": normalized_codes,
+        },
         run_id=run_id,
     )
     return {
@@ -880,8 +1048,83 @@ def _run_create_subaward_attachment_batch(
     }
 
 
+def plan_subaward_batch(
+    engine: Engine,
+    requested_size: int,
+    *,
+    subaward_codes: list[str] | None = None,
+    prefix: str = "subawards/by-file-data-id",
+) -> dict[str, Any]:
+    """Read-only preview of exactly what a real
+    _run_create_subaward_attachment_batch call would select, with no
+    side effects: never calls batch_framework.create_batch (no
+    archive.etl_batch write), never upserts subaward_attachment
+    metadata, never touches S3 or an Oracle BLOB. Still issues the same
+    read-only Postgres/Oracle queries a real batch-create would (code
+    resolution, the subaward_id-scoped file scan, and the cross-scope
+    safety check) - a --dry-run should surface a scope problem before
+    anyone attempts the real write, not hide it behind "nothing was
+    actually checked"."""
+    if requested_size <= 0:
+        raise ValueError(f"requested_size must be positive, got {requested_size}")
+
+    excluded = _subaward_excluded_file_data_ids(engine)
+    loaded_subaward_ids = _loaded_subaward_ids(engine)
+    normalized_codes = _normalize_subaward_codes(subaward_codes)
+
+    resolved: dict[int, str] = {}
+    unresolved_codes: list[str] = []
+    if normalized_codes:
+        resolved = _resolve_subaward_ids_for_codes(engine, normalized_codes)
+        resolved_codes = set(resolved.values())
+        unresolved_codes = [code for code in normalized_codes if code not in resolved_codes]
+        scoped_subaward_ids = [sid for sid in loaded_subaward_ids if sid in resolved]
+    else:
+        scoped_subaward_ids = loaded_subaward_ids
+
+    selected: list[str] = []
+    if scoped_subaward_ids:
+        raw = with_bounded_retry(
+            lambda: OracleDataSource(SUBAWARD_ATTACHMENT_FILE_IDS_SQL).read_filtered(
+                column="subaward_id", values=scoped_subaward_ids
+            ),
+            operation_name="subaward attachment file_data_id scan (dry-run)",
+        )
+        for value in raw["file_data_id"] if not raw.empty else []:
+            if value is None:
+                continue
+            text_value = str(value).strip()
+            if not text_value or text_value in excluded:
+                continue
+            excluded.add(text_value)
+            selected.append(text_value)
+            if len(selected) >= requested_size:
+                break
+
+    cross_scope_violation: dict[str, Any] | None = None
+    if normalized_codes and selected:
+        try:
+            _assert_no_cross_scope_file_sharing(engine, selected, set(resolved.keys()))
+        except CrossScopeFileSharingError as error:
+            cross_scope_violation = {
+                "file_data_id": error.file_data_id,
+                "offending_subaward_ids": sorted(error.offending_subaward_ids),
+            }
+
+    return {
+        "dry_run": True,
+        "requested_subaward_codes": normalized_codes,
+        "unresolved_subaward_codes": unresolved_codes,
+        "resolved_subaward_version_count": len(resolved) if normalized_codes else None,
+        "in_scope_loaded_subaward_id_count": len(scoped_subaward_ids),
+        "candidate_file_data_id_count": len(selected),
+        "destination_key_shape": f"{prefix.strip('/')}/{{file_data_id}}/{{safe_file_name}}",
+        "cross_scope_violation": cross_scope_violation,
+    }
+
+
 def subaward_metadata_stage(
-    engine: Engine, *, batch_size: int, run_id: str
+    engine: Engine, *, batch_size: int, run_id: str, subaward_codes: list[str] | None = None
 ) -> dict[str, Any]:
     """NOTE: archive.subaward's own core-record population is itself
     only 513 of 88,818 real Oracle subawards (0.6%) as of 2026-08-12 -
@@ -892,17 +1135,33 @@ def subaward_metadata_stage(
     is a separate, out-of-scope undertaking (see the inventory doc). In
     the current dev database this stage will correctly find ~0 new
     candidates, not because of a bug, but because the reachable
-    population is already fully archived."""
+    population is already fully archived.
+
+    subaward_codes (repeatable --subaward-code on the CLI) restricts a
+    newly-created batch's selection - see
+    _run_create_subaward_attachment_batch. When an incomplete batch is
+    found instead, it is only resumed if it was created under the exact
+    same --subaward-code scope (see SubawardCodeScopeMismatch) - this is
+    what stops a scoped pilot run from silently finishing an unrelated,
+    differently-scoped batch that happens to be sitting CREATED."""
     resume_batch_id = _find_incomplete_batch(
         engine, domain=SUBAWARD_ATTACHMENT_DOMAIN, entity_type=SUBAWARD_ATTACHMENT_ENTITY_TYPE
     )
     if resume_batch_id is not None:
+        requested_scope = _normalize_subaward_codes(subaward_codes)
+        existing_scope = _normalize_subaward_codes(_batch_subaward_codes(engine, resume_batch_id))
+        if existing_scope != requested_scope:
+            raise SubawardCodeScopeMismatch(
+                batch_id=resume_batch_id, requested=requested_scope, existing=existing_scope
+            )
         batch_id = resume_batch_id
         file_data_ids = _batch_file_data_ids(engine, batch_id)
         logger.info("Subaward metadata: resuming incomplete batch_id={}", batch_id)
     else:
         created = with_bounded_retry(
-            lambda: _run_create_subaward_attachment_batch(engine, batch_size, run_id=run_id),
+            lambda: _run_create_subaward_attachment_batch(
+                engine, batch_size, run_id=run_id, subaward_codes=subaward_codes
+            ),
             operation_name="subaward create-batch",
         )
         batch_id = created["batch_id"]
@@ -1496,8 +1755,17 @@ def reconcile_batch(
 
 
 def run_orchestration(
-    *, modules: tuple[str, ...] = SUPPORTED_MODULES, bucket: str, batch_size: int = DEFAULT_BATCH_SIZE
+    *,
+    modules: tuple[str, ...] = SUPPORTED_MODULES,
+    bucket: str,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    subaward_codes: list[str] | None = None,
 ) -> dict[str, Any]:
+    """subaward_codes (repeatable --subaward-code on the CLI) is only
+    ever consulted for the 'subaward' module's metadata stage - see
+    subaward_metadata_stage. Passing it while 'subaward' isn't in
+    `modules` is harmless (simply never read); award/proposal ignore it
+    entirely."""
     for module in modules:
         if module not in SUPPORTED_MODULES:
             raise ValueError(
@@ -1524,7 +1792,9 @@ def run_orchestration(
                 elif module == PROPOSAL:
                     result = proposal_metadata_stage(engine, batch_size=batch_size, run_id=run_id)
                 else:
-                    result = subaward_metadata_stage(engine, batch_size=batch_size, run_id=run_id)
+                    result = subaward_metadata_stage(
+                        engine, batch_size=batch_size, run_id=run_id, subaward_codes=subaward_codes
+                    )
                 module_summary["metadata_batches"].append(result)
                 logger.bind(module=module, stage="metadata").info("Batch: {}", result)
 
@@ -1660,14 +1930,50 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--ecs", action="store_true")
+    parser.add_argument(
+        "--subaward-code",
+        action="append",
+        default=None,
+        help=(
+            "Restrict the Subaward module's batch selection to this "
+            "Subaward Code (repeatable - pass multiple times for "
+            "multiple codes). Only affects the 'subaward' module; "
+            "ignored by award/proposal. An ECS containerOverrides "
+            "command array delivers each occurrence as its own token, "
+            "so every requested code survives regardless of how many "
+            "are given."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Read-only preview of the Subaward module's next batch "
+            "selection (counts and destination-key shape) - performs no "
+            "writes and does not run the real orchestration. Combine "
+            "with --subaward-code to preview a scoped pilot batch."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.ecs:
         configure_ecs_environment(boto3.client("secretsmanager"), include_oracle=True)
 
+    if args.dry_run:
+        engine = create_postgres_engine()
+        plan = plan_subaward_batch(engine, args.batch_size, subaward_codes=args.subaward_code)
+        logger.info("Subaward dry-run plan: {}", plan)
+        print(json.dumps(plan, indent=2, default=str))
+        return 0 if not plan.get("cross_scope_violation") else 6
+
     modules = tuple(m.strip() for m in args.modules.split(",") if m.strip())
     try:
-        summary = run_orchestration(modules=modules, bucket=args.bucket, batch_size=args.batch_size)
+        summary = run_orchestration(
+            modules=modules,
+            bucket=args.bucket,
+            batch_size=args.batch_size,
+            subaward_codes=args.subaward_code,
+        )
     except LockNotAcquired as error:
         logger.error(str(error))
         return 4
