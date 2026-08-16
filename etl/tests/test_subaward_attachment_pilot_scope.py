@@ -152,7 +152,7 @@ class ScopedBatchSelectionTest(unittest.TestCase):
         self.assertIsNone(selection_parameters["subaward_codes"])
         self.assertEqual(
             create_batch.call_args.kwargs["selection_strategy"],
-            "ORACLE_SCAN_SUBAWARD_ID_SCOPED_FILE_DATA_ID_EXCL_LOADED",
+            "SUBAWARD_ALL_EXCL_ARCHIVED",
         )
 
     def test_scoped_selection_uses_distinct_selection_strategy(self) -> None:
@@ -176,7 +176,7 @@ class ScopedBatchSelectionTest(unittest.TestCase):
 
         self.assertEqual(
             create_batch.call_args.kwargs["selection_strategy"],
-            "ORACLE_SCAN_SUBAWARD_CODE_SCOPED_FILE_DATA_ID_EXCL_LOADED",
+            "SUBAWARD_CODE_SCOPE_EXCL_ARCHIVED",
         )
 
 

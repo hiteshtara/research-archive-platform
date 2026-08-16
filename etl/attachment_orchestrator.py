@@ -1048,10 +1048,19 @@ def _run_create_subaward_attachment_batch(
         domain=SUBAWARD_ATTACHMENT_DOMAIN,
         entity_type=SUBAWARD_ATTACHMENT_ENTITY_TYPE,
         requested_size=requested_size,
+        # archive.etl_batch.selection_strategy is VARCHAR(50) (V037) -
+        # the original, more descriptive strategy names here
+        # (ORACLE_SCAN_SUBAWARD_ID_SCOPED_FILE_DATA_ID_EXCL_LOADED /
+        # ...CODE_SCOPED..., 55/57 chars) were a real, live-data-
+        # confirmed defect: both exceed the column, and this INSERT had
+        # simply never executed against real Postgres before (Subaward
+        # binary-stage execution was deferred throughout - see the
+        # module docstring). Never widen the column for this - keep
+        # every strategy name under the existing limit instead.
         selection_strategy=(
-            "ORACLE_SCAN_SUBAWARD_CODE_SCOPED_FILE_DATA_ID_EXCL_LOADED"
+            "SUBAWARD_CODE_SCOPE_EXCL_ARCHIVED"
             if normalized_codes
-            else "ORACLE_SCAN_SUBAWARD_ID_SCOPED_FILE_DATA_ID_EXCL_LOADED"
+            else "SUBAWARD_ALL_EXCL_ARCHIVED"
         ),
         selected_keys=list(range(1, len(selected) + 1)),
         selection_parameters={
