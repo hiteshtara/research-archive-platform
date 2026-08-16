@@ -123,6 +123,7 @@ from archive_etl.utils.redaction import redact_error_message
 
 import load_award_attachments as award_attachments
 import load_proposals_from_csv as proposals
+import load_subawards_from_csv as subawards
 
 # --------------------------------------------------------------------
 # Module scope
@@ -1270,7 +1271,8 @@ _SUBAWARD_ATTACHMENT_COLUMNS = [
     "attachment_type_code", "attachment_type_description", "document_id",
     "file_data_id", "file_name", "mime_type", "document_status_code",
     "description", "last_update_timestamp", "last_update_user",
-    "update_timestamp", "update_user", "ver_nbr", "obj_id",
+    "source_update_timestamp", "source_update_user",
+    "source_version_number", "source_object_id",
 ]
 
 
@@ -1287,7 +1289,21 @@ def _upsert_subaward_attachments(connection: Connection, attachments: pd.DataFra
     subaward_ids (see module docstring) can bring back a reference row
     for a NOT-loaded sibling subaward even though batch selection itself
     is already scoped to loaded subaward_ids - this is the last line of
-    defense against that, not the primary filter."""
+    defense against that, not the primary filter.
+
+    `attachments` arrives with Oracle's own raw column names
+    (update_timestamp/update_user/ver_nbr/obj_id - see
+    oracle/subaward/export_subaward_attachments.sql) - real,
+    live-data-confirmed incident (2026-08-16): archive.subaward_attachment
+    (V018) has no columns by those names at all, only
+    source_update_timestamp/source_update_user/source_version_number/
+    source_object_id, exactly as load_subawards_from_csv.py's own
+    SOURCE_COLUMN_RENAMES already establishes for the rest of Subaward's
+    business data - reused here unchanged rather than reinvented.
+    last_update_timestamp/last_update_user are NOT in that rename map and
+    need none: both Oracle source and Postgres target already use the
+    identical name."""
+    attachments = attachments.rename(columns=subawards.SOURCE_COLUMN_RENAMES)
     present_columns = [c for c in _SUBAWARD_ATTACHMENT_COLUMNS if c in attachments.columns]
     inserted = updated = unchanged = 0
     skipped_no_core_record = 0
