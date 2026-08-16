@@ -575,5 +575,153 @@ class DryRunPlanningTest(unittest.TestCase):
         self.assertNotEqual(exit_code, 0)
 
 
+# ---------------------------------------------------------------------
+# Regression: 2026-08-16 live-dry-run incident against the real,
+# approved Subaward Code 3595 pilot fixture. candidate_file_data_id_count
+# came back 0 instead of the expected 13. Root cause:
+# _subaward_excluded_file_data_ids() queried archive.subaward_attachment
+# (metadata presence) instead of archive.subaward_attachment_archive
+# (confirmed ARCHIVED status) - metadata is already ~100% loaded for the
+# whole Subaward population (a side effect of the unrelated Subaward
+# --sync-all business-data sync, not of this orchestrator's own metadata
+# stage), so every candidate was excluded before selection ever ran, for
+# every Subaward Code, not just 3595. Every fixture below is synthetic -
+# this reproduces the *shape* of the incident (25 resolved versions, 150
+# Oracle references, 13 distinct physical files, all already
+# metadata-loaded but none yet archived), never real 3595 data.
+# ---------------------------------------------------------------------
+
+SYNTHETIC_PILOT_CODE = "SYNTHETIC-SUBAWARD-PILOT"
+SYNTHETIC_SUBAWARD_IDS = list(range(50001, 50026))  # 25 versions, matching the incident
+SYNTHETIC_FILE_DATA_IDS = [
+    f"99999999-0000-0000-0000-{i:012d}" for i in range(13)
+]  # 13 distinct files
+
+
+def _synthetic_oracle_rows(total_rows: int = 150) -> pd.DataFrame:
+    """150 (subaward_id, file_data_id) rows across the 25 synthetic
+    subaward_ids and 13 synthetic file_data_ids - some files referenced
+    by many subaward_id versions, mirroring the real incident's own
+    "11 of 13 physical files referenced by more than one attachment row"
+    shape (never its real values)."""
+    subaward_ids = []
+    file_data_ids = []
+    for i in range(total_rows):
+        subaward_ids.append(SYNTHETIC_SUBAWARD_IDS[i % len(SYNTHETIC_SUBAWARD_IDS)])
+        file_data_ids.append(SYNTHETIC_FILE_DATA_IDS[i % len(SYNTHETIC_FILE_DATA_IDS)])
+    return pd.DataFrame({"subaward_id": subaward_ids, "file_data_id": file_data_ids})
+
+
+class SubawardExclusionQueryTargetsArchiveStatusTest(unittest.TestCase):
+    """Precise regression test for the exact semantic bug: the exclusion
+    query must target confirmed-ARCHIVED status, never bare metadata
+    presence."""
+
+    def test_query_targets_subaward_attachment_archive_and_archived_status(self) -> None:
+        connection = MagicMock()
+        connection.execute.return_value.scalars.return_value = []
+        engine = _engine_with_connection(connection)
+
+        orch._subaward_excluded_file_data_ids(engine)
+
+        statement = str(connection.execute.call_args.args[0])
+        self.assertIn("archive.subaward_attachment_archive", statement)
+        self.assertIn("archive_status = 'ARCHIVED'", statement)
+
+    def test_query_never_treats_bare_metadata_table_alone_as_the_source(self) -> None:
+        # archive.subaward_attachment (metadata) is a substring of
+        # archive.subaward_attachment_archive, so this asserts the WHERE
+        # clause specifically, not just table-name presence - a query
+        # against the bare metadata table with no archive_status
+        # condition at all is exactly the incident's regression shape.
+        connection = MagicMock()
+        connection.execute.return_value.scalars.return_value = []
+        engine = _engine_with_connection(connection)
+
+        orch._subaward_excluded_file_data_ids(engine)
+
+        statement = str(connection.execute.call_args.args[0])
+        self.assertNotIn("FROM archive.subaward_attachment WHERE", statement)
+
+
+class PlanSubawardBatchFullChainReproductionTest(unittest.TestCase):
+    """End-to-end reproduction of the incident's own numbers, entirely
+    with synthetic fixtures: 25 resolved Subaward versions -> 150 Oracle
+    references -> 13 distinct physical files -> 13 planned candidates
+    (not 0). Exercises the real, unmocked _subaward_excluded_file_data_ids
+    query text via the connection mock, so this would have caught the
+    real bug had it existed before the fix - unlike every other test in
+    this file, which mocks _subaward_excluded_file_data_ids away
+    entirely (a real, contributing gap in the existing suite - see the
+    root-cause report)."""
+
+    def test_25_versions_150_references_13_files_yields_13_candidates(self) -> None:
+        # Discriminates by actual query content - NOT a blanket empty
+        # mock - specifically so this test exercises the real incident
+        # condition and would fail against the pre-fix query. Metadata
+        # (archive.subaward_attachment) already has all 13 synthetic
+        # files - the realistic "~100% metadata loaded" condition that
+        # caused the real bug - while nothing is yet confirmed ARCHIVED
+        # in archive.subaward_attachment_archive.
+        def discriminating_execute(statement, *args, **kwargs):
+            statement_text = str(statement)
+            result = MagicMock()
+            targets_archive_status = (
+                "archive.subaward_attachment_archive" in statement_text
+                and "ARCHIVED" in statement_text
+            )
+            if targets_archive_status:
+                result.scalars.return_value = []
+            elif "archive.subaward_attachment" in statement_text:
+                result.scalars.return_value = list(SYNTHETIC_FILE_DATA_IDS)
+            else:
+                raise AssertionError(f"unexpected query in test: {statement_text}")
+            return result
+
+        connection = MagicMock()
+        connection.execute.side_effect = discriminating_execute
+        engine = _engine_with_connection(connection)
+
+        with (
+            patch.object(orch, "_loaded_subaward_ids", return_value=SYNTHETIC_SUBAWARD_IDS),
+            patch.object(
+                orch, "_resolve_subaward_ids_for_codes",
+                return_value={sid: SYNTHETIC_PILOT_CODE for sid in SYNTHETIC_SUBAWARD_IDS},
+            ),
+            patch("attachment_orchestrator.OracleDataSource") as oracle_source,
+        ):
+            oracle_source.return_value.read_filtered.return_value = _synthetic_oracle_rows(150)
+            plan = orch.plan_subaward_batch(engine, 100, subaward_codes=[SYNTHETIC_PILOT_CODE])
+
+        self.assertEqual(plan["resolved_subaward_version_count"], 25)
+        self.assertEqual(plan["in_scope_loaded_subaward_id_count"], 25)
+        self.assertEqual(plan["candidate_file_data_id_count"], 13)
+        self.assertEqual(plan["unresolved_subaward_codes"], [])
+        self.assertIsNone(plan["cross_scope_violation"])
+
+    def test_already_archived_files_are_correctly_excluded_leaving_the_rest(self) -> None:
+        # Same 25/150/13 shape, but 5 of the 13 files are already
+        # confirmed ARCHIVED - proves the corrected exclusion still
+        # excludes what it should (real completed work is never
+        # re-selected), not just that it stopped over-excluding.
+        already_archived = set(SYNTHETIC_FILE_DATA_IDS[:5])
+        connection = MagicMock()
+        connection.execute.return_value.scalars.return_value = list(already_archived)
+        engine = _engine_with_connection(connection)
+
+        with (
+            patch.object(orch, "_loaded_subaward_ids", return_value=SYNTHETIC_SUBAWARD_IDS),
+            patch.object(
+                orch, "_resolve_subaward_ids_for_codes",
+                return_value={sid: SYNTHETIC_PILOT_CODE for sid in SYNTHETIC_SUBAWARD_IDS},
+            ),
+            patch("attachment_orchestrator.OracleDataSource") as oracle_source,
+        ):
+            oracle_source.return_value.read_filtered.return_value = _synthetic_oracle_rows(150)
+            plan = orch.plan_subaward_batch(engine, 100, subaward_codes=[SYNTHETIC_PILOT_CODE])
+
+        self.assertEqual(plan["candidate_file_data_id_count"], 13 - 5)
+
+
 if __name__ == "__main__":
     unittest.main()

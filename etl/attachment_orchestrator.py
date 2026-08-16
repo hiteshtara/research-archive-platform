@@ -810,11 +810,31 @@ def proposal_binary_stage(
 
 
 def _subaward_excluded_file_data_ids(engine: Engine) -> set[str]:
+    """Physical files that need no further batch-creation work: already
+    confirmed ARCHIVED in archive.subaward_attachment_archive.
+
+    NOT archive.subaward_attachment (metadata) - a file having metadata
+    is a *prerequisite* for archiving it, not evidence it was archived.
+    Querying metadata-presence here was a real, live-data-confirmed bug
+    (2026-08-16 dry-run against the real, approved Subaward Code 3595
+    pilot fixture): archive.subaward_attachment's metadata is already
+    ~100% loaded for the whole Subaward population (a side effect of
+    the unrelated Subaward --sync-all business-data sync, not of this
+    orchestrator's own metadata stage - see
+    docs/project-memory/CURRENT_STATE.md), so every candidate file was
+    excluded before selection ever ran, for every Subaward Code, not
+    just 3595 - candidate_file_data_id_count came back 0 instead of the
+    expected 13. Excluding by confirmed ARCHIVED status instead means a
+    file is only ever skipped once there is nothing left to do for it -
+    re-selecting a metadata-loaded-but-not-yet-archived file into a new
+    batch is safe regardless: _upsert_subaward_attachments's own
+    metadata UPSERT and its ON CONFLICT (attachment_id) DO NOTHING
+    archive-state insert are both already idempotent."""
     with engine.connect() as connection:
         rows = connection.execute(
             text(
-                "SELECT DISTINCT file_data_id FROM archive.subaward_attachment "
-                "WHERE file_data_id IS NOT NULL"
+                "SELECT DISTINCT file_data_id FROM archive.subaward_attachment_archive "
+                "WHERE archive_status = 'ARCHIVED' AND file_data_id IS NOT NULL"
             )
         ).scalars()
         return {str(value) for value in rows}
