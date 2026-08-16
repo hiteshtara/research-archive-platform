@@ -247,20 +247,24 @@ class LoaderImageLayoutTest(unittest.TestCase):
         self,
     ) -> None:
         # Mirrors the award/award-attachment ECS smoke tests above, for
-        # the exact command shape a Subaward pilot run would use:
-        # --modules subaward --subaward-code 3595 --dry-run --ecs. No AWS
-        # credentials exist in this sandboxed container run, so this must
-        # fail - but at Secrets Manager resolution (configure_ecs_environment,
-        # reached because --ecs is set), never at process exec or import.
-        # Reaching that point proves the command executes, argparse
-        # accepted every flag (including the repeated-capable
-        # --subaward-code), and every import up to it succeeded.
+        # the exact command shape a Subaward pilot run would use (a
+        # synthetic code here - this file exercises argparse/import
+        # wiring only, never real dev data; see the operational runbook
+        # for the actual approved dev pilot fixture code):
+        # --modules subaward --subaward-code SYNTHETIC-SUBAWARD-A --dry-run --ecs.
+        # No AWS credentials exist in this sandboxed container run, so
+        # this must fail - but at Secrets Manager resolution
+        # (configure_ecs_environment, reached because --ecs is set),
+        # never at process exec or import. Reaching that point proves
+        # the command executes, argparse accepted every flag (including
+        # the repeated-capable --subaward-code), and every import up to
+        # it succeeded.
         result = self._run_in_image(
             "python",
             "attachment_orchestrator.py",
             "--bucket", "test-bucket",
             "--modules", "subaward",
-            "--subaward-code", "3595",
+            "--subaward-code", "SYNTHETIC-SUBAWARD-A",
             "--dry-run",
             "--ecs",
         )
