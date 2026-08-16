@@ -13,7 +13,9 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardReportResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.SubawardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.SubawardArchivedAttachment;
@@ -75,6 +77,55 @@ public class SubawardArchiveService {
     public SubawardWorkspaceResponse findWorkspace(long subawardId) {
         SubawardRowResponse current = requireSubaward(subawardId);
         return new SubawardWorkspaceResponse(subawardId, current);
+    }
+
+    /*
+     * Mirrors AwardArchiveService.findVersions exactly: resolve the
+     * family (subawardCode) first, then paginate every version within
+     * it. requireSubaward already fetches the full row (including
+     * subawardCode) as its own existence/positive-ID check, so - unlike
+     * Award, which has a dedicated lightweight findAwardNumberForId
+     * query - no separate repository call is needed just to resolve the
+     * family here.
+     */
+    public PageResponse<SubawardVersionSummaryResponse> findVersions(
+            long subawardId,
+            int page,
+            int size
+    ) {
+        SubawardRowResponse current = requireSubaward(subawardId);
+        String subawardCode = current.subawardCode();
+
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+
+        long totalElements = repository.countVersions(subawardCode);
+
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(
+                        safePage,
+                        safeSize,
+                        totalElements
+                );
+
+        int offset = safePage * safeSize;
+
+        List<SubawardVersionSummaryResponse> content =
+                repository.findVersionSummaries(
+                        subawardCode,
+                        safeSize,
+                        offset
+                );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
     }
 
     public List<SubawardAmountResponse> findAmounts(long subawardId) {

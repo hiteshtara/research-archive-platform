@@ -1389,6 +1389,25 @@ export interface SubawardWorkspaceResponse {
   current: SubawardRow;
 }
 
+// One archive.subaward row (one archived version) within a
+// subaward_code family - see GET /api/subawards/{subawardId}/versions.
+// latestVersion is computed structurally (highest sequence_number, not
+// subawardSequenceStatus - see SubawardVersionSummaryResponse's own
+// backend doc comment for why).
+export interface SubawardVersion {
+  subawardId: number;
+  subawardCode: string;
+  sequenceNumber: number;
+  documentNumber: string | null;
+  status: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  updateTimestamp: string | null;
+  latestVersion: boolean;
+}
+
+export interface SubawardVersionPageResponse extends PageResponse<SubawardVersion> {}
+
 export interface SubawardAmount {
   subawardAmountInfoId: number;
   subawardId: number;

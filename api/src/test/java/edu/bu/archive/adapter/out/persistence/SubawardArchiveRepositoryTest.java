@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardNotificationResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -324,6 +325,109 @@ class SubawardArchiveRepositoryTest {
         assertThat(result.get(0).archived()).isTrue();
         assertThat(result.get(1).navigableCurrentAwardId()).isNull();
         assertThat(result.get(1).archived()).isFalse();
+    }
+
+    @Test
+    void countVersionsFiltersByExactSubawardCode() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param("subawardCode", "1004")).thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(25L);
+
+        long count = new SubawardArchiveRepository(jdbc).countVersions("1004");
+
+        assertThat(count).isEqualTo(25L);
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.subaward")
+                .contains("subaward_code = :subawardCode");
+        verify(statement).param("subawardCode", "1004");
+    }
+
+    @Test
+    void countVersionsReturnsZeroNotNullForAnUnknownCode() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<Long> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(statement);
+        when(statement.query(Long.class)).thenReturn(query);
+        when(query.single()).thenReturn(null);
+
+        assertThat(new SubawardArchiveRepository(jdbc).countVersions("NO-SUCH-CODE"))
+                .isZero();
+    }
+
+    @Test
+    void findVersionSummariesOrdersDescendingWithADeterministicTiebreakerAndScopesToOneCode() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<SubawardVersionSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(statement);
+        when(statement.query(SubawardVersionSummaryResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new SubawardArchiveRepository(jdbc)
+                .findVersionSummaries("1004", 25, 0);
+
+        String sql = firstSql(jdbc);
+        assertThat(sql)
+                .contains("FROM archive.subaward")
+                .contains("WHERE subaward_code = :subawardCode")
+                .containsPattern(
+                        "ORDER BY\\s+sequence_number DESC,\\s+subaward_id DESC"
+                )
+                // The parameterized WHERE - never a raw string-concatenated
+                // code - is what actually prevents another code's rows
+                // from leaking into this query at all.
+                .doesNotContain("subaward_code = '")
+                .contains("LIMIT :limit OFFSET :offset");
+        verify(statement).param("subawardCode", "1004");
+        verify(statement).param("limit", 25);
+        verify(statement).param("offset", 0);
+    }
+
+    @Test
+    void findVersionSummariesComputesLatestVersionStructurallyNotFromSequenceStatus() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement =
+                mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<SubawardVersionSummaryResponse> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(statement);
+        when(statement.query(SubawardVersionSummaryResponse.class))
+                .thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new SubawardArchiveRepository(jdbc)
+                .findVersionSummaries("1004", 25, 0);
+
+        assertThat(firstSql(jdbc))
+                .contains("ROW_NUMBER() OVER")
+                .contains("= 1 AS latest_version")
+                .doesNotContain("subaward_sequence_status");
     }
 
     private String firstSql(JdbcClient jdbc) {

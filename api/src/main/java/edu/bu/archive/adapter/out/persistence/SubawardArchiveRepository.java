@@ -12,6 +12,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardReportResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -589,6 +590,63 @@ public class SubawardArchiveRepository {
                 """)
                 .param("subawardId", subawardId)
                 .query(SubawardNotificationResponse.class)
+                .list();
+    }
+
+    /*
+     * --- Archived Versions (per-subaward_code family) --------------------
+     *
+     * Mirrors AwardArchiveRepository.countVersions/findVersionSummaries
+     * exactly - one row per archive.subaward_id within a subaward_code
+     * family, ordered newest-first, deterministic tiebreaker. Unlike
+     * Award (whose caller resolves award_number via a dedicated
+     * findAwardNumberForId query), the caller here already has
+     * subawardCode from SubawardArchiveService's own requireSubaward()
+     * fetch - one query does double duty (existence check + the code to
+     * scope by), so no equivalent lookup is needed on this side.
+     */
+    public long countVersions(String subawardCode) {
+        Long count = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM archive.subaward
+                WHERE subaward_code = :subawardCode
+                """)
+                .param("subawardCode", subawardCode)
+                .query(Long.class)
+                .single();
+
+        return count == null ? 0L : count;
+    }
+
+    public List<SubawardVersionSummaryResponse> findVersionSummaries(
+            String subawardCode,
+            int limit,
+            int offset
+    ) {
+        return jdbc.sql("""
+                SELECT
+                    subaward_id,
+                    subaward_code,
+                    sequence_number,
+                    document_number,
+                    status_description AS status,
+                    start_date,
+                    end_date,
+                    source_update_timestamp AS update_timestamp,
+                    ROW_NUMBER() OVER (
+                        ORDER BY sequence_number DESC, subaward_id DESC
+                    ) = 1 AS latest_version
+                FROM archive.subaward
+                WHERE subaward_code = :subawardCode
+                ORDER BY
+                    sequence_number DESC,
+                    subaward_id DESC
+                LIMIT :limit OFFSET :offset
+                """)
+                .param("subawardCode", subawardCode)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(SubawardVersionSummaryResponse.class)
                 .list();
     }
 

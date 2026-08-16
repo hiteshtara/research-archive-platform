@@ -1,8 +1,10 @@
 package edu.bu.archive.application.subaward;
 
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardPageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardRowResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse;
 import edu.bu.archive.adapter.out.persistence.SubawardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.SubawardArchivedAttachment;
 import edu.bu.archive.adapter.out.persistence.SubawardAttachmentStorage;
@@ -76,6 +78,134 @@ class SubawardArchiveServiceTest {
         assertThatThrownBy(() -> service.findAmounts(999L))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("Subaward not found: 999");
+    }
+
+    @Test
+    void findVersionsThrowsNotFoundForAMissingSubawardId() {
+        when(repository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.findVersions(999L, 0, 25))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("Subaward not found: 999");
+    }
+
+    @Test
+    void findVersionsResolvesTheSubawardCodeThenDelegates() {
+        // subawardRow() fixture has subawardId=101, subawardCode="1004".
+        when(repository.findById(101L))
+                .thenReturn(Optional.of(subawardRow()));
+        SubawardVersionSummaryResponse version =
+                new SubawardVersionSummaryResponse(
+                        101L, "1004", 4, "DOC-101", "Active",
+                        null, null, null, true
+                );
+        when(repository.countVersions("1004")).thenReturn(1L);
+        when(repository.findVersionSummaries("1004", 25, 0))
+                .thenReturn(List.of(version));
+
+        PageResponse<SubawardVersionSummaryResponse> page =
+                service.findVersions(101L, 0, 25);
+
+        assertThat(page.content()).containsExactly(version);
+        assertThat(page.totalElements()).isEqualTo(1L);
+        verify(repository).countVersions("1004");
+        verify(repository).findVersionSummaries("1004", 25, 0);
+    }
+
+    @Test
+    void findVersionsAppliesTheSamePaginationClampingAsSearch() {
+        when(repository.findById(101L))
+                .thenReturn(Optional.of(subawardRow()));
+        when(repository.countVersions("1004")).thenReturn(0L);
+        when(repository.findVersionSummaries("1004", 100, 0))
+                .thenReturn(List.of());
+
+        PageResponse<SubawardVersionSummaryResponse> page =
+                service.findVersions(101L, -1, 500);
+
+        assertThat(page.page()).isZero();
+        assertThat(page.size()).isEqualTo(100);
+        verify(repository).findVersionSummaries("1004", 100, 0);
+    }
+
+    /*
+     * Synthetic 25-version fixture (never real BU/3595 data) matching
+     * the real, live-confirmed Subaward Code 3595 population's shape
+     * (exactly 25 archive.subaward rows). Proves all 25 are returned,
+     * each exactly once (25 distinct subawardIds), in the exact
+     * descending-sequence order the repository already produced -
+     * service.findVersions is a pure pass-through of content, it must
+     * never resort, dedupe, or drop rows.
+     */
+    @Test
+    void findVersionsReturnsAllTwentyFiveVersionsExactlyOnceInDescendingOrder() {
+        when(repository.findById(90085L))
+                .thenReturn(Optional.of(subawardRow()));
+        List<SubawardVersionSummaryResponse> twentyFiveVersions =
+                java.util.stream.IntStream.rangeClosed(1, 25)
+                        .boxed()
+                        .sorted(java.util.Comparator.reverseOrder())
+                        .map(sequence -> new SubawardVersionSummaryResponse(
+                                90000L + sequence, "1004", sequence,
+                                "DOC-" + sequence, "Active", null, null, null,
+                                sequence == 25
+                        ))
+                        .toList();
+        when(repository.countVersions("1004")).thenReturn(25L);
+        when(repository.findVersionSummaries("1004", 25, 0))
+                .thenReturn(twentyFiveVersions);
+
+        PageResponse<SubawardVersionSummaryResponse> page =
+                service.findVersions(90085L, 0, 25);
+
+        assertThat(page.content()).hasSize(25);
+        assertThat(page.content())
+                .extracting(SubawardVersionSummaryResponse::subawardId)
+                .doesNotHaveDuplicates();
+        assertThat(page.content())
+                .extracting(SubawardVersionSummaryResponse::sequenceNumber)
+                .isSortedAccordingTo(java.util.Comparator.reverseOrder())
+                .containsExactly(
+                        25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13,
+                        12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1
+                );
+        assertThat(page.totalElements()).isEqualTo(25L);
+        assertThat(
+                page.content().stream()
+                        .filter(SubawardVersionSummaryResponse::latestVersion)
+                        .count()
+        ).isEqualTo(1L);
+    }
+
+    /*
+     * Two different Subaward IDs, resolving to two different codes -
+     * proves the service resolves and forwards each subawardId's OWN
+     * code, never a mixed-up or stale one from a previous call.
+     */
+    @Test
+    void findVersionsNeverMixesUpAnotherCodesResolvedFamily() {
+        when(repository.findById(101L))
+                .thenReturn(Optional.of(subawardRow()));
+        SubawardRowResponse otherCodeRow = new SubawardRowResponse(
+                202L, "DOC-202", 1, "9999", null, null, null, null,
+                null, "Other title", null, "Active", null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                null, "ACTIVE", null, null, null, null, null, null, null,
+                1L, "OBJECT-2", null, null, 1L, "DOCUMENT-OBJECT-2"
+        );
+        when(repository.findById(202L)).thenReturn(Optional.of(otherCodeRow));
+        when(repository.countVersions("1004")).thenReturn(1L);
+        when(repository.countVersions("9999")).thenReturn(1L);
+        when(repository.findVersionSummaries("1004", 25, 0))
+                .thenReturn(List.of());
+        when(repository.findVersionSummaries("9999", 25, 0))
+                .thenReturn(List.of());
+
+        service.findVersions(101L, 0, 25);
+        service.findVersions(202L, 0, 25);
+
+        verify(repository).findVersionSummaries("1004", 25, 0);
+        verify(repository).findVersionSummaries("9999", 25, 0);
     }
 
     @Test

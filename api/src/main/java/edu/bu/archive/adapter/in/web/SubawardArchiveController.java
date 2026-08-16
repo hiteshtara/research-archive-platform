@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.in.web;
 
+import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardAmountResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardCloseoutResponse;
@@ -11,16 +12,21 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardNotificationResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardPageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardReportResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardTemplateInfoResponse;
+import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.subaward.SubawardArchiveService;
 import edu.bu.archive.application.subaward.SubawardAttachmentDownload;
+
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,6 +39,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/subawards")
+@Validated
 public class SubawardArchiveController {
 
     private final SubawardArchiveService service;
@@ -66,6 +73,32 @@ public class SubawardArchiveController {
             long subawardId
     ) {
         return ResponseEntity.ok(service.findWorkspace(subawardId));
+    }
+
+    /*
+     * Every archive.subaward row sharing this subawardId's own
+     * subaward_code (its family/all archived versions), newest first -
+     * mirrors GET /api/v1/awards/{awardId}/versions exactly. Plain
+     * authenticated access, like workspace()/amounts() above - never
+     * gated behind attachmentAuthorizationService's stricter
+     * ArchiveAttachmentViewer boundary, which remains exclusive to the
+     * attachment endpoints below.
+     */
+    @GetMapping("/{subawardId}/versions")
+    public ResponseEntity<PageResponse<SubawardVersionSummaryResponse>> versions(
+            @PathVariable
+            long subawardId,
+
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @RequestParam(defaultValue = "25")
+            @Min(1)
+            @Max(100)
+            int size
+    ) {
+        return ResponseEntity.ok(service.findVersions(subawardId, page, size));
     }
 
     @GetMapping("/{subawardId}/amounts")

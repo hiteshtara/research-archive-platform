@@ -368,10 +368,14 @@ class SubawardAttachmentArchiveMigrationTest {
     }
 
     private static Path locateRepoRoot() throws IOException {
+        // .git is a directory in a normal clone but a plain file (a
+        // "gitdir: ..." pointer back to the main repo) inside a
+        // `git worktree` checkout - accept either so this test also
+        // runs from a worktree, not just the primary clone.
         Path candidate = Path.of("").toAbsolutePath();
         while (candidate != null) {
             if (Files.isDirectory(candidate.resolve("database/migrations"))
-                    && Files.isDirectory(candidate.resolve(".git"))) {
+                    && Files.exists(candidate.resolve(".git"))) {
                 return candidate;
             }
             candidate = candidate.getParent();

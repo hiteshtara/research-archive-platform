@@ -1161,6 +1161,29 @@ export function getSubawardWorkspace(
   return request(`/api/subawards/${encodeURIComponent(subawardId)}`);
 }
 
+// Every archived version (archive.subaward row) sharing this
+// subawardId's own subaward_code - mirrors getAwardVersionsV1 exactly.
+export function getSubawardVersions(
+  subawardId: number,
+  parameters: {
+    page?: number;
+    size?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<import("../types/api").SubawardVersionPageResponse> {
+  const searchParameters = new URLSearchParams({
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 10),
+  });
+
+  return request(
+    `/api/subawards/${encodeURIComponent(
+      subawardId,
+    )}/versions?${searchParameters.toString()}`,
+    signal,
+  );
+}
+
 export function getSubawardAmounts(
   subawardId: number,
 ): Promise<import("../types/api").SubawardAmount[]> {

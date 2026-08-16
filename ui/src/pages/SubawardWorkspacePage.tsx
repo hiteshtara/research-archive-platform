@@ -30,6 +30,7 @@ import {
   getSubawardContacts,
   getSubawardCustomData,
   getSubawardFunding,
+  getSubawardVersions,
   getSubawardWorkspace,
 } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
@@ -39,6 +40,7 @@ import { RelationshipCard } from "../components/common/RelationshipCard";
 import { SectionCard } from "../components/common/SectionCard";
 import { StatusPill } from "../components/common/StatusPill";
 import { WorkspaceHeader } from "../components/common/WorkspaceHeader";
+import { SubawardVersionsSection } from "../components/subaward/SubawardVersionsSection";
 import { formatCurrencyAmount } from "../features/award/awardSectionsPresentation.mjs";
 import { groupAttachmentsByType } from "../features/subaward/subawardAttachmentsPresentation.mjs";
 import { resolveContactDisplay } from "../features/subaward/subawardContactsPresentation.mjs";
@@ -59,13 +61,20 @@ import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 // secondary "More" menu without further backend work.
 const tabs = [
   "General",
-  "History of Changes",
+  // Renamed from "History of Changes" - this tab is amount/amendment
+  // transaction history (archive.subaward_amount), never a list of
+  // archived record versions. "Archived Versions" below is the new,
+  // separate tab for that - keep them distinct so they're never
+  // confused with each other again.
+  "Amendment History",
   "Funding",
   "Contacts",
   "Attachments",
   "Custom Data",
   "Closeout",
+  "Archived Versions",
 ];
+const ARCHIVED_VERSIONS_TAB_INDEX = tabs.length - 1;
 
 type DisplayValue = string | number | null;
 
@@ -217,6 +226,14 @@ function SubawardWorkspaceContent({
     enabled: validSubawardId && activeTab === 6,
     queryFn: () => getSubawardCloseout(parsedSubawardId),
   });
+  // Lightweight, always-on (not gated by the Archived Versions tab) -
+  // only needed for the "Version N of M" header chip below. size: 1
+  // keeps this cheap; totalElements is all the header needs.
+  const versionsCountQuery = useQuery({
+    queryKey: ["subaward-versions-count", parsedSubawardId],
+    enabled: validSubawardId,
+    queryFn: () => getSubawardVersions(parsedSubawardId, { page: 0, size: 1 }),
+  });
 
   if (!validSubawardId) {
     return <ErrorState message="Invalid Subaward ID." />;
@@ -290,7 +307,11 @@ function SubawardWorkspaceContent({
               />
             ),
           },
-          { label: `Version ${current.sequenceNumber}` },
+          {
+            label: versionsCountQuery.data
+              ? `Version ${current.sequenceNumber} of ${versionsCountQuery.data.totalElements}`
+              : `Version ${current.sequenceNumber}`,
+          },
           { label: `Workflow ${current.documentNumber ?? "—"}` },
         ]}
       />
@@ -731,6 +752,13 @@ function SubawardWorkspaceContent({
                 { label: "Received", render: (row) => display(row.dateReceived) },
                 { label: "Comments", render: (row) => display(row.comments) },
               ]}
+            />
+          )}
+
+          {activeTab === ARCHIVED_VERSIONS_TAB_INDEX && (
+            <SubawardVersionsSection
+              subawardId={parsedSubawardId}
+              currentSubawardId={parsedSubawardId}
             />
           )}
         </CardContent>

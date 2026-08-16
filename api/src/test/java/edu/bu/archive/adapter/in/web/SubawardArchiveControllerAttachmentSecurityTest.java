@@ -65,6 +65,53 @@ class SubawardArchiveControllerAttachmentSecurityTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    /*
+     * The new /{subawardId}/versions endpoint (Archived Versions):
+     * requires plain authentication like every other non-attachment
+     * Subaward route (workspace/amounts/etc.) - proven here alongside
+     * the attachment-route tests above/below specifically to show the
+     * attachment-only boundary is preserved, not accidentally widened
+     * or narrowed by this addition.
+     */
+    @Test
+    void versionsWithoutAuthenticationIsRejected() throws Exception {
+        mockMvc.perform(get("/api/subawards/55/versions"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void versionsWithPlainAuthenticationSucceedsWithoutTheAttachmentGroup()
+            throws Exception {
+        when(service.findVersions(55L, 0, 25)).thenReturn(
+                new edu.bu.archive.adapter.in.web.dto.PageResponse<>(
+                        List.of(), 0, 25, 0L, 0, true, true
+                )
+        );
+
+        mockMvc.perform(get("/api/subawards/55/versions").with(jwt()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void versionsRejectsAnOutOfRangeSizeAsABadRequestNotAServerError()
+            throws Exception {
+        mockMvc.perform(
+                        get("/api/subawards/55/versions")
+                                .param("size", "0")
+                                .with(jwt())
+                )
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(
+                        get("/api/subawards/55/versions")
+                                .param("size", "101")
+                                .with(jwt())
+                )
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
     @Test
     void listWithoutAttachmentGroupIsRejected() throws Exception {
         mockMvc.perform(
