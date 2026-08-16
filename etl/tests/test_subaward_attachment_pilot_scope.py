@@ -670,8 +670,13 @@ class PlanSubawardBatchFullChainReproductionTest(unittest.TestCase):
                 "archive.subaward_attachment_archive" in statement_text
                 and "ARCHIVED" in statement_text
             )
+            targets_already_batched = "FROM archive.etl_batch" in statement_text
             if targets_archive_status:
                 result.scalars.return_value = []
+            elif targets_already_batched:
+                # No batches exist yet in this synthetic scenario - the
+                # test's whole point is the first-ever candidate scan.
+                result.fetchall.return_value = []
             elif "archive.subaward_attachment" in statement_text:
                 result.scalars.return_value = list(SYNTHETIC_FILE_DATA_IDS)
             else:

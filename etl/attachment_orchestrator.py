@@ -841,6 +841,45 @@ def _subaward_excluded_file_data_ids(engine: Engine) -> set[str]:
         return {str(value) for value in rows}
 
 
+def _subaward_already_batched_file_data_ids(engine: Engine) -> set[str]:
+    """Every file_data_id ever selected into ANY domain=SUBAWARD_ATTACHMENT
+    entity_type=SUBAWARD_ATTACHMENT_FILE batch, regardless of that
+    batch's status (CREATED/READY/COMPLETED) - must be combined with
+    _subaward_excluded_file_data_ids at the call site, never used alone.
+
+    Real, live-data-confirmed incident (2026-08-16): run_orchestration's
+    Stage 1 loop ("while True: ... if selected_count == 0: break") only
+    consulted _subaward_excluded_file_data_ids (confirmed-ARCHIVED
+    only). A file only becomes ARCHIVED during Stage 2 (binary/upload),
+    which never runs until Stage 1's own loop exits - so an unarchived-
+    but-already-batched file stayed "eligible" forever, and Stage 1
+    re-selected and re-batched the exact same candidates on every
+    iteration. It never terminated on its own: 3,424 duplicate batches
+    (batch_id 219-3642) were created in ~94 minutes before the task
+    finally crashed on an unrelated Oracle connection failure, with
+    zero binaries ever actually uploaded. Excluding by batch membership
+    (this function) fixes the loop's own termination without changing
+    what _subaward_excluded_file_data_ids means or is used for
+    elsewhere - once a file is tracked in any batch, only Stage 2
+    (_next_ready_batch / subaward_binary_stage / reconcile_batch) is
+    responsible for it, and Stage 1 must never re-batch it, done or
+    not."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT selection_parameters FROM archive.etl_batch "
+                "WHERE domain = :domain AND entity_type = :entity_type "
+                "AND selection_parameters IS NOT NULL"
+            ),
+            {"domain": SUBAWARD_ATTACHMENT_DOMAIN, "entity_type": SUBAWARD_ATTACHMENT_ENTITY_TYPE},
+        ).fetchall()
+    already_batched: set[str] = set()
+    for row in rows:
+        for value in row.selection_parameters.get("file_data_ids", []):
+            already_batched.add(str(value))
+    return already_batched
+
+
 def _loaded_subaward_ids(engine: Engine) -> list[int]:
     """The reachable population for attachment metadata: only
     subaward_ids that already have a core archive.subaward row can
@@ -1011,7 +1050,9 @@ def _run_create_subaward_attachment_batch(
     if requested_size <= 0:
         raise ValueError(f"requested_size must be positive, got {requested_size}")
 
-    excluded = _subaward_excluded_file_data_ids(engine)
+    excluded = _subaward_excluded_file_data_ids(engine) | (
+        _subaward_already_batched_file_data_ids(engine)
+    )
     loaded_subaward_ids = _loaded_subaward_ids(engine)
 
     normalized_codes = _normalize_subaward_codes(subaward_codes)
@@ -1098,7 +1139,9 @@ def plan_subaward_batch(
     if requested_size <= 0:
         raise ValueError(f"requested_size must be positive, got {requested_size}")
 
-    excluded = _subaward_excluded_file_data_ids(engine)
+    excluded = _subaward_excluded_file_data_ids(engine) | (
+        _subaward_already_batched_file_data_ids(engine)
+    )
     loaded_subaward_ids = _loaded_subaward_ids(engine)
     normalized_codes = _normalize_subaward_codes(subaward_codes)
 
@@ -1969,6 +2012,136 @@ def _next_ready_batch(engine: Engine, *, module: str) -> int | None:
         ).scalar()
 
 
+def run_single_subaward_batch(
+    engine: Engine,
+    *,
+    bucket: str,
+    batch_id: int,
+    subaward_codes: list[str] | None = None,
+    expect_file_count: int | None = None,
+    run_id: str,
+) -> dict[str, Any]:
+    """Process exactly ONE, already-READY Subaward attachment batch by
+    its real batch_id - never Stage 1 (no metadata work, no new batch
+    is ever created), never _next_ready_batch (no batch other than the
+    one named here, READY or not, is ever touched).
+
+    Built for the aftermath of the 2026-08-16 runaway-batch incident
+    (see docs/runbooks/attachments/SUBAWARD_ATTACHMENT_ORCHESTRATOR.md
+    and project memory): with thousands of duplicate READY batches
+    (219-3642) now sitting alongside the one real batch (218), the
+    ordinary Stage 2 "while True: _next_ready_batch(...)" loop in
+    run_orchestration would process all of them in one run - each a
+    legitimate, harmless no-op after the first (per _next_ready_batch's
+    own docstring), but wastefully so, and not what "run the batch 218
+    pilot" should mean operationally. --batch-id is the explicit,
+    validated, single-batch alternative that guarantees no other batch
+    is ever read or written.
+
+    Fails closed - returns {"stopped_reason": ..., "batch_id":
+    batch_id} without any S3/Oracle read or Postgres write - unless ALL
+    of:
+      - the batch exists;
+      - domain=SUBAWARD_ATTACHMENT, entity_type=SUBAWARD_ATTACHMENT_FILE
+        (this option only ever targets a Subaward batch);
+      - status='READY' (not CREATED - metadata incomplete; not already
+        COMPLETED - would silently reprocess a finished batch);
+      - if subaward_codes is given, the batch's own recorded
+        selection_parameters.subaward_codes matches exactly (normalized,
+        order-independent - see _normalize_subaward_codes);
+      - if expect_file_count is given, the batch's own file_data_id
+        count matches exactly.
+    """
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT domain, entity_type, status, selection_parameters "
+                "FROM archive.etl_batch WHERE batch_id = :batch_id"
+            ),
+            {"batch_id": batch_id},
+        ).mappings().fetchone()
+
+    if row is None:
+        return {"batch_id": batch_id, "stopped_reason": f"batch_id={batch_id} does not exist"}
+
+    wrong_domain = row["domain"] != SUBAWARD_ATTACHMENT_DOMAIN
+    wrong_entity_type = row["entity_type"] != SUBAWARD_ATTACHMENT_ENTITY_TYPE
+    if wrong_domain or wrong_entity_type:
+        return {
+            "batch_id": batch_id,
+            "stopped_reason": (
+                f"batch_id={batch_id} is domain={row['domain']!r} "
+                f"entity_type={row['entity_type']!r}, not domain="
+                f"{SUBAWARD_ATTACHMENT_DOMAIN!r} entity_type="
+                f"{SUBAWARD_ATTACHMENT_ENTITY_TYPE!r}"
+            ),
+        }
+
+    if row["status"] != batch_framework.BATCH_STATUS_READY:
+        return {
+            "batch_id": batch_id,
+            "stopped_reason": (
+                f"batch_id={batch_id} has status={row['status']!r}, not "
+                f"{batch_framework.BATCH_STATUS_READY!r} - --batch-id "
+                "only ever processes an already-READY batch"
+            ),
+        }
+
+    selection_parameters = row["selection_parameters"] or {}
+
+    if subaward_codes is not None:
+        requested_scope = _normalize_subaward_codes(subaward_codes)
+        actual_scope = _normalize_subaward_codes(selection_parameters.get("subaward_codes"))
+        if requested_scope != actual_scope:
+            return {
+                "batch_id": batch_id,
+                "stopped_reason": (
+                    f"batch_id={batch_id} was created with subaward_codes "
+                    f"scope {actual_scope!r}, which does not match the "
+                    f"requested scope {requested_scope!r}"
+                ),
+            }
+
+    file_data_ids = list(selection_parameters.get("file_data_ids", []))
+    if expect_file_count is not None and len(file_data_ids) != expect_file_count:
+        return {
+            "batch_id": batch_id,
+            "stopped_reason": (
+                f"batch_id={batch_id} has {len(file_data_ids)} "
+                f"file_data_ids, expected exactly {expect_file_count}"
+            ),
+        }
+
+    s3_client = boto3.client("s3")
+    upload_report = subaward_binary_stage(
+        engine, bucket=bucket, batch_id=batch_id, run_id=run_id
+    )
+
+    if upload_report.get("s3_mismatch"):
+        upload_report["stopped_reason"] = (
+            f"S3 object mismatch detected for batch_id={batch_id}: "
+            f"{upload_report['s3_mismatch']}"
+        )
+        return upload_report
+
+    reconciliation = reconcile_batch(engine, s3_client, bucket, SUBAWARD, file_data_ids)
+    upload_report["reconciliation"] = reconciliation
+
+    if not reconciliation["clean"]:
+        upload_report["stopped_reason"] = (
+            f"Reconciliation failed for batch_id={batch_id}: "
+            f"{reconciliation['mismatches']}"
+        )
+        return upload_report
+
+    with engine.begin() as connection:
+        batch_framework.set_batch_status(
+            connection, batch_id, status=batch_framework.BATCH_STATUS_COMPLETED
+        )
+
+    return upload_report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--modules", default=",".join(SUPPORTED_MODULES))
@@ -1999,6 +2172,30 @@ def main(argv: list[str] | None = None) -> int:
             "with --subaward-code to preview a scoped pilot batch."
         ),
     )
+    parser.add_argument(
+        "--batch-id",
+        type=int,
+        default=None,
+        help=(
+            "Process exactly this one, already-READY Subaward "
+            "attachment batch_id - never Stage 1 (no new batch is ever "
+            "created), never any other batch (READY or not). Requires "
+            "--modules subaward exactly. Combine with --subaward-code "
+            "and/or --expect-file-count for additional fail-closed "
+            "validation before anything is read from S3/Oracle or "
+            "written to Postgres. See run_single_subaward_batch."
+        ),
+    )
+    parser.add_argument(
+        "--expect-file-count",
+        type=int,
+        default=None,
+        help=(
+            "Only valid with --batch-id. Fails closed (no processing) "
+            "unless the targeted batch's own file_data_id count matches "
+            "exactly."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.ecs:
@@ -2010,6 +2207,39 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Subaward dry-run plan: {}", plan)
         print(json.dumps(plan, indent=2, default=str))
         return 0 if not plan.get("cross_scope_violation") else 6
+
+    if args.batch_id is not None:
+        modules = tuple(m.strip() for m in args.modules.split(",") if m.strip())
+        if modules != (SUBAWARD,):
+            logger.error(
+                "--batch-id requires --modules {} exactly, got {!r}",
+                SUBAWARD, args.modules,
+            )
+            return 6
+
+        engine = create_postgres_engine()
+        run_id = str(uuid.uuid4())
+        try:
+            lock_connection = acquire_lock(engine, label=f"attachment-load:{run_id}")
+        except LockNotAcquired as error:
+            logger.error(str(error))
+            return 4
+
+        try:
+            result = run_single_subaward_batch(
+                engine,
+                bucket=args.bucket,
+                batch_id=args.batch_id,
+                subaward_codes=args.subaward_code,
+                expect_file_count=args.expect_file_count,
+                run_id=run_id,
+            )
+        finally:
+            release_lock(lock_connection)
+
+        logger.info("Single-batch result: {}", result)
+        print(json.dumps(result, indent=2, default=str))
+        return 0 if not result.get("stopped_reason") else 6
 
     modules = tuple(m.strip() for m in args.modules.split(",") if m.strip())
     try:
