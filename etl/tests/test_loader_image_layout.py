@@ -192,6 +192,84 @@ class LoaderImageLayoutTest(unittest.TestCase):
         self.assertNotIn("ModuleNotFoundError", result.stderr)
         self.assertIn("validate_aws_identity", result.stderr)
 
+    # --- attachment_orchestrator.py (Award/Proposal/Subaward attachment
+    # orchestration, including the Subaward --subaward-code pilot scope) -
+    # same image, same layout guarantees. Unlike award/award-attachment,
+    # this module is NOT registered in archive_etl.__main__.DOMAIN_MODULES -
+    # it is run directly (`python attachment_orchestrator.py ...`), which
+    # is exactly what these commands exercise. -----------------------
+
+    def test_attachment_orchestrator_help_lists_the_subaward_pilot_scope_flags(self) -> None:
+        result = self._run_in_image("python", "attachment_orchestrator.py", "--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--subaward-code", result.stdout)
+        self.assertIn("--dry-run", result.stdout)
+
+    def test_attachment_orchestrator_module_and_its_dependencies_import_cleanly(self) -> None:
+        # Mirrors test_loader_module_and_its_dependencies_import_cleanly
+        # above - --help alone exits before attachment_orchestrator.py
+        # (and its boto3/oracledb/loguru/sqlalchemy/pandas imports, plus
+        # load_award_attachments/load_proposals_from_csv) is ever loaded.
+        result = self._run_in_image("python", "-c", "import attachment_orchestrator")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+
+    def test_subaward_attachment_file_ids_sql_is_present_in_the_built_image(self) -> None:
+        # Proves oracle/subaward/export_subaward_attachment_file_ids.sql -
+        # the read-only Oracle extraction SQL the Subaward pilot-scope
+        # feature depends on for both the candidate scan and the
+        # cross-scope safety check - actually made it into the image via
+        # the Dockerfile's `COPY oracle oracle` (a whole-directory copy,
+        # not a per-file allowlist that could silently omit a new file).
+        # A module-import check alone cannot prove this: the file is only
+        # ever opened at Oracle-read time, which this sandboxed test
+        # deliberately never reaches.
+        result = self._run_in_image(
+            "python",
+            "-c",
+            "from pathlib import Path\n"
+            "import attachment_orchestrator as m\n"
+            "assert m.PROJECT_ROOT == Path('/app'), m.PROJECT_ROOT\n"
+            "assert m.SUBAWARD_ATTACHMENT_FILE_IDS_SQL.is_file(), "
+            "m.SUBAWARD_ATTACHMENT_FILE_IDS_SQL\n"
+            "assert m.SUBAWARD_ATTACHMENT_FILE_IDS_SQL == Path(\n"
+            "    '/app/oracle/subaward/export_subaward_attachment_file_ids.sql'\n"
+            "), m.SUBAWARD_ATTACHMENT_FILE_IDS_SQL\n"
+            "print('OK')\n",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("OK", result.stdout)
+
+    def test_attachment_orchestrator_ecs_subaward_dry_run_fails_on_missing_aws_identity(
+        self,
+    ) -> None:
+        # Mirrors the award/award-attachment ECS smoke tests above, for
+        # the exact command shape a Subaward pilot run would use:
+        # --modules subaward --subaward-code 3595 --dry-run --ecs. No AWS
+        # credentials exist in this sandboxed container run, so this must
+        # fail - but at Secrets Manager resolution (configure_ecs_environment,
+        # reached because --ecs is set), never at process exec or import.
+        # Reaching that point proves the command executes, argparse
+        # accepted every flag (including the repeated-capable
+        # --subaward-code), and every import up to it succeeded.
+        result = self._run_in_image(
+            "python",
+            "attachment_orchestrator.py",
+            "--bucket", "test-bucket",
+            "--modules", "subaward",
+            "--subaward-code", "3595",
+            "--dry-run",
+            "--ecs",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("executable file not found", result.stderr)
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+        self.assertNotIn("unrecognized arguments", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
