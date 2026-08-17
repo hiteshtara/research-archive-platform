@@ -29,3 +29,39 @@ export function filterOutIrbResults(response) {
     failedModules: filteredFailedModules,
   };
 }
+
+const SEMANTIC_MATCH_CHIP_LABEL = "Semantic match";
+
+// Describes what a single result card should render, given the exact
+// GlobalSearchItem the backend returned - the API is the source of
+// truth for real data (identifier/title/PI/sponsor/status; see
+// GlobalSearchService's semantic-search integration for how AWARD/
+// PROPOSAL semantic matches get enriched with it). This only decides
+// which optional lines/badges apply, so GlobalSearchPage never has to
+// re-derive backend enrichment/dedup decisions in JSX.
+//
+// matchedCaption is deliberately null once a semantic result carries
+// real enrichment (matchedField/matchedValue come back null from the
+// backend in that case) - showing "Matched on: Semantic (<identifier>)"
+// underneath an identifier line that already shows the same value is a
+// duplicate, not new information.
+export function describeResultCard(result) {
+  const identifier = result?.identifier ?? "";
+  const subtitle = result?.subtitle ?? null;
+  const principalInvestigator = result?.principalInvestigator ?? null;
+  const matchedField = result?.matchedField ?? null;
+  const matchedValue = result?.matchedValue ?? null;
+  const isSemanticMatch = result?.matchType === "RELATED";
+
+  return {
+    identifier,
+    title: result?.title ?? identifier,
+    identifierLine: subtitle ? `${identifier} • ${subtitle}` : identifier,
+    showSemanticChip: isSemanticMatch,
+    semanticChipLabel: SEMANTIC_MATCH_CHIP_LABEL,
+    piLine: principalInvestigator ? `PI: ${principalInvestigator}` : null,
+    matchedCaption: matchedField
+      ? `Matched on: ${matchedField}${matchedValue ? ` (${matchedValue})` : ""}`
+      : null,
+  };
+}

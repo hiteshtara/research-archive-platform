@@ -355,6 +355,23 @@ class AwardArchiveServiceTest {
     }
 
     @Test
+    void findSummariesForAwardNumbersIsAThinPassthroughToTheRepository() {
+        List<edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow> expected = List.of(
+                new edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow(
+                        "104628-00002", "Cancer Disparities in California", "Active",
+                        "National Cancer Institute", "Ulrike Boehmer"
+                )
+        );
+        when(repository.findCurrentSummariesForNumbers(List.of("104628-00002")))
+                .thenReturn(expected);
+
+        List<edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow> result =
+                service.findSummariesForAwardNumbers(List.of("104628-00002"));
+
+        assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
     void findHierarchyReturnsASingleNodeTreeWhenNoHierarchyRowExists() {
         when(repository.findHierarchyRoot("100004-00003"))
                 .thenReturn(Optional.empty());

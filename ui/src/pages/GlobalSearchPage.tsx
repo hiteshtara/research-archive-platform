@@ -20,7 +20,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
 import { LoadingState } from "../components/common/LoadingState";
-import { filterOutIrbResults } from "../features/search/globalSearchPresentation.mjs";
+import {
+  describeResultCard,
+  filterOutIrbResults,
+} from "../features/search/globalSearchPresentation.mjs";
 
 
 export function GlobalSearchPage() {
@@ -157,6 +160,7 @@ export function GlobalSearchPage() {
 
           {searchQuery.data.results.map((result) => {
             const clickable = Boolean(result.route);
+            const card = describeResultCard(result);
 
             return (
               <Card
@@ -257,9 +261,9 @@ export function GlobalSearchPage() {
                             />
                           )}
 
-                          {result.matchType === "RELATED" && (
+                          {card.showSemanticChip && (
                             <Chip
-                              label="Related match"
+                              label={card.semanticChipLabel}
                               size="small"
                               variant="outlined"
                             />
@@ -270,7 +274,7 @@ export function GlobalSearchPage() {
                           variant="h6"
                           sx={{ mt: 1.5 }}
                         >
-                          {result.title}
+                          {card.title}
                         </Typography>
 
                         <Typography
@@ -278,20 +282,26 @@ export function GlobalSearchPage() {
                           color="text.secondary"
                           sx={{ mt: 0.8 }}
                         >
-                          {result.identifier}
-                          {result.subtitle ? ` • ${result.subtitle}` : ""}
+                          {card.identifierLine}
                         </Typography>
 
-                        {result.matchedField && (
+                        {card.piLine && (
                           <Typography
                             variant="caption"
                             color="text.secondary"
                             sx={{ mt: 0.5, display: "block" }}
                           >
-                            Matched on: {result.matchedField}
-                            {result.matchedValue
-                              ? ` (${result.matchedValue})`
-                              : ""}
+                            {card.piLine}
+                          </Typography>
+                        )}
+
+                        {card.matchedCaption && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ mt: 0.5, display: "block" }}
+                          >
+                            {card.matchedCaption}
                           </Typography>
                         )}
                       </Box>

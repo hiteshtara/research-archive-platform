@@ -20,6 +20,11 @@ package edu.bu.archive.adapter.in.web.dto;
  * GlobalSearchService's semantic-search integration. It never carries a
  * raw similarity score, distance, embedding, or model name - none of
  * those leave the backend.
+ *
+ * principalInvestigator is populated for AWARD and PROPOSAL results
+ * only (structured and semantic alike) - every other domain leaves it
+ * null rather than repurposing a differently-meant field (e.g.
+ * Negotiation's negotiator, Subaward's organization) as a PI stand-in.
  */
 public record GlobalSearchItemResponse(
         String module,
@@ -36,6 +41,7 @@ public record GlobalSearchItemResponse(
         Long awardId,
         Integer sequenceNumber,
         Boolean primaryCurrent,
-        String matchType
+        String matchType,
+        String principalInvestigator
 ) {
 }

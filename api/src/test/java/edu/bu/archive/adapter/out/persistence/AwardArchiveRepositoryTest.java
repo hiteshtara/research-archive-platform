@@ -1701,6 +1701,49 @@ class AwardArchiveRepositoryTest {
                 .contains(":awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber)");
     }
 
+    // --- Global Search semantic-result enrichment ---------------------------
+
+    @Test
+    void findCurrentSummariesForNumbersScopesToPrimaryCurrentAndBindsTheSetOfAwardNumbers() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<AwardSemanticSummaryRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(AwardSemanticSummaryRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new AwardArchiveRepository(jdbc).findCurrentSummariesForNumbers(
+                List.of("104628-00002", "104615-00002")
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.award_version av")
+                .contains("av.award_number IN (:awardNumbers)")
+                .contains("av.is_primary_current = TRUE")
+                .contains("LEFT JOIN LATERAL")
+                .contains("ap.contact_role_code")
+                .doesNotContain("embedding")
+                .doesNotContain("distance");
+        verify(statement).param(
+                "awardNumbers", List.of("104628-00002", "104615-00002")
+        );
+    }
+
+    @Test
+    void findCurrentSummariesForNumbersNeverQueriesForAnEmptySet() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+
+        List<AwardSemanticSummaryRow> results =
+                new AwardArchiveRepository(jdbc).findCurrentSummariesForNumbers(List.of());
+
+        assertThat(results).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
     private String firstSql(JdbcClient jdbc) {
         return org.mockito.Mockito
                 .mockingDetails(jdbc)

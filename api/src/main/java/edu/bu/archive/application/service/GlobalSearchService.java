@@ -10,9 +10,11 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
+import edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow;
 import edu.bu.archive.adapter.out.persistence.GlobalSearchRepository;
 import edu.bu.archive.adapter.out.persistence.IrbGlobalSearchRow;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
+import edu.bu.archive.adapter.out.persistence.ProposalSemanticSummaryRow;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRepository;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRow;
 import edu.bu.archive.application.award.AwardArchiveService;
@@ -32,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 /*
  * Orchestrates Global Search as a fan-out over each domain's OWN search
@@ -253,6 +256,7 @@ public class GlobalSearchService {
                 null,
                 null,
                 null,
+                null,
                 null
         );
     }
@@ -300,7 +304,8 @@ public class GlobalSearchService {
                     summary.awardId(),
                     summary.sequenceNumber(),
                     null,
-                    null
+                    null,
+                    summary.principalInvestigator()
             ));
         } catch (NoSuchElementException notFound) {
             return java.util.Optional.empty();
@@ -324,6 +329,7 @@ public class GlobalSearchService {
                 null,
                 match.awardId(),
                 match.sequenceNumber(),
+                null,
                 null,
                 null
         );
@@ -350,7 +356,8 @@ public class GlobalSearchService {
                 result.awardId(),
                 result.latestSequenceNumber(),
                 Boolean.TRUE,
-                null
+                null,
+                result.principalInvestigator()
         );
     }
 
@@ -429,6 +436,7 @@ public class GlobalSearchService {
                 matchedField,
                 negotiationMatchedValue(result, matchedField),
                 "/negotiations/" + result.negotiationId(),
+                null,
                 null,
                 null,
                 null,
@@ -514,6 +522,7 @@ public class GlobalSearchService {
                 null,
                 result.sequenceNumber(),
                 null,
+                null,
                 null
         );
     }
@@ -593,7 +602,8 @@ public class GlobalSearchService {
                 null,
                 result.latestVersionNumber(),
                 null,
-                null
+                null,
+                result.principalInvestigator()
         );
     }
 
@@ -650,14 +660,27 @@ public class GlobalSearchService {
     // table, archive.search_embedding_poc, which stays a permanently
     // separate regression benchmark). No similarity threshold, per the
     // threshold experiment's finding that no single global cutoff works
-    // - just a hard Top-5 cap (min'd again here even though the
-    // repository already applies its own LIMIT, since
-    // SemanticSearchProperties.topK is operator-configurable and must
-    // never be trusted to exceed the proven-safe maximum). Any failure
-    // here (embedding call, pgvector query) propagates up to
-    // joinOrRecordFailure exactly like every other domain's failure -
-    // Global Search still returns full structured results.
+    // - just a hard Top-5 cap on the FINAL, deduplicated result list
+    // (min'd again here even though the repository already applies its
+    // own LIMIT, since SemanticSearchProperties.topK is
+    // operator-configurable and must never be trusted to exceed the
+    // proven-safe maximum). Any failure here (embedding call, pgvector
+    // query, enrichment query) propagates up to joinOrRecordFailure
+    // exactly like every other domain's failure - Global Search still
+    // returns full structured results.
     private static final int SEMANTIC_MAX_RESULTS = 5;
+
+    // The repository is asked for more than SEMANTIC_MAX_RESULTS raw
+    // embedding rows on purpose: a single business record (e.g. one
+    // Award) can legitimately have several archived-version rows in
+    // archive.search_embedding, each embedded and ranked independently,
+    // so the nearest-neighbor list can contain several rows that all
+    // resolve to the same Award/Proposal before per-business-record
+    // dedup runs. Oversampling a bounded, fixed candidate window (never
+    // unbounded, never operator-configurable) lets dedup collapse those
+    // duplicates without starving the Top-5 cap of otherwise-distinct
+    // matches - see dedupeByBusinessRecord.
+    private static final int SEMANTIC_CANDIDATE_LIMIT = 50;
 
     private List<GlobalSearchItemResponse> searchSemantic(String query) {
         EmbeddingProvider embeddingProvider =
@@ -666,30 +689,104 @@ public class GlobalSearchService {
             return List.of();
         }
 
-        int topK = Math.min(semanticSearchProperties.getTopK(), SEMANTIC_MAX_RESULTS);
         float[] queryEmbedding = embeddingProvider.embed(query);
-        List<SemanticSearchRow> rows =
-                semanticSearchRepository.findNearest(queryEmbedding, topK);
-        // Defensive: the Top-5 cap is enforced here regardless of what
-        // the repository/config actually returns, never trusted as a
-        // hint alone.
-        if (rows.size() > SEMANTIC_MAX_RESULTS) {
-            rows = rows.subList(0, SEMANTIC_MAX_RESULTS);
+        List<SemanticSearchRow> candidates =
+                semanticSearchRepository.findNearest(queryEmbedding, SEMANTIC_CANDIDATE_LIMIT);
+
+        List<SemanticSearchRow> deduped = dedupeByBusinessRecord(candidates);
+
+        int topK = Math.min(semanticSearchProperties.getTopK(), SEMANTIC_MAX_RESULTS);
+        if (deduped.size() > topK) {
+            deduped = deduped.subList(0, topK);
         }
+
+        return enrichSemanticResults(deduped);
+    }
+
+    // Keeps the single best-scoring (lowest-distance) row per business
+    // record - candidates arrive pre-sorted by ascending distance
+    // (nearest first), so the first occurrence of a (module,
+    // businessNumber) key encountered here is already its best match.
+    // Keyed on the exact business identifier rather than
+    // canonicalFamilyId so this dedup holds even if two rows for the
+    // same Award/Proposal were embedded from different archived
+    // versions and therefore carry different record/family IDs.
+    private List<SemanticSearchRow> dedupeByBusinessRecord(
+            List<SemanticSearchRow> rows
+    ) {
+        Map<String, SemanticSearchRow> byBusinessRecord = new LinkedHashMap<>();
+        for (SemanticSearchRow row : rows) {
+            String key = row.module() + ":" + row.businessNumber();
+            byBusinessRecord.putIfAbsent(key, row);
+        }
+        return new ArrayList<>(byBusinessRecord.values());
+    }
+
+    // Resolves title/PI/sponsor/status for every AWARD/PROPOSAL row in
+    // one set-based query per module (never one query per result) - see
+    // AwardArchiveService.findSummariesForAwardNumbers and
+    // ProposalArchiveRepository.findCurrentSummariesForNumbers. NEGOTIATION
+    // and SUBAWARD semantic rows are intentionally left unenriched (out
+    // of scope for this pass) and keep the bare-identifier presentation
+    // they've always had.
+    private List<GlobalSearchItemResponse> enrichSemanticResults(
+            List<SemanticSearchRow> rows
+    ) {
+        List<String> awardNumbers = rows.stream()
+                .filter(row -> "AWARD".equals(row.module()))
+                .map(SemanticSearchRow::businessNumber)
+                .distinct()
+                .toList();
+        List<String> proposalNumbers = rows.stream()
+                .filter(row -> "PROPOSAL".equals(row.module()))
+                .map(SemanticSearchRow::businessNumber)
+                .distinct()
+                .toList();
+
+        Map<String, AwardSemanticSummaryRow> awardSummaries = awardNumbers.isEmpty()
+                ? Map.of()
+                : awardArchiveService.findSummariesForAwardNumbers(awardNumbers).stream()
+                        .collect(Collectors.toMap(
+                                AwardSemanticSummaryRow::awardNumber,
+                                summary -> summary,
+                                (first, second) -> first
+                        ));
+        Map<String, ProposalSemanticSummaryRow> proposalSummaries = proposalNumbers.isEmpty()
+                ? Map.of()
+                : proposalArchiveRepository.findCurrentSummariesForNumbers(proposalNumbers).stream()
+                        .collect(Collectors.toMap(
+                                ProposalSemanticSummaryRow::proposalNumber,
+                                summary -> summary,
+                                (first, second) -> first
+                        ));
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
-            mapped.add(toGlobalSearchItem(row));
+            mapped.add(toGlobalSearchItem(
+                    row,
+                    awardSummaries.get(row.businessNumber()),
+                    proposalSummaries.get(row.businessNumber())
+            ));
         }
         return mapped;
     }
 
-    // sourceText/title are deliberately not part of
-    // archive.search_embedding's schema, so businessNumber (always
-    // present) is the best available human-readable label without an
-    // extra per-result domain lookup for what is, by construction, at
-    // most 5 supplemental results.
-    private GlobalSearchItemResponse toGlobalSearchItem(SemanticSearchRow row) {
+    // awardSummary/proposalSummary are the enrichment rows resolved for
+    // this row's businessNumber, if any (exactly one of the two is ever
+    // non-null, since a row's module determines which map it was looked
+    // up in) - either or both can legitimately be null: no row at all
+    // when the business record is stale/removed since the embedding was
+    // built (falls back to the pre-enrichment bare-identifier
+    // presentation), or a found row whose own principalInvestigator/
+    // sponsor columns are individually null (renders with those fields
+    // simply absent). Never carries a raw similarity score, distance,
+    // embedding, or model name - none of those leave the backend, per
+    // GlobalSearchItemResponse's own contract.
+    private GlobalSearchItemResponse toGlobalSearchItem(
+            SemanticSearchRow row,
+            AwardSemanticSummaryRow awardSummary,
+            ProposalSemanticSummaryRow proposalSummary
+    ) {
         String route = switch (row.module()) {
             case "AWARD" -> "/awards/" + row.canonicalFamilyId();
             case "PROPOSAL" -> "/proposals/dashboard/" + row.canonicalFamilyId();
@@ -699,22 +796,40 @@ public class GlobalSearchService {
         };
         Long awardId = "AWARD".equals(row.module()) ? row.canonicalFamilyId() : null;
 
+        boolean enriched = awardSummary != null || proposalSummary != null;
+        String title = row.businessNumber();
+        String sponsor = null;
+        String status = null;
+        String principalInvestigator = null;
+        if (awardSummary != null) {
+            title = awardSummary.title() != null ? awardSummary.title() : title;
+            sponsor = awardSummary.sponsor();
+            status = awardSummary.status();
+            principalInvestigator = awardSummary.principalInvestigator();
+        } else if (proposalSummary != null) {
+            title = proposalSummary.title() != null ? proposalSummary.title() : title;
+            sponsor = proposalSummary.sponsor();
+            status = proposalSummary.status();
+            principalInvestigator = proposalSummary.principalInvestigator();
+        }
+
         return new GlobalSearchItemResponse(
                 row.module(),
                 row.canonicalFamilyId(),
                 row.businessNumber(),
-                row.businessNumber(),
+                title,
+                sponsor,
+                status,
                 null,
-                null,
-                null,
-                SEMANTIC_MATCHED_FIELD,
-                row.businessNumber(),
+                enriched ? null : SEMANTIC_MATCHED_FIELD,
+                enriched ? null : row.businessNumber(),
                 route,
                 null,
                 awardId,
                 null,
                 null,
-                MATCH_TYPE_RELATED
+                MATCH_TYPE_RELATED,
+                principalInvestigator
         );
     }
 

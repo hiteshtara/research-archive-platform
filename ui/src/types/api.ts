@@ -114,6 +114,9 @@ export interface GlobalSearchItem {
   // "RELATED" for a semantic-search result that survived deduplication
   // against structured results; null for every structured result.
   matchType: string | null;
+  // Populated for AWARD and PROPOSAL results only (structured and
+  // semantic alike); null for every other module.
+  principalInvestigator: string | null;
 }
 
 // failedModules names every domain whose search errored during this

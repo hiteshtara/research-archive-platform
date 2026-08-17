@@ -66,6 +66,7 @@ import edu.bu.archive.adapter.in.web.dto.PaginationSupport;
 import edu.bu.archive.adapter.out.persistence.AwardArchivedAttachment;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.AwardAttachmentStorage;
+import edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow;
 
 import org.springframework.stereotype.Service;
 
@@ -523,6 +524,17 @@ public class AwardArchiveService {
         );
 
         return new AwardSearchResponse(exactDocumentMatch, results);
+    }
+
+    // Thin passthrough for Global Search's semantic-result enrichment
+    // (see GlobalSearchService) - kept here rather than injecting
+    // AwardArchiveRepository directly into GlobalSearchService, mirroring
+    // how every other Award call in this class already goes through the
+    // service layer.
+    public List<AwardSemanticSummaryRow> findSummariesForAwardNumbers(
+            List<String> awardNumbers
+    ) {
+        return repository.findCurrentSummariesForNumbers(awardNumbers);
     }
 
     /*

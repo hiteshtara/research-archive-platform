@@ -11,9 +11,11 @@ import java.util.Optional;
 
 import static edu.bu.archive.testsupport.ProposalFixtures.proposalRow;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ProposalArchiveRepositoryTest {
@@ -150,6 +152,64 @@ class ProposalArchiveRepositoryTest {
                 .contains(
                         "relationship.proposal_id DESC, relationship.award_funding_proposal_id DESC"
                 );
+    }
+
+    // --- Global Search semantic-result enrichment ---------------------------
+
+    @Test
+    void findCurrentSummariesForNumbersRanksTheLatestVersionAndBindsTheSetOfProposalNumbers() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
+        @SuppressWarnings("unchecked")
+        JdbcClient.MappedQuerySpec<ProposalSemanticSummaryRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+
+        when(jdbc.sql(anyString())).thenReturn(statement);
+        when(statement.param(anyString(), any())).thenReturn(statement);
+        when(statement.query(ProposalSemanticSummaryRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+
+        new ProposalArchiveRepository(jdbc).findCurrentSummariesForNumbers(
+                List.of("01117952", "01099385")
+        );
+
+        assertThat(firstSql(jdbc))
+                .contains("FROM archive.proposal_version")
+                .contains("proposal_number IN (:proposalNumbers)")
+                .contains("ROW_NUMBER() OVER (")
+                .contains("PARTITION BY proposal_number")
+                .contains("WHERE row_rank = 1")
+                .doesNotContain("embedding")
+                .doesNotContain("distance");
+        verify(statement).param(
+                "proposalNumbers", List.of("01117952", "01099385")
+        );
+    }
+
+    @Test
+    void findCurrentSummariesForNumbersNeverQueriesForAnEmptySet() {
+        JdbcClient jdbc = mock(JdbcClient.class);
+
+        List<ProposalSemanticSummaryRow> results =
+                new ProposalArchiveRepository(jdbc)
+                        .findCurrentSummariesForNumbers(List.of());
+
+        assertThat(results).isEmpty();
+        verifyNoInteractions(jdbc);
+    }
+
+    private String firstSql(JdbcClient jdbc) {
+        return org.mockito.Mockito
+                .mockingDetails(jdbc)
+                .getInvocations()
+                .stream()
+                .filter(invocation ->
+                        invocation.getMethod().getName().equals("sql")
+                )
+                .map(invocation -> (String) invocation.getArgument(0))
+                .findFirst()
+                .orElseThrow()
+                .replaceAll("\\s+", " ");
     }
 
 }

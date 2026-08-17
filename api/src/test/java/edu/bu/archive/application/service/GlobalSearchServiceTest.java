@@ -11,9 +11,11 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardPageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardSummaryResponse;
+import edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow;
 import edu.bu.archive.adapter.out.persistence.GlobalSearchRepository;
 import edu.bu.archive.adapter.out.persistence.IrbGlobalSearchRow;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
+import edu.bu.archive.adapter.out.persistence.ProposalSemanticSummaryRow;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRepository;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRow;
 import edu.bu.archive.application.award.AwardArchiveService;
@@ -568,7 +570,7 @@ class GlobalSearchServiceTest {
         semanticSearchProperties.setEnabled(true);
         when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
         when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
-        when(semanticSearchRepository.findNearest(any(float[].class), eq(5)))
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
                 .thenReturn(List.of(
                         semanticRow("PROPOSAL", 900L, 900L, "unrelated-01")
                 ));
@@ -599,7 +601,7 @@ class GlobalSearchServiceTest {
         semanticSearchProperties.setEnabled(true);
         when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
         when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
-        when(semanticSearchRepository.findNearest(any(float[].class), eq(5)))
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
                 .thenReturn(List.of(
                         semanticRow("SUBAWARD", 900L, 900L, "unrelated-01")
                 ));
@@ -623,7 +625,7 @@ class GlobalSearchServiceTest {
         semanticSearchProperties.setEnabled(true);
         when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
         when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
-        when(semanticSearchRepository.findNearest(any(float[].class), eq(5)))
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
                 .thenReturn(List.of(
                         semanticRow("AWARD", 111L, 111L, "111-00001"),
                         semanticRow("PROPOSAL", 222L, 222L, "222-01")
@@ -652,7 +654,7 @@ class GlobalSearchServiceTest {
                 semanticRow("AWARD", 7L, 7L, "7"),
                 semanticRow("AWARD", 8L, 8L, "8")
         );
-        when(semanticSearchRepository.findNearest(any(float[].class), eq(5)))
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
                 .thenReturn(eightCandidates);
 
         GlobalSearchResponse response = service.search("large federally funded projects");
@@ -665,7 +667,7 @@ class GlobalSearchServiceTest {
         semanticSearchProperties.setEnabled(true);
         when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
         when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
-        when(semanticSearchRepository.findNearest(any(float[].class), eq(5)))
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
                 .thenReturn(List.of(
                         semanticRow("AWARD", 555L, 555L, "100200-00001")
                 ));
@@ -731,4 +733,152 @@ class GlobalSearchServiceTest {
         verify(embeddingProviderObjectProvider, never()).getIfAvailable();
         verifyNoInteractions(semanticSearchRepository);
     }
+
+    // --- Semantic result card enrichment ------------------------------------
+    //
+    // Fixtures mirror the live acceptance queries used to verify this
+    // feature ("rural mortality disparities cancer" -> Award
+    // 104628-00002, "gonorrhea prevention vaccine research" -> Proposals
+    // 01117952/01099385).
+
+    @Test
+    void enrichesAnAwardSemanticMatchWithTitlePiSponsorAndStatus() {
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("AWARD", 104628002L, 104628002L, "104628-00002")
+                ));
+        when(awardArchiveService.findSummariesForAwardNumbers(List.of("104628-00002")))
+                .thenReturn(List.of(new AwardSemanticSummaryRow(
+                        "104628-00002", "Cancer Disparities in California", "Active",
+                        "National Cancer Institute", "Ulrike Boehmer"
+                )));
+
+        GlobalSearchResponse response =
+                service.search("rural mortality disparities cancer");
+
+        GlobalSearchItemResponse item = response.results().get(0);
+        assertThat(item.module()).isEqualTo("AWARD");
+        assertThat(item.identifier()).isEqualTo("104628-00002");
+        assertThat(item.title()).isEqualTo("Cancer Disparities in California");
+        assertThat(item.principalInvestigator()).isEqualTo("Ulrike Boehmer");
+        assertThat(item.subtitle()).isEqualTo("National Cancer Institute");
+        assertThat(item.status()).isEqualTo("Active");
+        assertThat(item.matchType()).isEqualTo("RELATED");
+        // Once real metadata is available, the old "Matched on: Semantic
+        // (<identifier>)" caption - a duplicate of the identifier
+        // already shown above it - no longer renders.
+        assertThat(item.matchedField()).isNull();
+        assertThat(item.matchedValue()).isNull();
+    }
+
+    @Test
+    void enrichesAProposalSemanticMatchWithTitlePiSponsorAndStatus() {
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("PROPOSAL", 1117952L, 1117952L, "01117952")
+                ));
+        when(proposalArchiveRepository.findCurrentSummariesForNumbers(List.of("01117952")))
+                .thenReturn(List.of(new ProposalSemanticSummaryRow(
+                        "01117952", "Gonorrhea Vaccine Development", "Funded",
+                        "NIH", "Dr. Jerse"
+                )));
+
+        GlobalSearchResponse response =
+                service.search("gonorrhea prevention vaccine research");
+
+        GlobalSearchItemResponse item = response.results().get(0);
+        assertThat(item.module()).isEqualTo("PROPOSAL");
+        assertThat(item.identifier()).isEqualTo("01117952");
+        assertThat(item.title()).isEqualTo("Gonorrhea Vaccine Development");
+        assertThat(item.principalInvestigator()).isEqualTo("Dr. Jerse");
+        assertThat(item.subtitle()).isEqualTo("NIH");
+        assertThat(item.status()).isEqualTo("Funded");
+        assertThat(item.matchedField()).isNull();
+    }
+
+    @Test
+    void aSemanticMatchWithNoPiOrSponsorOnRecordRendersWithThoseFieldsAbsent() {
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("AWARD", 1L, 1L, "104615-00002")
+                ));
+        when(awardArchiveService.findSummariesForAwardNumbers(List.of("104615-00002")))
+                .thenReturn(List.of(new AwardSemanticSummaryRow(
+                        "104615-00002", "Untitled Pending Award", "Pending", null, null
+                )));
+
+        GlobalSearchResponse response =
+                service.search("rural mortality disparities cancer");
+
+        GlobalSearchItemResponse item = response.results().get(0);
+        assertThat(item.title()).isEqualTo("Untitled Pending Award");
+        assertThat(item.status()).isEqualTo("Pending");
+        assertThat(item.subtitle()).isNull();
+        assertThat(item.principalInvestigator()).isNull();
+    }
+
+    @Test
+    void duplicateEmbeddingRowsForTheSameAwardCollapseToTheBestScoringOne() {
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        // Two archived-version rows for the same business Award,
+        // pre-sorted by ascending distance (best match first) exactly
+        // as the real repository query guarantees.
+        SemanticSearchRow best = new SemanticSearchRow(
+                "AWARD", 100L, 100L, "204713-00133", 0.10
+        );
+        SemanticSearchRow worse = new SemanticSearchRow(
+                "AWARD", 101L, 101L, "204713-00133", 0.55
+        );
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(best, worse));
+        when(awardArchiveService.findSummariesForAwardNumbers(List.of("204713-00133")))
+                .thenReturn(List.of(new AwardSemanticSummaryRow(
+                        "204713-00133", "CARB-X Accelerator", "Active",
+                        "CARB-X", "Dr. Outterson"
+                )));
+
+        GlobalSearchResponse response =
+                service.search("antibacterial resistance accelerator");
+
+        List<GlobalSearchItemResponse> awardResults = response.results().stream()
+                .filter(r -> "AWARD".equals(r.module()))
+                .toList();
+        assertThat(awardResults).hasSize(1);
+        assertThat(awardResults.get(0).recordId()).isEqualTo(100L);
+    }
+
+    @Test
+    void preservesExactIdentifiersAndLeadingZeroesOnSemanticResults() {
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("PROPOSAL", 1099385L, 1099385L, "01099385")
+                ));
+        when(proposalArchiveRepository.findCurrentSummariesForNumbers(List.of("01099385")))
+                .thenReturn(List.of(new ProposalSemanticSummaryRow(
+                        "01099385", "Gonorrhea Diagnostics Study", "Funded",
+                        "CDC", "Dr. Workowski"
+                )));
+
+        GlobalSearchResponse response =
+                service.search("gonorrhea prevention vaccine research");
+
+        GlobalSearchItemResponse item = response.results().get(0);
+        assertThat(item.identifier()).isEqualTo("01099385");
+        assertThat(item.identifier()).startsWith("0");
+    }
+
 }

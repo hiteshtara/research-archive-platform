@@ -139,6 +139,55 @@ public class AwardArchiveRepository {
                 .optional();
     }
 
+    /*
+     * Set-based batch lookup for Global Search's semantic-result card
+     * enrichment (see GlobalSearchService) - one query resolving every
+     * distinct award_number a batch of semantic hits references, never
+     * one query per result. Same current-row scope (is_primary_current)
+     * and same PI-resolution LATERAL join as searchAwards above, kept
+     * in sync deliberately rather than factored into a shared fragment,
+     * since the two queries' column lists genuinely differ. Awards with
+     * no matching current row (stale/removed since the embedding was
+     * built) are simply absent from the result list - the caller must
+     * treat that as "no enrichment available", not an error.
+     */
+    public List<AwardSemanticSummaryRow> findCurrentSummariesForNumbers(
+            List<String> awardNumbers
+    ) {
+        if (awardNumbers.isEmpty()) {
+            return List.of();
+        }
+
+        return jdbc.sql("""
+                SELECT
+                    av.award_number,
+                    av.title,
+                    av.status_description AS status,
+                    av.sponsor_name AS sponsor,
+                    pi.full_name AS principal_investigator
+                FROM archive.award_version av
+                LEFT JOIN LATERAL (
+                    SELECT ap.full_name
+                    FROM archive.award_person ap
+                    WHERE ap.award_id = av.award_id
+                    ORDER BY
+                        CASE
+                            WHEN UPPER(TRIM(ap.contact_role_code)) = 'PI'
+                            THEN 0
+                            ELSE 1
+                        END,
+                        ap.full_name NULLS LAST,
+                        ap.award_person_id
+                    LIMIT 1
+                ) pi ON TRUE
+                WHERE av.award_number IN (:awardNumbers)
+                  AND av.is_primary_current = TRUE
+                """)
+                .param("awardNumbers", awardNumbers)
+                .query(AwardSemanticSummaryRow.class)
+                .list();
+    }
+
     public long countSequences(
             String awardNumber
     ) {

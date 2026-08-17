@@ -87,6 +87,59 @@ public class ProposalArchiveRepository {
                 .list();
     }
 
+    /*
+     * Set-based batch lookup for Global Search's semantic-result card
+     * enrichment (see GlobalSearchService) - one query resolving every
+     * distinct proposal_number a batch of semantic hits references,
+     * never one query per result. Same "latest version wins" ranking as
+     * findFamilies above, kept as its own query rather than reusing
+     * findFamilies directly since that method's ILIKE-based filter
+     * shape doesn't fit an exact-set IN lookup. Proposals with no
+     * matching row (stale/removed since the embedding was built) are
+     * simply absent from the result list - the caller must treat that
+     * as "no enrichment available", not an error.
+     */
+    public List<ProposalSemanticSummaryRow> findCurrentSummariesForNumbers(
+            List<String> proposalNumbers
+    ) {
+        if (proposalNumbers.isEmpty()) {
+            return List.of();
+        }
+
+        return jdbc.sql("""
+                WITH ranked AS (
+                    SELECT
+                        proposal_number,
+                        version_number,
+                        title,
+                        proposal_sequence_status,
+                        sponsor_name,
+                        principal_investigator_name,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY proposal_number
+                            ORDER BY
+                                version_number DESC,
+                                source_update_timestamp DESC NULLS LAST,
+                                proposal_id DESC
+                        ) AS row_rank
+                    FROM archive.proposal_version
+                    WHERE proposal_number IN (:proposalNumbers)
+                )
+                SELECT
+                    proposal_number,
+                    title,
+                    proposal_sequence_status AS status,
+                    sponsor_name AS sponsor,
+                    principal_investigator_name
+                        AS principal_investigator
+                FROM ranked
+                WHERE row_rank = 1
+                """)
+                .param("proposalNumbers", proposalNumbers)
+                .query(ProposalSemanticSummaryRow.class)
+                .list();
+    }
+
     public Optional<ProposalRowResponse> findCurrent(
             String proposalNumber
     ) {

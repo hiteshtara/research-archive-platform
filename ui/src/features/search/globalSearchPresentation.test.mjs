@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { filterOutIrbResults } from "./globalSearchPresentation.mjs";
+import {
+  describeResultCard,
+  filterOutIrbResults,
+} from "./globalSearchPresentation.mjs";
 
 function readGlobalSearchPageSource() {
   const pagePath = fileURLToPath(
@@ -115,4 +118,170 @@ test("Global Search results are routed through filterOutIrbResults before render
   const source = readGlobalSearchPageSource();
 
   assert.match(source, /filterOutIrbResults\(await globalSearch\(/);
+});
+
+// --- describeResultCard: semantic result card enrichment -----------------
+//
+// Fixtures mirror the live acceptance queries used to verify the
+// semantic-result card enrichment feature:
+// "rural mortality disparities cancer" -> Award 104628-00002, and
+// "gonorrhea prevention vaccine research" -> Proposals 01117952/01099385.
+
+test("describeResultCard renders full metadata for an enriched Award semantic match", () => {
+  const card = describeResultCard({
+    module: "AWARD",
+    identifier: "104628-00002",
+    title: "Cancer Disparities in California",
+    subtitle: "National Cancer Institute",
+    status: "Active",
+    principalInvestigator: "Ulrike Boehmer",
+    matchedField: null,
+    matchedValue: null,
+    matchType: "RELATED",
+  });
+
+  assert.equal(card.title, "Cancer Disparities in California");
+  assert.equal(card.identifier, "104628-00002");
+  assert.equal(
+    card.identifierLine,
+    "104628-00002 • National Cancer Institute",
+  );
+  assert.equal(card.piLine, "PI: Ulrike Boehmer");
+  assert.equal(card.showSemanticChip, true);
+  assert.equal(card.semanticChipLabel, "Semantic match");
+  // Real metadata is present, so no "Matched on: ..." duplicate caption.
+  assert.equal(card.matchedCaption, null);
+});
+
+test("describeResultCard renders full metadata for an enriched Proposal semantic match", () => {
+  const card = describeResultCard({
+    module: "PROPOSAL",
+    identifier: "01117952",
+    title: "Gonorrhea Vaccine Development",
+    subtitle: "NIH",
+    status: "Funded",
+    principalInvestigator: "Dr. Jerse",
+    matchedField: null,
+    matchedValue: null,
+    matchType: "RELATED",
+  });
+
+  assert.equal(card.title, "Gonorrhea Vaccine Development");
+  assert.equal(card.identifierLine, "01117952 • NIH");
+  assert.equal(card.piLine, "PI: Dr. Jerse");
+  assert.equal(card.showSemanticChip, true);
+  assert.equal(card.matchedCaption, null);
+});
+
+test("describeResultCard omits the PI line and subtitle when a semantic match has no PI or sponsor on record", () => {
+  const card = describeResultCard({
+    module: "AWARD",
+    identifier: "104615-00002",
+    title: "Untitled Pending Award",
+    subtitle: null,
+    status: "Pending",
+    principalInvestigator: null,
+    matchedField: null,
+    matchedValue: null,
+    matchType: "RELATED",
+  });
+
+  assert.equal(card.title, "Untitled Pending Award");
+  // No subtitle -> identifierLine is the bare identifier, not
+  // "104615-00002 • null" or a trailing separator.
+  assert.equal(card.identifierLine, "104615-00002");
+  assert.equal(card.piLine, null);
+});
+
+test("describeResultCard removes the duplicated identifier caption once a semantic result has real enrichment", () => {
+  // Before enrichment, a semantic result's matchedField/matchedValue
+  // duplicated the identifier already shown on the line above
+  // ("Matched on: Semantic (104628-00002)"). Once the backend resolves
+  // real metadata, it leaves matchedField/matchedValue null specifically
+  // to drop that duplicate - see GlobalSearchService.
+  const unenriched = describeResultCard({
+    module: "SUBAWARD",
+    identifier: "3595",
+    title: "3595",
+    subtitle: null,
+    matchedField: "Semantic",
+    matchedValue: "3595",
+    matchType: "RELATED",
+  });
+  const enriched = describeResultCard({
+    module: "AWARD",
+    identifier: "104628-00002",
+    title: "Cancer Disparities in California",
+    subtitle: "National Cancer Institute",
+    matchedField: null,
+    matchedValue: null,
+    matchType: "RELATED",
+  });
+
+  assert.equal(unenriched.matchedCaption, "Matched on: Semantic (3595)");
+  assert.equal(enriched.matchedCaption, null);
+});
+
+test("describeResultCard preserves exact identifiers and leading zeroes", () => {
+  const proposalCard = describeResultCard({
+    module: "PROPOSAL",
+    identifier: "01099385",
+    title: "Gonorrhea Diagnostics Study",
+    subtitle: "CDC",
+    matchedField: null,
+    matchedValue: null,
+    matchType: "RELATED",
+  });
+  const awardCard = describeResultCard({
+    module: "AWARD",
+    identifier: "104628-00002",
+    title: "Cancer Disparities in California",
+    subtitle: null,
+    matchedField: null,
+    matchedValue: null,
+    matchType: "RELATED",
+  });
+
+  assert.equal(proposalCard.identifier, "01099385");
+  assert.ok(proposalCard.identifier.startsWith("0"));
+  assert.equal(awardCard.identifier, "104628-00002");
+});
+
+test("describeResultCard shows no semantic chip for a structured (non-semantic) result", () => {
+  const card = describeResultCard({
+    module: "AWARD",
+    identifier: "100200-00001",
+    title: "Campbell Research",
+    subtitle: "NSF",
+    matchedField: "Title",
+    matchedValue: "Campbell Research",
+    matchType: null,
+  });
+
+  assert.equal(card.showSemanticChip, false);
+  assert.equal(
+    card.matchedCaption,
+    "Matched on: Title (Campbell Research)",
+  );
+});
+
+test("describeResultCard never throws on a null/undefined result", () => {
+  assert.doesNotThrow(() => describeResultCard(null));
+  assert.doesNotThrow(() => describeResultCard(undefined));
+
+  const card = describeResultCard(undefined);
+  assert.equal(card.identifier, "");
+  assert.equal(card.piLine, null);
+  assert.equal(card.matchedCaption, null);
+});
+
+test("Global Search cards render through describeResultCard rather than raw backend fields", () => {
+  const source = readGlobalSearchPageSource();
+
+  assert.match(source, /describeResultCard\(result\)/);
+  assert.match(source, /card\.title/);
+  assert.match(source, /card\.identifierLine/);
+  assert.match(source, /card\.piLine/);
+  assert.match(source, /card\.matchedCaption/);
+  assert.doesNotMatch(source, /"Related match"/);
 });
