@@ -11,6 +11,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 
 import { searchAwardVersionsV1 } from "../../api/client";
@@ -25,8 +26,39 @@ import {
   versionCurrentLabel,
   versionDetailPath,
 } from "../../features/award/awardVersionSearchPresentation.mjs";
+import { useDebouncedCallback } from "../../hooks/useDebouncedCallback";
 
 const PAGE_SIZE = 25;
+const SEARCH_DEBOUNCE_MS = 350;
+
+// Keeps a text field feeling instantly responsive to typing (local
+// state, updated synchronously) while the URL/query-param update it
+// eventually commits - and therefore the network request it triggers,
+// since q/awardNumber/documentNumber/awardId all feed the search
+// queryKey - is debounced to fire only once typing pauses. Stays in
+// sync with external URL changes (e.g. browser back/forward) via the
+// effect below.
+function useDebouncedUrlParam(
+  urlValue: string,
+  commit: (value: string) => void,
+): [string, (value: string) => void] {
+  const [draft, setDraft] = useState(urlValue);
+  const debouncedCommit = useDebouncedCallback(commit, SEARCH_DEBOUNCE_MS);
+
+  useEffect(() => {
+    setDraft(urlValue);
+    // Only external (e.g. back/forward) changes to urlValue should
+    // resync draft - not every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlValue]);
+
+  function handleChange(value: string) {
+    setDraft(value);
+    debouncedCommit(value);
+  }
+
+  return [draft, handleChange];
+}
 
 // Historical Award Records explorer: one result per award_id (a
 // specific version), never scoped to the current version - the
@@ -104,6 +136,25 @@ export function AwardVersionSearchPage() {
     setSearchParams(next);
   }
 
+  // Debounced drafts for display/typing only - q/awardNumber/
+  // documentNumber/awardId above (URL-sourced) remain the values that
+  // actually drive the search query, unchanged until typing pauses.
+  const [qDraft, setQDraft] = useDebouncedUrlParam(q, (value) =>
+    updateParam("q", value),
+  );
+  const [awardNumberDraft, setAwardNumberDraft] = useDebouncedUrlParam(
+    awardNumber,
+    (value) => updateParam("awardNumber", value),
+  );
+  const [documentNumberDraft, setDocumentNumberDraft] = useDebouncedUrlParam(
+    documentNumber,
+    (value) => updateParam("documentNumber", value),
+  );
+  const [awardIdDraft, setAwardIdDraft] = useDebouncedUrlParam(
+    awardId,
+    (value) => updateParam("awardId", value),
+  );
+
   function setPage(nextPage: number) {
     const next = new URLSearchParams(searchParams);
     next.set("page", String(nextPage));
@@ -140,8 +191,8 @@ export function AwardVersionSearchPage() {
             fullWidth
             autoFocus
             placeholder="Title, sponsor, PI, or lead unit..."
-            value={q}
-            onChange={(event) => updateParam("q", event.target.value)}
+            value={qDraft}
+            onChange={(event) => setQDraft(event.target.value)}
             slotProps={{
               input: {
                 startAdornment: <SearchOutlined sx={{ mr: 1 }} />,
@@ -153,21 +204,21 @@ export function AwardVersionSearchPage() {
             <TextField
               fullWidth
               label="Award number (exact)"
-              value={awardNumber}
-              onChange={(event) => updateParam("awardNumber", event.target.value)}
+              value={awardNumberDraft}
+              onChange={(event) => setAwardNumberDraft(event.target.value)}
             />
             <TextField
               fullWidth
               label="Document number (exact)"
-              value={documentNumber}
-              onChange={(event) => updateParam("documentNumber", event.target.value)}
+              value={documentNumberDraft}
+              onChange={(event) => setDocumentNumberDraft(event.target.value)}
             />
             <TextField
               fullWidth
               label="Award ID (exact)"
               placeholder="e.g. 3561589"
-              value={awardId}
-              onChange={(event) => updateParam("awardId", event.target.value)}
+              value={awardIdDraft}
+              onChange={(event) => setAwardIdDraft(event.target.value)}
               error={awardIdError}
               helperText={awardIdError ? "Award ID must be a whole number." : " "}
             />
