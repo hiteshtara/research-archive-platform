@@ -2002,6 +2002,42 @@ def _next_ready_batch(engine: Engine, *, module: str) -> int | None:
         domain, entity_type = SUBAWARD_ATTACHMENT_DOMAIN, SUBAWARD_ATTACHMENT_ENTITY_TYPE
 
     with engine.connect() as connection:
+        if module == SUBAWARD:
+            # 2026-08-16 incident: 3,424 duplicate READY batches
+            # (batch_id 219-3642) share the identical file_data_id
+            # selection as batch_id=218, which was later completed via
+            # the explicit --batch-id pilot path. Once every
+            # file_data_id a batch selected is already ARCHIVED (not
+            # PENDING/UPLOADING), that batch has zero real upload
+            # candidates left - the unfixed version of this function
+            # would still return it, and the Stage 2 loop in
+            # run_orchestration would redundantly reconcile it and
+            # unconditionally flip its status to COMPLETED even though
+            # no real work happened, corrupting the READY state
+            # deliberately preserved as incident evidence. This EXISTS
+            # clause is deliberately not a hardcoded batch_id range -
+            # it generalizes to any batch (past or future) whose own
+            # candidates have already been fully archived, so a batch
+            # is only ever returned here if at least one of its own
+            # file_data_ids still has a real, unarchived candidate.
+            return connection.execute(
+                text(
+                    "SELECT b.batch_id FROM archive.etl_batch b "
+                    "WHERE b.domain = :domain AND b.entity_type = :entity_type "
+                    "AND b.status = 'READY' "
+                    "AND EXISTS ("
+                    "  SELECT 1 FROM archive.subaward_attachment_archive a "
+                    "  WHERE a.file_data_id IN ("
+                    "    SELECT jsonb_array_elements_text("
+                    "      b.selection_parameters -> 'file_data_ids'"
+                    "    )"
+                    "  ) AND a.archive_status IN ('PENDING', 'UPLOADING')"
+                    ") "
+                    "ORDER BY b.batch_id ASC LIMIT 1"
+                ),
+                {"domain": domain, "entity_type": entity_type},
+            ).scalar()
+
         return connection.execute(
             text(
                 "SELECT batch_id FROM archive.etl_batch "
