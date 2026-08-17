@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 
 import { searchAwardsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -41,10 +41,19 @@ const SEARCH_DIMENSIONS = [
 // search-hero + results-list presentation.
 export function AwardSearchPage() {
   const navigate = useNavigate();
+  // Search state lives in the URL (?q=...&page=...), not local-only
+  // useState, so navigating away and back (or using browser back/
+  // forward) restores the exact search instead of silently resetting
+  // it - matching AwardVersionSearchPage's own established convention
+  // for this domain - and a revisit within the query cache's staleTime
+  // renders instantly from cache instead of re-fetching.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialQuery = searchParams.get("q") ?? "";
+  const initialPage = Number(searchParams.get("page") ?? "0") || 0;
 
-  const [query, setQuery] = useState("");
-  const [appliedQuery, setAppliedQuery] = useState("");
-  const [page, setPage] = useState(0);
+  const [query, setQuery] = useState(initialQuery);
+  const [appliedQuery, setAppliedQuery] = useState(initialQuery);
+  const [page, setPage] = useState(initialPage);
 
   const searchQuery = useQuery({
     queryKey: ["award-search-v1", appliedQuery, page],
@@ -54,9 +63,16 @@ export function AwardSearchPage() {
   });
 
   function runSearch(value: string) {
+    const trimmed = value.trim();
     setQuery(value);
-    setAppliedQuery(value.trim());
+    setAppliedQuery(trimmed);
     setPage(0);
+    setSearchParams(trimmed ? { q: trimmed } : {});
+  }
+
+  function goToPage(nextPage: number) {
+    setPage(nextPage);
+    setSearchParams(appliedQuery ? { q: appliedQuery, page: String(nextPage) } : {});
   }
 
   const hasSearched = appliedQuery.trim().length > 0;
@@ -289,7 +305,7 @@ export function AwardSearchPage() {
                 <PaginationFooter
                   totalPages={totalPages}
                   page={page}
-                  onPageChange={setPage}
+                  onPageChange={goToPage}
                 />
               </Box>
             </>

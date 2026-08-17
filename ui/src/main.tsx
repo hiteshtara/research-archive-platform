@@ -23,7 +23,13 @@ const queryClient = new QueryClient({
 
         return failureCount < 1;
       },
-      staleTime: 30_000,
+      // A read-only, preserved historical archive - see CLAUDE.md - is
+      // never mutated by user activity and is refreshed only by
+      // periodic/manual ETL loads, not live traffic, so a short
+      // staleTime buys no real freshness and just forces a redundant
+      // ~1-2s network round-trip on every revisit to the same query
+      // within a session (e.g. navigating away from a search and back).
+      staleTime: 5 * 60_000,
       refetchOnWindowFocus: false,
     },
   },
