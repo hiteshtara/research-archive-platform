@@ -129,6 +129,63 @@ Multiple codes can be piloted together in one run:
     --image-uri <already-pushed-image-uri>
 ```
 
+## Single-batch pilot mode (`--batch-id`)
+
+**Background:** on 2026-08-16, resuming the Subaward Code `3595` pilot
+(batch_id `218`) surfaced a real incident: `run_orchestration`'s
+Subaward Stage 1 loop never exhausted (its exclusion query only
+recognized a `file_data_id` as ineligible once `ARCHIVED`, a status
+only Stage 2 can set - Stage 2 never runs until Stage 1's own loop
+exits), so it created 3,424 duplicate batches (batch_id `219`-`3642`,
+all `READY`, all sharing the identical 13-file selection as `218`)
+before crashing on an unrelated Oracle disconnect. That loop is now
+fixed, and batches `219`-`3642` were investigated read-only and
+confirmed harmless (see project memory) - they were deliberately left
+unchanged, no cleanup performed.
+
+Running the ordinary Stage 2 loop again (`--run --subaward-code 3595`
+above) would still work correctly, but wastefully: `_next_ready_batch`
+processes every `READY` batch in ascending `batch_id` order, so it
+would churn through all 3,424 harmless duplicates as no-ops before ever
+reaching `218`. **`--batch-id` is the explicit, single-batch
+alternative** (`attachment_orchestrator.py`'s
+`run_single_subaward_batch`): it reads and writes exactly the one named
+`batch_id`, never Stage 1 (no new batch is ever created), never any
+other batch (`READY` or not) - guaranteeing none of the 219-3642
+duplicates can be touched, redirected into, or multiplied by the run.
+
+This launcher's own `--batch-id` support fails closed before any AWS
+call: it requires `--run` (never `--dry-run` -
+`attachment_orchestrator.py`'s own `--dry-run` branch returns before
+`--batch-id` is ever inspected, so combining them would silently run
+the generic scoped preview instead of validating the named batch) and
+requires at least one `--subaward-code` (never `--all-subawards` or no
+code at all - a single `batch_id` is definitionally already scoped).
+`--expect-file-count` is optional additional validation, only valid
+together with `--batch-id`.
+
+The exact command for the batch `218` pilot - **verify `V077` is
+actually applied to the target database first** (see the Prerequisites
+section above; committing a migration is not the same as it having
+been applied):
+
+```bash
+AWS_PROFILE=bu-nprd \
+POSTGRES_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-XXXXXX \
+ORACLE_SECRET_ID=arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/oracle-XXXXXX \
+  scripts/run-subaward-attachment-loader.sh --run --subaward-code 3595 \
+    --batch-id 218 --expect-file-count 13 --image-uri <already-pushed-image-uri>
+```
+
+`run_single_subaward_batch` itself re-validates before touching
+anything: batch `218` must exist, be
+`domain=SUBAWARD_ATTACHMENT`/`entity_type=SUBAWARD_ATTACHMENT_FILE`, be
+`status=READY`, have been created with `subaward_codes=['3595']`
+exactly (matching `--subaward-code 3595` above), and hold exactly 13
+`file_data_id`s (matching `--expect-file-count 13`) - any mismatch
+returns a `stopped_reason` with no S3/Oracle read and no Postgres
+write.
+
 ## Idempotency rerun
 
 Re-running the **exact same** `--run --subaward-code 3595 ...` command

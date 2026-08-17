@@ -394,6 +394,124 @@ test_no_mutation_before_validation_completes() {
   done
 }
 
+# --- 12. --batch-id command construction ---------------------------------
+
+test_batch_id_command_with_expect_file_count() {
+  local output command_json
+  output="$(
+    export AWS_PROFILE=fake-profile POSTGRES_SECRET_ID=arn:pg ORACLE_SECRET_ID=arn:ora
+    parse_and_validate_args --run --subaward-code SYNTHETIC-SUBAWARD-A \
+      --batch-id 218 --expect-file-count 13 --image-uri fake:uri
+    BUCKET="fake-bucket"
+    CONTAINER_NAME="loader"
+    build_command_array
+    build_overrides_json
+    echo "$OVERRIDES_JSON"
+  )"
+  command_json="$(echo "$output" | jq -c '.containerOverrides[0].command')"
+  assert_eq "--batch-id + --expect-file-count: command array" \
+    '["python","attachment_orchestrator.py","--bucket","fake-bucket","--modules","subaward","--ecs","--subaward-code","SYNTHETIC-SUBAWARD-A","--batch-id","218","--expect-file-count","13"]' \
+    "$command_json"
+}
+
+test_batch_id_command_without_expect_file_count() {
+  local output command_json
+  output="$(
+    export AWS_PROFILE=fake-profile POSTGRES_SECRET_ID=arn:pg ORACLE_SECRET_ID=arn:ora
+    parse_and_validate_args --run --subaward-code SYNTHETIC-SUBAWARD-A \
+      --batch-id 218 --image-uri fake:uri
+    BUCKET="fake-bucket"
+    CONTAINER_NAME="loader"
+    build_command_array
+    build_overrides_json
+    echo "$OVERRIDES_JSON"
+  )"
+  command_json="$(echo "$output" | jq -c '.containerOverrides[0].command')"
+  assert_eq "--batch-id alone (no --expect-file-count): command array has no --expect-file-count token" \
+    '["python","attachment_orchestrator.py","--bucket","fake-bucket","--modules","subaward","--ecs","--subaward-code","SYNTHETIC-SUBAWARD-A","--batch-id","218"]' \
+    "$command_json"
+}
+
+# --- 13. --batch-id validation: fails closed before any AWS call ---------
+
+test_batch_id_requires_run_not_dry_run() {
+  local output rc
+  set +e
+  output="$(run_parse_only --dry-run --subaward-code SYNTHETIC-SUBAWARD-A --batch-id 218 --image-uri fake:uri)"; rc=$?
+  set -e
+  assert_not_zero "--batch-id combined with --dry-run is rejected" "$rc"
+  assert_contains "batch-id/dry-run rejection error message" "$output" "requires --run"
+}
+
+test_batch_id_requires_at_least_one_subaward_code() {
+  local output rc
+  set +e
+  output="$(run_parse_only --run --batch-id 218 --image-uri fake:uri)"; rc=$?
+  set -e
+  assert_not_zero "--batch-id without any --subaward-code is rejected" "$rc"
+  assert_contains "batch-id/unscoped rejection error message" "$output" "--subaward-code"
+}
+
+test_batch_id_rejects_all_subawards() {
+  local output rc
+  set +e
+  output="$(run_parse_only --run --all-subawards --batch-id 218 --image-uri fake:uri)"; rc=$?
+  set -e
+  assert_not_zero "--batch-id combined with --all-subawards is rejected" "$rc"
+  assert_contains "batch-id/all-subawards rejection error message" "$output" "--all-subawards"
+}
+
+test_batch_id_must_be_a_positive_integer() {
+  local output rc
+  set +e
+  output="$(run_parse_only --run --subaward-code SYNTHETIC-SUBAWARD-A --batch-id "218; rm -rf /" --image-uri fake:uri)"; rc=$?
+  set -e
+  assert_not_zero "a non-numeric --batch-id is rejected" "$rc"
+  assert_contains "non-numeric batch-id rejection error message" "$output" "positive integer"
+}
+
+test_expect_file_count_must_be_a_non_negative_integer() {
+  local output rc
+  set +e
+  output="$(run_parse_only --run --subaward-code SYNTHETIC-SUBAWARD-A --batch-id 218 --expect-file-count nope --image-uri fake:uri)"; rc=$?
+  set -e
+  assert_not_zero "a non-numeric --expect-file-count is rejected" "$rc"
+  assert_contains "non-numeric expect-file-count rejection error message" "$output" "non-negative integer"
+}
+
+test_expect_file_count_requires_batch_id() {
+  local output rc
+  set +e
+  output="$(run_parse_only --run --subaward-code SYNTHETIC-SUBAWARD-A --expect-file-count 13 --image-uri fake:uri)"; rc=$?
+  set -e
+  assert_not_zero "--expect-file-count without --batch-id is rejected" "$rc"
+  assert_contains "expect-file-count-without-batch-id rejection error message" "$output" "only valid together with --batch-id"
+}
+
+test_no_mutation_before_validation_completes_for_batch_id() {
+  local scenarios=(
+    "--dry-run --subaward-code SYNTHETIC-SUBAWARD-A --batch-id 218 --image-uri fake:uri" # dry-run + batch-id
+    "--run --batch-id 218 --image-uri fake:uri"                                          # unscoped batch-id
+    "--run --all-subawards --batch-id 218 --image-uri fake:uri"                          # all-subawards + batch-id
+    "--run --subaward-code SYNTHETIC-SUBAWARD-A --batch-id notanumber --image-uri fake:uri" # bad batch-id
+  )
+  local scenario
+  for scenario in "${scenarios[@]}"; do
+    BUILD_AND_REGISTER_CALLED=0
+    RUN_ECS_TASK_CALLED=0
+    set +e
+    (
+      # shellcheck disable=SC2086
+      run_parse_only $scenario > /dev/null 2>&1
+    )
+    set -e
+    assert_eq "no mutation before validation ('$scenario'): build_and_register_task_definition never called" \
+      "0" "$BUILD_AND_REGISTER_CALLED"
+    assert_eq "no mutation before validation ('$scenario'): run_ecs_task never called" \
+      "0" "$RUN_ECS_TASK_CALLED"
+  done
+}
+
 # --- Run everything -----------------------------------------------------
 
 test_dry_run_command_for_one_code
@@ -408,6 +526,15 @@ test_command_json_cannot_lose_or_merge_arguments
 test_nonzero_task_exit_propagates
 test_zero_task_exit_propagates
 test_no_mutation_before_validation_completes
+test_batch_id_command_with_expect_file_count
+test_batch_id_command_without_expect_file_count
+test_batch_id_requires_run_not_dry_run
+test_batch_id_requires_at_least_one_subaward_code
+test_batch_id_rejects_all_subawards
+test_batch_id_must_be_a_positive_integer
+test_expect_file_count_must_be_a_non_negative_integer
+test_expect_file_count_requires_batch_id
+test_no_mutation_before_validation_completes_for_batch_id
 
 echo ""
 if [[ "$FAILURES" -eq 0 ]]; then

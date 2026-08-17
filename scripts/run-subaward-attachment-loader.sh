@@ -33,11 +33,24 @@ set -euo pipefail
 #   - Exactly one of --image-uri / --build-image is required. This
 #     script never silently rebuilds an image, and never silently
 #     resolves or reuses a "latest"/previous image on its own.
+#   - --batch-id requires --run (never --dry-run - attachment_orchestrator.py's
+#     own --dry-run branch returns before --batch-id is ever inspected,
+#     so combining them would silently run the generic scoped preview
+#     instead of validating the named batch - this launcher refuses that
+#     combination rather than let it mislead an operator) and requires
+#     at least one --subaward-code (never --all-subawards - a single
+#     batch_id is definitionally already scoped).
 #
 # --- Usage --------------------------------------------------------------
 #
 #   scripts/run-subaward-attachment-loader.sh (--dry-run|--run) \
 #       (--subaward-code CODE [--subaward-code CODE ...] | --all-subawards) \
+#       (--image-uri URI | --build-image)
+#
+#   # Single-batch pilot mode (see --batch-id below):
+#   scripts/run-subaward-attachment-loader.sh --run \
+#       --subaward-code CODE [--subaward-code CODE ...] \
+#       --batch-id ID [--expect-file-count N] \
 #       (--image-uri URI | --build-image)
 #
 # --dry-run: forwards --dry-run to attachment_orchestrator.py - a
@@ -67,6 +80,24 @@ set -euo pipefail
 # --build-image: build/push a fresh image from the current commit before
 #   launching. The explicit alternative to --image-uri - never the
 #   default.
+#
+# --batch-id ID: process exactly this one, already-READY Subaward
+#   attachment batch_id (attachment_orchestrator.py's
+#   run_single_subaward_batch) - never Stage 1 (no new batch is ever
+#   created), never any other batch. Added after the 2026-08-16 incident
+#   that left 3,424 duplicate READY batches (batch_id 219-3642)
+#   alongside the one real pilot batch (218): this is the explicit,
+#   single-batch alternative to the ordinary Stage-2 "process every
+#   READY batch" loop, which would otherwise churn through every
+#   duplicate before reaching the real one. Requires --run (rejected
+#   with --dry-run - see above) and at least one --subaward-code
+#   (rejected with --all-subawards or with no --subaward-code at all -
+#   this launcher never lets --batch-id run unscoped).
+#
+# --expect-file-count N: only valid together with --batch-id. Forwarded
+#   as attachment_orchestrator.py's own --expect-file-count - the
+#   targeted batch fails closed (no S3/Oracle read, no Postgres write)
+#   unless its own file_data_id count matches N exactly.
 #
 # --- Required environment ------------------------------------------------
 #
@@ -129,6 +160,12 @@ set -euo pipefail
 #   # Full population - requires the explicit, separate flag:
 #   AWS_PROFILE=bu-nprd POSTGRES_SECRET_ID=arn:...:postgres ORACLE_SECRET_ID=arn:...:oracle \
 #     scripts/run-subaward-attachment-loader.sh --run --all-subawards --image-uri <uri>
+#
+#   # Single-batch pilot (e.g. the post-incident batch_id=218 pilot -
+#   # see docs/runbooks/attachments/SUBAWARD_ATTACHMENT_ORCHESTRATOR.md):
+#   AWS_PROFILE=bu-nprd POSTGRES_SECRET_ID=arn:...:postgres ORACLE_SECRET_ID=arn:...:oracle \
+#     scripts/run-subaward-attachment-loader.sh --run --subaward-code 3595 \
+#       --batch-id 218 --expect-file-count 13 --image-uri <uri>
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$ROOT_DIR/terraform/environments/dev"
@@ -164,6 +201,8 @@ SUBAWARD_CODES=()
 ALL_SUBAWARDS=false
 IMAGE_URI_OVERRIDE=""
 BUILD_IMAGE=false
+BATCH_ID=""
+EXPECT_FILE_COUNT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -183,6 +222,8 @@ while [[ $# -gt 0 ]]; do
     --all-subawards) ALL_SUBAWARDS=true; shift ;;
     --image-uri) IMAGE_URI_OVERRIDE="$2"; shift 2 ;;
     --build-image) BUILD_IMAGE=true; shift ;;
+    --batch-id) BATCH_ID="$2"; shift 2 ;;
+    --expect-file-count) EXPECT_FILE_COUNT="$2"; shift 2 ;;
     *) echo "ERROR: Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -210,6 +251,41 @@ fi
 if [[ -z "$IMAGE_URI_OVERRIDE" && "$BUILD_IMAGE" == false ]]; then
   echo "ERROR: exactly one of --image-uri URI or --build-image is required - this launcher never silently rebuilds or selects a 'latest'/previous image" >&2
   exit 1
+fi
+
+if [[ -n "$BATCH_ID" && ! "$BATCH_ID" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --batch-id must be a positive integer, got '$BATCH_ID'" >&2
+  exit 1
+fi
+
+if [[ -n "$EXPECT_FILE_COUNT" && ! "$EXPECT_FILE_COUNT" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --expect-file-count must be a non-negative integer, got '$EXPECT_FILE_COUNT'" >&2
+  exit 1
+fi
+
+if [[ -n "$EXPECT_FILE_COUNT" && -z "$BATCH_ID" ]]; then
+  echo "ERROR: --expect-file-count is only valid together with --batch-id" >&2
+  exit 1
+fi
+
+if [[ -n "$BATCH_ID" ]]; then
+  # --batch-id is the single-batch pilot path (attachment_orchestrator.py's
+  # run_single_subaward_batch) - it never creates a batch and never
+  # touches any batch other than the one named, so it makes no sense
+  # paired with a read-only preview or with the unscoped/all-subawards
+  # gate. Fail closed on either before any AWS call is ever made.
+  if [[ "$OPERATION" != "run" ]]; then
+    echo "ERROR: --batch-id requires --run - attachment_orchestrator.py's --dry-run branch returns before --batch-id is ever inspected, so combining them would silently run the generic scoped preview instead of validating the named batch" >&2
+    exit 1
+  fi
+  if [[ "$ALL_SUBAWARDS" == true ]]; then
+    echo "ERROR: --batch-id cannot be combined with --all-subawards - a single batch_id is definitionally already scoped, not the full population" >&2
+    exit 1
+  fi
+  if [[ "${#SUBAWARD_CODES[@]}" -eq 0 ]]; then
+    echo "ERROR: --batch-id requires at least one --subaward-code - an unscoped --batch-id run is refused, matching this launcher's existing scoped-vs-all-subawards safety gate" >&2
+    exit 1
+  fi
 fi
 
 TMP_DIR="$(mktemp -d)"
@@ -312,6 +388,14 @@ build_command_array() {
       COMMAND_ARRAY+=(--subaward-code "$code")
     done
   fi
+
+  if [[ -n "$BATCH_ID" ]]; then
+    COMMAND_ARRAY+=(--batch-id "$BATCH_ID")
+  fi
+
+  if [[ -n "$EXPECT_FILE_COUNT" ]]; then
+    COMMAND_ARRAY+=(--expect-file-count "$EXPECT_FILE_COUNT")
+  fi
 }
 
 build_overrides_json() {
@@ -338,6 +422,10 @@ print_launch_plan() {
   echo "=== Launch plan ==="
   echo "Operation:  $OPERATION"
   echo "Scope:      $([[ "$ALL_SUBAWARDS" == true ]] && echo "ALL SUBAWARDS (unscoped)" || echo "${SUBAWARD_CODES[*]}")"
+  if [[ -n "$BATCH_ID" ]]; then
+    echo "Batch ID:   $BATCH_ID (single-batch pilot mode - no other batch is read or written)"
+    [[ -n "$EXPECT_FILE_COUNT" ]] && echo "Expect file count: $EXPECT_FILE_COUNT"
+  fi
   echo "Image:      $IMAGE_URI"
   echo "Cluster:    $CLUSTER_NAME"
   echo "Task family: $TASK_FAMILY"
