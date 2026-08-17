@@ -9,7 +9,6 @@ import {
   Card,
   CardContent,
   Chip,
-  CircularProgress,
   InputAdornment,
   Stack,
   TextField,
@@ -20,6 +19,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
+import { LoadingState } from "../components/common/LoadingState";
 import { filterOutIrbResults } from "../features/search/globalSearchPresentation.mjs";
 
 
@@ -120,11 +120,13 @@ export function GlobalSearchPage() {
         </Card>
       )}
 
-      {searchQuery.isLoading && (
-        <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-          <CircularProgress />
-        </Box>
+      {queryValue && queryValue.trim().length < 2 && (
+        <Alert severity="info">
+          Enter at least 2 characters to search.
+        </Alert>
       )}
+
+      {searchQuery.isLoading && <LoadingState />}
 
       {searchQuery.isError && (
         <Alert severity="error">
@@ -159,8 +161,20 @@ export function GlobalSearchPage() {
             return (
               <Card
                 key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
                 onClick={() => {
                   if (result.route) {
+                    navigate(result.route);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    clickable &&
+                    result.route &&
+                    (event.key === "Enter" || event.key === " ")
+                  ) {
+                    event.preventDefault();
                     navigate(result.route);
                   }
                 }}
@@ -271,7 +285,7 @@ export function GlobalSearchPage() {
                         {result.matchedField && (
                           <Typography
                             variant="caption"
-                            color="text.disabled"
+                            color="text.secondary"
                             sx={{ mt: 0.5, display: "block" }}
                           >
                             Matched on: {result.matchedField}

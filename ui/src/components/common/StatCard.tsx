@@ -41,7 +41,7 @@ export function StatCard({
         {caption && (
           <Typography
             variant="caption"
-            color="text.disabled"
+            color="text.secondary"
             sx={{ display: "block", mt: 0.5 }}
           >
             {caption}

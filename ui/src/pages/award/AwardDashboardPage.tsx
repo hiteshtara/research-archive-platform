@@ -165,7 +165,7 @@ export function AwardDashboardPage() {
 
           <Typography
             variant="caption"
-            color="text.disabled"
+            color="text.secondary"
             sx={{ display: "block", mt: 0.75, fontFamily: "monospace" }}
           >
             award_id {summary.awardId} &middot; sequence{" "}
@@ -191,15 +191,27 @@ export function AwardDashboardPage() {
         <StatusPill status={summary.status} domain="award" />
       </Box>
 
-      <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: { xs: "column", md: "row" },
+          gap: 3,
+          alignItems: "flex-start",
+        }}
+      >
         <List
           sx={{
-            width: 220,
+            width: { xs: "100%", md: 220 },
             flexShrink: 0,
             border: "1px solid",
             borderColor: "divider",
             borderRadius: 2,
             p: 1,
+            display: { xs: "flex", md: "block" },
+            flexDirection: "row",
+            flexWrap: "nowrap",
+            overflowX: { xs: "auto", md: "visible" },
+            gap: { xs: 0.5, md: 0 },
           }}
         >
           {SECTIONS.map((section) => (
@@ -209,7 +221,9 @@ export function AwardDashboardPage() {
               onClick={() => setActiveSection(section.key)}
               sx={{
                 borderRadius: 1.5,
-                mb: 0.25,
+                mb: { xs: 0, md: 0.25 },
+                flexShrink: { xs: 0, md: 1 },
+                whiteSpace: "nowrap",
                 "&.Mui-selected": {
                   backgroundColor: "rgba(139, 24, 50, 0.10)",
                   color: "primary.main",

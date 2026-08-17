@@ -384,7 +384,7 @@ export function AwardTimeAndMoneySection({ awardId }: { awardId: number }) {
         />
       </Stack>
 
-      <Typography variant="caption" color="text.disabled">
+      <Typography variant="caption" color="text.secondary">
         Totals above reflect this Award version (sequence{" "}
         {summary.sequenceNumber}) only.
       </Typography>
@@ -399,7 +399,7 @@ export function AwardTimeAndMoneySection({ awardId }: { awardId: number }) {
 
       <Divider />
 
-      <Typography variant="caption" color="text.disabled">
+      <Typography variant="caption" color="text.secondary">
         Actions and history below include all versions of Award{" "}
         {summary.awardNumber}, not just the one you&rsquo;re viewing.
       </Typography>

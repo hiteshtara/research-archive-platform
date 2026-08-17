@@ -206,7 +206,7 @@ function TreeNodeCard({
           <Typography
             component="span"
             variant="caption"
-            color="text.disabled"
+            color="text.secondary"
             sx={{ ml: 1 }}
           >
             (inactive link)

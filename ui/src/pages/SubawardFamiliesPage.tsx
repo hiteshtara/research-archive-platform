@@ -136,6 +136,8 @@ export function SubawardFamiliesPage() {
                         key={subaward.subawardId}
                         hover
                         sx={{ cursor: "pointer" }}
+                        role="button"
+                        tabIndex={0}
                         onClick={() =>
                           navigate(
                             `/subawards/${encodeURIComponent(
@@ -143,6 +145,16 @@ export function SubawardFamiliesPage() {
                             )}`,
                           )
                         }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            navigate(
+                              `/subawards/${encodeURIComponent(
+                                subaward.subawardId,
+                              )}`,
+                            );
+                          }
+                        }}
                       >
                         <TableCell>
                           <Typography sx={{ fontWeight: 700 }}>

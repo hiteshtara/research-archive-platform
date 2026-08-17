@@ -14,7 +14,6 @@ import {
   Card,
   CardContent,
   Chip,
-  CircularProgress,
   Grid,
   InputAdornment,
   Stack,
@@ -26,6 +25,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getDashboard } from "../api/client";
+import { LoadingState } from "../components/common/LoadingState";
 import {
   futureModuleCards,
   historicalActivityCards,
@@ -52,7 +52,7 @@ export function DashboardPage() {
   function submitSearch() {
     const normalized = searchText.trim();
 
-    if (normalized) {
+    if (normalized.length >= 2) {
       navigate(`/search?query=${encodeURIComponent(normalized)}`);
     }
   }
@@ -63,11 +63,7 @@ export function DashboardPage() {
   });
 
   if (dashboardQuery.isLoading) {
-    return (
-      <Box sx={{ display: "grid", placeItems: "center", minHeight: 400 }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingState />;
   }
 
   if (dashboardQuery.isError || !dashboardQuery.data) {
@@ -136,7 +132,7 @@ export function DashboardPage() {
           type="submit"
           variant="contained"
           size="large"
-          disabled={!searchText.trim()}
+          disabled={searchText.trim().length < 2}
           sx={{
             minWidth: 140,
             minHeight: 58,
@@ -162,7 +158,15 @@ export function DashboardPage() {
               return (
                 <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 3 }}>
                   <Card
+                    role="button"
+                    tabIndex={0}
                     onClick={() => navigate(card.path)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        navigate(card.path);
+                      }
+                    }}
                     sx={{
                       height: "100%",
                       cursor: "pointer",
@@ -235,7 +239,15 @@ export function DashboardPage() {
             return (
               <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
                 <Card
+                  role="button"
+                  tabIndex={0}
                   onClick={() => navigate(card.path)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(card.path);
+                    }
+                  }}
                   sx={{
                     height: "100%",
                     cursor: "pointer",

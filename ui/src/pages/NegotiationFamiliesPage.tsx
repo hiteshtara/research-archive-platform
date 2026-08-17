@@ -135,6 +135,8 @@ export function NegotiationFamiliesPage() {
                         key={negotiation.negotiationId}
                         hover
                         sx={{ cursor: "pointer" }}
+                        role="button"
+                        tabIndex={0}
                         onClick={() =>
                           navigate(
                             `/negotiations/${encodeURIComponent(
@@ -142,6 +144,16 @@ export function NegotiationFamiliesPage() {
                             )}`,
                           )
                         }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            navigate(
+                              `/negotiations/${encodeURIComponent(
+                                negotiation.negotiationId,
+                              )}`,
+                            );
+                          }
+                        }}
                       >
                         <TableCell>
                           <Typography sx={{ fontWeight: 700 }}>

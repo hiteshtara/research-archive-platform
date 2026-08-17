@@ -1,8 +1,9 @@
-import { Alert, Box, CircularProgress } from "@mui/material";
+import { Alert } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useParams } from "react-router-dom";
 
 import { getProposalWorkspace } from "../api/client";
+import { LoadingState } from "../components/common/LoadingState";
 
 // Retired: this page's own General/Awards/History tabs predated the
 // current ProposalDashboardPage (Summary/Versions/Funded Awards/
@@ -34,9 +35,5 @@ export function ProposalWorkspacePage() {
     return <Alert severity="error">Unable to load Proposal workspace.</Alert>;
   }
 
-  return (
-    <Box sx={{ display: "grid", placeItems: "center", py: 10 }}>
-      <CircularProgress />
-    </Box>
-  );
+  return <LoadingState />;
 }

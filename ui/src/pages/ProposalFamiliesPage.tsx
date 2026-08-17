@@ -121,11 +121,21 @@ export function ProposalFamiliesPage() {
                         key={proposal.proposalNumber}
                         hover
                         sx={{ cursor: "pointer" }}
+                        role="button"
+                        tabIndex={0}
                         onClick={() =>
                           navigate(
                             `/proposals/dashboard/${proposal.currentProposalId}`,
                           )
                         }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            navigate(
+                              `/proposals/dashboard/${proposal.currentProposalId}`,
+                            );
+                          }
+                        }}
                       >
                         <TableCell>
                           <Typography sx={{ fontWeight: 700 }}>

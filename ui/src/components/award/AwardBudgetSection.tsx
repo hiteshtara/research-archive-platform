@@ -66,7 +66,7 @@ function BudgetSummaryPanel({ awardId }: { awardId: number }) {
           {selectedBudgetLabel(summary)}
         </Typography>
         {scopeNote && (
-          <Typography variant="caption" color="text.disabled">
+          <Typography variant="caption" color="text.secondary">
             {scopeNote}
           </Typography>
         )}
@@ -148,7 +148,7 @@ function BudgetSummaryPanel({ awardId }: { awardId: number }) {
       </Typography>
 
       {scopeNote && (
-        <Typography variant="caption" color="text.disabled">
+        <Typography variant="caption" color="text.secondary">
           {scopeNote}
         </Typography>
       )}
