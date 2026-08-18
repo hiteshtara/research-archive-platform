@@ -47,6 +47,19 @@ public class SensitiveFieldRedactor {
             Pattern.compile(
                     "(?i)(X-Amz-(?:Signature|Credential|Security-Token))"
                             + "=[^&\\s]+"
+            ),
+            // HTTP Authorization headers - archived raw SOAP/HTTP
+            // transaction dumps (e.g. Award SAP transmission sentData/
+            // returnedData) can carry a real Basic/Bearer/Digest
+            // credential verbatim (Basic is base64(username:password)
+            // - trivially reversible, not just an opaque token). Match
+            // "Authorization" as either a header line (": ") or a
+            // serialized map entry ("=[...]" / "=..."), independent of
+            // surrounding punctuation.
+            Pattern.compile(
+                    "(?i)Authorization\\s*[:=]\\s*\\[?"
+                            + "(?:Basic|Bearer|Digest|AWS4-HMAC-SHA256)"
+                            + "\\s+[^\\]\\r\\n,}]+\\]?"
             )
     );
 

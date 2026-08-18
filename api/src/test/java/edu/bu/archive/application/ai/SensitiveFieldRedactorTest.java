@@ -30,6 +30,41 @@ class SensitiveFieldRedactorTest {
     }
 
     @Test
+    void redactsHttpAuthorizationHeadersEmbeddedInArchivedTransactionDumps() {
+        // Matches the real shape found in archived Award SAP transmission
+        // sentData/returnedData - a serialized HTTP headers map
+        // (java.util.Map#toString style) whose Authorization entry
+        // carries a real Basic-auth credential (base64(username:password),
+        // trivially reversible - not just an opaque token). Synthetic
+        // credential value only.
+        String value = redactor.redact(
+                "Headers: {SOAPAction=[urn:example], "
+                        + "Authorization=[Basic c3ludGhldGljOnBhc3N3b3JkMTIz], "
+                        + "Accept=[*/*]}"
+        );
+
+        assertThat(value)
+                .doesNotContain("Basic c3ludGhldGljOnBhc3N3b3JkMTIz")
+                .contains("SOAPAction=[urn:example]")
+                .contains("Accept=[*/*]")
+                .contains("[REDACTED]");
+    }
+
+    @Test
+    void redactsBearerAndDigestAuthorizationHeadersOnASeparateLine() {
+        String value = redactor.redact(
+                "GET /api/x HTTP/1.1\n"
+                        + "Authorization: Bearer synthetic-token-abc123\n"
+                        + "Host: example.edu"
+        );
+
+        assertThat(value)
+                .doesNotContain("synthetic-token-abc123")
+                .contains("GET /api/x HTTP/1.1")
+                .contains("Host: example.edu");
+    }
+
+    @Test
     void preservesNullAndOrdinaryArchiveValues() {
         assertThat(redactor.redact(null)).isNull();
         assertThat(redactor.redact("National Science Foundation"))

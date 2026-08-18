@@ -95,6 +95,14 @@ public class AwardReportPdfRenderer {
     // max-serialized-context-chars truncation philosophy.
     private static final int FREE_TEXT_TRUNCATE_LIMIT = 4000;
 
+    private final edu.bu.archive.application.ai.SensitiveFieldRedactor sensitiveFieldRedactor;
+
+    public AwardReportPdfRenderer(
+            edu.bu.archive.application.ai.SensitiveFieldRedactor sensitiveFieldRedactor
+    ) {
+        this.sensitiveFieldRedactor = sensitiveFieldRedactor;
+    }
+
     public void render(AwardReportData data, OutputStream outputStream) throws DocumentException {
         Document document = new Document(PageSize.LETTER, 42, 42, 56, 56);
         PdfWriter writer = PdfWriter.getInstance(document, outputStream);
@@ -709,7 +717,13 @@ public class AwardReportPdfRenderer {
         labelParagraph.setSpacingAfter(2);
         document.add(labelParagraph);
 
-        String value = truncatedText(xml);
+        // Archived SAP sentData/returnedData is a raw HTTP/SOAP
+        // transaction dump, not just an XML body - it can carry a real
+        // Authorization header verbatim (see SensitiveFieldRedactor).
+        // Redact on the full value before truncating, so a credential
+        // can never survive by falling on the far side of the
+        // truncation cutoff.
+        String value = truncatedText(sensitiveFieldRedactor.redact(xml));
         Paragraph body = new Paragraph(value.equals(EM_DASH) ? "Not recorded." : value, MONOSPACE_FONT);
         body.setSpacingAfter(6);
         document.add(body);

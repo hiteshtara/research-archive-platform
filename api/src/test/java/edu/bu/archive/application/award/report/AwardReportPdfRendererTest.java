@@ -6,6 +6,7 @@ import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardBudgetSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardCommentsResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardSapTransmissionResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardTermsResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
@@ -35,7 +36,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class AwardReportPdfRendererTest {
 
-    private final AwardReportPdfRenderer renderer = new AwardReportPdfRenderer();
+    private final AwardReportPdfRenderer renderer =
+            new AwardReportPdfRenderer(new edu.bu.archive.application.ai.SensitiveFieldRedactor());
 
     @Test
     void emptySectionsRenderSafelyWithNoExceptionsAndNoDataMessage() throws Exception {
@@ -96,6 +98,36 @@ class AwardReportPdfRendererTest {
         assertThat(text).contains(hostileTitle);
         assertThat(text).doesNotContain("&lt;script&gt;");
         assertThat(text).doesNotContain("&amp;");
+    }
+
+    @Test
+    void sapTransmissionAuthorizationHeaderIsRedactedNotRenderedVerbatim() throws Exception {
+        // Mirrors the real shape found in archived Award SAP
+        // transmission sentData/returnedData - a serialized HTTP
+        // headers dump whose Authorization entry carries a real
+        // Basic-auth credential (base64(username:password) - trivially
+        // reversible). Synthetic credential value only; never the real
+        // one.
+        String rawSentData =
+                "Headers: {SOAPAction=[urn:example], "
+                        + "Authorization=[Basic c3ludGhldGljOnBhc3N3b3JkMTIz], "
+                        + "Accept=[*/*]} Payload: <soap:Envelope><Body/></soap:Envelope>";
+
+        AwardSapTransmissionResponse transmission = new AwardSapTransmissionResponse(
+                1L, "900000-00001", 1, "INIT", "TX", "S", true,
+                LocalDate.of(2020, 1, 1), "C", 1, "SPN", "M", "SAPDOC-1",
+                rawSentData, null, List.of()
+        );
+        AwardReportData data = withSapTransmissions(baseData(), List.of(transmission));
+
+        String text = renderToText(data);
+
+        assertThat(text)
+                .doesNotContain("c3ludGhldGljOnBhc3N3b3JkMTIz")
+                .doesNotContain("Basic c3ludGhldGljOnBhc3N3b3JkMTIz")
+                .contains("[REDACTED]")
+                .contains("SOAPAction=[urn:example]")
+                .contains("soap:Envelope");
     }
 
     @Test
@@ -284,6 +316,19 @@ class AwardReportPdfRendererTest {
                 base.budgetLineItems(), base.budgetPersonnel(), base.timeAndMoneySummary(),
                 base.timeAndMoneyActions(), base.timeAndMoneyHistory(), base.terms(),
                 base.customData(), base.comments(), base.sapTransmissions(), base.generatedAt()
+        );
+    }
+
+    private static AwardReportData withSapTransmissions(
+            AwardReportData base, List<AwardSapTransmissionResponse> sapTransmissions
+    ) {
+        return new AwardReportData(
+                base.summary(), base.versions(), base.people(), base.fundingProposals(),
+                base.fundingSubawards(), base.associatedNegotiations(), base.amounts(),
+                base.budgetSummary(), base.budgetVersions(), base.budgetPeriods(),
+                base.budgetLineItems(), base.budgetPersonnel(), base.timeAndMoneySummary(),
+                base.timeAndMoneyActions(), base.timeAndMoneyHistory(), base.terms(),
+                base.customData(), base.comments(), sapTransmissions, base.generatedAt()
         );
     }
 
