@@ -212,6 +212,14 @@ export function AwardDashboardPage() {
             flexWrap: "nowrap",
             overflowX: { xs: "auto", md: "visible" },
             gap: { xs: 0.5, md: 0 },
+            maskImage: {
+              xs: "linear-gradient(to right, black 92%, transparent 100%)",
+              md: "none",
+            },
+            WebkitMaskImage: {
+              xs: "linear-gradient(to right, black 92%, transparent 100%)",
+              md: "none",
+            },
           }}
         >
           {SECTIONS.map((section) => (
