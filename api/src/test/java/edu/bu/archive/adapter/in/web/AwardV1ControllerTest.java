@@ -865,7 +865,7 @@ class AwardV1ControllerTest {
         edu.bu.archive.application.award.report.AwardReportData data =
                 mock(edu.bu.archive.application.award.report.AwardReportData.class);
         AwardSummaryResponse summary = new AwardSummaryResponse(
-                3L, "104628-00002", 2, "Title", "Active", "Sponsor", null,
+                3L, "900000-00001", 2, "Title", "Active", "Sponsor", null,
                 "PI", "Unit", null, null, null, null, null, null,
                 null, null, null, null, null, null, true, "DOC-1"
         );
@@ -878,7 +878,7 @@ class AwardV1ControllerTest {
                 .andExpect(header().string(
                         "Content-Disposition",
                         org.hamcrest.Matchers.containsString(
-                                "Award_104628-00002_Complete_Report.pdf"
+                                "Award_900000-00001_Complete_Report.pdf"
                         )
                 ));
 
@@ -895,7 +895,7 @@ class AwardV1ControllerTest {
         edu.bu.archive.application.award.report.AwardReportData data =
                 mock(edu.bu.archive.application.award.report.AwardReportData.class);
         AwardSummaryResponse summary = new AwardSummaryResponse(
-                3L, "104628/00002; rm -rf", 2, "Title", "Active", "Sponsor", null,
+                3L, "900000/00001; rm -rf", 2, "Title", "Active", "Sponsor", null,
                 "PI", "Unit", null, null, null, null, null, null,
                 null, null, null, null, null, null, true, "DOC-1"
         );
@@ -907,12 +907,12 @@ class AwardV1ControllerTest {
                 .andExpect(header().string(
                         "Content-Disposition",
                         org.hamcrest.Matchers.containsString(
-                                "Award_104628_00002__rm_-rf_Complete_Report.pdf"
+                                "Award_900000_00001__rm_-rf_Complete_Report.pdf"
                         )
                 ))
                 .andExpect(header().string(
                         "Content-Disposition",
-                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("00002; rm"))
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("00001; rm"))
                 ));
     }
 

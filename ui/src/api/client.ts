@@ -1,5 +1,8 @@
 import { accessToken } from "../auth";
-import { parseDownloadFilename } from "../features/award/awardSectionsPresentation.mjs";
+import {
+  buildAwardReportFileName,
+  parseDownloadFilename,
+} from "../features/award/awardSectionsPresentation.mjs";
 
 import type {
   AwardAiQuestionResponse,
@@ -753,6 +756,46 @@ export async function downloadAwardAttachmentV1(
   link.download = parseDownloadFilename(
     response.headers.get("Content-Disposition"),
     fallbackFileName,
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+// Downloads the Complete Award Report PDF via the authenticated
+// GET /api/v1/awards/{awardId}/report.pdf endpoint - same
+// fetch-with-bearer-token/blob/anchor-click pattern as
+// downloadAwardAttachmentV1 above, since the API streams the PDF
+// through a normal authenticated response rather than a redirect.
+export async function downloadAwardReportV1(
+  awardId: number,
+  awardNumber: string,
+): Promise<void> {
+  const token = await accessToken();
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const path = `/api/v1/awards/${encodeURIComponent(awardId)}/report.pdf`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This Award's report could not be generated.");
+    }
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = parseDownloadFilename(
+    response.headers.get("Content-Disposition"),
+    buildAwardReportFileName(awardNumber),
   );
   document.body.appendChild(link);
   link.click();

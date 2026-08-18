@@ -97,6 +97,13 @@ screenshots/
 ui/.env.local
 .gstack/
 
+# Complete Award Report PDF feature - generated output, never source.
+# The real production filename follows Award_<award-number>_Complete_Report.pdf
+# (see AwardV1Controller#sanitizeFilenameSegment); sample-award-report.pdf is
+# the manual-review fixture used while developing/reviewing the renderer.
+sample-award-report.pdf
+Award_*_Complete_Report.pdf
+
 # Obsidian vault (personal notes, decisions, session handoffs — not source;
 # see vault boundaries note: GitHub = code, Obsidian = notes).
 # Anchored to the repo root (/bu/, not bu/) - an unanchored "bu/" pattern

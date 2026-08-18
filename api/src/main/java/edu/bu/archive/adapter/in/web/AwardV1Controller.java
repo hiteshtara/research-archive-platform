@@ -34,6 +34,8 @@ import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
 import edu.bu.archive.application.award.AwardContactService;
+import edu.bu.archive.application.award.report.AwardReportPdfRenderer;
+import edu.bu.archive.application.award.report.AwardReportService;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -91,15 +93,21 @@ public class AwardV1Controller {
     private final AwardArchiveService service;
     private final AwardContactService contactService;
     private final AttachmentAuthorizationService attachmentAuthorizationService;
+    private final AwardReportService reportService;
+    private final AwardReportPdfRenderer reportPdfRenderer;
 
     public AwardV1Controller(
             AwardArchiveService service,
             AwardContactService contactService,
-            AttachmentAuthorizationService attachmentAuthorizationService
+            AttachmentAuthorizationService attachmentAuthorizationService,
+            AwardReportService reportService,
+            AwardReportPdfRenderer reportPdfRenderer
     ) {
         this.service = service;
         this.contactService = contactService;
         this.attachmentAuthorizationService = attachmentAuthorizationService;
+        this.reportService = reportService;
+        this.reportPdfRenderer = reportPdfRenderer;
     }
 
     @Operation(
@@ -798,6 +806,64 @@ public class AwardV1Controller {
                         disposition.toString()
                 )
                 .body(body);
+    }
+
+    @Operation(
+            summary = "Download the Complete Award Report PDF",
+            description = "Resolves awardId to its award_number family "
+                    + "and streams a professionally formatted PDF "
+                    + "covering the cover page, executive summary, "
+                    + "complete version history, people and units, "
+                    + "funding proposals, subawards, negotiations, "
+                    + "amount history, budget, time and money, terms, "
+                    + "custom data, comments/notepad, SAP transmission "
+                    + "history, and a source-reference appendix. Never "
+                    + "includes attachment files, attachment metadata, "
+                    + "Evidence Search results, AI-generated text, or "
+                    + "S3/storage internals."
+    )
+    @ApiResponse(responseCode = "200", description = "The Complete Award Report PDF.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/report.pdf")
+    public ResponseEntity<StreamingResponseBody> report(
+            @PathVariable
+            long awardId
+    ) {
+        edu.bu.archive.application.award.report.AwardReportData data =
+                reportService.buildReportData(awardId);
+
+        StreamingResponseBody body = output -> {
+            try {
+                reportPdfRenderer.render(data, output);
+            } catch (com.lowagie.text.DocumentException e) {
+                throw new java.io.IOException("Failed to render Award report PDF", e);
+            }
+        };
+
+        String fileName = "Award_" + sanitizeFilenameSegment(data.summary().awardNumber())
+                + "_Complete_Report.pdf";
+
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(fileName, StandardCharsets.UTF_8)
+                .build();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(body);
+    }
+
+    /*
+     * Award numbers are archive-controlled and already
+     * alphanumeric-plus-hyphen in practice, but this is sanitized
+     * defensively before use in a Content-Disposition filename rather
+     * than trusted as-is.
+     */
+    private static String sanitizeFilenameSegment(String value) {
+        if (value == null || value.isBlank()) {
+            return "Unknown";
+        }
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     @Operation(

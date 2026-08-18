@@ -395,6 +395,26 @@ export function downloadUnavailableReason(uploadStatus) {
   }
 }
 
+// Builds the client-side fallback filename for the Complete Award
+// Report download - mirrors AwardV1Controller#sanitizeFilenameSegment
+// exactly (Award_<award-number>_Complete_Report.pdf) so the two stay
+// in lockstep even though the server's Content-Disposition header is
+// what actually names the saved file in the common case.
+export function buildAwardReportFileName(awardNumber) {
+  const safeAwardNumber = (awardNumber ?? "Unknown").replace(
+    /[^A-Za-z0-9._-]/g,
+    "_",
+  );
+  return `Award_${safeAwardNumber}_Complete_Report.pdf`;
+}
+
+export function awardReportDownloadErrorMessage(status) {
+  if (status === 404) {
+    return "This Award's report could not be generated.";
+  }
+  return "Unable to download the Award report. Please try again.";
+}
+
 export function formatAttachmentCountLabel(count) {
   return `${count} Attachment${count === 1 ? "" : "s"}`;
 }

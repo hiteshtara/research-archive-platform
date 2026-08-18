@@ -103,3 +103,7 @@ export function downloadUnavailableReason(
 ): string;
 
 export function formatAttachmentCountLabel(count: number): string;
+
+export function buildAwardReportFileName(awardNumber: string | null): string;
+
+export function awardReportDownloadErrorMessage(status: number): string;

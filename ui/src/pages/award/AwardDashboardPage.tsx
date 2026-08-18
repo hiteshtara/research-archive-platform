@@ -1,6 +1,9 @@
+import { DownloadOutlined } from "@mui/icons-material";
 import {
   Box,
+  Button,
   Chip,
+  CircularProgress,
   Divider,
   List,
   ListItemButton,
@@ -12,7 +15,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { getAwardHierarchyV1, getAwardSummaryV1 } from "../../api/client";
+import {
+  downloadAwardReportV1,
+  getAwardHierarchyV1,
+  getAwardSummaryV1,
+} from "../../api/client";
 import { AwardAmountsSection } from "../../components/award/AwardAmountsSection";
 import { AwardAttachmentsSection } from "../../components/award/AwardAttachmentsSection";
 import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
@@ -84,6 +91,8 @@ export function AwardDashboardPage() {
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<SectionKey>("summary");
+  const [reportDownloading, setReportDownloading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   const summaryQuery = useQuery({
     queryKey: ["award-summary-v1", awardId],
@@ -114,6 +123,26 @@ export function AwardDashboardPage() {
 
     setActiveSection("summary");
     navigate(`/awards/${node.awardId}`);
+  }
+
+  async function handleDownloadReport() {
+    if (!Number.isFinite(awardId) || !summaryQuery.data) {
+      return;
+    }
+
+    setReportDownloading(true);
+    setReportError(null);
+    try {
+      await downloadAwardReportV1(awardId, summaryQuery.data.awardNumber);
+    } catch (error) {
+      setReportError(
+        error instanceof Error
+          ? error.message
+          : "Unable to download the Award report. Please try again.",
+      );
+    } finally {
+      setReportDownloading(false);
+    }
   }
 
   if (!Number.isFinite(awardId)) {
@@ -188,7 +217,38 @@ export function AwardDashboardPage() {
           )}
         </Box>
 
-        <StatusPill status={summary.status} domain="award" />
+        <Stack spacing={1} sx={{ alignItems: "flex-end" }}>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={
+                reportDownloading ? (
+                  <CircularProgress size={16} color="inherit" />
+                ) : (
+                  <DownloadOutlined fontSize="small" />
+                )
+              }
+              disabled={reportDownloading}
+              onClick={handleDownloadReport}
+              aria-busy={reportDownloading}
+            >
+              {reportDownloading ? "Preparing report…" : "Download Award Report"}
+            </Button>
+            <StatusPill status={summary.status} domain="award" />
+          </Stack>
+
+          {reportError && (
+            <Typography
+              variant="caption"
+              color="error"
+              role="alert"
+              sx={{ maxWidth: 320, textAlign: "right" }}
+            >
+              {reportError}
+            </Typography>
+          )}
+        </Stack>
       </Box>
 
       <Box

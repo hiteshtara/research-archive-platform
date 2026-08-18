@@ -3,6 +3,8 @@ package edu.bu.archive.adapter.in.web;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
 import edu.bu.archive.application.award.AwardContactService;
+import edu.bu.archive.application.award.report.AwardReportPdfRenderer;
+import edu.bu.archive.application.award.report.AwardReportService;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.config.SecurityConfiguration;
 
@@ -59,6 +61,12 @@ class AwardV1ControllerDownloadSecurityTest {
 
     @MockitoBean
     private AwardContactService contactService;
+
+    @MockitoBean
+    private AwardReportService reportService;
+
+    @MockitoBean
+    private AwardReportPdfRenderer reportPdfRenderer;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -142,6 +150,14 @@ class AwardV1ControllerDownloadSecurityTest {
                 ));
 
         org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
+    @Test
+    void reportWithoutAuthenticationIsRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/awards/1833767/report.pdf"))
+                .andExpect(status().isUnauthorized());
+
+        org.mockito.Mockito.verifyNoInteractions(reportService);
     }
 
     @Test

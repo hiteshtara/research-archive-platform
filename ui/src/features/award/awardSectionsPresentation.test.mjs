@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  awardReportDownloadErrorMessage,
+  buildAwardReportFileName,
   classifyAttachmentType,
   downloadUnavailableReason,
   formatAdvanceNotice,
@@ -608,4 +610,46 @@ test("matchesAwardCustomDataQuery does not blow up on a real persisted blank val
 
   assert.equal(matchesAwardCustomDataQuery(row, "opportunity"), true);
   assert.equal(matchesAwardCustomDataQuery(row, "nonsense"), false);
+});
+
+test("buildAwardReportFileName matches the backend's Award_<number>_Complete_Report.pdf pattern", () => {
+  assert.equal(
+    buildAwardReportFileName("900000-00001"),
+    "Award_900000-00001_Complete_Report.pdf",
+  );
+});
+
+test("buildAwardReportFileName preserves leading zeros in the Award number", () => {
+  assert.equal(
+    buildAwardReportFileName("0900000-00001"),
+    "Award_0900000-00001_Complete_Report.pdf",
+  );
+});
+
+test("buildAwardReportFileName sanitizes unsafe filename characters", () => {
+  assert.equal(
+    buildAwardReportFileName("900000/00001; rm -rf"),
+    "Award_900000_00001__rm_-rf_Complete_Report.pdf",
+  );
+});
+
+test("buildAwardReportFileName falls back to Unknown for a missing Award number", () => {
+  assert.equal(
+    buildAwardReportFileName(null),
+    "Award_Unknown_Complete_Report.pdf",
+  );
+});
+
+test("awardReportDownloadErrorMessage gives a specific message for 404", () => {
+  assert.equal(
+    awardReportDownloadErrorMessage(404),
+    "This Award's report could not be generated.",
+  );
+});
+
+test("awardReportDownloadErrorMessage gives a generic retry message for other failures", () => {
+  assert.equal(
+    awardReportDownloadErrorMessage(500),
+    "Unable to download the Award report. Please try again.",
+  );
 });
