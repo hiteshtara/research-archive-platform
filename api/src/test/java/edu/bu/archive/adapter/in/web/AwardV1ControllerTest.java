@@ -25,6 +25,8 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
 import edu.bu.archive.application.award.AwardContactService;
+import edu.bu.archive.application.award.report.AwardReportPdfRenderer;
+import edu.bu.archive.application.award.report.AwardReportService;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -51,14 +53,19 @@ class AwardV1ControllerTest {
 
     private AwardArchiveService service;
     private AwardContactService contactService;
+    private AwardReportService reportService;
+    private AwardReportPdfRenderer reportPdfRenderer;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         service = mock(AwardArchiveService.class);
         contactService = mock(AwardContactService.class);
+        reportService = mock(AwardReportService.class);
+        reportPdfRenderer = mock(AwardReportPdfRenderer.class);
         AwardV1Controller controller = new AwardV1Controller(
-                service, contactService, mock(AttachmentAuthorizationService.class)
+                service, contactService, mock(AttachmentAuthorizationService.class),
+                reportService, reportPdfRenderer
         );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
@@ -850,5 +857,74 @@ class AwardV1ControllerTest {
                         get("/api/v1/awards/3/attachments/999/download")
                 )
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void reportStreamsAPdfWithTheExpectedContentTypeAndDisposition()
+            throws Exception {
+        edu.bu.archive.application.award.report.AwardReportData data =
+                mock(edu.bu.archive.application.award.report.AwardReportData.class);
+        AwardSummaryResponse summary = new AwardSummaryResponse(
+                3L, "104628-00002", 2, "Title", "Active", "Sponsor", null,
+                "PI", "Unit", null, null, null, null, null, null,
+                null, null, null, null, null, null, true, "DOC-1"
+        );
+        when(data.summary()).thenReturn(summary);
+        when(reportService.buildReportData(3L)).thenReturn(data);
+
+        mockMvc.perform(get("/api/v1/awards/3/report.pdf"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "application/pdf"))
+                .andExpect(header().string(
+                        "Content-Disposition",
+                        org.hamcrest.Matchers.containsString(
+                                "Award_104628-00002_Complete_Report.pdf"
+                        )
+                ));
+
+        verify(reportService).buildReportData(3L);
+        verify(reportPdfRenderer).render(
+                org.mockito.ArgumentMatchers.eq(data),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void reportSanitizesAnUnsafeAwardNumberInTheDownloadFilename()
+            throws Exception {
+        edu.bu.archive.application.award.report.AwardReportData data =
+                mock(edu.bu.archive.application.award.report.AwardReportData.class);
+        AwardSummaryResponse summary = new AwardSummaryResponse(
+                3L, "104628/00002; rm -rf", 2, "Title", "Active", "Sponsor", null,
+                "PI", "Unit", null, null, null, null, null, null,
+                null, null, null, null, null, null, true, "DOC-1"
+        );
+        when(data.summary()).thenReturn(summary);
+        when(reportService.buildReportData(3L)).thenReturn(data);
+
+        mockMvc.perform(get("/api/v1/awards/3/report.pdf"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Content-Disposition",
+                        org.hamcrest.Matchers.containsString(
+                                "Award_104628_00002__rm_-rf_Complete_Report.pdf"
+                        )
+                ))
+                .andExpect(header().string(
+                        "Content-Disposition",
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("00002; rm"))
+                ));
+    }
+
+    @Test
+    void reportPropagatesNotFoundAsAnHttp404() throws Exception {
+        when(reportService.buildReportData(999L))
+                .thenThrow(new NoSuchElementException("Award not found: 999"));
+
+        mockMvc.perform(get("/api/v1/awards/999/report.pdf"))
+                .andExpect(status().isNotFound());
+
+        verify(reportPdfRenderer, org.mockito.Mockito.never())
+                .render(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 }
