@@ -206,3 +206,41 @@ generalizing `SensitiveFieldRedactor` any further — reusing its full,
 generic pattern set for a structured-but-foreign-schema payload like this
 one is what caused the over-redaction, and the same risk would repeat for
 any future raw-payload archive field.
+
+**Separate, still-open exposure — not resolved by the PDF fix above:**
+`AwardSapTransmissionResponse.sentData`/`returnedData` reach the browser
+completely unredacted through the pre-existing
+`GET /api/v1/awards/{awardId}/sap-transmissions` endpoint and are
+rendered as-is by `AwardSapTransmissionsSection.tsx`'s `XmlViewer` — the
+live SAP Transmission History workspace tab, independent of and
+predating the PDF report. The same class of embedded HTTP `Authorization`
+credential (and potentially other sensitive content the conservative PDF
+redaction above was deliberately guarding against) may still be visible
+there to any authenticated Cognito user today. Revision 63 (the PDF fix)
+does not touch this path at all — do not treat the PDF fix as having
+resolved credential exposure in this feature area more broadly.
+
+Priority sequence for this follow-up, once picked back up:
+1. Redact SAP payloads server-side (`AwardArchiveService`/the
+   `sap-transmissions` endpoint, not just the PDF renderer) before they
+   are ever sent to the UI — likely the same field-aware fix described
+   above, applied at the shared data layer so both the API response and
+   the PDF report get it from one place instead of two separate
+   redaction call sites.
+2. Verify the credential no longer appears in raw API responses or
+   rendered browser content (`sap-transmissions` JSON, the workspace
+   tab's DOM/network tab).
+3. Determine whether the specific credential found live (2013 KCRM↔SAP
+   integration) is still active, and rotate it if so — this needs a
+   human/security-team call, not an assumption that a ~13-year-old
+   legacy credential is automatically dead.
+4. Review access logs where available for prior exposure of this
+   credential via either surface.
+5. Add regression tests covering both the PDF and the UI/API exposure
+   path, so this class of leak can't reappear silently in either place
+   again.
+
+Only after this sequence should the pending documentation commit
+(`4878136`) be pushed and the security correction deployed — deliberately
+kept separate from, and after, any live demonstration of the current PDF
+feature.
