@@ -88,7 +88,7 @@ built on `feature/protocol-oracle-loader`, ETL-only so far (no API/UI). It
 is **not** a restoration of the schema below — smaller scope (no derived
 views, no unit-administrator table pending a verified Oracle source) — and
 it is **additive alongside legacy IRB**, not a replacement for it. See
-[`docs/PROTOCOL_ORACLE_LOADER.md`](PROTOCOL_ORACLE_LOADER.md) for the full
+[`docs/etl/protocol-loader.md`](etl/protocol-loader.md) for the full
 architecture, and migration `V034__create_protocol_archive.sql`. The
 parent-resolution strategies below (`NUMBER_SEQUENCE`, `OWNER_CHAIN`) carry
 forward unchanged into this rebuild — they were re-verified, not
@@ -114,7 +114,7 @@ rebuild a second Protocol domain without a fresh decision to do so.
   retired in a dedicated cleanup milestone. (This did not happen — IRB was
   kept and Protocol Archive was removed instead.)
 - Protocol child `PROTOCOL_ID` values were found not to be universally
-  reliable version parents (see `docs/PROTOCOL_PARENT_RESOLUTION_ANALYSIS.md`,
+  reliable version parents (see `docs/archive/retired-domains/protocol/PROTOCOL_PARENT_RESOLUTION_ANALYSIS.md`,
   retained as a deprecated but evidence-backed reference — the same
   `PROTOCOL_ID`/`PROTOCOL_NUMBER`/`SEQUENCE_NUMBER` disagreement could
   resurface in any future Oracle extraction touching these tables, including
@@ -166,3 +166,43 @@ chatbot/RAG. Production population has not been run as of this decision —
 it needs a real cost/time estimate from the PoC's own measured Bedrock
 throughput before it's run for real (~24,557 records across Award,
 Proposal, Negotiation, Subaward, vs. the PoC's 777-row sample).
+
+## Complete Award Report PDF: conservative (not field-aware) SAP payload redaction
+
+`AwardReportPdfRenderer` streams a per-Award PDF from
+`GET /api/v1/awards/{awardId}/report.pdf`, reusing existing
+`AwardArchiveService` methods so every section's scope matches what the
+Award workspace UI already shows. Live verification against a real Award
+(105698-00001, task definition revision 62) found that the SAP
+Transmission History section's `sentData`/`returnedData` fields — raw
+archived HTTP/SOAP transaction dumps from the legacy KCRM↔SAP
+integration — can carry a real HTTP `Authorization` header verbatim,
+including a Basic-auth credential (`base64(username:password)`, trivially
+reversible, not just an opaque token). The PDF rendered it unredacted.
+
+Fixed same-day (revision 63) by extending `SensitiveFieldRedactor` (the
+existing AI-context redaction utility, `application/ai/`) with an
+`Authorization: Basic|Bearer|Digest|AWS4-HMAC-SHA256 ...` pattern, and
+applying the utility's full pattern set — not just the new one — to the
+SAP XML blocks before they reach the PDF. This is a deliberate, currently
+accepted tradeoff: the redactor's pre-existing phone-number-shaped and
+generic-secret patterns also strip some legitimate long numeric business
+values from the same payload (e.g. `SPPROGRAM_NUMBER`), so **some SAP
+transmission payload values are conservatively redacted to prevent
+disclosure of credentials or sensitive information** — chosen over a
+narrower fix (redacting only the Authorization pattern) because a raw
+legacy HTTP/SOAP dump is not fully enumerable by inspection, and the risk
+of an unredacted email, phone number, token, or unexpected credential
+elsewhere in the same payload outweighs the inconvenience of losing a
+sponsored-program number.
+
+**Follow-up, not yet built:** a field-aware fix — parse the SAP XML
+safely, allowlist known business fields (`SPPROGRAM_NUMBER` and similar),
+redact only credentials/tokens/emails/personal-contact fields, show a
+visible "redacted" label at the point of redaction (today the SAP block
+just shows `[REDACTED]` inline with no further context), and add tests
+against representative SAP payloads with synthetic values. Do this before
+generalizing `SensitiveFieldRedactor` any further — reusing its full,
+generic pattern set for a structured-but-foreign-schema payload like this
+one is what caused the over-redaction, and the same risk would repeat for
+any future raw-payload archive field.

@@ -723,6 +723,23 @@ public class AwardReportPdfRenderer {
         // Redact on the full value before truncating, so a credential
         // can never survive by falling on the far side of the
         // truncation cutoff.
+        //
+        // Deliberately applies SensitiveFieldRedactor's FULL pattern
+        // set, not just its Authorization-header pattern - a
+        // conservative choice (see docs/DECISIONS.md's "Complete Award
+        // Report PDF: conservative (not field-aware) SAP payload
+        // redaction") made after live verification found a real
+        // credential in this exact field. Known side effect: the
+        // phone-number-shaped/generic-secret patterns also strip some
+        // legitimate long numeric business values from this payload
+        // (e.g. SPPROGRAM_NUMBER) - accepted for now because a raw
+        // legacy HTTP/SOAP dump isn't fully enumerable by inspection,
+        // and an unredacted email/token/unexpected credential elsewhere
+        // in the same payload is worse than losing a sponsored-program
+        // number. Do not narrow this to Authorization-only without
+        // first building the field-aware fix DECISIONS.md describes
+        // (parse the XML, allowlist known business fields, redact only
+        // credential/PII fields, label redactions visibly).
         String value = truncatedText(sensitiveFieldRedactor.redact(xml));
         Paragraph body = new Paragraph(value.equals(EM_DASH) ? "Not recorded." : value, MONOSPACE_FONT);
         body.setSpacingAfter(6);
