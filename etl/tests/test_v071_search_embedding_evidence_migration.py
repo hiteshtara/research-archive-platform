@@ -36,6 +36,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from archive_etl.upload.migrations import (
+    INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
     apply_migrations,
     find_missing_migration_versions,
 )
@@ -138,13 +139,21 @@ class V071CommittedChainTest(unittest.TestCase):
             "V073 is superseded by V077 and must not be committed",
         )
 
-    def test_only_v073_remains_missing_from_the_sequence(self):
+    def test_committed_chain_reports_no_missing_versions(self):
+        """V071 is restored, and 73 is registered in
+        INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS (V077 owns that
+        schema change), so the committed chain reports nothing missing.
+
+        This assertion previously expected [73]; that was correct only
+        while the gap was unregistered. The gap itself has not moved -
+        V073 is still deliberately uncommitted - it is now declared
+        rather than reported."""
         clean = _clean_migrations_dir()
         try:
-            self.assertEqual(
-                find_missing_migration_versions(clean), [73],
-                "V071 must no longer be reported missing; only the "
-                "intentionally-superseded V073 may remain",
+            self.assertEqual(find_missing_migration_versions(clean), [])
+            self.assertIn(
+                73, INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
+                "73 must be silent only because it is explicitly declared",
             )
         finally:
             shutil.rmtree(clean, ignore_errors=True)

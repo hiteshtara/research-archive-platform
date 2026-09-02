@@ -67,6 +67,23 @@ def discover_migrations(
     return migrations
 
 
+# Version numbers that are deliberately absent from the committed
+# migration sequence. Each entry is a specific, justified historical
+# gap - never a way to quieten an unexplained one.
+#
+# 73: V073__extend_subaward_attachment_archive_status.sql was written
+#     but never committed to any git ref. Its schema change (widening
+#     archive.subaward_attachment_archive.archive_status to include
+#     PENDING/UPLOADING, plus DEFAULT 'PENDING') is implemented verbatim
+#     by the committed V077, which states in its own header that it
+#     deliberately does not depend on V073 so a clean checkout never
+#     needs that file. Restoring V073 would also be unsafe: its
+#     DROP CONSTRAINT has no IF EXISTS and would abort a fresh chain
+#     wherever V019's constraint name differs. Version 73 is therefore
+#     an intentional historical gap, not a missing executable migration.
+INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS = {73}
+
+
 def find_missing_migration_versions(
     migrations_directory: str | Path,
 ) -> list[int]:
@@ -76,6 +93,11 @@ def find_missing_migration_versions(
     gap (e.g. V001, V002, V004 with V003 missing) that is easy to miss in
     review. This checks the files present on disk; it does not look at what
     has been applied to any particular database.
+
+    Versions listed in INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS are
+    excluded - each one is individually documented above. Every other gap
+    is still reported exactly as before, so a genuinely lost or misnumbered
+    migration remains just as visible.
     """
     versions = [version for version, _, _ in discover_migrations(migrations_directory)]
 
@@ -83,7 +105,8 @@ def find_missing_migration_versions(
         return []
 
     expected = set(range(versions[0], versions[-1] + 1))
-    return sorted(expected - set(versions))
+    missing = expected - set(versions)
+    return sorted(missing - INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS)
 
 
 def apply_migrations(
