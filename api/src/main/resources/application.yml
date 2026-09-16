@@ -28,6 +28,12 @@ spring:
 
 server:
   port: 8080
+  # Behind the ALB, TLS terminates at the load balancer and the container
+  # sees plain HTTP. Honour X-Forwarded-Proto so Spring (and springdoc's
+  # generated server URL) builds https:// links. Without this, Swagger UI
+  # loads over https but fires requests at http:// and the browser blocks
+  # them as mixed content ("Failed to fetch").
+  forward-headers-strategy: framework
 
 logging:
   level:
