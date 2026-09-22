@@ -1,224 +1,146 @@
-import {
-  ArrowForwardOutlined,
-  SearchOutlined,
-} from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  InputAdornment,
-  Pagination,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Box, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { getSubawards } from "../api/client";
+import { EmptyState } from "../components/common/EmptyState";
+import { PaginationFooter } from "../components/common/PaginationFooter";
+import { StatusPill } from "../components/common/StatusPill";
+import { HintChips } from "../components/common/search/HintChips";
+import { ResultCard } from "../components/common/search/ResultCard";
+import { ResultCount } from "../components/common/search/ResultCount";
+import { SearchBox } from "../components/common/search/SearchBox";
+import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
+import { SearchStates } from "../components/common/search/SearchStates";
+import {
+  joinMetadata,
+  resolveSearchState,
+} from "../features/common/searchPresentation.mjs";
+import { useSearchQueryParam } from "../hooks/useSearchQueryParam";
 
-const pageSize = 25;
+const PAGE_SIZE = 25;
 
-function display(value: string | number | null) {
-  return value ?? "—";
+const SEARCH_DIMENSIONS = [
+  "Subaward Code",
+  "Document Number",
+  "Title",
+  "Organization",
+  "Account",
+];
+
+function formatDateRange(startDate: string | null, endDate: string | null) {
+  if (!startDate && !endDate) {
+    return null;
+  }
+  return `${startDate ?? "—"} to ${endDate ?? "—"}`;
 }
 
 export function SubawardFamiliesPage() {
-  const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
-  const [page, setPage] = useState(0);
+  const { draft, setDraft, query, page, submit, goToPage, hasSearched } =
+    useSearchQueryParam();
 
-  const query = useQuery({
-    queryKey: ["subawards", appliedSearch, page],
+  const searchQuery = useQuery({
+    queryKey: ["subawards", query, page],
     queryFn: ({ signal }) =>
-      getSubawards({
-        query: appliedSearch,
-        page,
-        size: pageSize,
-      }, signal),
+      getSubawards({ query, page, size: PAGE_SIZE }, signal),
+    // No preload. This page used to fetch the first 25 of 88,818
+    // archived Subaward records on mount.
+    enabled: hasSearched,
   });
 
-  const applySearch = () => {
-    setAppliedSearch(search.trim());
-    setPage(0);
-  };
+  const results = searchQuery.data ?? null;
+
+  const state = resolveSearchState({
+    hasSearched,
+    isLoading: searchQuery.isLoading,
+    isError: searchQuery.isError,
+    resultCount: results?.content.length ?? 0,
+  });
 
   return (
-    <Stack spacing={3}>
-      <Card>
-        <CardContent>
-          <Typography variant="h4">Subawards</Typography>
-
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            Search physical archived Subaward records and open a specific
-            source version.
-          </Typography>
-
-          <TextField
-            fullWidth
-            sx={{ mt: 3 }}
-            placeholder="Subaward ID, code, document, title, status, organization, account..."
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                applySearch();
-              }
-            }}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchOutlined />
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        {query.isLoading && (
-          <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-            <CircularProgress />
-          </Box>
-        )}
-
-        {query.isError && (
-          <Alert severity="error">Unable to load Subawards.</Alert>
-        )}
-
-        {query.data && (
+    <SearchPageLayout
+      title="Find a Subaward"
+      subtitle="Search archived Subaward records by Subaward code, document number, title, organization or account, and open a specific source version."
+      search={
+        <SearchBox
+          value={draft}
+          onChange={setDraft}
+          onSubmit={submit}
+          placeholder="Subaward code, document number, organization..."
+          ariaLabel="Search Subawards"
+        />
+      }
+      belowSearch={<HintChips hints={SEARCH_DIMENSIONS} />}
+    >
+      <SearchStates
+        state={state}
+        errorMessage="Unable to search Subawards right now. Try again in a moment."
+      >
+        {results && (
           <>
-            <Box sx={{ px: 3, py: 2 }}>
-              <Typography sx={{ fontWeight: 700 }}>
-                {query.data.totalElements.toLocaleString()} physical Subaward
-                records
-              </Typography>
-            </Box>
+            <ResultCount total={results.totalElements} singular="subaward" />
 
-            {query.data.content.length === 0 ? (
-              <Box sx={{ px: 3, pb: 3 }}>
-                <Alert severity="info">
-                  No matching Subaward records were found.
-                </Alert>
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Subaward</TableCell>
-                      <TableCell>Sequence</TableCell>
-                      <TableCell>Title</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Organization</TableCell>
-                      <TableCell>Dates</TableCell>
-                      <TableCell />
-                    </TableRow>
-                  </TableHead>
-
-                  <TableBody>
-                    {query.data.content.map((subaward) => (
-                      <TableRow
-                        key={subaward.subawardId}
-                        hover
-                        sx={{ cursor: "pointer" }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          navigate(
-                            `/subawards/${encodeURIComponent(
-                              subaward.subawardId,
-                            )}`,
-                          )
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            navigate(
-                              `/subawards/${encodeURIComponent(
-                                subaward.subawardId,
-                              )}`,
-                            );
-                          }
-                        }}
-                      >
-                        <TableCell>
-                          <Typography sx={{ fontWeight: 700 }}>
-                            {subaward.subawardCode}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            ID {subaward.subawardId} · Document{" "}
-                            {display(subaward.documentNumber)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            label={`Sequence ${subaward.sequenceNumber}`}
-                          />
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ display: "block", mt: 0.5 }}
-                          >
-                            {display(subaward.subawardSequenceStatus)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell sx={{ minWidth: 260 }}>
-                          {display(subaward.title)}
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            label={display(subaward.statusDescription)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {display(subaward.organizationId)}
-                        </TableCell>
-                        <TableCell>
-                          {display(subaward.startDate)} –{" "}
-                          {display(subaward.endDate)}
-                        </TableCell>
-                        <TableCell align="right">
-                          <ArrowForwardOutlined color="action" />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+            {results.content.length === 0 && (
+              <EmptyState
+                variant="text"
+                message={`No subawards match "${query}".`}
+              />
             )}
 
-            {query.data.totalPages > 1 && (
-              <Stack sx={{ alignItems: "center", py: 3 }}>
-                <Pagination
-                  page={query.data.page + 1}
-                  count={query.data.totalPages}
-                  onChange={(_, nextPage) => setPage(nextPage - 1)}
-                  color="primary"
+            <Stack spacing={1.25}>
+              {results.content.map((subaward) => (
+                <ResultCard
+                  key={`${subaward.subawardId}-${subaward.sequenceNumber}`}
+                  to={`/subawards/${encodeURIComponent(subaward.subawardId)}`}
+                  identifier={subaward.subawardCode}
+                  secondaryIdentifier={
+                    <Typography variant="body2" color="text.secondary">
+                      sequence {subaward.sequenceNumber}
+                    </Typography>
+                  }
+                  // statusDescription is numbered in the source
+                  // ("07. Executed"); StatusPill shows the words and
+                  // keeps the ordinal as secondary metadata.
+                  status={
+                    <StatusPill
+                      status={subaward.statusDescription}
+                      domain="subaward"
+                    />
+                  }
+                  title={subaward.title ?? "Untitled Subaward"}
+                  metadata={joinMetadata([
+                    // organizationId has no verified name anywhere in
+                    // the archive, so the identifier stands alone
+                    // rather than being dressed up as a name.
+                    subaward.organizationId
+                      ? `Organization ${subaward.organizationId}`
+                      : null,
+                    subaward.accountNumber
+                      ? `Account ${subaward.accountNumber}`
+                      : null,
+                    subaward.documentNumber
+                      ? `Document ${subaward.documentNumber}`
+                      : null,
+                  ])}
+                  rightSlot={
+                    <Typography variant="body2" color="text.secondary">
+                      {formatDateRange(subaward.startDate, subaward.endDate) ??
+                        "—"}
+                    </Typography>
+                  }
                 />
-              </Stack>
-            )}
+              ))}
+            </Stack>
+
+            <Box sx={{ mt: 3 }}>
+              <PaginationFooter
+                totalPages={results.totalPages}
+                page={page}
+                onPageChange={goToPage}
+              />
+            </Box>
           </>
         )}
-      </Card>
-    </Stack>
+      </SearchStates>
+    </SearchPageLayout>
   );
 }
