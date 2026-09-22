@@ -1,320 +1,190 @@
-import {
-  ArrowForwardOutlined,
-  MenuBookOutlined,
-  SearchOutlined,
-} from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  InputAdornment,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Alert, Chip, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
-import { LoadingState } from "../components/common/LoadingState";
+import { EmptyState } from "../components/common/EmptyState";
+import { StatusPill } from "../components/common/StatusPill";
+import type { StatusDomain } from "../components/common/StatusPill";
+import { HintChips } from "../components/common/search/HintChips";
+import { ResultCard } from "../components/common/search/ResultCard";
+import { ResultCount } from "../components/common/search/ResultCount";
+import { SearchBox } from "../components/common/search/SearchBox";
+import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
+import { SearchStates } from "../components/common/search/SearchStates";
+import {
+  joinMetadata,
+  resolveSearchState,
+} from "../features/common/searchPresentation.mjs";
 import {
   describeResultCard,
   filterOutIrbResults,
 } from "../features/search/globalSearchPresentation.mjs";
+import { useSearchQueryParam } from "../hooks/useSearchQueryParam";
 
+const MINIMUM_QUERY_LENGTH = 2;
+
+const SEARCH_DIMENSIONS = [
+  "Document Number",
+  "PI",
+  "Sponsor",
+  "Award",
+  "Title",
+];
+
+const STATUS_DOMAINS: Record<string, StatusDomain> = {
+  AWARD: "award",
+  PROPOSAL: "proposal",
+  NEGOTIATION: "negotiation",
+  SUBAWARD: "subaward",
+};
 
 export function GlobalSearchPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const queryValue = searchParams.get("query") ?? "";
-  const [searchText, setSearchText] = useState(queryValue);
+  // This page used ?query= before the archive standardised on ?q=.
+  // Existing bookmarks and copied links keep working: a legacy value is
+  // migrated to ?q= on arrival rather than silently ignored.
+  const legacyQuery = searchParams.get("query");
+  useEffect(() => {
+    if (legacyQuery && !searchParams.get("q")) {
+      setSearchParams({ q: legacyQuery }, { replace: true });
+    }
+  }, [legacyQuery, searchParams, setSearchParams]);
+
+  const { draft, setDraft, query, submit } = useSearchQueryParam();
+
+  const longEnough = query.trim().length >= MINIMUM_QUERY_LENGTH;
 
   const searchQuery = useQuery({
-    queryKey: ["global-search", queryValue],
-    queryFn: async () => filterOutIrbResults(await globalSearch(queryValue)),
-    enabled: queryValue.trim().length >= 2,
+    queryKey: ["global-search", query],
+    queryFn: async () => filterOutIrbResults(await globalSearch(query)),
+    enabled: longEnough,
   });
 
-  const submitSearch = () => {
-    const normalized = searchText.trim();
+  const results = searchQuery.data ?? null;
 
-    if (normalized.length >= 2) {
-      setSearchParams({ query: normalized });
-    }
-  };
+  const state = resolveSearchState({
+    hasSearched: longEnough,
+    isLoading: searchQuery.isLoading,
+    isError: searchQuery.isError,
+    resultCount: results?.results.length ?? 0,
+  });
 
   return (
-    <Stack spacing={3}>
-      <Box>
-        <Chip
-          label="Search across the archive"
-          size="small"
-          color="primary"
-          variant="outlined"
-          sx={{ mb: 1.5 }}
+    <SearchPageLayout
+      title="Search the Archive"
+      subtitle="Search Awards, Proposals, Negotiations, and Subawards at once by document number, PI, sponsor, award number or title."
+      search={
+        <SearchBox
+          value={draft}
+          onChange={setDraft}
+          onSubmit={(value) => {
+            if (value.trim().length >= MINIMUM_QUERY_LENGTH) {
+              submit(value);
+            }
+          }}
+          placeholder="Search document number, PI, sponsor, award, title..."
+          ariaLabel="Search the archive"
         />
-
-        <Typography variant="h4">
-          Global Search
-        </Typography>
-
-        <Typography color="text.secondary" sx={{ mt: 1 }}>
-          Global Search covers Awards, Proposals, Negotiations, and
-          Subawards. Search by document number, title, investigator,
-          sponsor, award, status, subaward code, or negotiation agreement
-          type.
-        </Typography>
-      </Box>
-
-      <Card>
-        <CardContent sx={{ p: 3 }}>
-          <TextField
-            fullWidth
-            autoFocus
-            value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                submitSearch();
-              }
-            }}
-            placeholder="Search document number, PI, sponsor, award, title..."
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchOutlined />
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
-        </CardContent>
-      </Card>
-
-      {!queryValue && (
-        <Card>
-          <CardContent sx={{ p: 5 }}>
-            <Stack
-              spacing={2}
-              sx={{
-                alignItems: "center",
-                textAlign: "center",
-              }}
-            >
-              <SearchOutlined
-                color="primary"
-                sx={{ fontSize: 52 }}
-              />
-
-              <Typography variant="h6">
-                Search the Research Data Hub
-              </Typography>
-
-              <Typography color="text.secondary">
-                Try a document number, award number, sponsor, person name, or title keyword.
-              </Typography>
-            </Stack>
-          </CardContent>
-        </Card>
-      )}
-
-      {queryValue && queryValue.trim().length < 2 && (
-        <Alert severity="info">
-          Enter at least 2 characters to search.
-        </Alert>
-      )}
-
-      {searchQuery.isLoading && <LoadingState />}
-
-      {searchQuery.isError && (
-        <Alert severity="error">
-          Search results could not be loaded.
-        </Alert>
-      )}
-
-      {searchQuery.data && (
-        <Stack spacing={2}>
-          <Typography sx={{ fontWeight: 700 }}>
-            {searchQuery.data.totalResults.toLocaleString()} results for
-            “{searchQuery.data.query}”
-          </Typography>
-
-          {searchQuery.data.failedModules.length > 0 && (
-            <Alert severity="warning">
-              {searchQuery.data.failedModules.join(", ")} could not be
-              searched right now. Showing results from the remaining
-              modules.
-            </Alert>
-          )}
-
-          {searchQuery.data.results.length === 0 && (
-            <Alert severity="info">
-              No matching archive records were found.
-            </Alert>
-          )}
-
-          {searchQuery.data.results.map((result) => {
-            const clickable = Boolean(result.route);
-            const card = describeResultCard(result);
-
-            return (
-              <Card
-                key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
-                role={clickable ? "button" : undefined}
-                tabIndex={clickable ? 0 : undefined}
-                onClick={() => {
-                  if (result.route) {
-                    navigate(result.route);
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    clickable &&
-                    result.route &&
-                    (event.key === "Enter" || event.key === " ")
-                  ) {
-                    event.preventDefault();
-                    navigate(result.route);
-                  }
-                }}
-                sx={{
-                  cursor: clickable ? "pointer" : "default",
-                  transition: "transform 150ms ease, box-shadow 150ms ease",
-                  ...(clickable && {
-                    "&:hover": {
-                      transform: "translateY(-2px)",
-                      boxShadow: "0 12px 28px rgba(15, 23, 42, 0.10)",
-                    },
-                  }),
-                }}
+      }
+      belowSearch={
+        <>
+          <HintChips hints={SEARCH_DIMENSIONS} />
+          {draft.trim().length > 0 &&
+            draft.trim().length < MINIMUM_QUERY_LENGTH && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 2.5 }}
               >
-                <CardContent sx={{ p: 3 }}>
-                  <Stack
-                    spacing={2}
-                    sx={{
-                      flexDirection: {
-                        xs: "column",
-                        md: "row",
-                      },
-                      justifyContent: "space-between",
-                      alignItems: {
-                        md: "center",
-                      },
-                    }}
-                  >
-                    <Stack
-                      spacing={2}
-                      sx={{
-                        flexDirection: "row",
-                        alignItems: "flex-start",
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 2,
-                          display: "grid",
-                          placeItems: "center",
-                          flexShrink: 0,
-                          backgroundColor: "rgba(139, 24, 50, 0.10)",
-                          color: "primary.main",
-                        }}
-                      >
-                        <MenuBookOutlined />
-                      </Box>
+                Enter at least {MINIMUM_QUERY_LENGTH} characters to search.
+              </Typography>
+            )}
+        </>
+      }
+    >
+      <SearchStates
+        state={state}
+        errorMessage="Search results could not be loaded."
+      >
+        {results && (
+          <>
+            <ResultCount total={results.totalResults} singular="result" />
 
-                      <Box>
-                        <Stack
-                          spacing={1}
-                          sx={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            flexWrap: "wrap",
-                            gap: 1,
-                          }}
-                        >
+            {results.failedModules.length > 0 && (
+              <Alert severity="warning" sx={{ mb: 1.5 }}>
+                {results.failedModules.join(", ")} could not be searched right
+                now. Showing results from the remaining modules.
+              </Alert>
+            )}
+
+            {results.results.length === 0 && (
+              <EmptyState
+                variant="text"
+                message="No matching archive records were found."
+              />
+            )}
+
+            <Stack spacing={1.25}>
+              {results.results.map((result) => {
+                const card = describeResultCard(result);
+
+                return (
+                  <ResultCard
+                    key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
+                    to={result.route || undefined}
+                    identifier={card.identifier}
+                    secondaryIdentifier={
+                      <>
+                        <Chip
+                          label={result.module}
+                          size="small"
+                          color="primary"
+                        />
+                        {result.documentNumber && (
                           <Chip
-                            label={result.module}
+                            label={`Doc ${result.documentNumber}`}
                             size="small"
-                            color="primary"
+                            variant="outlined"
                           />
-
-                          {result.status && (
-                            <Chip
-                              label={result.status}
-                              size="small"
-                              variant="outlined"
-                            />
-                          )}
-
-                          {result.documentNumber && (
-                            <Chip
-                              label={`Doc ${result.documentNumber}`}
-                              size="small"
-                              variant="outlined"
-                            />
-                          )}
-
-                          {card.showSemanticChip && (
-                            <Chip
-                              label={card.semanticChipLabel}
-                              size="small"
-                              variant="outlined"
-                            />
-                          )}
-                        </Stack>
-
-                        <Typography
-                          variant="h6"
-                          sx={{ mt: 1.5 }}
-                        >
-                          {card.title}
-                        </Typography>
-
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          sx={{ mt: 0.8 }}
-                        >
-                          {card.identifierLine}
-                        </Typography>
-
-                        {card.piLine && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ mt: 0.5, display: "block" }}
-                          >
-                            {card.piLine}
-                          </Typography>
                         )}
-
-                        {card.matchedCaption && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ mt: 0.5, display: "block" }}
-                          >
-                            {card.matchedCaption}
-                          </Typography>
+                        {card.showSemanticChip && (
+                          <Chip
+                            label={card.semanticChipLabel}
+                            size="small"
+                            variant="outlined"
+                          />
                         )}
-                      </Box>
-                    </Stack>
-
-                    {clickable && <ArrowForwardOutlined color="action" />}
-                  </Stack>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </Stack>
-      )}
-    </Stack>
+                      </>
+                    }
+                    status={
+                      result.status ? (
+                        <StatusPill
+                          status={result.status}
+                          domain={
+                            STATUS_DOMAINS[result.module ?? ""] ?? "award"
+                          }
+                        />
+                      ) : undefined
+                    }
+                    title={card.title}
+                    // card.identifierLine repeats the identifier that
+                    // is already this card's first line, so the
+                    // secondary detail uses card.subtitleLine instead.
+                    metadata={joinMetadata([
+                      card.subtitleLine,
+                      card.piLine,
+                      card.matchedCaption,
+                    ])}
+                  />
+                );
+              })}
+            </Stack>
+          </>
+        )}
+      </SearchStates>
+    </SearchPageLayout>
   );
 }

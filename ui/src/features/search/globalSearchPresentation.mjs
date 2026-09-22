@@ -57,6 +57,10 @@ export function describeResultCard(result) {
     identifier,
     title: result?.title ?? identifier,
     identifierLine: subtitle ? `${identifier} • ${subtitle}` : identifier,
+    // The identifier is the result card's own first line, so a card
+    // that shows it there uses subtitleLine for the secondary detail
+    // instead of identifierLine, which would repeat the identifier.
+    subtitleLine: subtitle,
     showSemanticChip: isSemanticMatch,
     semanticChipLabel: SEMANTIC_MATCH_CHIP_LABEL,
     piLine: principalInvestigator ? `PI: ${principalInvestigator}` : null,

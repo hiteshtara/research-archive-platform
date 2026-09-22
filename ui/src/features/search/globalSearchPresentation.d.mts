@@ -15,6 +15,7 @@ export function describeResultCard(
   identifier: string;
   title: string;
   identifierLine: string;
+  subtitleLine: string | null;
   showSemanticChip: boolean;
   semanticChipLabel: string;
   piLine: string | null;
