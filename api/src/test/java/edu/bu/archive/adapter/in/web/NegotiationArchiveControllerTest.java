@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.application.negotiation.NegotiationArchiveService;
 import edu.bu.archive.application.negotiation.NegotiationAttachmentDownload;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
+import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +58,8 @@ class NegotiationArchiveControllerTest {
                 true
         );
 
-        when(service.findPage("award", 2, 10))
+        when(service.findPage(
+                NegotiationSearchFilters.ofQuery("award"), 2, 10))
                 .thenReturn(page);
 
         mockMvc.perform(
@@ -70,7 +72,8 @@ class NegotiationArchiveControllerTest {
                 .andExpect(jsonPath("$.page").value(2))
                 .andExpect(jsonPath("$.size").value(10));
 
-        verify(service).findPage("award", 2, 10);
+        verify(service).findPage(
+                NegotiationSearchFilters.ofQuery("award"), 2, 10);
     }
 
     @Test

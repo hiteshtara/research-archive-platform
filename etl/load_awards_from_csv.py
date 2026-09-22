@@ -28,6 +28,7 @@ from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.reference_data import (
     run_load_comment_type_reference_data,
     run_load_custom_attribute_reference_data,
+    run_load_sponsor_reference_data,
     run_load_terms_reference_data,
     run_load_unit_reference_data,
 )
@@ -10613,6 +10614,20 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--load-sponsor-reference-data",
+        action="store_true",
+        help=(
+            "Loads archive.sponsor, Kuali's sponsor master (7,246 rows "
+            "on BU's real Oracle). A small, bounded full reference-data "
+            "load, independent of every other reference-data bundle. "
+            "Award already denormalizes sponsor_name onto "
+            "archive.award_version at extract time and does not read "
+            "this table; the first consumer is Negotiation, which "
+            "otherwise cannot resolve a sponsor code to a readable "
+            "name. Idempotent - combine with --dry-run to roll back."
+        ),
+    )
+    parser.add_argument(
         "--ecs",
         action="store_true",
         help=(
@@ -10753,6 +10768,13 @@ def main() -> None:
         if not arguments.ecs:
             apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
         run_load_terms_reference_data(engine, dry_run=arguments.dry_run)
+        return
+
+    if arguments.load_sponsor_reference_data:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        run_load_sponsor_reference_data(engine, dry_run=arguments.dry_run)
         return
 
     if arguments.load_award_id is not None:

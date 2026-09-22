@@ -34,15 +34,32 @@ public class NegotiationArchiveService {
         this.attachmentStorage = attachmentStorage;
     }
 
+    /**
+     * Free-text-only search, kept for callers that have no structured
+     * filters to apply (Global Search).
+     */
     public PageResponse<NegotiationSummaryResponse> findPage(
             String query,
+            int page,
+            int size
+    ) {
+        return findPage(NegotiationSearchFilters.ofQuery(query), page, size);
+    }
+
+    /**
+     * Filtered search. Every supplied filter is ANDed, in PostgreSQL, so
+     * the total count and the returned page always describe the same
+     * result set - see NegotiationSearchFilters.
+     */
+    public PageResponse<NegotiationSummaryResponse> findPage(
+            NegotiationSearchFilters filters,
             int page,
             int size
     ) {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
-        long totalElements = repository.countNegotiations(query);
+        long totalElements = repository.countNegotiations(filters);
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
                         safePage,
@@ -53,7 +70,7 @@ public class NegotiationArchiveService {
 
         List<NegotiationSummaryResponse> content =
                 repository.findNegotiations(
-                        query,
+                        filters,
                         safeSize,
                         offset
                 );

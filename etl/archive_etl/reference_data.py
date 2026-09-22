@@ -61,6 +61,7 @@ FREQUENCY_SQL = REFERENCE_SQL_DIR / "13_frequency.sql"
 FREQUENCY_BASE_SQL = REFERENCE_SQL_DIR / "14_frequency_base.sql"
 DISTRIBUTION_SQL = REFERENCE_SQL_DIR / "15_distribution.sql"
 CONTACT_TYPE_SQL = REFERENCE_SQL_DIR / "16_contact_type.sql"
+SPONSOR_SQL = REFERENCE_SQL_DIR / "17_sponsor.sql"
 
 
 def _sql_value(value: Any) -> Any:
@@ -305,6 +306,17 @@ _DISTRIBUTION_COLUMNS = [
 _CONTACT_TYPE_COLUMNS = [
     "contact_type_code",
     "description",
+    "source_update_timestamp",
+    "source_update_user",
+    "source_version_number",
+]
+
+_SPONSOR_COLUMNS = [
+    "sponsor_code",
+    "sponsor_name",
+    "acronym",
+    "sponsor_type_code",
+    "active",
     "source_update_timestamp",
     "source_update_user",
     "source_version_number",
@@ -695,6 +707,105 @@ def load_contact_types(connection: Connection, load_id: int) -> dict[str, int]:
         rows=frame,
         load_id=load_id,
     )
+
+
+def load_sponsors(connection: Connection, load_id: int) -> dict[str, int]:
+    """Full load of KCOEUS.SPONSOR into archive.sponsor.
+
+    ACTV_IND is VARCHAR2(1) 'Y'/'N' here, whereas UNIT's equivalent is
+    CHAR(1) ACTIVE_FLAG - different source columns and types, mapped to
+    the same BOOLEAN `active` on the archive side. The comparison is
+    against the stripped, upper-cased value because a CHAR-padded or
+    lower-case 'y' must not silently become False.
+    """
+    frame = OracleDataSource(SPONSOR_SQL).read()
+    normalize_columns(frame)
+    frame = _rename(
+        frame,
+        {
+            "update_timestamp": "source_update_timestamp",
+            "update_user": "source_update_user",
+            "ver_nbr": "source_version_number",
+        },
+    )
+    if "actv_ind" in frame.columns:
+        frame["active"] = (
+            frame["actv_ind"].astype("string").str.strip().str.upper() == "Y"
+        )
+    return _upsert_rows(
+        connection,
+        table="sponsor",
+        pk_columns=["sponsor_code"],
+        columns=_SPONSOR_COLUMNS,
+        rows=frame,
+        load_id=load_id,
+    )
+
+
+def run_load_sponsor_reference_data(
+    engine: Engine, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """Loads archive.sponsor, Kuali's sponsor master (7,246 rows as of
+    2026-09-22 live verification).
+
+    Independent of every other reference-data bundle - it has no FK
+    relationship to the Unit/Person chain or to the Award Terms lookups
+    - so it gets its own top-level entry point and CLI flag rather than
+    being folded into one of those, matching how
+    run_load_terms_reference_data is separated.
+
+    Award already denormalizes sponsor_name onto archive.award_version
+    at extract time and does not read this table; the first consumer is
+    Negotiation, which otherwise cannot resolve a sponsor code to a
+    name at all.
+    """
+    started = time.perf_counter()
+    report: dict[str, Any] = {}
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            load_id = connection.execute(
+                text(
+                    """
+                    INSERT INTO archive.load_run (
+                        domain, source_system, source_file_name,
+                        rows_read, status
+                    ) VALUES (
+                        'SPONSOR_REFERENCE_DATA', 'KUALI',
+                        'Oracle KCOEUS export', 0, 'STARTED'
+                    )
+                    RETURNING load_id
+                    """
+                )
+            ).scalar_one()
+
+            report["sponsor"] = load_sponsors(connection, load_id)
+
+            connection.execute(
+                text(
+                    """
+                    UPDATE archive.load_run
+                       SET status = 'LOADED', completed_at = CURRENT_TIMESTAMP
+                     WHERE load_id = :load_id
+                    """
+                ),
+                {"load_id": load_id},
+            )
+        except Exception:
+            transaction.rollback()
+            raise
+        else:
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+
+    report["elapsed_ms"] = (time.perf_counter() - started) * 1000
+    logger.bind(stage="load_sponsor_reference_data").info(
+        "Sponsor reference data load complete", **report
+    )
+    return report
 
 
 def run_load_terms_reference_data(

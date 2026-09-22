@@ -1041,21 +1041,31 @@ export function resolveAwardByNumberV1(
   );
 }
 
+/*
+ * Negotiation search. `query` is the free-text term; every other key is
+ * an optional structured filter, and they are ANDed server-side. The
+ * parameter object is built by buildNegotiationSearchParams, which omits
+ * unset filters entirely rather than sending empty strings - an omitted
+ * filter must impose no condition.
+ */
 export function getNegotiations(
-  parameters: {
-    query?: string;
-    page?: number;
-    size?: number;
-  } = {},
+  parameters: Record<string, string | number> = {},
   signal?: AbortSignal,
 ): Promise<import("../types/api").NegotiationPageResponse> {
-  const searchParameters = new URLSearchParams({
-    page: String(parameters.page ?? 0),
-    size: String(parameters.size ?? 25),
-  });
+  const searchParameters = new URLSearchParams();
 
-  if (parameters.query?.trim()) {
-    searchParameters.set("query", parameters.query.trim());
+  for (const [key, value] of Object.entries(parameters)) {
+    const serialized = String(value).trim();
+    if (serialized) {
+      searchParameters.set(key, serialized);
+    }
+  }
+
+  if (!searchParameters.has("page")) {
+    searchParameters.set("page", "0");
+  }
+  if (!searchParameters.has("size")) {
+    searchParameters.set("size", "25");
   }
 
   return request(`/api/negotiations?${searchParameters.toString()}`, signal);
