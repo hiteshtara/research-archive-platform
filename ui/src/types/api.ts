@@ -229,6 +229,7 @@ export interface AwardSearchHit {
   principalInvestigator: string | null;
   sponsor: string | null;
   leadUnit: string | null;
+  grantNumber: string | null;
   currentObligatedAmount: number | null;
   rootAwardNumber: string | null;
   parentAwardNumber: string | null;
