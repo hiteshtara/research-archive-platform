@@ -1,176 +1,129 @@
-import {
-  ArrowForwardOutlined,
-  SearchOutlined,
-} from "@mui/icons-material";
-import {
-  Alert,
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  InputAdornment,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Chip, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { getProposalFamilies } from "../api/client";
+import { EmptyState } from "../components/common/EmptyState";
+import { StatusPill } from "../components/common/StatusPill";
+import { HintChips } from "../components/common/search/HintChips";
+import { ResultCard } from "../components/common/search/ResultCard";
+import { ResultCount } from "../components/common/search/ResultCount";
+import { SearchBox } from "../components/common/search/SearchBox";
+import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
+import { SearchStates } from "../components/common/search/SearchStates";
+import {
+  joinMetadata,
+  resolveSearchState,
+} from "../features/common/searchPresentation.mjs";
+import { useSearchQueryParam } from "../hooks/useSearchQueryParam";
+
+// The Proposal families endpoint returns a plain capped array, not a
+// paginated page. That API contract is left exactly as it is - changing
+// it merely to gain a pagination control would be changing API semantics
+// for styling - so this page shows the cap honestly instead of implying
+// the count is a total.
+const RESULT_LIMIT = 100;
+
+const SEARCH_DIMENSIONS = [
+  "Proposal Number",
+  "PI",
+  "Sponsor",
+  "Lead Unit",
+  "Title",
+];
 
 export function ProposalFamiliesPage() {
-  const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
+  const { draft, setDraft, query, submit, hasSearched } =
+    useSearchQueryParam();
 
-  const query = useQuery({
-    queryKey: ["proposal-families", appliedSearch],
+  const searchQuery = useQuery({
+    queryKey: ["proposal-families", query],
     queryFn: ({ signal }) =>
-      getProposalFamilies({
-        query: appliedSearch,
-        limit: 100,
-      }, signal),
+      getProposalFamilies({ query, limit: RESULT_LIMIT }, signal),
+    // Nothing is fetched until a search is run. This page used to load
+    // 100 Proposal families on mount; a primary search page must not put
+    // rows on screen merely because data exists.
+    enabled: hasSearched,
+  });
+
+  const results = searchQuery.data ?? null;
+
+  const state = resolveSearchState({
+    hasSearched,
+    isLoading: searchQuery.isLoading,
+    isError: searchQuery.isError,
+    resultCount: results?.length ?? 0,
   });
 
   return (
-    <Stack spacing={3}>
-      <Card>
-        <CardContent>
-          <Typography variant="h4">Proposal Families</Typography>
-
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            One row per Proposal Number.
-          </Typography>
-
-          <TextField
-            fullWidth
-            sx={{ mt: 3 }}
-            placeholder="Proposal number, sponsor, title, lead unit, PI..."
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                setAppliedSearch(search.trim());
-              }
-            }}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchOutlined />
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        {query.isLoading && (
-          <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-            <CircularProgress />
-          </Box>
-        )}
-
-        {query.isError && (
-          <Alert severity="error">Unable to load Proposal families.</Alert>
-        )}
-
-        {query.data && (
+    <SearchPageLayout
+      title="Find a Proposal"
+      subtitle="Search archived Proposal records by Proposal number, PI, sponsor, lead unit or title. One result per Proposal Number."
+      search={
+        <SearchBox
+          value={draft}
+          onChange={setDraft}
+          onSubmit={submit}
+          placeholder="Proposal number, Orsmond, NIH..."
+          ariaLabel="Search Proposals"
+        />
+      }
+      belowSearch={<HintChips hints={SEARCH_DIMENSIONS} />}
+    >
+      <SearchStates
+        state={state}
+        errorMessage="Unable to search Proposals right now. Try again in a moment."
+      >
+        {results && (
           <>
-            <Box sx={{ px: 3, py: 2 }}>
-              <Typography sx={{ fontWeight: 700 }}>
-                {query.data.length.toLocaleString()} Proposal Families
+            <ResultCount total={results.length} singular="proposal" />
+
+            {results.length === 0 && (
+              <EmptyState
+                variant="text"
+                message={`No proposals match "${query}".`}
+              />
+            )}
+
+            <Stack spacing={1.25}>
+              {results.map((proposal) => (
+                <ResultCard
+                  key={proposal.proposalNumber}
+                  to={`/proposals/dashboard/${encodeURIComponent(proposal.currentProposalId)}`}
+                  identifier={proposal.proposalNumber}
+                  status={
+                    <StatusPill status={proposal.status} domain="proposal" />
+                  }
+                  title={proposal.title ?? "Untitled Proposal"}
+                  metadata={joinMetadata([
+                    proposal.principalInvestigator
+                      ? `PI: ${proposal.principalInvestigator}`
+                      : null,
+                    proposal.sponsorName,
+                    proposal.leadUnitName,
+                  ])}
+                  rightSlot={
+                    <Chip
+                      size="small"
+                      label={`v${proposal.latestVersionNumber}`}
+                    />
+                  }
+                />
+              ))}
+            </Stack>
+
+            {results.length === RESULT_LIMIT && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mt: 2, textAlign: "center" }}
+              >
+                Showing the first {RESULT_LIMIT} matches. Narrow the search
+                to see more specific results.
               </Typography>
-            </Box>
-
-            {query.data.length === 0 ? (
-              <Box sx={{ px: 3, pb: 3 }}>
-                <Alert severity="info">
-                  No matching Proposal families were found.
-                </Alert>
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Proposal Number</TableCell>
-                      <TableCell>Version</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Sponsor</TableCell>
-                      <TableCell>Lead Unit</TableCell>
-                      <TableCell>Principal Investigator</TableCell>
-                      <TableCell>Title</TableCell>
-                      <TableCell />
-                    </TableRow>
-                  </TableHead>
-
-                  <TableBody>
-                    {query.data.map((proposal) => (
-                      <TableRow
-                        key={proposal.proposalNumber}
-                        hover
-                        sx={{ cursor: "pointer" }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          navigate(
-                            `/proposals/dashboard/${proposal.currentProposalId}`,
-                          )
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            navigate(
-                              `/proposals/dashboard/${proposal.currentProposalId}`,
-                            );
-                          }
-                        }}
-                      >
-                        <TableCell>
-                          <Typography sx={{ fontWeight: 700 }}>
-                            {proposal.proposalNumber}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={proposal.latestVersionNumber}
-                          />
-                        </TableCell>
-                        <TableCell>{proposal.status ?? "—"}</TableCell>
-                        <TableCell>{proposal.sponsorName ?? "—"}</TableCell>
-                        <TableCell>{proposal.leadUnitName ?? "—"}</TableCell>
-                        <TableCell>
-                          {proposal.principalInvestigator ?? "—"}
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 420 }}>
-                          <Typography noWrap variant="body2">
-                            {proposal.title ?? "Untitled Proposal"}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <ArrowForwardOutlined color="action" />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
             )}
           </>
         )}
-      </Card>
-    </Stack>
+      </SearchStates>
+    </SearchPageLayout>
   );
 }
