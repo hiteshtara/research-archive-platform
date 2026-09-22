@@ -1,5 +1,6 @@
 import { Chip } from "@mui/material";
 
+import { splitStatusCode } from "../../features/common/searchPresentation.mjs";
 import { resolveStatusVariant } from "../../features/common/statusPresentation.mjs";
 
 export type StatusDomain = "award" | "proposal" | "negotiation" | "subaward";
@@ -19,11 +20,22 @@ export function StatusPill({
   status: string | null;
   domain: StatusDomain;
 }) {
+  // The colour rule keeps reading the FULL archived value, because
+  // Subaward's variant map is keyed on it ("04. PI/DA",
+  // "09. Temporarily Cancelled"). Only the visible label drops the
+  // leading ordinal, with the original kept on the title attribute as
+  // secondary metadata - BU reads the words, not the number.
+  //
+  // splitStatusCode is a no-op for Award, Proposal and Negotiation
+  // statuses, which carry no ordinal, so this cannot change how they
+  // render.
   const variant = resolveStatusVariant(domain, status);
+  const { code, label } = splitStatusCode(status);
 
   return (
     <Chip
-      label={status ?? "Unknown"}
+      title={code ? `${code} · ${label}` : undefined}
+      label={label ?? "Unknown"}
       size="small"
       sx={{
         fontWeight: 600,
