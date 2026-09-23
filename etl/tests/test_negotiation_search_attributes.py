@@ -361,3 +361,206 @@ class NegotiationSearchAttributeRebuildTest(unittest.TestCase):
         self.assertEqual(report["source_none"], 1)
         self.assertEqual(report["with_principal_investigator"], 3)
         self.assertEqual(report["with_lead_unit_name"], 3)
+
+
+class AwardAssociatedPrecedenceRegressionTest(unittest.TestCase):
+    """The verified Kuali precedence rule, pinned on the real records
+    that establish it.
+
+    For an Award-associated Negotiation EVERY resolved attribute comes
+    from the CURRENT ACTIVE associated Award - title, PI, sponsor and
+    lead unit alike. Confirmed against the Kuali UI on 2026-09-23.
+
+    These three negotiations are the ONLY ones in the archive where the
+    candidate rules disagree on PI; the other 18 Award-associated
+    records carrying a detail PI have a detail PI identical to the
+    Award's and prove nothing. 1641 additionally rules out an "as of the
+    negotiation date" rule - Harrison Farber WAS the Award PI during
+    that 2015 negotiation, yet Kuali shows the current ACTIVE PI.
+
+    The detail rows seeded here are REAL archived data, not stale or
+    erroneous values. Kuali simply does not display them once the
+    Negotiation is Award-associated.
+    """
+
+    db_prefix = "pytest_negotiation_precedence"
+
+    setUp = NegotiationSearchAttributeRebuildTest.setUp
+    tearDown = NegotiationSearchAttributeRebuildTest.tearDown
+    _negotiation = NegotiationSearchAttributeRebuildTest._negotiation
+    _detail = NegotiationSearchAttributeRebuildTest._detail
+    _attributes = NegotiationSearchAttributeRebuildTest._attributes
+
+    # negotiation_id -> (award_number, detail PI, ACTIVE Award PI)
+    PI_CASES = {
+        1641: ("204120-00001", "HARRISON W FARBER", "ELIZABETH S KLINGS"),
+        2587: ("205034-00001", "HARRISON W FARBER", "ROBERT W SIMMS"),
+        2676: ("203818-00001", "JANE E FOX", "JORGE DELVA"),
+    }
+
+    def _seed(self) -> None:
+        with self.engine.connect() as connection:
+            connection.execute(text(
+                """
+                INSERT INTO archive.unit (unit_number, unit_name) VALUES
+                  ('2444020000', 'SPH Ctr Advancing Hlth Policy & Practice'),
+                  ('2442430000', 'SPH HEALTH LAW, POLICY & MANAGEMENT'),
+                  ('2574000000', 'CNTR MED--ARTHRITIS CENTER'),
+                  ('2573180000', 'MED-MEDICINE')
+                """))
+            connection.execute(text(
+                """
+                INSERT INTO archive.sponsor (sponsor_code, sponsor_name) VALUES
+                  ('301028', 'HHS/Health Resources and Services Administration'),
+                  ('304143', 'Southern Nevada Health District'),
+                  ('304091', 'EMD Serono Research & Development Institute, Inc.'),
+                  ('302986', 'EMD Serono, Inc (Merck)')
+                """))
+
+            award_id = 1
+            person_id = 1
+            for nid, (award_number, detail_pi, award_pi) in self.PI_CASES.items():
+                # An older ARCHIVED version whose PI is the one the detail
+                # row also names - this is what makes the case ambiguous.
+                connection.execute(text(
+                    """
+                    INSERT INTO archive.award_version (
+                        award_id, award_number, sequence_number,
+                        award_sequence_status, title,
+                        sponsor_code, sponsor_name,
+                        lead_unit_number, lead_unit_name
+                    ) VALUES
+                      (:old_id, :num, 1, 'ARCHIVED', 'OLD AWARD TITLE',
+                       '301028', 'HHS/Health Resources and Services Administration',
+                       '2444020000', 'SPH Ctr Advancing Hlth Policy & Practice'),
+                      (:new_id, :num, 2, 'ACTIVE', 'CURRENT AWARD TITLE',
+                       '301028', 'HHS/Health Resources and Services Administration',
+                       '2444020000', 'SPH Ctr Advancing Hlth Policy & Practice')
+                    """), {"old_id": award_id, "new_id": award_id + 1, "num": award_number})
+                connection.execute(text(
+                    """
+                    INSERT INTO archive.award_person (
+                        award_person_id, award_id, award_number, sequence_number,
+                        person_id, full_name, contact_role_code
+                    ) VALUES
+                      (:p1, :old_id, :num, 1, 'UOLD', :detail_pi, 'PI'),
+                      (:p2, :new_id, :num, 2, 'UNEW', :award_pi, 'PI')
+                    """), {"p1": person_id, "p2": person_id + 1,
+                           "old_id": award_id, "new_id": award_id + 1,
+                           "num": award_number, "detail_pi": detail_pi,
+                           "award_pi": award_pi})
+                self._negotiation(connection, nid, "Award", award_number)
+                self._detail(connection, 9000 + nid, nid,
+                             title="DETAIL TITLE (real, but not displayed)",
+                             pi_name=detail_pi, pi_person_id="UOLD",
+                             lead_unit="2442430000", sponsor_code="304143")
+                award_id += 2
+                person_id += 2
+            connection.commit()
+
+    def _rebuild(self) -> None:
+        run_rebuild_negotiation_search_attributes(self.engine)
+
+    def test_pi_resolves_to_the_current_active_award_not_the_detail_row(self) -> None:
+        self._rebuild()
+        for nid, (_num, detail_pi, award_pi) in self.PI_CASES.items():
+            with self.subTest(negotiation=nid):
+                got = self._attributes(nid)
+                self.assertEqual(award_pi, got["principal_investigator_name"])
+                self.assertNotEqual(detail_pi, got["principal_investigator_name"])
+
+    def test_sponsor_resolves_to_the_award_for_2676(self) -> None:
+        self._rebuild()
+        got = self._attributes(2676)
+        self.assertEqual(
+            "HHS/Health Resources and Services Administration",
+            got["sponsor_name"])
+        self.assertNotEqual("Southern Nevada Health District", got["sponsor_name"])
+
+    def test_lead_unit_resolves_to_the_award_for_2676(self) -> None:
+        self._rebuild()
+        got = self._attributes(2676)
+        self.assertEqual(
+            "SPH Ctr Advancing Hlth Policy & Practice", got["lead_unit_name"])
+        self.assertNotEqual("SPH HEALTH LAW, POLICY & MANAGEMENT",
+                            got["lead_unit_name"])
+
+    def test_title_resolves_to_the_award_not_the_detail_row(self) -> None:
+        self._rebuild()
+        for nid in self.PI_CASES:
+            with self.subTest(negotiation=nid):
+                got = self._attributes(nid)
+                self.assertEqual("CURRENT AWARD TITLE", got["title"])
+
+    def test_every_one_of_the_three_is_sourced_from_the_award(self) -> None:
+        self._rebuild()
+        for nid in self.PI_CASES:
+            with self.subTest(negotiation=nid):
+                self.assertEqual("AWARD", self._attributes(nid)["attribute_source"])
+
+    def test_detail_rows_are_preserved_untouched_by_the_rebuild(self) -> None:
+        """Not displayed is not the same as deleted."""
+        self._rebuild()
+        with self.engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT negotiation_id, pi_name, lead_unit, sponsor_code "
+                "FROM archive.negotiation_unassociated_detail "
+                "ORDER BY negotiation_id")).mappings().all()
+        self.assertEqual(len(self.PI_CASES), len(rows))
+        for row in rows:
+            _num, detail_pi, _award_pi = self.PI_CASES[row["negotiation_id"]]
+            self.assertEqual(detail_pi, row["pi_name"])
+            self.assertEqual("2442430000", row["lead_unit"])
+            self.assertEqual("304143", row["sponsor_code"])
+
+
+class AwardVersionSelectionTest(unittest.TestCase):
+    """Which Award version an Award-associated Negotiation resolves to.
+
+    Regression for a real defect: the loader selected MAX(award_id),
+    which is NOT the ACTIVE version for 230 of 40,732 Award families.
+    Award 205270-00001 is the concrete case - award_id 3142987 is
+    sequence 11 and CANCELED, while the ACTIVE row is 3142979,
+    sequence 10. is_primary_current (V013) is no better here: it ranks
+    sequence_number DESC ahead of ACTIVE and picks the same CANCELED row.
+    """
+
+    db_prefix = "pytest_negotiation_award_version"
+
+    setUp = NegotiationSearchAttributeRebuildTest.setUp
+    tearDown = NegotiationSearchAttributeRebuildTest.tearDown
+    _negotiation = NegotiationSearchAttributeRebuildTest._negotiation
+    _attributes = NegotiationSearchAttributeRebuildTest._attributes
+
+    def _seed(self) -> None:
+        with self.engine.connect() as connection:
+            connection.execute(text(
+                """
+                INSERT INTO archive.award_version (
+                    award_id, award_number, sequence_number,
+                    award_sequence_status, title
+                ) VALUES
+                  (3142979, '205270-00001', 10, 'ACTIVE',   'ACTIVE TITLE'),
+                  (3142987, '205270-00001', 11, 'CANCELED', 'CANCELED TITLE'),
+                  (3352140, '200421-00001',  3, 'ARCHIVED', 'NO ACTIVE TITLE')
+                """))
+            # 2680 and 5246 both associate to the CANCELED-latest family.
+            self._negotiation(connection, 2680, "Award", "205270-00001")
+            self._negotiation(connection, 5246, "Award", "205270-00001")
+            # Negotiation 1's award family has no ACTIVE version at all.
+            self._negotiation(connection, 1, "Award", "200421-00001")
+            connection.commit()
+
+    def test_active_version_wins_over_a_higher_canceled_award_id(self) -> None:
+        run_rebuild_negotiation_search_attributes(self.engine)
+        for nid in (2680, 5246):
+            with self.subTest(negotiation=nid):
+                self.assertEqual("ACTIVE TITLE", self._attributes(nid)["title"])
+
+    def test_family_with_no_active_version_still_resolves(self) -> None:
+        """The tie-breaks are load-bearing: without them this would
+        resolve to nothing and the record would go blank."""
+        run_rebuild_negotiation_search_attributes(self.engine)
+        got = self._attributes(1)
+        self.assertEqual("NO ACTIVE TITLE", got["title"])
+        self.assertEqual("AWARD", got["attribute_source"])

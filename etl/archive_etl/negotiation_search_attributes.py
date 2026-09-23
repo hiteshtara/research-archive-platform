@@ -33,12 +33,30 @@ from sqlalchemy.engine import Connection, Engine
 # negotiations, 8,533 unassociated ones have a detail row and 2,202
 # Award-associated ones have none.
 #
-# Exactly 21 Award-associated negotiations have BOTH. For those, the
-# Award wins here, because that is what Kuali's own screen resolves for
-# an Award-associated Negotiation; a detail row on such a record is a
-# leftover from before it was associated. This affects 21 of 10,775
-# records (0.19%) and is worth confirming against a Kuali screen for one
-# of them before this ships.
+# Exactly 21 Award-associated negotiations have BOTH. For those the
+# Award wins, for EVERY resolved attribute - title, PI, sponsor and lead
+# unit alike. This is now verified, not assumed: the rule was checked
+# against the Kuali UI on the only three records where the candidate
+# rules disagree, and all three display the current ACTIVE Award's
+# values rather than the detail row's.
+#
+#   1641  detail PI HARRISON W FARBER  -> Kuali shows ELIZABETH S KLINGS
+#   2587  detail PI HARRISON W FARBER  -> Kuali shows ROBERT W SIMMS
+#   2676  detail PI JANE E FOX         -> Kuali shows JORGE DELVA
+#
+# 1641 also rules out an "as of the negotiation date" rule: Farber WAS
+# the Award PI during that 2015 negotiation, yet Kuali displays the
+# current ACTIVE Award PI. The resolution is current-state, not
+# historical.
+#
+# THE DETAIL ROWS ARE NOT STALE OR ERRONEOUS. They hold real, genuinely
+# recorded data - for 2676 a real PI, lead unit and sponsor that differ
+# from the Award's. Kuali simply does not use them as the displayed
+# source once a Negotiation is Award-associated. Nothing here deletes
+# them or treats them as suspect; they remain archived in full and are
+# still the source for unassociated Negotiations.
+#
+# This affects 21 of 10,775 records (0.19%).
 #
 # Subaward (16) and Institutional Proposal (3) associations have no
 # detail row and no fallback implemented, so they resolve to NONE and
@@ -80,10 +98,29 @@ SELECT
 FROM archive.negotiation n
 LEFT JOIN archive.negotiation_unassociated_detail d
        ON d.negotiation_id = n.negotiation_id
--- Award-association fallback. ASSOCIATED_DOCUMENT_ID matches
+-- Award association. ASSOCIATED_DOCUMENT_ID matches
 -- AWARD.AWARD_NUMBER for 2,223 of 2,223 Award-associated negotiations
--- (100%, verified live). Highest award_id is the current row for the
--- family, matching how AwardArchiveRepository resolves one.
+-- (100%, verified live) - a family-level key with no version pointer,
+-- so the version has to be chosen here.
+--
+-- WHICH VERSION: the CURRENT ACTIVE one. Confirmed against the Kuali UI
+-- on the three records where the candidate rules disagree - 1641, 2587
+-- and 2676 - all of which display the current ACTIVE Award's values.
+--
+-- This is deliberately NOT ordered by award_id alone, and deliberately
+-- NOT is_primary_current:
+--   * award_id DESC picks a CANCELED row for award 205270-00001
+--     (award_id 3142987, sequence 11, CANCELED) over its ACTIVE row
+--     (3142979, sequence 10). 230 of 40,732 Award families have a
+--     highest award_id that is not the ACTIVE version.
+--   * is_primary_current (V013) ranks sequence_number DESC ahead of
+--     ACTIVE, so it selects that same CANCELED sequence 11.
+-- Both would contradict the verified Kuali behaviour, so ACTIVE is
+-- ranked first explicitly. sequence_number/award_id remain as
+-- deterministic tie-breaks, and are the only ordering left for the one
+-- associated family that has no ACTIVE version at all
+-- (negotiation 1 -> award 200421-00001), which would otherwise resolve
+-- to nothing.
 LEFT JOIN LATERAL (
     SELECT av.award_id, av.title, av.sponsor_code, av.sponsor_name,
            av.prime_sponsor_code, av.prime_sponsor_name,
@@ -91,7 +128,13 @@ LEFT JOIN LATERAL (
     FROM archive.award_version av
     WHERE n.negotiation_association_type_description = 'Award'
       AND av.award_number = n.associated_document_id
-    ORDER BY av.award_id DESC
+    ORDER BY
+        CASE
+            WHEN UPPER(TRIM(av.award_sequence_status)) = 'ACTIVE' THEN 0
+            ELSE 1
+        END,
+        av.sequence_number DESC,
+        av.award_id DESC
     LIMIT 1
 ) aw ON TRUE
 -- Same PI-selection rule the Award repository already uses.
