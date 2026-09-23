@@ -116,7 +116,22 @@ LEFT JOIN archive.negotiation_unassociated_detail d
 --   * is_primary_current (V013) ranks sequence_number DESC ahead of
 --     ACTIVE, so it selects that same CANCELED sequence 11.
 -- Both would contradict the verified Kuali behaviour, so ACTIVE is
--- ranked first explicitly. sequence_number/award_id remain as
+-- ranked first explicitly.
+--
+-- THE DIVERGENCE FROM is_primary_current IS INTENTIONAL AND
+-- EVIDENCE-BASED, not an oversight, and must not be "tidied up" into a
+-- shared helper:
+--   * is_primary_current (V013) is an ARCHIVE convention. It answers
+--     "which row represents this Award family in the archive" and ranks
+--     sequence_number DESC ahead of ACTIVE.
+--   * Negotiation attribute resolution needs KUALI ACTIVE semantics -
+--     "which Award version does the Kuali Negotiation screen display" -
+--     which was established by direct UI verification.
+-- Those two questions have different answers for 230 Award families, so
+-- this ordering stays explicit and local to this feature. Do not
+-- substitute is_primary_current here, and do not change
+-- is_primary_current globally to match this: other callers depend on
+-- its existing semantics. sequence_number/award_id remain as
 -- deterministic tie-breaks, and are the only ordering left for the one
 -- associated family that has no ACTIVE version at all
 -- (negotiation 1 -> award 200421-00001), which would otherwise resolve
