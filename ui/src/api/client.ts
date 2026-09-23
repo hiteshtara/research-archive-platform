@@ -1,3 +1,10 @@
+import {
+  REPORT_ONLY,
+  REPORT_WITH_ATTACHMENTS,
+  buildAwardReportFallbackFileName,
+  buildAwardReportPath,
+  reportDownloadErrorMessage,
+} from "../features/award/awardReportDownloadPresentation.mjs";
 import { accessToken } from "../auth";
 import {
   buildAwardReportFileName,
@@ -777,7 +784,7 @@ export async function downloadAwardReportV1(
     throw new Error("No Cognito access token is available.");
   }
 
-  const path = `/api/v1/awards/${encodeURIComponent(awardId)}/report.pdf`;
+  const path = buildAwardReportPath(awardId, REPORT_ONLY);
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1505,4 +1512,40 @@ export function getExplorerProposalDiscovery(
     `/api/v1/explorer/proposals?${parameters.toString()}`,
     signal,
   );
+}
+
+export async function downloadAwardReportWithAttachmentsV1(
+  awardId: number,
+  awardNumber: string,
+): Promise<void> {
+  const token = await accessToken();
+  if (!token) {
+    throw new Error("No Cognito access token is available.");
+  }
+
+  const path = buildAwardReportPath(awardId, REPORT_WITH_ATTACHMENTS);
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    // Never silently fall back to the report-only endpoint: the user
+    // asked for attachments and must be told they did not get them.
+    throw new Error(
+      reportDownloadErrorMessage(response.status, REPORT_WITH_ATTACHMENTS),
+    );
+  }
+
+  const blobUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = parseDownloadFilename(
+    response.headers.get("Content-Disposition"),
+    buildAwardReportFallbackFileName(awardNumber, REPORT_WITH_ATTACHMENTS),
+  );
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
 }

@@ -47,7 +47,9 @@ class AwardBudgetControllerTest {
                 new AwardV1Controller(
                         service, contactService,
                         mock(AttachmentAuthorizationService.class),
-                        mock(AwardReportService.class), mock(AwardReportPdfRenderer.class)
+                        mock(AwardReportService.class), mock(AwardReportPdfRenderer.class),
+                        mock(edu.bu.archive.application.award.report
+                                .AwardConsolidatedReportAssembler.class)
                 );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)

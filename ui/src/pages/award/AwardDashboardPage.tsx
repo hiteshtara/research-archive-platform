@@ -9,6 +9,7 @@ import {
   ListItemButton,
   ListItemText,
   Stack,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
@@ -17,6 +18,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import {
   downloadAwardReportV1,
+  downloadAwardReportWithAttachmentsV1,
   getAwardHierarchyV1,
   getAwardSummaryV1,
 } from "../../api/client";
@@ -85,6 +87,13 @@ const IMPLEMENTED_SECTIONS = new Set<SectionKey>([
 // Award Hierarchy -> Award Dashboard. Tab switches are local state (no
 // route change), matching the approved mockup's in-page section
 // switcher - "no page reloads" between sections of the same Award.
+// Deliberately says "this Award version" - the consolidated
+// endpoint is version-scoped (award_id), not family-scoped, so
+// "all Award attachments" would be wrong.
+const REPORT_WITH_ATTACHMENTS_HELP =
+  "Downloads the Award report with archived PDF attachments for "
+  + "this Award version.";
+
 export function AwardDashboardPage() {
   const { awardId: awardIdParameter } = useParams<{ awardId: string }>();
   const awardId = Number(awardIdParameter);
@@ -93,6 +102,10 @@ export function AwardDashboardPage() {
   const [activeSection, setActiveSection] = useState<SectionKey>("summary");
   const [reportDownloading, setReportDownloading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [attachmentsReportDownloading, setAttachmentsReportDownloading] =
+    useState(false);
+  const [attachmentsReportError, setAttachmentsReportError] =
+    useState<string | null>(null);
 
   const summaryQuery = useQuery({
     queryKey: ["award-summary-v1", awardId],
@@ -123,6 +136,35 @@ export function AwardDashboardPage() {
 
     setActiveSection("summary");
     navigate(`/awards/${node.awardId}`);
+  }
+
+  async function handleDownloadReportWithAttachments() {
+    if (!Number.isFinite(awardId) || !summaryQuery.data) {
+      return;
+    }
+
+    // Independent state: only this action is disabled while it runs, so
+    // the rest of the page stays usable and the report-only button is
+    // unaffected. No client-side timeout - the consolidated report can
+    // legitimately take much longer than the plain one.
+    setAttachmentsReportDownloading(true);
+    setAttachmentsReportError(null);
+    try {
+      await downloadAwardReportWithAttachmentsV1(
+        awardId,
+        summaryQuery.data.awardNumber,
+      );
+    } catch (error) {
+      // Never silently fall back to the report-only download.
+      setAttachmentsReportError(
+        error instanceof Error
+          ? error.message
+          : "Unable to download the Award report with attachments. "
+            + "Please try again.",
+      );
+    } finally {
+      setAttachmentsReportDownloading(false);
+    }
   }
 
   async function handleDownloadReport() {
@@ -235,6 +277,29 @@ export function AwardDashboardPage() {
             >
               {reportDownloading ? "Preparing report…" : "Download Award Report"}
             </Button>
+            <Tooltip title={REPORT_WITH_ATTACHMENTS_HELP}>
+              <span>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={
+                    attachmentsReportDownloading ? (
+                      <CircularProgress size={16} color="inherit" />
+                    ) : (
+                      <DownloadOutlined fontSize="small" />
+                    )
+                  }
+                  disabled={attachmentsReportDownloading}
+                  onClick={handleDownloadReportWithAttachments}
+                  aria-busy={attachmentsReportDownloading}
+                  aria-label={REPORT_WITH_ATTACHMENTS_HELP}
+                >
+                  {attachmentsReportDownloading
+                    ? "Preparing report…"
+                    : "Download Report + Attachments"}
+                </Button>
+              </span>
+            </Tooltip>
             <StatusPill status={summary.status} domain="award" />
           </Stack>
 
@@ -246,6 +311,17 @@ export function AwardDashboardPage() {
               sx={{ maxWidth: 320, textAlign: "right" }}
             >
               {reportError}
+            </Typography>
+          )}
+
+          {attachmentsReportError && (
+            <Typography
+              variant="caption"
+              color="error"
+              role="alert"
+              sx={{ maxWidth: 320, textAlign: "right" }}
+            >
+              {attachmentsReportError}
             </Typography>
           )}
         </Stack>

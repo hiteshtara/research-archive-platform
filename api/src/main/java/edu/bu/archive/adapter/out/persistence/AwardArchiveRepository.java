@@ -50,6 +50,7 @@ import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionHeaderRow;
 
+import edu.bu.archive.application.award.report.AwardReportAttachment;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -2844,6 +2845,55 @@ public class AwardArchiveRepository {
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(ExplorerProposalDiscoveryResponse.class)
+                .list();
+    }
+
+
+    /**
+     * Attachments for the CONSOLIDATED report, version-scoped to exactly
+     * one award_id - the same scope findAttachments uses and the same
+     * scope the Award workspace's attachments tab shows, so the merged
+     * PDF contains what the user is looking at.
+     *
+     * NOT family-scoped. Award 105698-00001 has 9 attachments on
+     * award_id 2727052 but 81 across its 20 versions, and the worst
+     * family in the archive holds 214,311 attachments totalling ~84 GiB
+     * against a worst single version of 913 / 444 MiB - family scope is
+     * unbounded in practice as well as wrong for the user.
+     *
+     * Ordering is identical to findAttachments (oracle_update_timestamp
+     * DESC NULLS LAST, award_attachment_id DESC) so the merged document
+     * matches the on-screen list row for row. It is fully deterministic:
+     * award_attachment_id is a unique tiebreak, so no two rows can swap.
+     *
+     * Returns rows whose object is missing or never archived as well -
+     * they become information pages rather than disappearing.
+     */
+    public List<AwardReportAttachment> findAttachmentsForReport(long awardId) {
+        return jdbc.sql("""
+                SELECT
+                    aa.award_attachment_id,
+                    ao.file_name,
+                    ao.content_type,
+                    aa.description,
+                    aa.type_code,
+                    aa.document_status_code,
+                    ao.file_size_bytes,
+                    ao.upload_status,
+                    ao.s3_bucket,
+                    ao.s3_key,
+                    aa.oracle_update_timestamp,
+                    aa.oracle_update_user
+                FROM archive.award_attachment aa
+                LEFT JOIN archive.attachment_object ao
+                    ON ao.file_id = aa.file_id
+                WHERE aa.award_id = :awardId
+                ORDER BY
+                    aa.oracle_update_timestamp DESC NULLS LAST,
+                    aa.award_attachment_id DESC
+                """)
+                .param("awardId", awardId)
+                .query(AwardReportAttachment.class)
                 .list();
     }
 

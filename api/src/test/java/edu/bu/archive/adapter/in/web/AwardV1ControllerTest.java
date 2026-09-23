@@ -65,7 +65,9 @@ class AwardV1ControllerTest {
         reportPdfRenderer = mock(AwardReportPdfRenderer.class);
         AwardV1Controller controller = new AwardV1Controller(
                 service, contactService, mock(AttachmentAuthorizationService.class),
-                reportService, reportPdfRenderer
+                reportService, reportPdfRenderer,
+                mock(edu.bu.archive.application.award.report
+                        .AwardConsolidatedReportAssembler.class)
         );
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)

@@ -68,6 +68,7 @@ import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.AwardAttachmentStorage;
 import edu.bu.archive.adapter.out.persistence.AwardSemanticSummaryRow;
 
+import edu.bu.archive.application.award.report.AwardReportAttachment;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -2027,4 +2028,21 @@ public class AwardArchiveService {
                         .findFirst())
                 .orElse(null);
     }
+
+    /**
+     * Version-scoped attachments for the consolidated Award report, in
+     * the same archive order as the attachments tab. Includes rows whose
+     * object was never archived so the report can show an information
+     * page rather than silently omitting them.
+     *
+     * The returned rows carry s3Bucket/s3Key for server-side fetching
+     * only. They are never serialized to an API response - this method is
+     * not reachable from a controller, only from the report assembler.
+     */
+    public java.util.List<edu.bu.archive.application.award.report.AwardReportAttachment>
+            findReportAttachments(long awardId) {
+        requireAwardNumberForId(awardId);
+        return repository.findAttachmentsForReport(awardId);
+    }
+
 }
