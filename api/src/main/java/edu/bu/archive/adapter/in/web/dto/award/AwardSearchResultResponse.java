@@ -11,6 +11,7 @@ public record AwardSearchResultResponse(
         String principalInvestigator,
         String sponsor,
         String leadUnit,
+        String grantNumber,
         BigDecimal currentObligatedAmount,
         String rootAwardNumber,
         String parentAwardNumber

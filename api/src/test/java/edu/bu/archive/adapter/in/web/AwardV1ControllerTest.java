@@ -76,10 +76,19 @@ class AwardV1ControllerTest {
     @Test
     void searchIsRoutedUnderTheV1Prefix() throws Exception {
         AwardSearchResultResponse result = new AwardSearchResultResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "MICHAEL MCCLEAN", "Brown University",
-                "SPH ENVIRONMENTAL HEALTH", BigDecimal.TEN, null, null
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                "MICHAEL MCCLEAN",
+                "Brown University",
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            );
         PageResponse<AwardSearchResultResponse> page = new PageResponse<>(
                 List.of(result), 1, 10, 1L, 1, false, true
         );
@@ -461,12 +470,46 @@ class AwardV1ControllerTest {
     @Test
     void summaryIsRoutedUnderTheV1Prefix() throws Exception {
         AwardSummaryResponse summary = new AwardSummaryResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "Brown University", null, "MICHAEL MCCLEAN",
-                "SPH ENVIRONMENTAL HEALTH", null, null, null, null,
-                BigDecimal.TEN, BigDecimal.TEN, "1", "Cost reimbursement",
-                "28", "Invoice", null, null, true, null
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                null,
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                null,
+                null,
+                null,
+                "Brown University",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                "1",
+                "Cost reimbursement",
+                "28",
+                "Invoice",
+                "MICHAEL MCCLEAN",
+                null,
+                null,
+                true,
+                null
+            );
         when(service.findSummary(3L)).thenReturn(summary);
 
         mockMvc.perform(get("/api/v1/awards/3/summary"))
@@ -865,10 +908,46 @@ class AwardV1ControllerTest {
         edu.bu.archive.application.award.report.AwardReportData data =
                 mock(edu.bu.archive.application.award.report.AwardReportData.class);
         AwardSummaryResponse summary = new AwardSummaryResponse(
-                3L, "900000-00001", 2, "Title", "Active", "Sponsor", null,
-                "PI", "Unit", null, null, null, null, null, null,
-                null, null, null, null, null, null, true, "DOC-1"
-        );
+                3L,
+                "900000-00001",
+                2,
+                "Title",
+                "Active",
+                null,
+                "Unit",
+                null,
+                null,
+                null,
+                null,
+                "Sponsor",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "PI",
+                null,
+                null,
+                true,
+                "DOC-1"
+            );
         when(data.summary()).thenReturn(summary);
         when(reportService.buildReportData(3L)).thenReturn(data);
 
@@ -895,10 +974,46 @@ class AwardV1ControllerTest {
         edu.bu.archive.application.award.report.AwardReportData data =
                 mock(edu.bu.archive.application.award.report.AwardReportData.class);
         AwardSummaryResponse summary = new AwardSummaryResponse(
-                3L, "900000/00001; rm -rf", 2, "Title", "Active", "Sponsor", null,
-                "PI", "Unit", null, null, null, null, null, null,
-                null, null, null, null, null, null, true, "DOC-1"
-        );
+                3L,
+                "900000/00001; rm -rf",
+                2,
+                "Title",
+                "Active",
+                null,
+                "Unit",
+                null,
+                null,
+                null,
+                null,
+                "Sponsor",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "PI",
+                null,
+                null,
+                true,
+                "DOC-1"
+            );
         when(data.summary()).thenReturn(summary);
         when(reportService.buildReportData(3L)).thenReturn(data);
 

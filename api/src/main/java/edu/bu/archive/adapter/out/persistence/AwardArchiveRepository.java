@@ -674,6 +674,7 @@ public class AwardArchiveRepository {
                     pi.full_name AS principal_investigator,
                     av.sponsor_name AS sponsor,
                     av.lead_unit_name AS lead_unit,
+                    ext.grant_number,
                     amt.obligated_total_amount AS current_obligated_amount,
                     ah.root_award_number,
                     ah.parent_award_number
@@ -700,6 +701,8 @@ public class AwardArchiveRepository {
                         ai.award_amount_info_id DESC
                     LIMIT 1
                 ) amt ON TRUE
+                LEFT JOIN archive.award_extension ext
+                    ON ext.award_id = av.award_id
                 LEFT JOIN archive.award_hierarchy ah
                     ON ah.award_number = av.award_number
                 WHERE av.is_primary_current = TRUE
@@ -717,6 +720,31 @@ public class AwardArchiveRepository {
                             SELECT 1 FROM archive.award_person ap2
                             WHERE ap2.award_id = av.award_id
                               AND ap2.full_name ILIKE :pattern
+                        )
+                        /*
+                         * Grant Number (AWARD_EXTENSION.GRANT_NUMBER) is
+                         * VERSION-scoped - award_extension is keyed by
+                         * award_id, so each Award version carries its own
+                         * row. The surrounding query is deliberately
+                         * restricted to av.is_primary_current = TRUE, so
+                         * matching only ext.grant_number would silently
+                         * miss an Award whose Grant Number appears on an
+                         * earlier version. This matches family-wide,
+                         * across every version sharing the award_number,
+                         * while the SELECT above still displays the
+                         * current version's own value.
+                         */
+                        OR EXISTS (
+                            SELECT 1
+                            FROM archive.award_version av2
+                            JOIN archive.award_extension ext2
+                              ON ext2.award_id = av2.award_id
+                            WHERE av2.award_number = av.award_number
+                              AND (
+                                    UPPER(ext2.grant_number)
+                                        = UPPER(:rawQuery)
+                                    OR ext2.grant_number ILIKE :pattern
+                              )
                         )
                   )
                 ORDER BY av.award_number
@@ -869,7 +897,23 @@ public class AwardArchiveRepository {
                     av.prime_sponsor_name AS prime_sponsor,
                     pi.full_name AS principal_investigator,
                     av.lead_unit_name AS lead_unit,
+                    ext.grant_number,
+                    av.account_type,
+                    av.activity_type,
+                    av.award_type,
+                    ext.federal_clinical_trial,
+                    av.sponsor_code,
+                    av.sponsor_award_number,
+                    av.prime_sponsor_code,
+                    ext.prime_sponsor_award_id,
+                    av.modification_number,
+                    av.fain_id,
+                    av.nsf_science_code,
+                    av.nsf_sequence_number,
+                    cfda.cfda_number AS aln_number,
+                    cfda.cfda_description AS aln_program_title_name,
                     av.award_effective_date,
+                    amt.current_fund_effective_date AS obligation_start_date,
                     av.award_execution_date,
                     av.begin_date,
                     av.closeout_date,
@@ -901,13 +945,26 @@ public class AwardArchiveRepository {
                 LEFT JOIN LATERAL (
                     SELECT
                         ai.obligated_total_amount,
-                        ai.anticipated_total_amount
+                        ai.anticipated_total_amount,
+                        ai.current_fund_effective_date
                     FROM archive.award_amount_info ai
                     WHERE ai.award_id = av.award_id
                     ORDER BY
                         ai.award_amount_info_id DESC
                     LIMIT 1
                 ) amt ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        ac.cfda_number,
+                        ac.cfda_description
+                    FROM archive.award_cfda ac
+                    WHERE ac.award_id = av.award_id
+                    ORDER BY
+                        ac.award_cfda_id
+                    LIMIT 1
+                ) cfda ON TRUE
+                LEFT JOIN archive.award_extension ext
+                    ON ext.award_id = av.award_id
                 LEFT JOIN archive.award_hierarchy ah
                     ON ah.award_number = av.award_number
                 WHERE av.award_id = :awardId

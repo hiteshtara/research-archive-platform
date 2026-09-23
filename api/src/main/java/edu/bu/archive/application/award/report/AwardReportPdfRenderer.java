@@ -215,10 +215,24 @@ public class AwardReportPdfRenderer {
         addFieldRow(table, "Prime Sponsor", text(s.primeSponsor()));
         addFieldRow(table, "Principal Investigator", text(s.principalInvestigator()));
         addFieldRow(table, "Lead Unit", text(s.leadUnit()));
-        addFieldRow(table, "Award Effective Date", formatDate(s.awardEffectiveDate()));
+        addFieldRow(table, "Grant Number", text(s.grantNumber()));
+        /*
+         * Kuali business labels, matching the web Award Summary exactly
+         * (see AwardSummaryResponse and V078). This is NOT a rename of
+         * beginDate/closeoutDate:
+         *
+         *   Project Start Date  = award_effective_date. begin_date is
+         *       populated in 2 of 267,386 Oracle AWARD rows and would
+         *       print blank on virtually every report.
+         *   Obligation Start Date = the current AWARD_AMOUNT_INFO row's
+         *       current_fund_effective_date, selected by Kuali's
+         *       MAX(award_amount_info_id) rule.
+         *
+         * Award Execution Date keeps its own Kuali label and column.
+         */
+        addFieldRow(table, "Project Start Date", formatDate(s.awardEffectiveDate()));
+        addFieldRow(table, "Obligation Start Date", formatDate(s.obligationStartDate()));
         addFieldRow(table, "Award Execution Date", formatDate(s.awardExecutionDate()));
-        addFieldRow(table, "Begin Date", formatDate(s.beginDate()));
-        addFieldRow(table, "Closeout Date", formatDate(s.closeoutDate()));
         addFieldRow(table, "Obligated Total Amount", formatCurrency(s.obligatedTotalAmount()));
         addFieldRow(table, "Anticipated Total Amount", formatCurrency(s.anticipatedTotalAmount()));
         addFieldRow(table, "Basis of Payment", codeAndDescription(s.basisOfPaymentCode(), s.basisOfPaymentDescription()));

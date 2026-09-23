@@ -79,17 +79,32 @@ class AwardV1ContractTest {
     @Test
     void searchResultShapeIsStable() throws Exception {
         AwardSearchResultResponse result = new AwardSearchResultResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "MICHAEL MCCLEAN", "Brown University",
-                "SPH ENVIRONMENTAL HEALTH", BigDecimal.TEN,
-                "100004-00001", "100004-00002"
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                "MICHAEL MCCLEAN",
+                "Brown University",
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                BigDecimal.TEN,
+                "100004-00001",
+                "100004-00002"
+            );
 
         assertFieldNames(result, Set.of(
                 "awardId", "awardNumber", "latestSequenceNumber",
                 "title", "status", "principalInvestigator", "sponsor",
                 "leadUnit", "currentObligatedAmount", "rootAwardNumber",
-                "parentAwardNumber"
+                "parentAwardNumber",
+                // Grant Number (AWARD_EXTENSION.GRANT_NUMBER) is exposed
+                // as search-result metadata so a user who searched by it
+                // can see which value matched. It is also a searchable
+                // predicate - Award 105698-00001's Grant Number 50105698
+                // shares no substring with its award_number, so without
+                // it that search returns nothing.
+                "grantNumber"
         ));
     }
 
@@ -160,13 +175,46 @@ class AwardV1ContractTest {
     void summaryShapeIsStableAndDatesSerializeAsIsoStrings()
             throws Exception {
         AwardSummaryResponse summary = new AwardSummaryResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "Brown University", "NIH", "MICHAEL MCCLEAN",
-                "SPH ENVIRONMENTAL HEALTH", LocalDate.of(2007, 9, 15),
-                null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                "1", "Cost reimbursement", "28", "Invoice",
-                "100004-00001", "100004-00002", true, "DOC-9001"
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                null,
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                null,
+                null,
+                null,
+                "Brown University",
+                null,
+                null,
+                "NIH",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                LocalDate.of(2007, 9, 15),
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                "1",
+                "Cost reimbursement",
+                "28",
+                "Invoice",
+                "MICHAEL MCCLEAN",
+                "100004-00001",
+                "100004-00002",
+                true,
+                "DOC-9001"
+            );
 
         assertFieldNames(summary, Set.of(
                 "awardId", "awardNumber", "sequenceNumber", "title",
@@ -177,15 +225,40 @@ class AwardV1ContractTest {
                 "anticipatedTotalAmount", "basisOfPaymentCode",
                 "basisOfPaymentDescription", "methodOfPaymentCode",
                 "methodOfPaymentDescription", "rootAwardNumber",
-                "parentAwardNumber", "primaryCurrent", "documentNumber"
+                "parentAwardNumber", "primaryCurrent", "documentNumber",
+                // Added for the Kuali-labelled Summary (V078). The UI
+                // labels these "Sponsor ID", "Sponsor Award ID",
+                // "Prime Sponsor ID", "Prime Sponsor Award ID",
+                // "Modification ID", "FAIN ID", "NSF Science Code",
+                // "ALN Number", "ALN Program Title Name",
+                // "Obligation Start Date", "Grant Number",
+                // "Account Type", "Activity Type", "Award Type" and
+                // "Federal Clinical Trial"; awardEffectiveDate above is
+                // labelled "Project Start Date".
+                "sponsorCode", "sponsorAwardNumber", "primeSponsorCode",
+                "primeSponsorAwardId", "modificationNumber", "fainId",
+                "nsfScienceCode", "nsfSequenceNumber", "alnNumber",
+                "alnProgramTitleName", "obligationStartDate",
+                "grantNumber", "accountType", "activityType",
+                "awardType", "federalClinicalTrial"
         ));
 
-        // FAIN and "account type" must never reappear as fields -
-        // see AWARD_SEARCH_API_DESIGN.md's "Fields deliberately
-        // omitted" section.
+        // FAIN ID and Account Type were previously asserted to be
+        // permanently absent (AWARD_SEARCH_API_DESIGN.md's "Fields
+        // deliberately omitted"), because at the time no archive column
+        // existed for either. V078 archived both from verified Oracle
+        // sources - AWARD.FAIN_ID (populated in 137,906 of 267,386
+        // rows) and AWARD.ACCOUNT_TYPE_CODE resolved against
+        // ACCOUNT_TYPE (267,386 of 267,386) - so that omission no
+        // longer holds and the contract is now that both ARE exposed.
+        //
+        // Federal Award Year remains genuinely omitted:
+        // AWARD.FED_AWARD_YEAR is populated in 0 of 267,386 rows.
         String json = objectMapper.writeValueAsString(summary);
-        assertThat(json).doesNotContainIgnoringCase("fain");
-        assertThat(json).doesNotContainIgnoringCase("accountType");
+        assertThat(json).containsIgnoringCase("fainId");
+        assertThat(json).containsIgnoringCase("accountType");
+        assertThat(json).doesNotContainIgnoringCase("fedAwardYear");
+        assertThat(json).doesNotContainIgnoringCase("federalAwardYear");
 
         JsonNode node = objectMapper.valueToTree(summary);
         assertThat(node.get("awardEffectiveDate").asText())
@@ -193,6 +266,14 @@ class AwardV1ContractTest {
         assertThat(node.get("awardEffectiveDate").isTextual())
                 .as("dates must serialize as ISO strings, not "
                         + "numeric timestamp arrays")
+                .isTrue();
+
+        // Obligation Start Date is a date like any other and must
+        // serialize the same way.
+        assertThat(node.get("obligationStartDate").isNull()
+                        || node.get("obligationStartDate").isTextual())
+                .as("Obligation Start Date must serialize as an ISO "
+                        + "string, not a numeric timestamp array")
                 .isTrue();
     }
 

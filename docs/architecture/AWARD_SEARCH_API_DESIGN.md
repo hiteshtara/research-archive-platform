@@ -368,19 +368,42 @@ genuinely selective predicates):
 
 Per `CLAUDE.md`'s "never invent Oracle table/column names" rule:
 
-- **FAIN** — confirmed absent from the archive schema entirely (grepped
-  every migration; cross-referenced against
-  `AWARD_EXTENSION_CGB_DESIGN.md` and
-  `SAP_AWARD_TRANSMISSION_ASSESSMENT.md`'s own open questions about
-  `Award.fainId`). Omitted from `AwardSearchResultResponse` and
-  `AwardSummaryResponse` even though both were requested to include it.
-- **"Account type"** — the only `account_type_code` in this schema is
-  `archive.award_transmission`'s own SAP-specific field (`V052`), not a
-  general Award attribute. Omitted from `AwardSummaryResponse`.
-- **"Final expiration date" / "current fund effective date"** — invented
-  field names from `docs/design/award-ui-redesign-mockup.html` with no
-  backing column. `closeoutDate` (`award_version.closeout_date`) is
-  exposed in their place as the real, analogous column.
+- **Federal Award Year** — `AWARD.FED_AWARD_YEAR` exists in Oracle but
+  is populated in **0 of 267,386** AWARD rows (verified against live
+  KCOEUS staging). Archiving it would create a permanently empty column
+  and a permanently empty Summary card, so it is deliberately not
+  archived and not exposed.
+- **"Account type" as an SAP concept** — `archive.award_transmission`'s
+  `account_type_code` (`V052`) is SAP-transmission-specific and is still
+  never used as a general Award attribute. The `accountType` field now
+  on `AwardSummaryResponse` is a *different* thing: `AWARD.
+  ACCOUNT_TYPE_CODE` resolved against the `ACCOUNT_TYPE` lookup.
+
+### Superseded omissions (V078)
+
+The two entries below were correct when written — no archive column
+existed for either — and were **superseded on 2026-09-21** by `V078`,
+which archived both from sources verified against live Oracle staging.
+They are retained because the reasoning still explains why neither may
+be sourced from a same-shaped-but-wrong column.
+
+- **FAIN** — *was* absent from the archive schema entirely. `V078` adds
+  `archive.award_version.fain_id` from `AWARD.FAIN_ID` (populated in
+  137,906 of 267,386 rows). It is now exposed on `AwardSummaryResponse`
+  as `fainId` and labelled "FAIN ID". The value is passed through
+  verbatim: the literal string `unknown` is a real archived Kuali value
+  and must never be coerced to null or an em dash.
+- **"Final expiration date" / "current fund effective date"** — *was*
+  treated as an invented mockup field name. `CURRENT_FUND_EFFECTIVE_DATE`
+  is in fact a real `AWARD_AMOUNT_INFO` column; what was missing was any
+  archive column for it. `V078` adds
+  `archive.award_amount_info.current_fund_effective_date`, exposed as
+  `obligationStartDate` and labelled "Obligation Start Date" — the
+  legacy Kuali label. It is read through Kuali's own current-row rule,
+  `MAX(award_amount_info_id)`, in the same LATERAL that selects the
+  obligated/anticipated totals. `closeoutDate` is no longer shown on the
+  Summary in its place: `award_version.closeout_date` is populated in
+  only 1,129 of 267,386 rows.
 
 ## Manual verification
 
@@ -425,8 +448,10 @@ additions/replacements), all passing; full API suite (170 tests) passes.
 - `AwardArchiveRepositoryTest` (11): search/count SQL shape and bound
   parameters (never concatenated), hierarchy root/edges queries,
   summary-cards empty-collection short-circuit (no query issued) and
-  `IN (:awardNumbers)` binding, summary-by-id column mapping (asserting
-  absence of any `fain`/`account_type` reference), award-number
+  `IN (:awardNumbers)` binding, summary-by-id column mapping (since `V078`,
+  asserting that `fain_id` and `account_type` ARE selected, and that
+  `account_type` still does not come from the SAP-specific
+  `award_transmission`), award-number
   resolution, version ordering and pagination, version count.
 - `AwardArchiveServiceTest` (13): pagination clamping (search and
   versions), wildcard/empty query normalization, single-node hierarchy
@@ -613,9 +638,12 @@ Validated by starting the app locally and inspecting the live
   `summary`, `description`, parameter descriptions, and declared
   response codes (confirmed for `search`: `summary: "Search Awards"`,
   parameter descriptions for `q`/`page`/`size`, responses `200`/`400`).
-- `AwardSummaryResponse`'s generated schema lists exactly its 20 real
-  fields — no `fain`, no `accountType` — confirming the DTO-level
-  omissions survive into the generated contract, not just the Java type.
+- `AwardSummaryResponse`'s generated schema lists exactly its real
+  fields. Since `V078` that includes `fainId` and `accountType`; the
+  contract test now asserts both are present and that no
+  `fedAwardYear`/`federalAwardYear` field appears, confirming the one
+  remaining omission survives into the generated contract, not just the
+  Java type.
 
 ## Backward-compatibility rules
 

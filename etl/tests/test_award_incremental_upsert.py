@@ -6577,7 +6577,23 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
         )
         self.assertEqual(missing_item["status"], "MISSING_SOURCE")
 
-    def test_batch_status_becomes_ready_on_success(self) -> None:
+    def test_batch_status_becomes_completed_on_success(self) -> None:
+        """CHANGED 2026-09-22. This test previously asserted the batch
+        ended in READY, which encoded a real defect rather than a
+        requirement: _run_load_award_batch set the parent to READY on
+        success and never to a terminal status, and no
+        finish_batch_processing call existed anywhere in the Award loader.
+
+        Because selection excludes entities claimed by a non-terminal
+        batch, every successfully loaded Award batch kept claiming its
+        families forever - 32 such batches were found in dev holding
+        40,919 of 40,926 Award families, which reduced a 100-family V078
+        backfill selection to 7.
+
+        The terminal status is now derived from the PERSISTED
+        etl_batch_item rows after they commit. Award-scoped: Award
+        Attachment's deliberate use of READY as an intermediate phase
+        marker is unchanged."""
         batch_id = self._create_batch([1])
         with self._patched_oracle(
             versions=[_version_row(award_id=1, award_number="A-0001")]
@@ -6585,7 +6601,25 @@ class RunLoadAwardBatchTest(_AwardPostgresTestCase):
             award_loader._run_load_award_batch(self.engine, batch_id)
 
         batch_row = self._row("etl_batch", batch_id=batch_id)
-        self.assertEqual(batch_row["status"], "READY")
+        self.assertEqual(batch_row["status"], "COMPLETED")
+        self.assertIsNotNone(
+            batch_row["completed_at"],
+            "finish_batch_processing must stamp completed_at",
+        )
+
+    def test_dry_run_batch_is_not_finalized(self) -> None:
+        """A dry run rolls the load back, so it must not claim any
+        terminal status."""
+        batch_id = self._create_batch([1])
+        with self._patched_oracle(
+            versions=[_version_row(award_id=1, award_number="A-0001")]
+        ):
+            award_loader._run_load_award_batch(
+                self.engine, batch_id, dry_run=True
+            )
+
+        batch_row = self._row("etl_batch", batch_id=batch_id)
+        self.assertNotEqual(batch_row["status"], "COMPLETED")
 
     def test_does_not_touch_unrelated_pending_award(self) -> None:
         batch_id = self._create_batch([1])
