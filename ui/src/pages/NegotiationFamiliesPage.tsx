@@ -1,38 +1,39 @@
-import { ArrowForwardOutlined, SearchOutlined } from "@mui/icons-material";
-import {
-  Box,
-  Card,
-  CardContent,
-  InputAdornment,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Box, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { getNegotiations } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
-import { ErrorState } from "../components/common/ErrorState";
 import { FilterChips } from "../components/common/FilterChips";
 import {
   FilterPanel,
   FilterToggleButton,
 } from "../components/common/FilterPanel";
-import { LoadingState } from "../components/common/LoadingState";
 import { PaginationFooter } from "../components/common/PaginationFooter";
 import { StatusPill } from "../components/common/StatusPill";
+import { ResultCard } from "../components/common/search/ResultCard";
+import { ResultCount } from "../components/common/search/ResultCount";
+import { SearchBox } from "../components/common/search/SearchBox";
+import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
+import { SearchStates } from "../components/common/search/SearchStates";
+import {
+  joinMetadata,
+  resolveSearchState,
+} from "../features/common/searchPresentation.mjs";
 import {
   NEGOTIATION_FILTER_FIELDS,
   buildNegotiationFilterChips,
   buildNegotiationPath,
   buildNegotiationSearchParams,
+  buildNegotiationUrlParams,
   clearNegotiationFilters,
   countActiveNegotiationFilters,
-  describeNegotiationResults,
-  emptyNegotiationFilters,
   formatLeadUnit,
+  hasNegotiationSearchCriteria,
+  negotiationFiltersFromParams,
+  negotiationPageFromParams,
+  negotiationQueryFromParams,
   removeNegotiationFilter,
 } from "../features/negotiation/negotiationSearchPresentation.mjs";
 import type {
@@ -40,118 +41,135 @@ import type {
   NegotiationFilters,
 } from "../features/negotiation/negotiationSearchPresentation.d.mts";
 
-const pageSize = 25;
+const PAGE_SIZE = 25;
+
+const SEARCH_DIMENSIONS = [
+  "Negotiation ID",
+  "Title",
+  "Status",
+  "Negotiator",
+  "PI",
+  "Sponsor",
+  "Lead Unit",
+];
 
 function display(value: string | number | null) {
   return value ?? "—";
 }
 
 export function NegotiationFamiliesPage() {
-  const navigate = useNavigate();
+  // The applied search lives in the URL, like every other archive search
+  // page, so a reload or a shared link reproduces the same result set
+  // instead of dropping back to the empty state with populated inputs.
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
+  const appliedSearch = negotiationQueryFromParams(searchParams);
+  const appliedFilters = negotiationFiltersFromParams(searchParams);
+  const page = negotiationPageFromParams(searchParams);
 
-  // `filters` is what the panel is editing; `appliedFilters` is what the
-  // last search actually used. Keeping them apart means typing in the
-  // panel does not fire a request per keystroke, and the chips always
-  // describe the result set on screen rather than a pending edit.
-  const [filters, setFilters] = useState<NegotiationFilters>(
-    emptyNegotiationFilters(),
-  );
-  const [appliedFilters, setAppliedFilters] = useState<NegotiationFilters>(
-    emptyNegotiationFilters(),
-  );
-
+  // `draft`/`filters` are what the inputs are editing; the URL holds what
+  // the last search actually used. Keeping them apart means typing does
+  // not fire a request per keystroke, and the chips always describe the
+  // result set on screen rather than a pending edit.
+  const [draft, setDraft] = useState(appliedSearch);
+  const [filters, setFilters] = useState<NegotiationFilters>(appliedFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [page, setPage] = useState(0);
+
+  // Nothing is fetched until the user asks for something. This page used
+  // to query on mount, putting the first page of 10,775 Negotiations on
+  // screen before anyone had searched.
+  const hasSearched = hasNegotiationSearchCriteria({
+    query: appliedSearch,
+    filters: appliedFilters,
+  });
 
   const searchParameters = buildNegotiationSearchParams({
     query: appliedSearch,
     filters: appliedFilters,
     page,
-    size: pageSize,
+    size: PAGE_SIZE,
   });
 
   const query = useQuery({
     queryKey: ["negotiations", searchParameters],
     queryFn: ({ signal }) => getNegotiations(searchParameters, signal),
+    enabled: hasSearched,
   });
 
-  const chips = buildNegotiationFilterChips(appliedFilters);
-  const activeCount = countActiveNegotiationFilters(filters);
+  const results = query.data ?? null;
 
-  const applySearch = () => {
-    setAppliedSearch(search.trim());
-    setAppliedFilters(filters);
-    setPage(0);
+  const state = resolveSearchState({
+    hasSearched,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    resultCount: results?.content.length ?? 0,
+  });
+
+  const commit = (
+    nextQuery: string,
+    nextFilters: NegotiationFilters,
+    nextPage = 0,
+  ) => {
+    setSearchParams(
+      buildNegotiationUrlParams({
+        query: nextQuery,
+        filters: nextFilters,
+        page: nextPage,
+      }),
+    );
   };
+
+  const applySearch = () => commit(draft.trim(), filters);
 
   const changeFilter = (key: NegotiationFilterKey, value: string) => {
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  // Removing a chip is an immediate action on the applied result set, so
-  // it drops the filter from both the panel and the live search at once.
+  // Removing a chip acts on the applied result set immediately, so it
+  // drops the filter from both the panel and the live search at once.
   const removeChip = (key: NegotiationFilterKey) => {
     const next = removeNegotiationFilter(appliedFilters, key);
     setFilters(next);
-    setAppliedFilters(next);
-    setPage(0);
+    commit(appliedSearch, next);
   };
 
+  // Clear All removes the structured filters AND the free text, which
+  // returns the page to its initial state and stops it querying.
   const clearAll = () => {
     const cleared = clearNegotiationFilters();
     setFilters(cleared);
-    setAppliedFilters(cleared);
-    setPage(0);
+    setDraft("");
+    commit("", cleared);
   };
 
   return (
-    <Stack spacing={3}>
-      <Card>
-        <CardContent>
-          <Typography variant="h4" sx={{ fontWeight: 700 }}>
-            Negotiations
-          </Typography>
-
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            Search archived agreements and their associated Kuali records.
-          </Typography>
-
-          <Stack
-            direction={{ xs: "column", sm: "row" }}
-            spacing={1.5}
-            sx={{ mt: 3, alignItems: { xs: "stretch", sm: "center" } }}
-          >
-            <TextField
-              fullWidth
+    <SearchPageLayout
+      title="Negotiations"
+      subtitle="Search archived negotiations and their associated Kuali records."
+      search={
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={1.5}
+          sx={{ alignItems: { xs: "stretch", sm: "center" } }}
+        >
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <SearchBox
+              value={draft}
+              onChange={setDraft}
+              onSubmit={applySearch}
               placeholder="Negotiation ID, title, status, negotiator, PI, sponsor, lead unit..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  applySearch();
-                }
-              }}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchOutlined />
-                    </InputAdornment>
-                  ),
-                },
-              }}
+              ariaLabel="Search Negotiations"
             />
-
-            <FilterToggleButton
-              open={filtersOpen}
-              activeCount={activeCount}
-              onClick={() => setFiltersOpen((open) => !open)}
-            />
-          </Stack>
-
+          </Box>
+          <FilterToggleButton
+            open={filtersOpen}
+            activeCount={countActiveNegotiationFilters(filters)}
+            onClick={() => setFiltersOpen((open) => !open)}
+          />
+        </Stack>
+      }
+      belowSearch={
+        <>
           <FilterPanel
             open={filtersOpen}
             fields={NEGOTIATION_FILTER_FIELDS}
@@ -160,151 +178,99 @@ export function NegotiationFamiliesPage() {
             onApply={applySearch}
             onClearAll={clearAll}
           />
-
           <FilterChips
-            chips={chips}
+            chips={buildNegotiationFilterChips(appliedFilters)}
             onRemove={removeChip}
             onClearAll={clearAll}
           />
-        </CardContent>
-      </Card>
-
-      {query.isLoading && <LoadingState mode="spinner" />}
-
-      {query.isError && (
-        <ErrorState message="Unable to load Negotiations right now. Try again in a moment." />
-      )}
-
-      {query.data && (
-        <Stack spacing={1.25}>
-          <Typography variant="body2" color="text.secondary">
-            {describeNegotiationResults({
-              totalElements: query.data.totalElements,
-              page: query.data.page,
-              size: query.data.size,
-              count: query.data.content.length,
-            })}
-          </Typography>
-
-          {query.data.content.length === 0 ? (
-            <EmptyState message="No matching Negotiations were found." />
-          ) : (
-            query.data.content.map((negotiation) => {
-              const leadUnit = formatLeadUnit(
-                negotiation.leadUnitName,
-                negotiation.leadUnitNumber,
-              );
-              const path = buildNegotiationPath(negotiation.negotiationId);
-
-              return (
-                <Card
-                  key={negotiation.negotiationId}
-                  variant="outlined"
-                  sx={{
-                    cursor: "pointer",
-                    "&:hover": { borderColor: "primary.main" },
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(path)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      navigate(path);
-                    }
-                  }}
-                >
-                  <CardContent sx={{ "&:last-child": { pb: 2 } }}>
-                    <Stack
-                      direction="row"
-                      spacing={2}
-                      sx={{ alignItems: "flex-start" }}
-                    >
-                      <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                        <Stack
-                          direction="row"
-                          spacing={1}
-                          sx={{ alignItems: "center", flexWrap: "wrap" }}
-                        >
-                          <Typography sx={{ fontWeight: 700 }}>
-                            {negotiation.negotiationId}
-                          </Typography>
-                          <StatusPill
-                            status={negotiation.negotiationStatusDescription}
-                            domain="negotiation"
-                          />
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{ whiteSpace: "nowrap" }}
-                          >
-                            {display(
-                              negotiation.negotiationAgreementTypeDescription,
-                            )}
-                          </Typography>
-                        </Stack>
-
-                        <Typography sx={{ mt: 0.5 }}>
-                          {display(negotiation.title)}
-                        </Typography>
-
-                        <Typography variant="body2" color="text.secondary">
-                          {display(negotiation.principalInvestigatorName)}
-                          {negotiation.sponsorName
-                            ? ` · ${negotiation.sponsorName}`
-                            : ""}
-                        </Typography>
-
-                        {/*
-                          Lead Unit: BU explicitly asked for the actual
-                          unit name as the primary value, with the number
-                          as secondary metadata - never the number alone.
-                        */}
-                        <Typography variant="body2" sx={{ mt: 0.5 }}>
-                          {leadUnit.primary}
-                        </Typography>
-                        {leadUnit.secondary && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            component="div"
-                          >
-                            {leadUnit.secondary}
-                          </Typography>
-                        )}
-
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          component="div"
-                          sx={{ mt: 0.5 }}
-                        >
-                          Negotiator {display(negotiation.negotiatorFullName)}
-                          {negotiation.negotiationStartDate
-                            ? ` · Started ${negotiation.negotiationStartDate}`
-                            : ""}
-                        </Typography>
-                      </Box>
-
-                      <ArrowForwardOutlined color="action" />
-                    </Stack>
-                  </CardContent>
-                </Card>
-              );
-            })
+          {!hasSearched && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 2.5 }}
+            >
+              Search by {SEARCH_DIMENSIONS.join(", ")}, or open Filters to
+              combine criteria.
+            </Typography>
           )}
+        </>
+      }
+    >
+      <SearchStates
+        state={state}
+        errorMessage="Unable to load Negotiations right now. Try again in a moment."
+      >
+        {results && (
+          <>
+            <ResultCount total={results.totalElements} singular="negotiation" />
 
-          {query.data.totalPages > 1 && (
-            <Box sx={{ mt: 2 }}>
-              <PaginationFooter
-                page={query.data.page}
-                totalPages={query.data.totalPages}
-                onPageChange={setPage}
+            {results.content.length === 0 && (
+              <EmptyState
+                variant="text"
+                message="No matching Negotiations were found."
               />
-            </Box>
-          )}
-        </Stack>
-      )}
-    </Stack>
+            )}
+
+            <Stack spacing={1.25}>
+              {results.content.map((negotiation) => {
+                // Lead Unit: BU explicitly asked for the actual unit name
+                // as the primary value, with the number as secondary
+                // metadata - never the number alone.
+                const leadUnit = formatLeadUnit(
+                  negotiation.leadUnitName,
+                  negotiation.leadUnitNumber,
+                );
+
+                return (
+                  <ResultCard
+                    key={negotiation.negotiationId}
+                    to={buildNegotiationPath(negotiation.negotiationId)}
+                    identifier={negotiation.negotiationId}
+                    secondaryIdentifier={
+                      <Typography variant="body2" color="text.secondary">
+                        {display(
+                          negotiation.negotiationAgreementTypeDescription,
+                        )}
+                      </Typography>
+                    }
+                    status={
+                      <StatusPill
+                        status={negotiation.negotiationStatusDescription}
+                        domain="negotiation"
+                      />
+                    }
+                    title={display(negotiation.title)}
+                    metadata={joinMetadata([
+                      negotiation.principalInvestigatorName,
+                      negotiation.sponsorName,
+                      leadUnit.primary,
+                      leadUnit.secondary,
+                      negotiation.negotiatorFullName
+                        ? `Negotiator ${negotiation.negotiatorFullName}`
+                        : null,
+                      negotiation.negotiationStartDate
+                        ? `Started ${negotiation.negotiationStartDate}`
+                        : null,
+                    ])}
+                  />
+                );
+              })}
+            </Stack>
+
+            {results.totalPages > 1 && (
+              <Box sx={{ mt: 3 }}>
+                <PaginationFooter
+                  page={results.page}
+                  totalPages={results.totalPages}
+                  onPageChange={(next) =>
+                    commit(appliedSearch, appliedFilters, next)
+                  }
+                />
+              </Box>
+            )}
+          </>
+        )}
+      </SearchStates>
+    </SearchPageLayout>
   );
 }

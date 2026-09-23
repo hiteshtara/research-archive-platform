@@ -178,3 +178,72 @@ export function describeNegotiationResults({
 export function buildNegotiationPath(negotiationId) {
   return `/negotiations/${encodeURIComponent(negotiationId)}`;
 }
+
+/*
+ * URL-backed search state.
+ *
+ * The Negotiation page gates its query on hasSearched, exactly like the
+ * other archive search pages, so the criteria have to survive a reload
+ * or a shared link - otherwise a pasted URL would render the empty state
+ * while showing populated inputs.
+ *
+ * Free text uses ?q= to match the rest of the archive. Structured
+ * filters use their own key names, unchanged from what the API already
+ * expects, so a URL reads the same way as the request it produces.
+ * buildNegotiationSearchParams is untouched: this is URL serialization,
+ * not request serialization, and the two must stay separable.
+ */
+export function negotiationFiltersFromParams(searchParams) {
+  const read = (key) => {
+    const value = searchParams?.get?.(key);
+    return typeof value === "string" ? value : "";
+  };
+  const filters = emptyNegotiationFilters();
+  for (const field of NEGOTIATION_FILTER_FIELDS) {
+    filters[field.key] = read(field.key);
+  }
+  return filters;
+}
+
+export function negotiationQueryFromParams(searchParams) {
+  const value = searchParams?.get?.("q");
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * The URL parameters for a search. Empty criteria are omitted entirely
+ * rather than written as empty keys, so clearing everything returns a
+ * bare URL and the page falls back to its initial state.
+ */
+export function buildNegotiationUrlParams({ query, filters, page = 0 } = {}) {
+  const params = {};
+  const trimmedQuery = normalize(query);
+  if (trimmedQuery) {
+    params.q = trimmedQuery;
+  }
+  for (const [key, value] of Object.entries(activeNegotiationFilters(filters))) {
+    params[key] = value;
+  }
+  if (page > 0) {
+    params.page = String(page);
+  }
+  return params;
+}
+
+/**
+ * Whether a search should run at all.
+ *
+ * True when the user has supplied free text OR any structured filter.
+ * This is what stops the page fetching the first page of 10,775
+ * Negotiations before anyone has asked for anything, and what returns it
+ * to the empty state when everything is cleared.
+ */
+export function hasNegotiationSearchCriteria({ query, filters } = {}) {
+  return Boolean(normalize(query)) || hasActiveNegotiationFilters(filters);
+}
+
+export function negotiationPageFromParams(searchParams) {
+  const raw = searchParams?.get?.("page");
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}

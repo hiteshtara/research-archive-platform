@@ -84,3 +84,22 @@ export function describeNegotiationResults(options?: {
 export function buildNegotiationPath(
   negotiationId: number | string,
 ): string;
+
+export declare function negotiationFiltersFromParams(
+  searchParams: URLSearchParams,
+): NegotiationFilters;
+export declare function negotiationQueryFromParams(
+  searchParams: URLSearchParams,
+): string;
+export declare function buildNegotiationUrlParams(input?: {
+  query?: string;
+  filters?: NegotiationFilters;
+  page?: number;
+}): Record<string, string>;
+export declare function hasNegotiationSearchCriteria(input?: {
+  query?: string;
+  filters?: NegotiationFilters;
+}): boolean;
+export declare function negotiationPageFromParams(
+  searchParams: URLSearchParams,
+): number;
