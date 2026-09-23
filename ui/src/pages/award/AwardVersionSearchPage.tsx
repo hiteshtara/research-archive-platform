@@ -1,9 +1,7 @@
-import { SearchOutlined } from "@mui/icons-material";
 import {
   Box,
-  Card,
-  CardContent,
   Chip,
+  Grid,
   Link,
   MenuItem,
   Stack,
@@ -12,14 +10,18 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 
 import { searchAwardVersionsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
-import { ErrorState } from "../../components/common/ErrorState";
-import { LoadingState } from "../../components/common/LoadingState";
 import { PaginationFooter } from "../../components/common/PaginationFooter";
 import { StatusPill } from "../../components/common/StatusPill";
+import { ResultCard } from "../../components/common/search/ResultCard";
+import { ResultCount } from "../../components/common/search/ResultCount";
+import { SearchBox } from "../../components/common/search/SearchBox";
+import { SearchPageLayout } from "../../components/common/search/SearchPageLayout";
+import { SearchStates } from "../../components/common/search/SearchStates";
+import { resolveSearchState } from "../../features/common/searchPresentation.mjs";
 import {
   describeVersionSearchResults,
   isValidAwardIdInput,
@@ -68,7 +70,6 @@ function useDebouncedUrlParam(
 // browser back/forward naturally restores the exact search that was
 // active, not just the page shell.
 export function AwardVersionSearchPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const q = searchParams.get("q") ?? "";
@@ -165,184 +166,168 @@ export function AwardVersionSearchPage() {
     describeVersionSearchResults(searchQuery.data);
 
   return (
-    <Stack spacing={4} sx={{ alignItems: "center" }}>
-      <Box sx={{ maxWidth: 760, width: "100%", textAlign: "center", mt: 4 }}>
-        <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
-          Historical Award Records
-        </Typography>
-
-        <Typography color="text.secondary" sx={{ mb: 1 }}>
-          Each result here is an individual archived Award version, not
-          a family/current-record summary - every historical sequence
-          is searchable, including by its exact internal Award ID.
-          Selecting a result opens that exact version.
-        </Typography>
-
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-          Looking for the current record for an Award number instead?{" "}
-          <Link component={RouterLink} to="/awards/search">
-            Use Awards
-          </Link>
-          .
-        </Typography>
-
-        <Stack spacing={2}>
-          <TextField
-            fullWidth
-            autoFocus
-            placeholder="Title, sponsor, PI, or lead unit..."
-            value={qDraft}
-            onChange={(event) => setQDraft(event.target.value)}
-            slotProps={{
-              input: {
-                startAdornment: <SearchOutlined sx={{ mr: 1 }} />,
-              },
-            }}
-          />
-
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <TextField
-              fullWidth
-              label="Award number (exact)"
-              value={awardNumberDraft}
-              onChange={(event) => setAwardNumberDraft(event.target.value)}
-            />
-            <TextField
-              fullWidth
-              label="Document number (exact)"
-              value={documentNumberDraft}
-              onChange={(event) => setDocumentNumberDraft(event.target.value)}
-            />
-            <TextField
-              fullWidth
-              label="Award ID (exact)"
-              placeholder="e.g. 3561589"
-              value={awardIdDraft}
-              onChange={(event) => setAwardIdDraft(event.target.value)}
-              error={awardIdError}
-              helperText={awardIdError ? "Award ID must be a whole number." : " "}
-            />
-          </Stack>
-
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <TextField
-              fullWidth
-              select
-              label="Version"
-              value={versionFilter}
-              onChange={(event) => updateParam("versionFilter", event.target.value)}
-            >
-              <MenuItem value="all">All versions</MenuItem>
-              <MenuItem value="current">Current only</MenuItem>
-              <MenuItem value="historical">Historical only</MenuItem>
-            </TextField>
-            <TextField
-              fullWidth
-              select
-              label="Sort by"
-              value={sort}
-              onChange={(event) => updateParam("sort", event.target.value)}
-            >
-              <MenuItem value="sequence">Sequence number</MenuItem>
-              <MenuItem value="date">Last updated</MenuItem>
-            </TextField>
-          </Stack>
-        </Stack>
-      </Box>
-
-      {hasSearched && (
-        <Box sx={{ maxWidth: 900, width: "100%" }}>
-          {searchQuery.isLoading && <LoadingState mode="spinner" />}
-
-          {searchQuery.isError && (
-            <ErrorState message="Unable to search Historical Award Records right now. Try again in a moment." />
-          )}
-
-          {searchQuery.data && (
-            <>
-              <Typography
-                variant="overline"
-                color="text.secondary"
-                sx={{ display: "block", mb: 1.5 }}
+    <SearchPageLayout
+      title="Search Historical Awards"
+      subtitle="Each result is an individual archived Award version, not a family or current-record summary - every historical sequence is searchable, including by its exact internal Award ID. Selecting a result opens that exact version."
+      search={
+        <SearchBox
+          value={qDraft}
+          onChange={setQDraft}
+          onSubmit={(value) => updateParam("q", value)}
+          placeholder="Title, sponsor, PI, or lead unit..."
+          ariaLabel="Search Historical Award Records"
+        />
+      }
+      belowSearch={
+        <>
+          {/*
+            Every filter this page already had is preserved. Typing
+            still commits to the URL on a debounce, so live searching
+            is unchanged; Enter now also submits immediately, which is
+            the behaviour shared with every other archive search page.
+          */}
+          <Grid container spacing={2} sx={{ mt: 1, textAlign: "left" }}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Award number (exact)"
+                value={awardNumberDraft}
+                onChange={(event) => setAwardNumberDraft(event.target.value)}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Document number (exact)"
+                value={documentNumberDraft}
+                onChange={(event) => setDocumentNumberDraft(event.target.value)}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Award ID (exact)"
+                placeholder="e.g. 3561589"
+                value={awardIdDraft}
+                onChange={(event) => setAwardIdDraft(event.target.value)}
+                error={awardIdError}
+                helperText={
+                  awardIdError ? "Award ID must be a whole number." : " "
+                }
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <TextField
+                fullWidth
+                size="small"
+                select
+                label="Version"
+                value={versionFilter}
+                onChange={(event) =>
+                  updateParam("versionFilter", event.target.value)
+                }
               >
-                {totalElements.toLocaleString()} version
-                {totalElements === 1 ? "" : "s"} found
-              </Typography>
+                <MenuItem value="all">All versions</MenuItem>
+                <MenuItem value="current">Current only</MenuItem>
+                <MenuItem value="historical">Historical only</MenuItem>
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <TextField
+                fullWidth
+                size="small"
+                select
+                label="Sort by"
+                value={sort}
+                onChange={(event) => updateParam("sort", event.target.value)}
+              >
+                <MenuItem value="sequence">Sequence number</MenuItem>
+                <MenuItem value="date">Last updated</MenuItem>
+              </TextField>
+            </Grid>
+          </Grid>
 
-              {content.length === 0 && (
-                <EmptyState variant="text" message="No Award versions match this search." />
-              )}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
+            Looking for the current record for an Award number instead?{" "}
+            <Link component={RouterLink} to="/awards/search">
+              Use Awards
+            </Link>
+            .
+          </Typography>
+        </>
+      }
+    >
+      <SearchStates
+        state={resolveSearchState({
+          hasSearched: hasSearched && !awardIdError,
+          isLoading: searchQuery.isLoading,
+          isError: searchQuery.isError,
+          resultCount: content.length,
+        })}
+        errorMessage="Unable to search Historical Award Records right now. Try again in a moment."
+      >
+        {searchQuery.data && (
+          <>
+            <ResultCount total={totalElements} singular="version" />
 
-              <Stack spacing={1.25}>
-                {content.map((hit) => (
-                  <Card
-                    key={hit.awardId}
-                    variant="outlined"
-                    sx={{
-                      cursor: "pointer",
-                      transition: "border-color .12s ease",
-                      "&:hover": { borderColor: "primary.main" },
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => navigate(versionDetailPath(hit))}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        navigate(versionDetailPath(hit));
-                      }
-                    }}
-                  >
-                    <CardContent
-                      sx={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: 2,
-                        "&:last-child": { pb: 2 },
-                      }}
-                    >
-                      <Box sx={{ minWidth: 0 }}>
-                        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                          <Typography sx={{ fontWeight: 700 }}>
-                            {hit.awardNumber}
-                          </Typography>
-                          <Chip size="small" label={`Seq ${hit.sequenceNumber ?? "—"}`} />
-                          <Chip
-                            size="small"
-                            color={hit.primaryCurrent ? "success" : "default"}
-                            label={versionCurrentLabel(hit)}
-                          />
-                          <StatusPill status={hit.status} domain="award" />
-                        </Stack>
+            {content.length === 0 && (
+              <EmptyState
+                variant="text"
+                message="No Award versions match this search."
+              />
+            )}
 
-                        <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.5 }}>
-                          {hit.title ?? "Untitled award"}
-                        </Typography>
+            <Stack spacing={1.25}>
+              {content.map((hit) => (
+                <ResultCard
+                  key={hit.awardId}
+                  to={versionDetailPath(hit)}
+                  identifier={hit.awardNumber}
+                  secondaryIdentifier={
+                    <>
+                      <Chip
+                        size="small"
+                        label={`Seq ${hit.sequenceNumber ?? "—"}`}
+                      />
+                      <Chip
+                        size="small"
+                        color={hit.primaryCurrent ? "success" : "default"}
+                        label={versionCurrentLabel(hit)}
+                      />
+                    </>
+                  }
+                  status={<StatusPill status={hit.status} domain="award" />}
+                  title={hit.title ?? "Untitled award"}
+                  metadata={
+                    <>
+                      {[hit.sponsor, hit.principalInvestigator, hit.leadUnit]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                      {hit.documentNumber ? ` · Doc ${hit.documentNumber}` : ""}
+                    </>
+                  }
+                  rightSlot={
+                    <Typography variant="caption" color="text.secondary">
+                      {hit.updateTimestamp ?? hit.awardEffectiveDate ?? "—"}
+                    </Typography>
+                  }
+                />
+              ))}
+            </Stack>
 
-                        <Typography variant="caption" color="text.secondary">
-                          {[hit.sponsor, hit.principalInvestigator, hit.leadUnit]
-                            .filter(Boolean)
-                            .join(" · ") || "—"}
-                          {hit.documentNumber ? ` · Doc ${hit.documentNumber}` : ""}
-                        </Typography>
-                      </Box>
-
-                      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                        {hit.updateTimestamp ?? hit.awardEffectiveDate ?? "—"}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                ))}
-              </Stack>
-
-              <Box sx={{ mt: 2 }}>
-                <PaginationFooter totalPages={totalPages} page={page} onPageChange={setPage} />
-              </Box>
-            </>
-          )}
-        </Box>
-      )}
-    </Stack>
+            <Box sx={{ mt: 3 }}>
+              <PaginationFooter
+                totalPages={totalPages}
+                page={page}
+                onPageChange={setPage}
+              />
+            </Box>
+          </>
+        )}
+      </SearchStates>
+    </SearchPageLayout>
   );
 }

@@ -1,6 +1,5 @@
 import { DownloadOutlined, SearchOutlined, VisibilityOutlined } from "@mui/icons-material";
 import {
-  Box,
   Card,
   CardContent,
   Chip,
@@ -31,6 +30,8 @@ import { EmptyState } from "../components/common/EmptyState";
 import { ErrorState } from "../components/common/ErrorState";
 import { LoadingState } from "../components/common/LoadingState";
 import { PaginationFooter } from "../components/common/PaginationFooter";
+import { ResultSurface } from "../components/common/search/ResultSurface";
+import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
 import { formatByteSize } from "../features/award/awardSectionsPresentation.mjs";
 import {
   archivedFileResultKey,
@@ -228,16 +229,11 @@ export function ArchivedFileFinderPage() {
   const data = searchQuery.data;
 
   return (
-    <Stack spacing={3}>
-      <Box>
-        <Typography variant="h4">Archived File Finder</Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-          Search for archived Award and Proposal attachment files by
-          exact identifier. This is separate from Kuali Documents,
-          which searches business records rather than files.
-        </Typography>
-      </Box>
-
+    <SearchPageLayout
+      title="Find an Archived File"
+      subtitle="Search for archived Award, Proposal and Negotiation attachment files by exact identifier. This is separate from Kuali Documents, which searches business records rather than files."
+      search={null}
+      belowSearch={
       <Card variant="outlined">
         <CardContent>
           <Stack spacing={2}>
@@ -370,7 +366,8 @@ export function ArchivedFileFinderPage() {
           </Stack>
         </CardContent>
       </Card>
-
+      }
+    >
       {!hasSearched && !validationError && (
         <EmptyState
           variant="text"
@@ -417,64 +414,43 @@ export function ArchivedFileFinderPage() {
                   const canView = viewPath !== null;
 
                   return (
-                    <Card key={key} variant="outlined">
-                      <CardContent
-                        sx={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 2,
-                          "&:last-child": { pb: 2 },
-                        }}
-                      >
-                        <Box sx={{ minWidth: 0 }}>
-                          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              label={result.recordType ?? "UNKNOWN"}
-                            />
-                            <Typography sx={{ fontWeight: 700 }} noWrap>
-                              {result.fileName ?? "Unnamed file"}
-                            </Typography>
-                          </Stack>
-
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{ mt: 0.25 }}
-                          >
-                            {result.parentNumber ?? "Unknown record"}
-                            {result.sequenceNumber !== null
-                              ? ` · Sequence ${result.sequenceNumber}`
-                              : ""}
-                            {result.workflowDocumentNumber
-                              ? ` · Document ${result.workflowDocumentNumber}`
-                              : ""}
-                          </Typography>
-
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ display: "block", mt: 0.25 }}
-                          >
-                            {result.documentType ?? "Unknown type"}
-                            {" · "}
-                            {formatByteSize(result.fileSizeBytes)}
-                            {" · "}
-                            {formatSourceDateLabel(result.sourceDate)}
-                          </Typography>
-
-                          <Chip
-                            size="small"
-                            sx={{ mt: 0.75 }}
-                            color={resolveAvailabilityChipColor(
-                              result.availabilityStatus,
-                            )}
-                            label={result.availabilityStatus}
-                          />
-                        </Box>
-
+                    <ResultSurface
+                      key={key}
+                      // Deliberately NOT a ResultCard. This result's
+                      // business action is Download, not navigation, so
+                      // it gets the shared surface and its own explicit
+                      // actions rather than an href it would be wrong to
+                      // Cmd-click or copy.
+                      identifier={result.fileName ?? "Unnamed file"}
+                      secondaryIdentifier={
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={result.recordType ?? "UNKNOWN"}
+                        />
+                      }
+                      status={
+                        <Chip
+                          size="small"
+                          color={resolveAvailabilityChipColor(
+                            result.availabilityStatus,
+                          )}
+                          label={result.availabilityStatus}
+                        />
+                      }
+                      title={`${result.parentNumber ?? "Unknown record"}${
+                        result.sequenceNumber !== null
+                          ? ` · Sequence ${result.sequenceNumber}`
+                          : ""
+                      }${
+                        result.workflowDocumentNumber
+                          ? ` · Document ${result.workflowDocumentNumber}`
+                          : ""
+                      }`}
+                      metadata={`${result.documentType ?? "Unknown type"} · ${formatByteSize(
+                        result.fileSizeBytes,
+                      )} · ${formatSourceDateLabel(result.sourceDate)}`}
+                      rightSlot={
                         <Stack direction="row" spacing={0.5}>
                           <Tooltip
                             title={
@@ -501,9 +477,7 @@ export function ArchivedFileFinderPage() {
 
                           <Tooltip
                             title={
-                              canDownload
-                                ? "Download"
-                                : result.availabilityStatus
+                              canDownload ? "Download" : result.availabilityStatus
                             }
                           >
                             <span>
@@ -527,8 +501,8 @@ export function ArchivedFileFinderPage() {
                             </span>
                           </Tooltip>
                         </Stack>
-                      </CardContent>
-                    </Card>
+                      }
+                    />
                   );
                 })}
               </Stack>
@@ -542,6 +516,6 @@ export function ArchivedFileFinderPage() {
           )}
         </>
       )}
-    </Stack>
+    </SearchPageLayout>
   );
 }
