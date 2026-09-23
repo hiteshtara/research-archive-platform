@@ -49,6 +49,7 @@ def build_container_command(
     migrate_only: bool = False,
     load_award_id: int | None = None,
     create_batch: int | None = None,
+    backfill_v078: bool = False,
     load_batch: int | None = None,
     show_batch: int | None = None,
     diff_award_versions: str | None = None,
@@ -74,6 +75,8 @@ def build_container_command(
         command.extend(["--load-award-id", str(load_award_id)])
     if create_batch is not None:
         command.extend(["--create-batch", str(create_batch)])
+        if backfill_v078:
+            command.append("--backfill-v078")
     if load_batch is not None:
         command.extend(["--load-batch", str(load_batch)])
     if show_batch is not None:
@@ -124,6 +127,7 @@ def build_run_task_overrides(
     migrate_only: bool = False,
     load_award_id: int | None = None,
     create_batch: int | None = None,
+    backfill_v078: bool = False,
     load_batch: int | None = None,
     show_batch: int | None = None,
     diff_award_versions: str | None = None,
@@ -142,6 +146,7 @@ def build_run_task_overrides(
             migrate_only=migrate_only,
             load_award_id=load_award_id,
             create_batch=create_batch,
+            backfill_v078=backfill_v078,
             load_batch=load_batch,
             show_batch=show_batch,
             diff_award_versions=diff_award_versions,
@@ -169,6 +174,7 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--migrate-only", action="store_true")
     parser.add_argument("--load-award-id", type=int, default=None)
     parser.add_argument("--create-batch", type=int, default=None)
+    parser.add_argument("--backfill-v078", action="store_true")
     parser.add_argument("--load-batch", type=int, default=None)
     parser.add_argument("--show-batch", type=int, default=None)
     parser.add_argument("--diff-award-versions", type=str, default=None)
@@ -191,6 +197,7 @@ def main() -> None:
         migrate_only=args.migrate_only,
         load_award_id=args.load_award_id,
         create_batch=args.create_batch,
+        backfill_v078=args.backfill_v078,
         load_batch=args.load_batch,
         show_batch=args.show_batch,
         diff_award_versions=args.diff_award_versions,

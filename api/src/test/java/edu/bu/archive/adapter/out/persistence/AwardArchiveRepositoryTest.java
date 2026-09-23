@@ -286,13 +286,46 @@ class AwardArchiveRepositoryTest {
         JdbcClient.MappedQuerySpec<AwardSummaryResponse> query =
                 mock(JdbcClient.MappedQuerySpec.class);
         AwardSummaryResponse expected = new AwardSummaryResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "Brown University", "NIH", "MICHAEL MCCLEAN",
-                "SPH ENVIRONMENTAL HEALTH", LocalDate.of(2007, 9, 15),
-                null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                "1", "Cost reimbursement", "28", "Invoice",
-                null, null, true, null
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                null,
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                null,
+                null,
+                null,
+                "Brown University",
+                null,
+                null,
+                "NIH",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                LocalDate.of(2007, 9, 15),
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                "1",
+                "Cost reimbursement",
+                "28",
+                "Invoice",
+                "MICHAEL MCCLEAN",
+                null,
+                null,
+                true,
+                null
+            );
 
         when(jdbc.sql(anyString())).thenReturn(statement);
         when(statement.param("awardId", 3L)).thenReturn(statement);
@@ -310,8 +343,16 @@ class AwardArchiveRepositoryTest {
                 .contains("method_of_payment_code")
                 .contains("ah.root_award_number")
                 .contains("ah.parent_award_number")
-                .doesNotContain("fain")
-                .doesNotContain("account_type");
+                // FAIN ID and Account Type were previously asserted
+                // ABSENT here because no such archive column existed.
+                // V078 added both from verified Oracle sources
+                // (AWARD.FAIN_ID; AWARD.ACCOUNT_TYPE_CODE resolved
+                // against ACCOUNT_TYPE), so the contract is now that
+                // they ARE selected - and that account_type still does
+                // not come from the SAP-specific award_transmission.
+                .contains("av.fain_id")
+                .contains("av.account_type")
+                .doesNotContain("award_transmission");
     }
 
     /** See searchAwardsOrdersCurrentAmountByAwardAmountInfoIdOnly for the

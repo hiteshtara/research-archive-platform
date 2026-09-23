@@ -335,6 +335,72 @@ def finish_batch_processing(engine: Engine, batch_id: int, *, status: str) -> No
         )
 
 
+# Batch statuses that are NOT terminal - a batch sitting in one of these
+# is, by definition, still claiming its entities.
+NON_TERMINAL_BATCH_STATUSES = (
+    BATCH_STATUS_CREATED,
+    BATCH_STATUS_METADATA_LOADING,
+    BATCH_STATUS_READY,
+    BATCH_STATUS_PROCESSING,
+)
+
+
+def find_stale_complete_batches(
+    engine: Engine,
+    *,
+    domain: str,
+    entity_type: str,
+) -> list[int]:
+    """Batches whose every item is COMPLETED but whose own status is still
+    non-terminal - i.e. work that finished without its batch ever being
+    closed out.
+
+    This is a real operational hazard, not a tidiness concern: selection
+    excludes entities claimed by a non-terminal batch, so a batch left in
+    READY after completing keeps its entities permanently unselectable.
+    Found in production 2026-09-22 - 32 AWARD batches created
+    2026-08-01..08-12, every item COMPLETED, all still READY, between them
+    claiming 40,919 of 40,926 Award families and reducing a 100-family
+    backfill selection to 7.
+
+    Strict by design, mirroring the manual reconciliation predicate: a
+    batch qualifies only if it has at least one item and EVERY item is
+    COMPLETED. A batch with zero items does not qualify (there is nothing
+    to conclude it finished), and neither does one with any FAILED,
+    PROCESSING, PENDING, MISSING_SOURCE or SKIPPED item - those are
+    genuinely unresolved and must stay claimed. Completion is never
+    inferred from timestamps or percentages.
+
+    Read-only. Promote a returned batch with finish_batch_processing."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                """
+                SELECT eb.batch_id
+                FROM archive.etl_batch eb
+                JOIN archive.etl_batch_item ebi
+                    ON ebi.batch_id = eb.batch_id
+                WHERE eb.domain = :domain
+                  AND eb.entity_type = :entity_type
+                  AND eb.status = ANY(:non_terminal)
+                GROUP BY eb.batch_id
+                HAVING count(*) > 0
+                   AND count(*) FILTER (
+                           WHERE ebi.status <> :completed
+                       ) = 0
+                ORDER BY eb.batch_id
+                """
+            ),
+            {
+                "domain": domain,
+                "entity_type": entity_type,
+                "non_terminal": list(NON_TERMINAL_BATCH_STATUSES),
+                "completed": ITEM_STATUS_COMPLETED,
+            },
+        ).scalars()
+        return [int(value) for value in rows]
+
+
 def show_batch(
     engine: Engine, batch_id: int, *, domain: str, entity_type: str
 ) -> dict[str, Any]:

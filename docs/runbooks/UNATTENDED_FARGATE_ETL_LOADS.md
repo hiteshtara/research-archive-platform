@@ -286,6 +286,50 @@ $0.04048 + GB × hours × $0.004445`), and treat a stated cost ceiling (e.g.
 "stop if estimate exceeds $20") as a hard precondition to launching, not a
 formality.
 
+### CpuUtilized is CPU units, NOT a percentage
+
+`ECS/ContainerInsights` publishes `CpuUtilized` with `Unit: None`, and its
+value is in **CPU units, where 1024 = 1 vCPU**. `MemoryUtilized` is in
+**MiB** (`Unit: Megabytes`). Neither is a percentage. Reading one as a
+percentage produces figures like "742% CPU" that look like an emergency
+and are not.
+
+To get a percentage, divide by the reservation the task **actually ran
+with** - which is not necessarily what the task definition declares. This
+project launches loader batches with a task-level `run-task` override, so
+`describe-task-definition` reports the wrong denominator:
+
+```
+task definition research-archive-platform-dev-loader:251
+  cpu 512 / memory 1024          <- declared, NOT what runs
+
+run-task override (backfill driver)
+  cpu "1024" / memory "2048"     <- what actually runs (1 vCPU / 2 GiB)
+```
+
+Confirm with `describe-tasks --query 'tasks[0].{cpu:cpu,memory:memory}'`,
+which reports the effective values.
+
+Worked example - Award V078 backfill, batch 3677 (2026-09-22):
+
+| Metric | Raw | Unit | Reservation | Percentage |
+|---|---|---|---|---|
+| `CpuUtilized` | 742.40 | CPU units (`None`) | 1024 (1 vCPU) | ~72.5% |
+| `MemoryUtilized` | 1182.0 | MiB (`Megabytes`) | 2048 (2 GiB) | ~57.7% |
+
+Both `Maximum`, 60-second period.
+
+Two things that example would have gotten wrong without checking:
+reporting 742 as a percentage, and comparing 1,182 MiB against the task
+definition's declared 1024 MiB - which would have implied the task had
+exceeded its hard memory limit and should have been OOM-killed, when it
+was in fact at 58% of its real 2 GiB.
+
+These are **task-definition-family-scoped maxima**, not per-task. The
+figures above are attributable to batch 3677 only because it was verified
+to be the sole task of that family running in the window. Do not describe
+them as per-task metrics without that concurrency check.
+
 ---
 
 ## CloudWatch monitoring (while it runs, and after it's gone)
@@ -413,7 +457,7 @@ not-yet-loaded physical files (excluded via durable Postgres state, not
 **stages** (metadata, then binary - see below), idempotent S3 upload
 (skip-if-already-verified with a hash/size check, never blind re-upload),
 the same whole-task advisory lock. Full design and rationale in
-`docs/architecture/ARCHIVE_ATTACHMENT_LOAD_INVENTORY.md`; summarized here
+`docs/archive/preflights/ARCHIVE_ATTACHMENT_LOAD_INVENTORY.md`; summarized here
 as the pattern's second real, concrete application:
 
 - **Two stages per module, always in order**: METADATA (bring missing
@@ -485,7 +529,7 @@ as the pattern's second real, concrete application:
 
 If/when real Kuali **production** Oracle connectivity is ever provisioned
 (a deliberate infrastructure decision this project has not made — see
-`docs/ORACLE_STAGING_CONNECTIVITY.md`), this exact orchestrator pattern
+`docs/runbooks/oracle/ORACLE_STAGING_CONNECTIVITY.md`), this exact orchestrator pattern
 still applies unchanged: swap the source DSN, re-run the full preflight
 (a production key-diff will differ from a staging one), and treat the
 existing staging-vs-production distinction in all reporting/documentation

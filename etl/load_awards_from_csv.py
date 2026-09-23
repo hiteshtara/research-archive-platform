@@ -575,6 +575,10 @@ def prepare_versions(
             "sequence_number",
             "status_code",
             "transaction_type_code",
+            "nsf_sequence_number",
+            "account_type_code",
+            "activity_type_code",
+            "award_type_code",
         ],
     )
 
@@ -756,6 +760,17 @@ def prepare_amounts(
             "anticipated_total_amount",
             "obligated_total_amount",
             "ver_nbr",
+        ],
+    )
+
+    # Obligation Start Date. AWARD_AMOUNT_INFO is the only place this
+    # date exists - see V078. Which of an Award version's many rows is
+    # "current" is decided by Kuali's MAX(award_amount_info_id) rule at
+    # read time, never here at load time; every row is archived.
+    convert_dates(
+        dataframe,
+        [
+            "current_fund_effective_date",
         ],
     )
 
@@ -2993,6 +3008,15 @@ _AWARD_VERSION_COLUMNS = [
     "method_of_payment_code",
     "method_of_payment_description",
     "modification_number",
+    "fain_id",
+    "nsf_sequence_number",
+    "nsf_science_code",
+    "account_type_code",
+    "account_type",
+    "activity_type_code",
+    "activity_type",
+    "award_type_code",
+    "award_type",
     "workflow_document_number",
     "source_update_timestamp",
     "source_update_user",
@@ -3012,6 +3036,7 @@ _AWARD_AMOUNT_INFO_COLUMNS = [
     "obligated_total_indirect",
     "anticipated_total_amount",
     "obligated_total_amount",
+    "current_fund_effective_date",
     "tnm_document_number",
     "transaction_id",
     "originating_award_version",
@@ -3944,7 +3969,10 @@ def upsert_award_version(
                 transaction_type_code, transaction_type,
                 basis_of_payment_code, basis_of_payment_description,
                 method_of_payment_code, method_of_payment_description,
-                modification_number, workflow_document_number,
+                modification_number, fain_id, nsf_sequence_number,
+                nsf_science_code, account_type_code, account_type,
+                activity_type_code, activity_type, award_type_code,
+                award_type, workflow_document_number,
                 source_update_timestamp, source_update_user,
                 is_current_version, is_primary_current, load_id
             ) VALUES (
@@ -3957,7 +3985,10 @@ def upsert_award_version(
                 :closeout_date, :transaction_type_code, :transaction_type,
                 :basis_of_payment_code, :basis_of_payment_description,
                 :method_of_payment_code, :method_of_payment_description,
-                :modification_number, :workflow_document_number,
+                :modification_number, :fain_id, :nsf_sequence_number,
+                :nsf_science_code, :account_type_code, :account_type,
+                :activity_type_code, :activity_type, :award_type_code,
+                :award_type, :workflow_document_number,
                 :source_update_timestamp,
                 :source_update_user, :is_current_version, :is_primary_current,
                 :load_id
@@ -3991,6 +4022,15 @@ def upsert_award_version(
                 method_of_payment_description =
                     EXCLUDED.method_of_payment_description,
                 modification_number = EXCLUDED.modification_number,
+                fain_id = EXCLUDED.fain_id,
+                nsf_sequence_number = EXCLUDED.nsf_sequence_number,
+                nsf_science_code = EXCLUDED.nsf_science_code,
+                account_type_code = EXCLUDED.account_type_code,
+                account_type = EXCLUDED.account_type,
+                activity_type_code = EXCLUDED.activity_type_code,
+                activity_type = EXCLUDED.activity_type,
+                award_type_code = EXCLUDED.award_type_code,
+                award_type = EXCLUDED.award_type,
                 workflow_document_number = EXCLUDED.workflow_document_number,
                 source_update_timestamp = EXCLUDED.source_update_timestamp,
                 source_update_user = EXCLUDED.source_update_user,
@@ -4048,6 +4088,24 @@ def upsert_award_version(
                     IS DISTINCT FROM EXCLUDED.method_of_payment_code
                 OR archive.award_version.method_of_payment_description
                     IS DISTINCT FROM EXCLUDED.method_of_payment_description
+                OR archive.award_version.fain_id
+                    IS DISTINCT FROM EXCLUDED.fain_id
+                OR archive.award_version.nsf_sequence_number
+                    IS DISTINCT FROM EXCLUDED.nsf_sequence_number
+                OR archive.award_version.nsf_science_code
+                    IS DISTINCT FROM EXCLUDED.nsf_science_code
+                OR archive.award_version.account_type_code
+                    IS DISTINCT FROM EXCLUDED.account_type_code
+                OR archive.award_version.account_type
+                    IS DISTINCT FROM EXCLUDED.account_type
+                OR archive.award_version.activity_type_code
+                    IS DISTINCT FROM EXCLUDED.activity_type_code
+                OR archive.award_version.activity_type
+                    IS DISTINCT FROM EXCLUDED.activity_type
+                OR archive.award_version.award_type_code
+                    IS DISTINCT FROM EXCLUDED.award_type_code
+                OR archive.award_version.award_type
+                    IS DISTINCT FROM EXCLUDED.award_type
                 OR archive.award_version.modification_number
                     IS DISTINCT FROM EXCLUDED.modification_number
                 OR archive.award_version.workflow_document_number
@@ -4092,6 +4150,7 @@ def upsert_award_amount_info(
                 anticipated_total_direct, anticipated_total_indirect,
                 obligated_total_direct, obligated_total_indirect,
                 anticipated_total_amount, obligated_total_amount,
+                current_fund_effective_date,
                 tnm_document_number, transaction_id, originating_award_version,
                 source_version_number, load_id
             ) VALUES (
@@ -4100,7 +4159,8 @@ def upsert_award_amount_info(
                 :anticipated_change_indirect, :anticipated_total_direct,
                 :anticipated_total_indirect, :obligated_total_direct,
                 :obligated_total_indirect, :anticipated_total_amount,
-                :obligated_total_amount, :tnm_document_number,
+                :obligated_total_amount, :current_fund_effective_date,
+                :tnm_document_number,
                 :transaction_id, :originating_award_version,
                 :source_version_number, :load_id
             )
@@ -4116,6 +4176,8 @@ def upsert_award_amount_info(
                 obligated_total_indirect = EXCLUDED.obligated_total_indirect,
                 anticipated_total_amount = EXCLUDED.anticipated_total_amount,
                 obligated_total_amount = EXCLUDED.obligated_total_amount,
+                current_fund_effective_date =
+                    EXCLUDED.current_fund_effective_date,
                 tnm_document_number = EXCLUDED.tnm_document_number,
                 transaction_id = EXCLUDED.transaction_id,
                 originating_award_version = EXCLUDED.originating_award_version,
@@ -4144,6 +4206,8 @@ def upsert_award_amount_info(
                     IS DISTINCT FROM EXCLUDED.anticipated_total_amount
                 OR archive.award_amount_info.obligated_total_amount
                     IS DISTINCT FROM EXCLUDED.obligated_total_amount
+                OR archive.award_amount_info.current_fund_effective_date
+                    IS DISTINCT FROM EXCLUDED.current_fund_effective_date
                 OR archive.award_amount_info.tnm_document_number
                     IS DISTINCT FROM EXCLUDED.tnm_document_number
                 OR archive.award_amount_info.transaction_id
@@ -9448,11 +9512,205 @@ def _excluded_completed_and_active_award_ids(engine: Engine) -> set[int]:
         }
 
 
+# --- V078 Award backfill selection -----------------------------------------
+#
+# WHY A COMPLETION MARKER IS NEEDED AT ALL: the V078 columns
+# (fain_id/nsf_*/account_type/activity_type/award_type on award_version,
+# current_fund_effective_date on award_amount_info) were added to an
+# archive that was ALREADY fully populated. Production --create-batch
+# deliberately excludes every award_id already present in
+# archive.award_version (clause (c) of
+# _excluded_completed_and_active_award_ids), so it can never re-select an
+# archived family - correct for "load new families", useless for "backfill
+# a new column onto existing families". Rather than add a second Award
+# loader, this mode changes only WHICH award_ids are selected; the load
+# itself remains the already-proven incremental UPSERT path
+# (--load-batch -> the same upsert_award_* functions --load-award-id uses).
+#
+# THE MARKER AND WHY IT IS account_type:
+# account_type is AWARD.ACCOUNT_TYPE_CODE resolved against the
+# ACCOUNT_TYPE lookup in 01_award_versions.sql. Verified against live
+# KCOEUS staging 2026-09-21: ACCOUNT_TYPE_CODE is populated in
+# 267,386/267,386 AWARD rows and the lookup join resolves for
+# 267,386/267,386 - i.e. every Award row Oracle can return has a non-null
+# account_type once the V078-aware extraction runs. That is what makes
+# "account_type IS NULL" a sound "not yet backfilled" signal, and
+# test_award_v078_backfill_selection.py pins both halves of that claim
+# (the extraction selects it from the lookup; the marker set is exactly
+# this column).
+#
+# WHY NOT fain_id / nsf_science_code: both are LEGITIMATELY SPARSE at
+# source - fain_id 137,906/267,386 and nsf_science_code 95,692/267,386.
+# Using either as a completion marker would mark ~half the archive
+# permanently incomplete and the backfill would never converge.
+#
+# FAMILY-LEVEL, NOT ROW-LEVEL: a family is incomplete if ANY of its
+# award_version rows has a NULL marker, so a family whose load was
+# interrupted part-way is selected again rather than left half-populated.
+# One award_id (the family's MIN) represents the family, because
+# --load-batch widens every requested award_id to its whole award_number
+# family anyway.
+_V078_COMPLETION_MARKER_COLUMN = "account_type"
+
+# Columns the backfill populates. Reported for progress, but only the
+# marker above decides eligibility - the rest are sparse at source.
+_V078_REPORTED_VERSION_COLUMNS = (
+    "account_type",
+    "activity_type",
+    "award_type",
+    "fain_id",
+    "nsf_science_code",
+)
+
+
+def v078_backfill_progress(engine: Engine) -> dict[str, int]:
+    """Family-level V078 progress, entirely from PostgreSQL. Read-only."""
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                f"""
+                SELECT
+                    count(*) AS total_families,
+                    count(*) FILTER (WHERE incomplete_rows = 0)
+                        AS completed_families,
+                    count(*) FILTER (WHERE incomplete_rows > 0)
+                        AS remaining_families
+                FROM (
+                    SELECT
+                        award_number,
+                        count(*) FILTER (
+                            WHERE {_V078_COMPLETION_MARKER_COLUMN} IS NULL
+                        ) AS incomplete_rows
+                    FROM archive.award_version
+                    GROUP BY award_number
+                ) families
+                """
+            )
+        ).mappings().one()
+        counts = {key: int(value) for key, value in row.items()}
+
+        for column in _V078_REPORTED_VERSION_COLUMNS:
+            counts[f"version_{column}_populated"] = int(
+                connection.execute(
+                    text(f"SELECT count({column}) FROM archive.award_version")
+                ).scalar_one()
+            )
+        counts["version_rows"] = int(
+            connection.execute(
+                text("SELECT count(*) FROM archive.award_version")
+            ).scalar_one()
+        )
+        counts["amount_info_current_fund_effective_date_populated"] = int(
+            connection.execute(
+                text(
+                    "SELECT count(current_fund_effective_date) "
+                    "FROM archive.award_amount_info"
+                )
+            ).scalar_one()
+        )
+        counts["amount_info_rows"] = int(
+            connection.execute(
+                text("SELECT count(*) FROM archive.award_amount_info")
+            ).scalar_one()
+        )
+    return counts
+
+
+def _select_v078_backfill_award_ids(
+    engine: Engine,
+    requested_size: int,
+) -> list[int]:
+    """Select up to `requested_size` archived Award FAMILIES still needing
+    V078, returning one representative award_id (the family's MIN) each.
+
+    PostgreSQL-only - never reads Oracle, unlike production
+    --create-batch's Oracle scan. Ordered by MIN(award_id) ascending, the
+    same stable ascending-award_id ordering the rest of the batch
+    framework uses, so progress and remaining-work counts are
+    interpretable and pagination is deterministic across runs.
+
+    Concurrency: excludes any family with ANY award_id belonging to an
+    UNRESOLVED batch - CREATED, METADATA_LOADING, READY or PROCESSING.
+    This is deliberately WIDER than
+    _excluded_completed_and_active_award_ids clause (b), which checks only
+    READY/PROCESSING: that function can afford the narrower set because
+    its clause (c) already excludes every archived award_id outright,
+    while this mode must not exclude archived award_ids at all.
+    batch_framework.create_batch persists a new batch as CREATED, so
+    without CREATED here two consecutive --create-batch --backfill-v078
+    calls would both select the same families. This is a real
+    claim check on batch state - the NULL marker alone is NOT relied on
+    for concurrency control, because two batches created before either
+    one loads would both still see the marker as NULL.
+
+    Deliberately does NOT exclude COMPLETED batch items: every family in
+    this archive was already loaded (many as COMPLETED items) BEFORE V078
+    existed, so excluding them is exactly the bug this mode fixes. A
+    successfully backfilled family drops out on the next selection
+    because its marker is then populated; a failed batch rolls back, the
+    marker stays NULL, and the family remains eligible. Repeated runs
+    therefore converge toward zero remaining families."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                f"""
+                WITH family AS (
+                    SELECT
+                        award_number,
+                        min(award_id) AS representative_award_id,
+                        count(*) FILTER (
+                            WHERE {_V078_COMPLETION_MARKER_COLUMN} IS NULL
+                        ) AS incomplete_rows
+                    FROM archive.award_version
+                    GROUP BY award_number
+                ),
+                actively_claimed AS (
+                    SELECT DISTINCT av.award_number
+                    FROM archive.etl_batch_item ebi
+                    JOIN archive.etl_batch eb
+                        ON eb.batch_id = ebi.batch_id
+                    JOIN archive.award_version av
+                        ON av.award_id = ebi.entity_key
+                    WHERE eb.domain = :domain
+                      AND eb.entity_type = :entity_type
+                      AND eb.status IN (
+                            :created_status,
+                            :metadata_loading_status,
+                            :ready_status,
+                            :processing_status
+                      )
+                )
+                SELECT family.representative_award_id
+                FROM family
+                WHERE family.incomplete_rows > 0
+                  AND family.award_number NOT IN (
+                      SELECT award_number FROM actively_claimed
+                  )
+                ORDER BY family.representative_award_id
+                LIMIT :limit
+                """
+            ),
+            {
+                "domain": AWARD_BATCH_DOMAIN,
+                "entity_type": AWARD_BATCH_ENTITY_TYPE,
+                "created_status": batch_framework.BATCH_STATUS_CREATED,
+                "metadata_loading_status": (
+                    batch_framework.BATCH_STATUS_METADATA_LOADING
+                ),
+                "ready_status": batch_framework.BATCH_STATUS_READY,
+                "processing_status": batch_framework.BATCH_STATUS_PROCESSING,
+                "limit": requested_size,
+            },
+        ).scalars()
+        return [int(value) for value in rows]
+
+
 def _run_create_award_batch(
     engine: Engine,
     requested_size: int,
     *,
     validation_overlap: bool = False,
+    backfill_v078: bool = False,
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """--create-batch: select exactly `requested_size` distinct award_ids,
@@ -9500,7 +9758,29 @@ def _run_create_award_batch(
             f"requested_size must be positive, got {requested_size}"
         )
 
-    if validation_overlap:
+    if backfill_v078 and validation_overlap:
+        raise ValueError(
+            "--backfill-v078 cannot be combined with --validation-overlap: "
+            "validation-overlap reselects the same lowest award_ids every "
+            "time and would never converge across the population."
+        )
+
+    if backfill_v078:
+        # PostgreSQL-only, archive-aware, family-level. Never touches
+        # Oracle during selection - the load that follows does.
+        progress = v078_backfill_progress(engine)
+        logger.info(
+            "V078 backfill progress BEFORE batch creation: "
+            "total_families={:,} completed={:,} remaining={:,}",
+            progress["total_families"],
+            progress["completed_families"],
+            progress["remaining_families"],
+        )
+        selected_award_ids = _select_v078_backfill_award_ids(
+            engine, requested_size
+        )
+        selection_strategy = "POSTGRES_V078_BACKFILL_INCOMPLETE_FAMILY"
+    elif validation_overlap:
         selected_award_ids = _select_award_ids_ascending(
             OracleDataSource(VERSIONS_ORACLE_SQL), requested_size
         )
@@ -9522,16 +9802,95 @@ def _run_create_award_batch(
         requested_size=requested_size,
         selection_strategy=selection_strategy,
         selected_keys=selected_award_ids,
-        selection_parameters={"validation_overlap": validation_overlap},
+        selection_parameters={
+            "validation_overlap": validation_overlap,
+            "backfill_v078": backfill_v078,
+        },
         run_id=run_id,
     )
 
-    return {
+    summary = {
         "batch_id": result["batch_id"],
         "requested_size": result["requested_size"],
         "selected_count": result["selected_count"],
         "selected_award_ids": result["selected_keys"],
     }
+    if backfill_v078:
+        summary["v078_progress_before"] = progress
+    return summary
+
+
+def derive_award_batch_terminal_status(
+    engine: Engine,
+    batch_id: int,
+) -> str | None:
+    """Terminal status for a finished Award batch, derived from the
+    PERSISTED archive.etl_batch_item rows - never from in-memory counters,
+    so a batch can only be called complete on the strength of what
+    actually committed.
+
+    Returns None when the batch must NOT be finalized: zero items (nothing
+    concluded), or any still-unresolved PENDING/PROCESSING item. The
+    caller leaves the status alone in that case.
+
+    Mapping:
+      any FAILED                                        -> FAILED
+      all COMPLETED                                     -> COMPLETED
+      COMPLETED + MISSING_SOURCE/SKIPPED, no FAILED     -> PARTIAL
+
+    MISSING_SOURCE and SKIPPED are resolved non-success outcomes: the
+    batch finished, but not every member landed, which is precisely what
+    PARTIAL means. They must not be allowed to yield COMPLETED, or a batch
+    that silently dropped members would look clean.
+
+    WHY THIS EXISTS: _run_load_award_batch previously set the parent to
+    READY on success and never to a terminal status, so every successfully
+    loaded Award batch stayed non-terminal forever. Because selection
+    excludes entities claimed by a non-terminal batch, those batches kept
+    claiming their families permanently - 32 such batches were found on
+    2026-09-22 holding 40,919 of 40,926 Award families. This is deliberately
+    Award-scoped: Award Attachment uses READY intentionally as an
+    intermediate phase marker between its metadata-load and upload phases
+    (load_award_attachments.py sets READY, then finish_batch_processing
+    COMPLETED later), and Proposal uses PROCESSING - neither is changed."""
+    with engine.connect() as connection:
+        counts = connection.execute(
+            text(
+                """
+                SELECT
+                    count(*) AS items,
+                    count(*) FILTER (WHERE status = :completed) AS completed,
+                    count(*) FILTER (WHERE status = :failed) AS failed,
+                    count(*) FILTER (
+                        WHERE status IN (:missing_source, :skipped)
+                    ) AS resolved_non_success,
+                    count(*) FILTER (
+                        WHERE status IN (:pending, :processing)
+                    ) AS unresolved
+                FROM archive.etl_batch_item
+                WHERE batch_id = :batch_id
+                """
+            ),
+            {
+                "batch_id": batch_id,
+                "completed": batch_framework.ITEM_STATUS_COMPLETED,
+                "failed": batch_framework.ITEM_STATUS_FAILED,
+                "missing_source": batch_framework.ITEM_STATUS_MISSING_SOURCE,
+                "skipped": batch_framework.ITEM_STATUS_SKIPPED,
+                "pending": batch_framework.ITEM_STATUS_PENDING,
+                "processing": batch_framework.ITEM_STATUS_PROCESSING,
+            },
+        ).mappings().one()
+
+    if counts["items"] == 0:
+        return None
+    if counts["unresolved"] > 0:
+        return None
+    if counts["failed"] > 0:
+        return batch_framework.BATCH_STATUS_FAILED
+    if counts["completed"] == counts["items"]:
+        return batch_framework.BATCH_STATUS_COMPLETED
+    return batch_framework.BATCH_STATUS_PARTIAL
 
 
 def _run_load_award_batch(
@@ -9591,7 +9950,9 @@ def _run_load_award_batch(
             entity_type=AWARD_BATCH_ENTITY_TYPE,
         )
 
-    report = {
+    # Values are heterogeneous: counts, the derived terminal batch status
+    # (str) and the V078 progress mapping, so this is not a counter dict.
+    report: dict[str, Any] = {
         "batch_id": batch_id,
         "requested_award_ids": len(award_ids),
         "families_loaded": 0,
@@ -9759,9 +10120,39 @@ def _run_load_award_batch(
                     award_id,
                     status=batch_framework.ITEM_STATUS_COMPLETED,
                 )
-            batch_framework.set_batch_status(
-                connection, batch_id, status=batch_framework.BATCH_STATUS_READY
+        # The parent status is deliberately NOT set inside the
+        # transaction above. finish_batch_processing runs only after the
+        # item-status updates have COMMITTED, and derives the terminal
+        # status by re-reading those persisted rows - so a rolled-back
+        # batch transaction can never leave the parent falsely COMPLETED.
+        if dry_run:
+            load_logger.info(
+                "Batch {} left non-terminal: --dry-run rolls the load back, "
+                "so no terminal status is claimed",
+                batch_id,
             )
+        else:
+            terminal_status = derive_award_batch_terminal_status(
+                engine, batch_id
+            )
+            if terminal_status is None:
+                load_logger.warning(
+                    "Batch {} not finalized: it has no items, or items still "
+                    "PENDING/PROCESSING - leaving status unchanged rather "
+                    "than claiming a terminal state",
+                    batch_id,
+                )
+            else:
+                batch_framework.finish_batch_processing(
+                    engine, batch_id, status=terminal_status
+                )
+                report["batch_status"] = terminal_status
+                load_logger.info(
+                    "Batch {} finalized: status={} (derived from persisted "
+                    "item rows)",
+                    batch_id,
+                    terminal_status,
+                )
 
         report["elapsed_ms"] = (time.perf_counter() - batch_started) * 1000
         load_logger.info(
@@ -9778,6 +10169,45 @@ def _run_load_award_batch(
             report["unchanged"],
             report["missing_in_oracle"],
         )
+        # V078 backfill progress. Reported after every batch (cheap,
+        # PostgreSQL-only) so remaining-work is observable from the log
+        # without a separate query, and so a NON-CONVERGING backfill is
+        # visible immediately: if families_loaded > 0 but
+        # remaining_families did not fall, the completion marker is not
+        # being populated by the load and the backfill would loop forever.
+        # Skipped for a dry run, whose UPSERTs are rolled back.
+        if not dry_run:
+            try:
+                progress = v078_backfill_progress(engine)
+                logger.info(
+                    "V078 progress AFTER batch {}: families_processed={} "
+                    "remaining_families={:,} of {:,} "
+                    "(account_type={:,} activity_type={:,} award_type={:,} "
+                    "fain_id={:,} nsf_science_code={:,} "
+                    "current_fund_effective_date={:,}/{:,})",
+                    batch_id,
+                    report["families_loaded"],
+                    progress["remaining_families"],
+                    progress["total_families"],
+                    progress["version_account_type_populated"],
+                    progress["version_activity_type_populated"],
+                    progress["version_award_type_populated"],
+                    progress["version_fain_id_populated"],
+                    progress["version_nsf_science_code_populated"],
+                    progress[
+                        "amount_info_current_fund_effective_date_populated"
+                    ],
+                    progress["amount_info_rows"],
+                )
+                report["v078_progress_after"] = progress
+            except Exception as progress_error:  # pragma: no cover
+                # Progress reporting must never fail a load that already
+                # committed successfully.
+                logger.warning(
+                    "V078 progress reporting failed (load itself was "
+                    "unaffected): {}",
+                    redact_error_message(str(progress_error)),
+                )
         return report
 
     if not award_ids:
@@ -10485,6 +10915,26 @@ def parse_args(
         ),
     )
     parser.add_argument(
+        "--backfill-v078",
+        action="store_true",
+        help=(
+            "Valid only with --create-batch. Selects already-archived "
+            "Award FAMILIES whose V078 fields are not yet populated, "
+            "using the completion marker "
+            "award_version.account_type IS NULL at family level (ANY row "
+            "NULL selects the whole family). PostgreSQL-only selection - "
+            "does not read Oracle. Unlike production --create-batch it "
+            "does NOT exclude already-archived award_ids (that exclusion "
+            "is precisely what makes a backfill impossible), but it DOES "
+            "exclude families claimed by a still-active READY/PROCESSING "
+            "batch. Resumable and convergent: a successfully backfilled "
+            "family drops out next selection; a rolled-back one stays "
+            "eligible. Never uses fain_id/nsf_science_code as a marker - "
+            "both are legitimately sparse at source. Cannot be combined "
+            "with --validation-overlap."
+        ),
+    )
+    parser.add_argument(
         "--validation-overlap",
         action="store_true",
         help=(
@@ -10674,6 +11124,14 @@ def parse_args(
         parser.error("--migrate-only cannot be combined with --load-award-id")
     if parsed.validation_overlap and parsed.create_batch is None:
         parser.error("--validation-overlap is only valid together with --create-batch")
+    if parsed.backfill_v078 and parsed.create_batch is None:
+        parser.error("--backfill-v078 is only valid together with --create-batch")
+    if parsed.backfill_v078 and parsed.validation_overlap:
+        parser.error(
+            "--backfill-v078 cannot be combined with --validation-overlap: "
+            "validation-overlap reselects the same lowest award_ids every "
+            "time and would never converge across the population"
+        )
 
     return parsed
 
@@ -10695,6 +11153,7 @@ def main() -> None:
             engine,
             arguments.create_batch,
             validation_overlap=arguments.validation_overlap,
+            backfill_v078=arguments.backfill_v078,
             run_id=run_id,
         )
         return
@@ -10881,6 +11340,24 @@ def main() -> None:
                     "method_of_payment_code",
                     "method_of_payment_description",
                     "modification_number",
+                    # V078 Kuali Summary fields. This list is SEPARATE
+                    # from the incremental path's _AWARD_VERSION_COLUMNS
+                    # - the full load COPYs, the incremental path
+                    # UPSERTs - so a column added to one and not the
+                    # other silently loads as NULL for whichever path
+                    # was missed. That exact divergence happened once
+                    # (2026-09-21): the incremental --load-award-id run
+                    # populated these correctly while a full reload left
+                    # all 267,386 rows NULL.
+                    "fain_id",
+                    "nsf_sequence_number",
+                    "nsf_science_code",
+                    "account_type_code",
+                    "account_type",
+                    "activity_type_code",
+                    "activity_type",
+                    "award_type_code",
+                    "award_type",
                     "document_number",
                     "update_timestamp",
                     "update_user",
@@ -10907,6 +11384,10 @@ def main() -> None:
                     "obligated_total_indirect",
                     "anticipated_total_amount",
                     "obligated_total_amount",
+                    # V078: Obligation Start Date. Same
+                    # full-load-vs-incremental divergence risk as the
+                    # award_version list above.
+                    "current_fund_effective_date",
                     "tnm_document_number",
                     "ver_nbr",
                 ],

@@ -225,11 +225,46 @@ class GlobalSearchServiceTest {
     void mapsAnAwardIdDirectLookupForANumericQuery() {
         when(awardArchiveService.findSummary(3831872L)).thenReturn(
                 new AwardSummaryResponse(
-                        3831872L, "103692-00002", 46, "Cancer Research Grant",
-                        "Active", "NIH", null, "Dr. Smith", "Medicine",
-                        null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                        null, null, null, null, null, null, true, null
-                )
+                3831872L,
+                "103692-00002",
+                46,
+                "Cancer Research Grant",
+                "Active",
+                null,
+                "Medicine",
+                null,
+                null,
+                null,
+                null,
+                "NIH",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                null,
+                null,
+                null,
+                null,
+                "Dr. Smith",
+                null,
+                null,
+                true,
+                null
+            )
         );
 
         GlobalSearchResponse response = service.search("3831872");
@@ -267,10 +302,19 @@ class GlobalSearchServiceTest {
                         null,
                         new PageResponse<>(
                                 List.of(new AwardSearchResultResponse(
-                                        555L, "100200-00001", 3, "Campbell Research",
-                                        "Active", "Dr. Campbell", "NSF", "Biology",
-                                        BigDecimal.TEN, null, null
-                                )),
+                555L,
+                "100200-00001",
+                3,
+                "Campbell Research",
+                "Active",
+                "Dr. Campbell",
+                "NSF",
+                "Biology",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            )),
                                 0, 25, 1, 1, true, true
                         )
                 )
@@ -424,10 +468,19 @@ class GlobalSearchServiceTest {
                         null,
                         new PageResponse<>(
                                 List.of(new AwardSearchResultResponse(
-                                        555L, "100200-00001", 3, "Campbell Research",
-                                        "Active", "Dr. Campbell", "NSF", "Biology",
-                                        BigDecimal.TEN, null, null
-                                )),
+                555L,
+                "100200-00001",
+                3,
+                "Campbell Research",
+                "Active",
+                "Dr. Campbell",
+                "NSF",
+                "Biology",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            )),
                                 0, 25, 1, 1, true, true
                         )
                 )
@@ -496,21 +549,65 @@ class GlobalSearchServiceTest {
     void ranksAnExactAwardIdLookupAheadOfABroadTitleSubstringMatch() {
         when(awardArchiveService.findSummary(555L)).thenReturn(
                 new AwardSummaryResponse(
-                        555L, "100200-00001", 3, "Campbell Research", "Active",
-                        "NSF", null, "Dr. Campbell", "Biology",
-                        null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                        null, null, null, null, null, null, true, null
-                )
+                555L,
+                "100200-00001",
+                3,
+                "Campbell Research",
+                "Active",
+                null,
+                "Biology",
+                null,
+                null,
+                null,
+                null,
+                "NSF",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                null,
+                null,
+                null,
+                null,
+                "Dr. Campbell",
+                null,
+                null,
+                true,
+                null
+            )
         );
         when(awardArchiveService.search("555", 0, 25)).thenReturn(
                 new AwardSearchResponse(
                         null,
                         new PageResponse<>(
                                 List.of(new AwardSearchResultResponse(
-                                        777L, "555-00001", 1, "Unrelated 555 Title",
-                                        "Active", "Dr. Other", "NSF", "Biology",
-                                        BigDecimal.ONE, null, null
-                                )),
+                777L,
+                "555-00001",
+                1,
+                "Unrelated 555 Title",
+                "Active",
+                "Dr. Other",
+                "NSF",
+                "Biology",
+                null,
+                BigDecimal.ONE,
+                null,
+                null
+            )),
                                 0, 25, 1, 1, true, true
                         )
                 )
@@ -525,21 +622,65 @@ class GlobalSearchServiceTest {
     void dedupesTheSameAwardVersionAppearingFromBothTheIdLookupAndBroadResults() {
         when(awardArchiveService.findSummary(555L)).thenReturn(
                 new AwardSummaryResponse(
-                        555L, "100200-00001", 3, "Campbell Research", "Active",
-                        "NSF", null, "Dr. Campbell", "Biology",
-                        null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                        null, null, null, null, null, null, true, null
-                )
+                555L,
+                "100200-00001",
+                3,
+                "Campbell Research",
+                "Active",
+                null,
+                "Biology",
+                null,
+                null,
+                null,
+                null,
+                "NSF",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                null,
+                null,
+                null,
+                null,
+                "Dr. Campbell",
+                null,
+                null,
+                true,
+                null
+            )
         );
         when(awardArchiveService.search("555", 0, 25)).thenReturn(
                 new AwardSearchResponse(
                         null,
                         new PageResponse<>(
                                 List.of(new AwardSearchResultResponse(
-                                        555L, "100200-00001", 3, "Campbell Research",
-                                        "Active", "Dr. Campbell", "NSF", "Biology",
-                                        BigDecimal.TEN, null, null
-                                )),
+                555L,
+                "100200-00001",
+                3,
+                "Campbell Research",
+                "Active",
+                "Dr. Campbell",
+                "NSF",
+                "Biology",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            )),
                                 0, 25, 1, 1, true, true
                         )
                 )
@@ -579,10 +720,19 @@ class GlobalSearchServiceTest {
                         null,
                         new PageResponse<>(
                                 List.of(new AwardSearchResultResponse(
-                                        555L, "campbell-00001", 3, "Some Title",
-                                        "Active", "Dr. Other", "NSF", "Biology",
-                                        BigDecimal.TEN, null, null
-                                )),
+                555L,
+                "campbell-00001",
+                3,
+                "Some Title",
+                "Active",
+                "Dr. Other",
+                "NSF",
+                "Biology",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            )),
                                 0, 25, 1, 1, true, true
                         )
                 )
@@ -676,10 +826,19 @@ class GlobalSearchServiceTest {
                         null,
                         new PageResponse<>(
                                 List.of(new AwardSearchResultResponse(
-                                        555L, "100200-00001", 3, "Campbell Research",
-                                        "Active", "Dr. Campbell", "NSF", "Biology",
-                                        BigDecimal.TEN, null, null
-                                )),
+                555L,
+                "100200-00001",
+                3,
+                "Campbell Research",
+                "Active",
+                "Dr. Campbell",
+                "NSF",
+                "Biology",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            )),
                                 0, 25, 1, 1, true, true
                         )
                 )

@@ -105,10 +105,46 @@ class AwardReportServiceTest {
 
     private static AwardSummaryResponse summary(long awardId) {
         return new AwardSummaryResponse(
-                awardId, "900000-00001", 1, "Synthetic Award", "Active", "Test Sponsor", null,
-                "Test PI", "Test Unit", LocalDate.of(2020, 1, 1), null, null, null,
-                BigDecimal.TEN, BigDecimal.TEN, null, null, null, null, null, null, true, "DOC-1"
-        );
+                awardId,
+                "900000-00001",
+                1,
+                "Synthetic Award",
+                "Active",
+                null,
+                "Test Unit",
+                null,
+                null,
+                null,
+                null,
+                "Test Sponsor",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                LocalDate.of(2020, 1, 1),
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                null,
+                null,
+                null,
+                null,
+                "Test PI",
+                null,
+                null,
+                true,
+                "DOC-1"
+            );
     }
 
     private static AwardBudgetSummaryResponse emptyBudgetSummary(long awardId) {

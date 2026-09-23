@@ -277,10 +277,19 @@ class AwardArchiveServiceTest {
     @Test
     void searchClampsPaginationAndBuildsAPageResponse() {
         AwardSearchResultResponse result = new AwardSearchResultResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "MICHAEL MCCLEAN", "Brown University",
-                "SPH ENVIRONMENTAL HEALTH", BigDecimal.TEN, null, null
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                "MICHAEL MCCLEAN",
+                "Brown University",
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                BigDecimal.TEN,
+                null,
+                null
+            );
         when(repository.countSearchAwards("%cancer%", "cancer"))
                 .thenReturn(205L);
         when(repository.searchAwards("%cancer%", "cancer", 100, 0))
@@ -534,12 +543,46 @@ class AwardArchiveServiceTest {
     @Test
     void findSummaryReturnsTheRepositoryMapping() {
         AwardSummaryResponse expected = new AwardSummaryResponse(
-                3L, "100004-00003", 1, "Title", "Approved Award",
-                "Brown University", null, "MICHAEL MCCLEAN",
-                "SPH ENVIRONMENTAL HEALTH", null, null, null, null,
-                BigDecimal.TEN, BigDecimal.TEN, "1", "Cost reimbursement",
-                "28", "Invoice", null, null, true, null
-        );
+                3L,
+                "100004-00003",
+                1,
+                "Title",
+                "Approved Award",
+                null,
+                "SPH ENVIRONMENTAL HEALTH",
+                null,
+                null,
+                null,
+                null,
+                "Brown University",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                "1",
+                "Cost reimbursement",
+                "28",
+                "Invoice",
+                "MICHAEL MCCLEAN",
+                null,
+                null,
+                true,
+                null
+            );
         when(repository.findSummaryByAwardId(3L))
                 .thenReturn(Optional.of(expected));
 
@@ -559,17 +602,87 @@ class AwardArchiveServiceTest {
     @Test
     void findSummaryReturnsTheExactHistoricalVersionNotTheCurrentOne() {
         AwardSummaryResponse currentVersion = new AwardSummaryResponse(
-                3561610L, "204713-00001", 544, "CARB-X", "Closed",
-                "Boston University", null, "PI NAME", "MEDICINE",
-                null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                null, null, null, null, null, null, true, null
-        );
+                3561610L,
+                "204713-00001",
+                544,
+                "CARB-X",
+                "Closed",
+                null,
+                "MEDICINE",
+                null,
+                null,
+                null,
+                null,
+                "Boston University",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                null,
+                null,
+                null,
+                null,
+                "PI NAME",
+                null,
+                null,
+                true,
+                null
+            );
         AwardSummaryResponse historicalVersion = new AwardSummaryResponse(
-                3561589L, "204713-00001", 543, "CARB-X", "Approved Award",
-                "Boston University", null, "PI NAME", "MEDICINE",
-                null, null, null, null, BigDecimal.TEN, BigDecimal.TEN,
-                null, null, null, null, null, null, false, null
-        );
+                3561589L,
+                "204713-00001",
+                543,
+                "CARB-X",
+                "Approved Award",
+                null,
+                "MEDICINE",
+                null,
+                null,
+                null,
+                null,
+                "Boston University",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                BigDecimal.TEN,
+                BigDecimal.TEN,
+                null,
+                null,
+                null,
+                null,
+                "PI NAME",
+                null,
+                null,
+                false,
+                null
+            );
         when(repository.findSummaryByAwardId(3561610L))
                 .thenReturn(Optional.of(currentVersion));
         when(repository.findSummaryByAwardId(3561589L))

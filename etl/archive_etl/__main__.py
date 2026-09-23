@@ -78,6 +78,17 @@ _EXTRA_DOMAIN_ARGUMENTS: dict[str, list[tuple[str, dict]]] = {
             },
         ),
         (
+            "--backfill-v078",
+            {
+                "action": "store_true",
+                "help": (
+                    "Forwarded to the underlying loader's "
+                    "--backfill-v078 (V078 Award backfill family "
+                    "selection; only valid with --create-batch)."
+                ),
+            },
+        ),
+        (
             "--load-batch",
             {
                 "type": int,

@@ -332,15 +332,122 @@ class AwardReportPdfRendererTest {
         );
     }
 
+
+    /**
+     * Rebuilds a summary with the Kuali-labelled fields populated, so the
+     * PDF assertions exercise real values rather than nulls.
+     */
+    private static AwardSummaryResponse withKualiFields(
+            AwardSummaryResponse s,
+            String grantNumber,
+            java.time.LocalDate projectStartDate,
+            java.time.LocalDate obligationStartDate,
+            java.time.LocalDate beginDate,
+            java.time.LocalDate closeoutDate
+    ) {
+        return new AwardSummaryResponse(
+                s.awardId(), s.awardNumber(), s.sequenceNumber(), s.title(),
+                s.status(),
+                grantNumber, s.leadUnit(), s.accountType(), s.activityType(),
+                s.awardType(), s.federalClinicalTrial(),
+                s.sponsor(), s.sponsorCode(), s.sponsorAwardNumber(),
+                s.primeSponsor(), s.primeSponsorCode(),
+                s.primeSponsorAwardId(), s.modificationNumber(), s.fainId(),
+                s.nsfScienceCode(), s.nsfSequenceNumber(),
+                s.alnNumber(), s.alnProgramTitleName(),
+                projectStartDate, obligationStartDate, s.awardExecutionDate(),
+                beginDate, closeoutDate,
+                s.obligatedTotalAmount(), s.anticipatedTotalAmount(),
+                s.basisOfPaymentCode(), s.basisOfPaymentDescription(),
+                s.methodOfPaymentCode(), s.methodOfPaymentDescription(),
+                s.principalInvestigator(), s.rootAwardNumber(),
+                s.parentAwardNumber(), s.primaryCurrent(), s.documentNumber()
+        );
+    }
+
+    /**
+     * The PDF is a rendering of the same Kuali Award summary as the web
+     * screen, so it must use the same labels and the same sources. This
+     * is deliberately NOT a rename of beginDate/closeoutDate: the test
+     * sets begin_date and closeout_date to values that would be visible
+     * if the old fields were merely relabelled, and asserts the report
+     * shows the award_effective_date / current_fund_effective_date
+     * values instead.
+     */
+    @Test
+    void reportUsesKualiDateLabelsAndSourcesNotBeginOrCloseoutDate()
+            throws Exception {
+        AwardSummaryResponse base = summary(
+                "105698-00001", "Autism Study", "Closed", 20, "771264"
+        );
+        AwardSummaryResponse s = withKualiFields(
+                base,
+                "50105698",
+                java.time.LocalDate.of(2007, 4, 1),
+                java.time.LocalDate.of(2007, 4, 1),
+                java.time.LocalDate.of(1999, 12, 31),
+                java.time.LocalDate.of(1998, 11, 30)
+        );
+
+        String text = renderToText(withSummary(baseData(), s));
+
+        assertThat(text).contains("Project Start Date");
+        assertThat(text).contains("Obligation Start Date");
+        assertThat(text).contains("Grant Number");
+        assertThat(text).contains("50105698");
+
+        assertThat(text).doesNotContain("Begin Date");
+        assertThat(text).doesNotContain("Closeout Date");
+
+        // The decoy begin/closeout values must not appear anywhere.
+        assertThat(text).doesNotContain("1999");
+        assertThat(text).doesNotContain("1998");
+    }
+
     private static AwardSummaryResponse summary(
             String awardNumber, String title, String status, int sequenceNumber, String documentNumber
     ) {
         return new AwardSummaryResponse(
-                5000L, awardNumber, sequenceNumber, title, status, "Test Sponsor", null,
-                "Test PI", "Test Unit", LocalDate.of(2020, 1, 1), LocalDate.of(2020, 1, 15),
-                LocalDate.of(2020, 2, 1), null, BigDecimal.valueOf(100000), BigDecimal.valueOf(150000),
-                "C", "Cost Reimbursement", "M", "Monthly", null, null, true, documentNumber
-        );
+                5000L,
+                awardNumber,
+                sequenceNumber,
+                title,
+                status,
+                null,
+                "Test Unit",
+                null,
+                null,
+                null,
+                null,
+                "Test Sponsor",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                LocalDate.of(2020, 1, 1),
+                null,
+                LocalDate.of(2020, 1, 15),
+                LocalDate.of(2020, 2, 1),
+                null,
+                BigDecimal.valueOf(100000),
+                BigDecimal.valueOf(150000),
+                "C",
+                "Cost Reimbursement",
+                "M",
+                "Monthly",
+                "Test PI",
+                null,
+                null,
+                true,
+                documentNumber
+            );
     }
 
     private static AwardVersionSummaryResponse version(long awardId, int sequenceNumber, String documentNumber) {
