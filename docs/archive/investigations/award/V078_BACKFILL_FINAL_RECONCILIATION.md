@@ -30,7 +30,7 @@ progress: completed=40,926  remaining=0  total=40,926
 | 6 | FAIN population | **137,906** ✅ |
 | 7 | NSF Science Code population | **95,692** ✅ |
 | 8 | `current_fund_effective_date` | **828,153 / 884,201** ✅ |
-| 9 | FK constraints / orphans | **75 / 0** ✅ |
+| 9 | Award copy-set FK edges / orphans | **75 / 0** ✅ |
 | 10 | Stale-complete detector | **empty** ✅ |
 | 11 | Fixture 105698-00001 | **9/9 PASS** ✅ |
 | 12 | Grant Number `50105698` | → **105698-00001**, seq 16–20 ✅ |
@@ -89,6 +89,20 @@ including the partial-FAIN case:
 
 `200902-00001` carrying FAIN on 5 of 7 versions in **both** systems is the
 useful one — it shows the per-version fidelity, not just totals.
+
+## What the FK number in check 9 actually counts
+
+Recorded precisely, because the bare figure invites the wrong reading:
+**75** is the number of distinct `(child table, child column, parent
+table)` foreign-key EDGES among the 37 Award copy-set tables, each of
+which was then individually orphan-checked and came back with zero
+violations.
+
+It is **not** the total number of foreign-key constraints in the
+`archive` schema — that number is **177**. Both were measured on dev;
+they answer different questions, and a later reader comparing 75 against
+a schema-wide `pg_constraint` count will think something is missing when
+nothing is.
 
 ## Operational notes carried forward
 
