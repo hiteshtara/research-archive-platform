@@ -1,4 +1,6 @@
 import { Box, Skeleton, Typography } from "@mui/material";
+
+import { WORKSPACE_FIELD_GRID } from "../common/workspace/workspaceGrid";
 import { useQuery } from "@tanstack/react-query";
 
 import { getAwardSummaryV1 } from "../../api/client";
@@ -19,15 +21,9 @@ type SummaryGroup = {
   fields: SummaryField[];
 };
 
-const GRID = {
-  display: "grid",
-  gridTemplateColumns: {
-    xs: "1fr",
-    sm: "repeat(2, 1fr)",
-    md: "repeat(3, 1fr)",
-  },
-  gap: 1.75,
-} as const;
+// The grid now comes from the shared workspace primitives, extracted
+// from this very file so the values are unchanged.
+const GRID = WORKSPACE_FIELD_GRID;
 
 // Grouped stat-card summary fed from GET /api/v1/awards/{awardId}/summary.
 //

@@ -1240,6 +1240,17 @@ export interface NegotiationPageResponse
   extends PageResponse<NegotiationSummary> {}
 
 export interface NegotiationRow extends NegotiationSummary {
+  /*
+   * Resolved attributes the WORKSPACE endpoint carries but the list
+   * endpoint does not. NegotiationSummaryResponse has seven resolved
+   * columns; NegotiationRowResponse has ten. These are the extra three,
+   * declared here rather than on NegotiationSummary so the list type
+   * keeps telling the truth about what the list actually returns.
+   */
+  primeSponsorCode: string | null;
+  primeSponsorName: string | null;
+  sponsorAwardNumber: string | null;
+
   documentFolder: string | null;
   sourceUpdateTimestamp: string | null;
   sourceUpdateUser: string | null;

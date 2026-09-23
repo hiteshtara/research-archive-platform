@@ -4,10 +4,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Divider,
-  List,
-  ListItemButton,
-  ListItemText,
   Stack,
   Tooltip,
   Typography,
@@ -35,6 +31,9 @@ import { AwardAssociatedNegotiationsSection } from "../../components/award/Award
 import { AwardFundingSubawardsSection } from "../../components/award/AwardFundingSubawardsSection";
 import { AwardSapTransmissionsSection } from "../../components/award/AwardSapTransmissionsSection";
 import { StatusPill } from "../../components/common/StatusPill";
+import { WorkspaceContent } from "../../components/common/workspace/WorkspaceContent";
+import { WorkspaceLayout } from "../../components/common/workspace/WorkspaceLayout";
+import { WorkspaceSectionNav } from "../../components/common/workspace/WorkspaceSectionNav";
 import { AwardSummarySection } from "../../components/award/AwardSummarySection";
 import { AwardTermsSection } from "../../components/award/AwardTermsSection";
 import { AwardTimeAndMoneySection } from "../../components/award/AwardTimeAndMoneySection";
@@ -327,75 +326,14 @@ export function AwardDashboardPage() {
         </Stack>
       </Box>
 
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: { xs: "column", md: "row" },
-          gap: 3,
-          alignItems: "flex-start",
-        }}
-      >
-        <List
-          sx={{
-            width: { xs: "100%", md: 220 },
-            flexShrink: 0,
-            border: "1px solid",
-            borderColor: "divider",
-            borderRadius: 2,
-            p: 1,
-            display: { xs: "flex", md: "block" },
-            flexDirection: "row",
-            flexWrap: "nowrap",
-            overflowX: { xs: "auto", md: "visible" },
-            gap: { xs: 0.5, md: 0 },
-            maskImage: {
-              xs: "linear-gradient(to right, black 92%, transparent 100%)",
-              md: "none",
-            },
-            WebkitMaskImage: {
-              xs: "linear-gradient(to right, black 92%, transparent 100%)",
-              md: "none",
-            },
-          }}
-        >
-          {SECTIONS.map((section) => (
-            <ListItemButton
-              key={section.key}
-              selected={activeSection === section.key}
-              onClick={() => setActiveSection(section.key)}
-              sx={{
-                borderRadius: 1.5,
-                mb: { xs: 0, md: 0.25 },
-                flexShrink: { xs: 0, md: 1 },
-                whiteSpace: "nowrap",
-                "&.Mui-selected": {
-                  backgroundColor: "rgba(139, 24, 50, 0.10)",
-                  color: "primary.main",
-                },
-              }}
-            >
-              <ListItemText
-                primary={section.label}
-                slotProps={{
-                  primary: { sx: { fontSize: 13, fontWeight: 600 } },
-                }}
-              />
-            </ListItemButton>
-          ))}
-        </List>
+      <WorkspaceLayout>
+        <WorkspaceSectionNav
+          sections={SECTIONS}
+          activeSection={activeSection}
+          onSelect={setActiveSection}
+        />
 
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            border: "1px solid",
-            borderColor: "divider",
-            borderRadius: 2,
-            p: 3.25,
-            minHeight: 360,
-          }}
-        >
-          <Divider sx={{ display: "none" }} />
+        <WorkspaceContent>
 
           {activeSection === "summary" && (
             <AwardSummarySection awardId={awardId} />
@@ -470,8 +408,8 @@ export function AwardDashboardPage() {
               }
             />
           )}
-        </Box>
-      </Box>
+        </WorkspaceContent>
+      </WorkspaceLayout>
     </Stack>
   );
 }

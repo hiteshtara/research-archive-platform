@@ -12,8 +12,6 @@ import {
   Chip,
   Divider,
   Stack,
-  Tab,
-  Tabs,
   Table,
   TableBody,
   TableCell,
@@ -41,7 +39,17 @@ import { EmptyState } from "../components/common/EmptyState";
 import { ErrorState } from "../components/common/ErrorState";
 import { LoadingState } from "../components/common/LoadingState";
 import { RelationshipCard } from "../components/common/RelationshipCard";
+import { StatCard } from "../components/common/StatCard";
 import { StatusPill } from "../components/common/StatusPill";
+import { WorkspaceContent } from "../components/common/workspace/WorkspaceContent";
+import { WorkspaceFieldGrid } from "../components/common/workspace/WorkspaceFieldGrid";
+import { WorkspaceHeader } from "../components/common/workspace/WorkspaceHeader";
+import { WorkspaceLayout } from "../components/common/workspace/WorkspaceLayout";
+import {
+  WorkspaceSection,
+  WorkspaceSectionStack,
+} from "../components/common/workspace/WorkspaceSection";
+import { WorkspaceSectionNav } from "../components/common/workspace/WorkspaceSectionNav";
 import {
   resolveNegotiationAssociationArchived,
   resolveNegotiationAssociationDisplayKind,
@@ -57,14 +65,27 @@ import type {
   NegotiationAttachment,
 } from "../types/api";
 
-const tabs = [
-  "Summary",
-  "Associated Record",
-  "Activity Timeline",
-  "Attachments",
-  "Custom Data",
-  "Notifications",
-];
+/*
+ * The same left-hand section navigation the Award workspace uses. These
+ * were tabs; only the navigation chrome changed - every section below
+ * renders exactly what its tab rendered.
+ */
+const SECTIONS = [
+  { key: "summary", label: "Summary" },
+  { key: "association", label: "Associated Record" },
+  { key: "activities", label: "Activity Timeline" },
+  { key: "attachments", label: "Attachments" },
+  { key: "customData", label: "Custom Data" },
+  { key: "notifications", label: "Notifications" },
+] as const;
+
+type SectionKey = (typeof SECTIONS)[number]["key"];
+
+type SummaryField = {
+  label: string;
+  value: string;
+  caption?: string;
+};
 
 const ASSOCIATION_ROUTE: Record<string, (id: number) => string> = {
   AWARD: (id) => `/awards/${id}`,
@@ -80,6 +101,11 @@ const ASSOCIATION_LABEL: Record<string, string> = {
 
 function display(value: string | number | null | undefined) {
   return value ?? "—";
+}
+
+/* StatCard takes a string; this is null-display only, never a fallback. */
+function text(value: string | number | null | undefined) {
+  return value === null || value === undefined ? "\u2014" : String(value);
 }
 
 function formatBytes(bytes: number | null) {
@@ -132,7 +158,7 @@ function NegotiationWorkspaceContent({
 }: {
   negotiationId: string | undefined;
 }) {
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeSection, setActiveSection] = useState<SectionKey>("summary");
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAttachmentId, setPendingAttachmentId] = useState<
     number | null
@@ -158,7 +184,7 @@ function NegotiationWorkspaceContent({
     queryKey: ["negotiation-unassociated", parsedNegotiationId],
     enabled:
       validNegotiationId &&
-      activeTab === 1 &&
+      activeSection === "association" &&
       associatedRecordQuery.data?.kind === "NONE",
     queryFn: () => getNegotiationUnassociatedDetails(parsedNegotiationId),
   });
@@ -171,19 +197,20 @@ function NegotiationWorkspaceContent({
 
   const attachmentsQuery = useQuery({
     queryKey: ["negotiation-attachments", parsedNegotiationId],
-    enabled: validNegotiationId && activeTab === 3 && attachmentAccess,
+    enabled:
+      validNegotiationId && activeSection === "attachments" && attachmentAccess,
     queryFn: () => getNegotiationAttachments(parsedNegotiationId),
   });
 
   const customDataQuery = useQuery({
     queryKey: ["negotiation-custom-data", parsedNegotiationId],
-    enabled: validNegotiationId && activeTab === 4,
+    enabled: validNegotiationId && activeSection === "customData",
     queryFn: () => getNegotiationCustomData(parsedNegotiationId),
   });
 
   const notificationsQuery = useQuery({
     queryKey: ["negotiation-notifications", parsedNegotiationId],
-    enabled: validNegotiationId && activeTab === 5,
+    enabled: validNegotiationId && activeSection === "notifications",
     queryFn: () => getNegotiationNotifications(parsedNegotiationId),
   });
 
@@ -248,17 +275,82 @@ function NegotiationWorkspaceContent({
     }
   }
 
-  const generalRows: Array<[string, string | number | null]> = [
-    ["Negotiation ID", current.negotiationId],
-    ["Document Number", current.documentNumber],
-    ["Status", current.negotiationStatusDescription],
-    ["Agreement Type", current.negotiationAgreementTypeDescription],
-    ["Negotiator", current.negotiatorFullName],
-    ["Start Date", current.negotiationStartDate],
-    ["End Date", current.negotiationEndDate],
-    ["Anticipated Award Date", current.anticipatedAwardDate],
-    ["Document Folder", current.documentFolder],
-    ["Last Updated", current.sourceUpdateTimestamp],
+  /*
+   * The three summary groups, rendered as the Award workspace renders
+   * its own: an overline group title over a StatCard grid.
+   *
+   * Every resolved attribute - Title, PI, Sponsor, Prime Sponsor, Lead
+   * Unit, Sponsor Award ID - is read straight off the workspace row.
+   * archive.negotiation_search_attribute already decided which source
+   * supplied it and attributeSource records that decision, so there is
+   * deliberately no precedence rule, COALESCE or fallback here. A code
+   * is shown as the card's caption, never substituted for a missing
+   * name.
+   */
+  const summaryGroups: Array<{ title: string; fields: SummaryField[] }> = [
+    {
+      title: "Negotiation",
+      fields: [
+        { label: "Negotiation ID", value: text(current.negotiationId) },
+        { label: "Document Number", value: text(current.documentNumber) },
+        { label: "Status", value: text(current.negotiationStatusDescription) },
+        {
+          label: "Agreement Type",
+          value: text(current.negotiationAgreementTypeDescription),
+        },
+        { label: "Negotiator", value: text(current.negotiatorFullName) },
+        { label: "Document Folder", value: text(current.documentFolder) },
+        { label: "Last Updated", value: text(current.sourceUpdateTimestamp) },
+      ],
+    },
+    {
+      title: "Dates",
+      fields: [
+        { label: "Start Date", value: text(current.negotiationStartDate) },
+        { label: "End Date", value: text(current.negotiationEndDate) },
+        {
+          label: "Anticipated Award Date",
+          value: text(current.anticipatedAwardDate),
+        },
+      ],
+    },
+    {
+      title: "Association / Attributes",
+      fields: [
+        {
+          label: "Association Type",
+          value: text(current.negotiationAssociationTypeDescription),
+        },
+        {
+          label: "Associated Record",
+          value: text(current.associatedDocumentId),
+        },
+        { label: "Title", value: text(current.title) },
+        {
+          label: "Principal Investigator",
+          value: text(current.principalInvestigatorName),
+        },
+        {
+          label: "Sponsor",
+          value: text(current.sponsorName),
+          caption: current.sponsorCode ?? undefined,
+        },
+        {
+          label: "Prime Sponsor",
+          value: text(current.primeSponsorName),
+          caption: current.primeSponsorCode ?? undefined,
+        },
+        {
+          label: "Lead Unit",
+          value: text(current.leadUnitName),
+          caption: current.leadUnitNumber ?? undefined,
+        },
+        {
+          label: "Sponsor Award ID",
+          value: text(current.sponsorAwardNumber),
+        },
+      ],
+    },
   ];
 
   const attachmentsByActivity = new Map<
@@ -274,34 +366,30 @@ function NegotiationWorkspaceContent({
 
   return (
     <Stack spacing={3}>
-      <Card>
-        <CardContent>
-          <Typography variant="h4">
-            Negotiation {current.negotiationId}
-          </Typography>
-
-          <Typography variant="h6" sx={{ mt: 1 }}>
-            {current.negotiationAgreementTypeDescription ??
-              "Unspecified agreement type"}
-          </Typography>
-
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            Negotiator: {current.negotiatorFullName ?? "Unknown"}
-          </Typography>
-
+      <WorkspaceHeader
+        identifier={`Negotiation ${current.negotiationId}`}
+        title={
+          current.negotiationAgreementTypeDescription ??
+          "Unspecified agreement type"
+        }
+        meta={
+          <>
+            negotiation_id {current.negotiationId}
+            {current.documentNumber ? (
+              <> &middot; document {current.documentNumber}</>
+            ) : null}
+          </>
+        }
+        badges={
           <Stack
             sx={{
-              mt: 3,
+              mt: 1,
               flexDirection: "row",
               alignItems: "center",
               flexWrap: "wrap",
               gap: 1,
             }}
           >
-            <StatusPill
-              status={current.negotiationStatusDescription}
-              domain="negotiation"
-            />
             {association?.clickable && association.navigableId ? (
               <Chip
                 size="small"
@@ -334,26 +422,53 @@ function NegotiationWorkspaceContent({
               />
             )}
           </Stack>
-        </CardContent>
-      </Card>
+        }
+        actions={
+          <StatusPill
+            status={current.negotiationStatusDescription}
+            domain="negotiation"
+          />
+        }
+      />
 
-      <Card>
-        <Tabs
-          value={activeTab}
-          onChange={(_, nextTab) => setActiveTab(nextTab)}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ px: 2, borderBottom: "1px solid", borderColor: "divider" }}
-        >
-          {tabs.map((tab) => (
-            <Tab key={tab} label={tab} />
-          ))}
-        </Tabs>
+      <WorkspaceLayout>
+        <WorkspaceSectionNav
+          sections={SECTIONS}
+          activeSection={activeSection}
+          onSelect={setActiveSection}
+        />
 
-        <CardContent>
-          {activeTab === 0 && <DetailTable rows={generalRows} />}
+        <WorkspaceContent>
+          {activeSection === "summary" && (
+            <WorkspaceSectionStack>
+              {summaryGroups.map((group) => (
+                <WorkspaceSection key={group.title} title={group.title}>
+                  {group.title === "Association / Attributes" && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mb: 1 }}
+                    >
+                      Attribute source: {text(current.attributeSource)}
+                    </Typography>
+                  )}
+                  <WorkspaceFieldGrid>
+                    {group.fields.map((field) => (
+                      <StatCard
+                        key={field.label}
+                        label={field.label}
+                        value={field.value}
+                        variant={field.caption ? "outlined" : "filled"}
+                        caption={field.caption}
+                      />
+                    ))}
+                  </WorkspaceFieldGrid>
+                </WorkspaceSection>
+              ))}
+            </WorkspaceSectionStack>
+          )}
 
-          {activeTab === 1 && (
+          {activeSection === "association" && (
             <Stack spacing={2}>
               {associatedRecordQuery.isLoading && <LoadingState />}
               {associatedRecordQuery.isError && (
@@ -431,7 +546,7 @@ function NegotiationWorkspaceContent({
             </Stack>
           )}
 
-          {activeTab === 2 && (
+          {activeSection === "activities" && (
             <Stack spacing={2}>
               {activitiesQuery.isLoading && <LoadingState />}
               {activitiesQuery.isError && (
@@ -514,7 +629,7 @@ function NegotiationWorkspaceContent({
             </Stack>
           )}
 
-          {activeTab === 3 && (
+          {activeSection === "attachments" && (
             <Stack spacing={2}>
               {!attachmentAccess && (
                 <ErrorState message="Access denied. Viewing Negotiation attachments requires membership in the ArchiveAttachmentViewer group - contact an administrator if you believe this is wrong." />
@@ -722,7 +837,7 @@ function NegotiationWorkspaceContent({
             </Stack>
           )}
 
-          {activeTab === 4 && (
+          {activeSection === "customData" && (
             <Stack spacing={2}>
               {customDataQuery.isLoading && <LoadingState />}
               {customDataQuery.isError && (
@@ -774,7 +889,7 @@ function NegotiationWorkspaceContent({
             </Stack>
           )}
 
-          {activeTab === 5 && (
+          {activeSection === "notifications" && (
             <Stack spacing={2}>
               {notificationsQuery.isLoading && <LoadingState />}
               {notificationsQuery.isError && (
@@ -815,8 +930,8 @@ function NegotiationWorkspaceContent({
                 ))}
             </Stack>
           )}
-        </CardContent>
-      </Card>
+        </WorkspaceContent>
+      </WorkspaceLayout>
     </Stack>
   );
 }
