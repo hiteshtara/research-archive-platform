@@ -9,14 +9,12 @@ import {
   HistoryOutlined,
   LogoutOutlined,
   SearchOutlined,
-  TravelExploreOutlined,
 } from "@mui/icons-material";
 import {
   AppBar,
   Box,
   Button,
   Chip,
-  Divider,
   Drawer,
   List,
   ListItemButton,
@@ -43,7 +41,6 @@ const ATTACHMENT_GATED_PATH = "/archived-files";
 
 const drawerWidth = 250;
 
-const EXPLORER_ENABLED = import.meta.env.VITE_EXPLORER_ENABLED === "true";
 
 // Icons are JSX and can't live in the plain-data presentation-helper
 // module, so each item's icon is looked up here by key instead - same
@@ -66,32 +63,19 @@ type NavigationEntry = {
   badge?: string;
 };
 
-const navigation: NavigationEntry[] = [
-  ...sidebarNavigationItems.map((item) => ({
-    label: item.label,
-    icon: NAV_ICONS[item.key],
-    path: item.path,
-  })),
-  // Dev-only developer tool - hidden unless the deployed environment's
-  // VITE_EXPLORER_ENABLED matches the API's own APP_EXPLORER_ENABLED
-  // (see docs/ARCHIVE_EXPLORER.md). Never enable in test/prod.
-  ...(EXPLORER_ENABLED
-    ? [
-        {
-          label: "Archive Explorer",
-          icon: <TravelExploreOutlined />,
-          path: "/explorer",
-          badge: "Dev",
-        },
-        {
-          label: "Proposal Explorer",
-          icon: <TravelExploreOutlined />,
-          path: "/explorer/proposals",
-          badge: "Dev",
-        },
-      ]
-    : []),
-];
+// The primary navigation is exactly the archive's domains, nothing else.
+//
+// The Archive Explorer and Proposal Explorer developer tools used to
+// appear here behind VITE_EXPLORER_ENABLED with a "Dev" badge. Their
+// routes (/explorer, /explorer/proposals), pages and their own
+// getExplorer* endpoints are all untouched and still gated by that same
+// flag - they were removed from the sidebar only, so the finished
+// application does not advertise developer tooling.
+const navigation: NavigationEntry[] = sidebarNavigationItems.map((item) => ({
+  label: item.label,
+  icon: NAV_ICONS[item.key],
+  path: item.path,
+}));
 
 export function AppLayout() {
   const [signedInUser, setSignedInUser] = useState("Signed in");
@@ -290,17 +274,6 @@ export function AppLayout() {
           ))}
         </List>
 
-        <Divider sx={{ mt: 2 }} />
-
-        <Box sx={{ p: 3 }}>
-          <Typography variant="caption" color="text.secondary">
-            Data source
-          </Typography>
-
-          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-            Kuali Legacy Archive
-          </Typography>
-        </Box>
       </Drawer>
 
       <Box

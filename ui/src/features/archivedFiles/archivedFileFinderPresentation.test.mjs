@@ -516,17 +516,42 @@ test("App.tsx routes /archived-files to ArchivedFileFinderPage", () => {
   assert.match(routeBlock, /ArchivedFileFinderPage/);
 });
 
-test("sidebarNavigationItems includes exactly one Archived File Finder entry pointing at /archived-files - no separate Award/Proposal/Subaward nav items", () => {
+test("Archived File Finder is NOT in the primary sidebar navigation", () => {
+  // Removed from primary navigation deliberately - the ROUTE, the page
+  // and its ArchiveAttachmentViewer authorization are all still intact
+  // (pinned by the route test above). This asserts the removal so it is
+  // not silently re-added.
   const source = readSource("../navigation/navigationPresentation.mjs");
-  assert.match(
-    source,
-    /label:\s*"Archived File Finder"[\s\S]{0,20}path:\s*"\/archived-files"/,
-  );
   const occurrences = source.match(/path:\s*"\/archived-files"/g) ?? [];
-  assert.equal(occurrences.length, 1);
+  assert.equal(occurrences.length, 0);
+  assert.doesNotMatch(source, /label:\s*"Archived File Finder"/);
 });
 
-test("AppLayout.tsx assigns an icon to the archivedFiles nav key", () => {
+test("primary navigation is exactly the seven archive domains, Global Search last", () => {
+  const source = readSource("../navigation/navigationPresentation.mjs");
+  const labels = [...source.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(labels, [
+    "Dashboard",
+    "Awards",
+    "Historical Awards",
+    "Proposals",
+    "Negotiations",
+    "Subawards",
+    "Global Search",
+  ]);
+});
+
+test("no developer-tool entries appear in the sidebar", () => {
+  // Archive Explorer / Proposal Explorer keep their routes and their
+  // VITE_EXPLORER_ENABLED gate; they are simply not advertised.
   const source = readSource("../../layout/AppLayout.tsx");
-  assert.match(source, /archivedFiles:\s*</);
+  assert.doesNotMatch(source, /label:\s*"Archive Explorer"/);
+  assert.doesNotMatch(source, /label:\s*"Proposal Explorer"/);
+  assert.doesNotMatch(source, /badge:\s*"Dev"/);
+});
+
+test("the Data source footer block is gone from the sidebar", () => {
+  const source = readSource("../../layout/AppLayout.tsx");
+  assert.doesNotMatch(source, /Data source/);
+  assert.doesNotMatch(source, /Kuali Legacy Archive/);
 });

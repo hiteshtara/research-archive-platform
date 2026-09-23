@@ -21,11 +21,14 @@ export const sidebarNavigationItems = [
   { key: "proposals", label: "Proposals", path: "/proposals" },
   { key: "negotiations", label: "Negotiations", path: "/negotiations" },
   { key: "subawards", label: "Subawards", path: "/subawards" },
-  {
-    key: "archivedFiles",
-    label: "Archived File Finder",
-    path: "/archived-files",
-  },
+  // Global Search is deliberately last: it is the catch-all, and every
+  // entry above it is a specific domain.
+  //
+  // Archived File Finder is NOT listed here. Its route, page and
+  // ArchiveAttachmentViewer authorization are all intact and unchanged -
+  // it was removed from primary navigation only. Nothing else in the UI
+  // links to /archived-files, so it is currently reachable by direct URL
+  // alone; that is deliberate pending a decision on its future.
   { key: "globalSearch", label: "Global Search", path: "/search" },
 ];
 
