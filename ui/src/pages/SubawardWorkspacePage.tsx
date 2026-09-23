@@ -265,7 +265,11 @@ function SubawardWorkspaceContent({
     ["Closeout Date", current.closeoutDate],
     ["Extension Date Received", current.extensionDateReceived],
     ["Account Number", current.accountNumber],
-    ["Purchase Order Number", current.purchaseOrderNum],
+    // BU's DataDictionary relabels Kuali's purchaseOrderNum as "FRN";
+    // "Purchase Order Number" was the vendor's name for it, which is why
+    // searching the workspace for "FRN" used to find nothing. The
+    // property name stays purchaseOrderNum.
+    ["FRN", current.purchaseOrderNum],
     ["Vendor Number", current.vendorNumber],
     ["Requisition Number", current.requisitionNumber],
     ["Requisitioner ID", current.requisitionerId],
@@ -447,6 +451,9 @@ function SubawardWorkspaceContent({
                             Anticipated change:{" "}
                             {display(card.anticipatedChange)}
                           </Typography>
+                          <Typography variant="body2">
+                            FRN: {display(card.purchaseOrderNum)}
+                          </Typography>
                         </Stack>
                         {card.comments && (
                           <Typography variant="body2" sx={{ mt: 1 }}>
@@ -484,6 +491,7 @@ function SubawardWorkspaceContent({
                     { label: "Anticipated", render: (row) => display(row.anticipatedAmount) },
                     { label: "Anticipated Change", render: (row) => display(row.anticipatedChange) },
                     { label: "Performance Period", render: (row) => `${display(row.performanceStartDate)} – ${display(row.performanceEndDate)}` },
+                    { label: "FRN", render: (row) => display(row.purchaseOrderNum) },
                     { label: "File Metadata", render: (row) => resolveAttachmentLabel(row) ?? "—" },
                     { label: "Updated", render: (row) => display(row.sourceUpdateTimestamp) },
                   ]}

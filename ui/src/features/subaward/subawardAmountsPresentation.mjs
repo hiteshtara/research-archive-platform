@@ -55,6 +55,9 @@ export function buildAmendmentTimeline(amountRows) {
     budgetPeriodEnd: row.performanceEndDate,
     obligatedChange: row.obligatedChange,
     anticipatedChange: row.anticipatedChange,
+    // BU labels PURCHASE_ORDER_NUM "FRN". Passed straight through - the
+    // FRN that applied to THIS amount row, never derived or inferred.
+    purchaseOrderNum: row.purchaseOrderNum ?? null,
     comments: row.comments,
     attachmentLabel: resolveAttachmentLabel(row),
   }));

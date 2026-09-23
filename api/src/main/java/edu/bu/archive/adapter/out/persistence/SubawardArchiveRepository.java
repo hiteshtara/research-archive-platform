@@ -37,7 +37,7 @@ public class SubawardArchiveRepository {
 
         JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT COUNT(*)
-                FROM archive.subaward
+                FROM archive.subaward s
                 """ + filter);
         if (!normalizedQuery.isEmpty()) {
             statement = statement.param("query", normalizedQuery);
@@ -49,6 +49,38 @@ public class SubawardArchiveRepository {
         return count == null ? 0L : count;
     }
 
+    /*
+     * Result ordering, for a non-empty query, ranks an EXACT Subaward
+     * code match ahead of everything else, and that family's ACTIVE
+     * record ahead of its own archived versions.
+     *
+     * This exists because "1920" is four digits and the free-text
+     * predicate matches substrings of numeric identifiers. Measured on
+     * dev: q=1920 returns 87 rows across 26 families, and the five rows
+     * ranked above Subaward 1920 matched nothing but incidental digit
+     * collisions - document_number 1119202, 1091920 and 861920, and
+     * subaward_id 81920 and 71920. None of them matched subaward_code.
+     * They outranked the real record only because they happened to be
+     * updated more recently. Subaward 1920's ACTIVE sequence 56 sat at
+     * rank 6.
+     *
+     * The two CASE keys are ordering only - they change no predicate, so
+     * the result SET and the count are identical either way, and the
+     * grain is still one row per archive.subaward version.
+     *
+     * Both keys are guarded by the same exact-code test on purpose. For
+     * a query that matches no Subaward code - any title, sponsor or
+     * organization search - both keys evaluate to the same constant for
+     * every row and the ordering collapses to exactly what it was
+     * before: source_update_timestamp, sequence_number, subaward_id.
+     * Ranking ACTIVE rows globally would have reordered ordinary text
+     * searches too, which is not what was asked for and is not done.
+     *
+     * Exact-match on subaward_code mirrors how Award already treats its
+     * own identifiers - searchAwardVersions keeps awardNumber and
+     * documentNumber as exact-match sentinels while rawQuery stays a
+     * contains-search - rather than inventing a new convention.
+     */
     public List<SubawardSummaryResponse> findSubawards(
             String query,
             int limit,
@@ -62,9 +94,13 @@ public class SubawardArchiveRepository {
                 """
                 : """
                 ORDER BY
-                    source_update_timestamp DESC NULLS LAST,
-                    sequence_number DESC,
-                    subaward_id DESC
+                    CASE WHEN s.subaward_code = :query THEN 0 ELSE 1 END,
+                    CASE WHEN s.subaward_code = :query
+                          AND s.subaward_sequence_status = 'ACTIVE'
+                         THEN 0 ELSE 1 END,
+                    s.source_update_timestamp DESC NULLS LAST,
+                    s.sequence_number DESC,
+                    s.subaward_id DESC
                 """;
 
         String sql = """
@@ -82,7 +118,7 @@ public class SubawardArchiveRepository {
                     end_date,
                     subaward_sequence_status,
                     source_update_timestamp
-                FROM archive.subaward
+                FROM archive.subaward s
                 %s
                 %s
                 LIMIT :limit
@@ -99,20 +135,102 @@ public class SubawardArchiveRepository {
                 .list();
     }
 
+    /*
+     * Free-text search predicate. The outer table is aliased s; the last
+     * two clauses are FRN.
+     *
+     * "FRN" is BU's own label for Kuali's PURCHASE_ORDER_NUM, not a
+     * column of its own. It is a BU DataDictionary customization:
+     * SubAwardAmountInfo.xml sets label "FRN" on property
+     * purchaseOrderNum, BUApplicationResources.properties carries
+     * "FRN is a required field", and SubAwardNotificationRenderer
+     * resolves {FRN_NUMBER} from
+     * getLatestSubAwardAmountInfo().getPurchaseOrderNum(). BU's own
+     * V1608_092 migration seeded FSRS_SUBAWARD_NUMBER from it. No FRN
+     * column exists and none is needed - all three columns searched
+     * here were already archived.
+     *
+     * FRN is matched across the WHOLE FAMILY, correlated on
+     * subaward_code rather than subaward_id, because an FRN rolls off
+     * the parent row as a Subaward is amended. Family 1920 carried
+     * 4500002829 on sequences 23-25 and its ACTIVE sequence 56 has no
+     * purchase_order_num at all. Correlating on subaward_id would make
+     * a historical FRN find only the retired versions that still carry
+     * it and never reach the current record - which is the whole point
+     * of the requirement.
+     *
+     * EXISTS, never a join: archive.subaward_amount is one-to-many per
+     * version (sequence 56 alone carries three distinct FRNs), so
+     * joining it into the paged query would multiply result rows. A
+     * semi-join cannot, so the predicates add rows to the result only
+     * by matching families, never by duplicating a row that already
+     * matched.
+     *
+     * This deliberately does NOT change the result grain. This search
+     * has always returned one row per archive.subaward VERSION, not one
+     * per family; whether it should instead return one current ACTIVE
+     * record per subaward_code is a separate, deliberate decision and
+     * is not taken here.
+     */
     private String subawardFilter(String normalizedQuery) {
         return normalizedQuery.isEmpty()
                 ? ""
                 : """
-                WHERE CAST(subaward_id AS TEXT)
+                WHERE CAST(s.subaward_id AS TEXT)
                         ILIKE '%' || :query || '%'
-                   OR subaward_code ILIKE '%' || :query || '%'
-                   OR document_number ILIKE '%' || :query || '%'
-                   OR title ILIKE '%' || :query || '%'
-                   OR status_description ILIKE '%' || :query || '%'
-                   OR organization_id ILIKE '%' || :query || '%'
-                   OR account_number ILIKE '%' || :query || '%'
-                   OR award_prime_sponsor_name ILIKE '%' || :query || '%'
-                   OR award_sponsor_name ILIKE '%' || :query || '%'
+                   OR s.subaward_code ILIKE '%' || :query || '%'
+                   OR s.document_number ILIKE '%' || :query || '%'
+                   OR s.title ILIKE '%' || :query || '%'
+                   OR s.status_description ILIKE '%' || :query || '%'
+                   OR s.organization_id ILIKE '%' || :query || '%'
+                   OR s.account_number ILIKE '%' || :query || '%'
+                   OR s.award_prime_sponsor_name ILIKE '%' || :query || '%'
+                   OR s.award_sponsor_name ILIKE '%' || :query || '%'
+                """ + frnFilter(normalizedQuery);
+    }
+
+    /*
+     * The two family-history FRN predicates, emitted ONLY when the query
+     * could be an FRN at all - see SubawardFrnQueryDetector for the
+     * measured rule and why it is length-based rather than prefixed.
+     *
+     * They are gated because they are unconditionally expensive:
+     * ILIKE '%x%' cannot use a btree, so each one is a full scan
+     * (archive.subaward, 88,818 rows; archive.subaward_amount, 181,777
+     * rows) that Postgres evaluates once per query as a hashed SubPlan
+     * whatever was typed. Ungated, an ordinary search measured 1085ms on
+     * dev against a 205ms baseline. Gated, a non-FRN query emits neither
+     * clause and pays nothing.
+     *
+     * Nothing is lost by gating: every FRN actually present in the
+     * archive is a 9- or 10-digit number, so a query that fails the
+     * detector could not have matched one of these columns anyway.
+     */
+    private String frnFilter(String normalizedQuery) {
+        if (!SubawardFrnQueryDetector.looksLikeFrn(normalizedQuery)) {
+            return "";
+        }
+        return """
+                   OR EXISTS (
+                          SELECT 1
+                          FROM archive.subaward sv
+                          WHERE sv.subaward_code = s.subaward_code
+                            AND (
+                                sv.purchase_order_num
+                                    ILIKE '%' || :query || '%'
+                             OR sv.fsrs_subaward_number
+                                    ILIKE '%' || :query || '%'
+                            )
+                      )
+                   OR EXISTS (
+                          SELECT 1
+                          FROM archive.subaward sv
+                          JOIN archive.subaward_amount sa
+                            ON sa.subaward_id = sv.subaward_id
+                          WHERE sv.subaward_code = s.subaward_code
+                            AND sa.purchase_order_num
+                                    ILIKE '%' || :query || '%'
+                      )
                 """;
     }
 
