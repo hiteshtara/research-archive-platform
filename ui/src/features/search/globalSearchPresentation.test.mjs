@@ -280,8 +280,35 @@ test("Global Search cards render through describeResultCard rather than raw back
 
   assert.match(source, /describeResultCard\(result\)/);
   assert.match(source, /card\.title/);
-  assert.match(source, /card\.identifierLine/);
+  // The shared ResultCard shows the identifier as the card's own first
+  // line, so the secondary detail is card.subtitleLine - identifierLine
+  // would repeat it. Both still come from describeResultCard, which is
+  // what this test exists to enforce.
+  assert.match(source, /card\.subtitleLine/);
   assert.match(source, /card\.piLine/);
   assert.match(source, /card\.matchedCaption/);
   assert.doesNotMatch(source, /"Related match"/);
+});
+
+
+test("describeResultCard exposes the subtitle separately from the identifier line", () => {
+  const withSubtitle = describeResultCard({
+    identifier: "100013-00001",
+    subtitle: "The Children's Hospital Corporation",
+  });
+
+  assert.equal(
+    withSubtitle.identifierLine,
+    "100013-00001 • The Children's Hospital Corporation",
+  );
+  assert.equal(
+    withSubtitle.subtitleLine,
+    "The Children's Hospital Corporation",
+  );
+
+  // No subtitle means no secondary line at all, rather than the
+  // identifier repeated underneath itself.
+  const withoutSubtitle = describeResultCard({ identifier: "100013-00001" });
+  assert.equal(withoutSubtitle.identifierLine, "100013-00001");
+  assert.equal(withoutSubtitle.subtitleLine, null);
 });
