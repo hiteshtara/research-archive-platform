@@ -95,19 +95,22 @@ public class AwardV1Controller {
     private final AttachmentAuthorizationService attachmentAuthorizationService;
     private final AwardReportService reportService;
     private final AwardReportPdfRenderer reportPdfRenderer;
+    private final edu.bu.archive.application.award.report.AwardConsolidatedReportAssembler consolidatedReportAssembler;
 
     public AwardV1Controller(
             AwardArchiveService service,
             AwardContactService contactService,
             AttachmentAuthorizationService attachmentAuthorizationService,
             AwardReportService reportService,
-            AwardReportPdfRenderer reportPdfRenderer
+            AwardReportPdfRenderer reportPdfRenderer,
+            edu.bu.archive.application.award.report.AwardConsolidatedReportAssembler consolidatedReportAssembler
     ) {
         this.service = service;
         this.contactService = contactService;
         this.attachmentAuthorizationService = attachmentAuthorizationService;
         this.reportService = reportService;
         this.reportPdfRenderer = reportPdfRenderer;
+        this.consolidatedReportAssembler = consolidatedReportAssembler;
     }
 
     @Operation(
@@ -842,6 +845,63 @@ public class AwardV1Controller {
 
         String fileName = "Award_" + sanitizeFilenameSegment(data.summary().awardNumber())
                 + "_Complete_Report.pdf";
+
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(fileName, StandardCharsets.UTF_8)
+                .build();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(body);
+    }
+
+    @Operation(
+            summary = "Download the Complete Award Report with attachments",
+            description =
+                    "The same generated Complete Award Report, followed by "
+                    + "this Award record's archived attachments merged into "
+                    + "one PDF.\n\n"
+                    + "Attachment scope is VERSION-SCOPED: only attachments "
+                    + "belonging to this award_id are included, matching the "
+                    + "Award workspace's attachments tab, not the whole "
+                    + "award_number family.\n\n"
+                    + "Attachments are appended in archive order. A PDF "
+                    + "attachment is merged page-for-page with its original "
+                    + "page size, orientation and quality preserved - never "
+                    + "rasterized. Whether a file is a PDF is decided by "
+                    + "sniffing its header, not by its recorded MIME type.\n\n"
+                    + "Any attachment that cannot be embedded - not a PDF, "
+                    + "never archived, zero bytes, corrupt, encrypted, or "
+                    + "unreadable from storage - is never silently dropped: "
+                    + "it appears as an information page giving its file "
+                    + "name, type, MIME type, description, date, user and "
+                    + "the reason it was not embedded.\n\n"
+                    + "An Attachments manifest listing every attachment and "
+                    + "its archived/embedded status is included in the "
+                    + "generated report. Size and count guardrails apply; "
+                    + "when a limit is reached the report and manifest are "
+                    + "still produced and the omitted attachments are named. "
+                    + "Never exposes S3 buckets, keys or any storage "
+                    + "internals."
+    )
+    @ApiResponse(responseCode = "200", description = "The consolidated Award PDF.")
+    @ApiResponse(responseCode = "404", description = "No such award_id.")
+    @GetMapping("/{awardId}/report-with-attachments.pdf")
+    public ResponseEntity<StreamingResponseBody> reportWithAttachments(
+            @PathVariable
+            long awardId
+    ) {
+        edu.bu.archive.application.award.report.AwardReportData data =
+                reportService.buildReportData(awardId);
+        java.util.List<edu.bu.archive.application.award.report.AwardReportAttachment>
+                attachments = reportService.findReportAttachments(awardId);
+
+        StreamingResponseBody body = output ->
+                consolidatedReportAssembler.assemble(data, attachments, output);
+
+        String fileName = "Award_" + sanitizeFilenameSegment(data.summary().awardNumber())
+                + "_Complete_Report_With_Attachments.pdf";
 
         ContentDisposition disposition = ContentDisposition.attachment()
                 .filename(fileName, StandardCharsets.UTF_8)

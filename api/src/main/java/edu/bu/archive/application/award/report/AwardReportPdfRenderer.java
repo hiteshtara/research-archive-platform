@@ -103,7 +103,29 @@ public class AwardReportPdfRenderer {
         this.sensitiveFieldRedactor = sensitiveFieldRedactor;
     }
 
+    /**
+     * The original report. UNCHANGED - /report.pdf still produces exactly
+     * this, with no attachment content, metadata or manifest. Delegates
+     * with an empty manifest, which renders no Attachments section at all.
+     */
     public void render(AwardReportData data, OutputStream outputStream) throws DocumentException {
+        render(data, java.util.List.of(), outputStream);
+    }
+
+    /**
+     * The report as it appears inside the consolidated PDF. Identical to
+     * the original except that a non-empty manifest adds one Attachments
+     * appendix listing every attachment and what happened to it.
+     *
+     * The manifest deliberately carries NO page numbers: PdfCopy can
+     * compute them, but only on a second pass after the merge, and a
+     * wrong page number is worse than none.
+     */
+    public void render(
+            AwardReportData data,
+            java.util.List<AwardReportAttachmentOutcome> attachmentManifest,
+            OutputStream outputStream
+    ) throws DocumentException {
         Document document = new Document(PageSize.LETTER, 42, 42, 56, 56);
         PdfWriter writer = PdfWriter.getInstance(document, outputStream);
         writer.setPageEvent(new ReportFooterEvent(data.summary().awardNumber()));
@@ -135,6 +157,7 @@ public class AwardReportPdfRenderer {
         addCommentsAndNotepad(document, data);
         addSapTransmissionHistory(document, data);
         addSourceReferenceAppendix(document, data);
+        addAttachmentManifest(document, attachmentManifest);
 
         document.close();
     }
@@ -1015,4 +1038,90 @@ public class AwardReportPdfRenderer {
             );
         }
     }
+
+    /**
+     * Attachments appendix: every attachment in archive order with what
+     * happened to it. Appears only in the consolidated report.
+     */
+    private void addAttachmentManifest(
+            Document document,
+            java.util.List<AwardReportAttachmentOutcome> manifest
+    ) throws DocumentException {
+        if (manifest == null || manifest.isEmpty()) {
+            return;
+        }
+        newSection(document, "Attachments");
+        Paragraph intro = new Paragraph(
+                "Archived attachments for this Award record, in archive "
+                        + "order. PDF attachments follow this page. Any "
+                        + "attachment that could not be embedded is still "
+                        + "listed here and appears as an information page "
+                        + "stating why.",
+                TABLE_BODY_FONT);
+        intro.setSpacingAfter(10f);
+        document.add(intro);
+
+        PdfPTable table = new PdfPTable(new float[]{4f, 14f, 7f, 7f, 7f, 8f});
+        table.setWidthPercentage(100f);
+        table.setSpacingBefore(4f);
+        addHeaderRow(table, "#", "File Name", "Type", "Date", "Archived", "Embedded");
+        int index = 1;
+        boolean alt = false;
+        for (AwardReportAttachmentOutcome outcome : manifest) {
+            AwardReportAttachment attachment = outcome.attachment();
+            addRow(table, alt,
+                    String.valueOf(index++),
+                    text(attachment.fileName()),
+                    text(attachment.typeCode()),
+                    formatDateTime(attachment.oracleUpdateTimestamp()),
+                    attachment.hasArchivedObject() ? "Archived" : "Not archived",
+                    outcome.status().manifestLabel());
+            alt = !alt;
+        }
+        document.add(table);
+    }
+
+
+    /**
+     * One page standing in for an attachment that is not embedded, so it
+     * can never disappear silently. Rendered as its own single-page PDF
+     * and merged in the attachment's own ordinal position.
+     */
+    public void renderAttachmentInformationPage(
+            AwardReportAttachmentOutcome outcome,
+            OutputStream outputStream
+    ) throws DocumentException {
+        AwardReportAttachment attachment = outcome.attachment();
+        Document document = new Document(PageSize.LETTER, 42, 42, 56, 56);
+        PdfWriter.getInstance(document, outputStream);
+        document.addTitle("Award attachment - " + text(attachment.fileName()));
+        document.addSubject("Read-only legacy research administration archive report");
+        document.addAuthor("Boston University Research Archive Platform");
+        document.addCreator("Research Archive Platform");
+        document.open();
+
+        sectionHeading(document, outcome.status().manifestLabel().equals("Not archived")
+                ? "Attachment not archived"
+                : "Attachment not embedded");
+
+        Paragraph reason = new Paragraph(text(outcome.status().reason()), TABLE_BODY_FONT);
+        reason.setSpacingAfter(12f);
+        document.add(reason);
+
+        PdfPTable table = twoColumnTable();
+        addFieldRow(table, "File Name", text(attachment.fileName()));
+        addFieldRow(table, "Attachment Type", text(attachment.typeCode()));
+        addFieldRow(table, "MIME Type", text(attachment.contentType()));
+        addFieldRow(table, "Description", text(attachment.description()));
+        addFieldRow(table, "Document Status", text(attachment.documentStatusCode()));
+        addFieldRow(table, "Date", formatDateTime(attachment.oracleUpdateTimestamp()));
+        addFieldRow(table, "User", text(attachment.oracleUpdateUser()));
+        addFieldRow(table, "Archive Status",
+                attachment.hasArchivedObject() ? "Archived" : "Not archived");
+        addFieldRow(table, "Reason Not Embedded", text(outcome.status().reason()));
+        document.add(table);
+
+        document.close();
+    }
+
 }

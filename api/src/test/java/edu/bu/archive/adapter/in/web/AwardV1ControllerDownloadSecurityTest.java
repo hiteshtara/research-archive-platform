@@ -69,6 +69,10 @@ class AwardV1ControllerDownloadSecurityTest {
     private AwardReportPdfRenderer reportPdfRenderer;
 
     @MockitoBean
+    private edu.bu.archive.application.award.report.AwardConsolidatedReportAssembler
+            consolidatedReportAssembler;
+
+    @MockitoBean
     private JwtDecoder jwtDecoder;
 
     private static org.springframework.test.web.servlet.request.RequestPostProcessor

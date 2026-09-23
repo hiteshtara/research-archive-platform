@@ -37,6 +37,19 @@ public class AwardReportService {
         this.service = service;
     }
 
+    /**
+     * Version-scoped attachments for the consolidated report, in archive
+     * order. Goes through the same repository the attachments tab uses,
+     * so the merged PDF lists exactly what the user sees on screen.
+     *
+     * requireAwardNumberForId-equivalent validation is performed by
+     * buildReportData, which the controller always calls first, so a
+     * non-existent award_id 404s before any attachment is touched.
+     */
+    public java.util.List<AwardReportAttachment> findReportAttachments(long awardId) {
+        return service.findReportAttachments(awardId);
+    }
+
     public AwardReportData buildReportData(long awardId) {
         // findSummary throws NoSuchElementException for an unknown
         // awardId, which GlobalExceptionHandler already maps to 404 -
