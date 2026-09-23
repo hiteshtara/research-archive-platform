@@ -156,14 +156,46 @@ class AwardConsolidatedReportSmokeTest {
     private static AwardReportData fixtureData() {
         return new AwardReportData(
                 new AwardSummaryResponse(
-                        2727052L, "105698-00001", 20, "Autism Study", "Closed",
-                        "University of Wisconsin System",
-                        "NIH/National Institute on Aging",
-                        "GAEL I ORSMOND", "SAR OCCUPATIONAL THERAPY",
-                        null, null, null, null,
-                        BigDecimal.ZERO, BigDecimal.ZERO,
-                        null, null, null, null,
-                        null, null, true, "771264"),
+                        2727052L,                          // awardId
+                        "105698-00001",                    // awardNumber
+                        20,                                // sequenceNumber
+                        "Autism Study",                    // title
+                        "Closed",                          // status
+                        null,                              // grantNumber
+                        "SAR OCCUPATIONAL THERAPY",        // leadUnit
+                        null,                              // accountType
+                        null,                              // activityType
+                        null,                              // awardType
+                        null,                              // federalClinicalTrial
+                        "University of Wisconsin System",  // sponsor
+                        null,                              // sponsorCode
+                        null,                              // sponsorAwardNumber
+                        "NIH/National Institute on Aging", // primeSponsor
+                        null,                              // primeSponsorCode
+                        null,                              // primeSponsorAwardId
+                        null,                              // modificationNumber
+                        null,                              // fainId
+                        null,                              // nsfScienceCode
+                        null,                              // nsfSequenceNumber
+                        null,                              // alnNumber
+                        null,                              // alnProgramTitleName
+                        null,                              // awardEffectiveDate
+                        null,                              // obligationStartDate
+                        null,                              // awardExecutionDate
+                        null,                              // beginDate
+                        null,                              // closeoutDate
+                        BigDecimal.ZERO,                   // obligatedTotalAmount
+                        BigDecimal.ZERO,                   // anticipatedTotalAmount
+                        null,                              // basisOfPaymentCode
+                        null,                              // basisOfPaymentDescription
+                        null,                              // methodOfPaymentCode
+                        null,                              // methodOfPaymentDescription
+                        "GAEL I ORSMOND",                  // principalInvestigator
+                        null,                              // rootAwardNumber
+                        null,                              // parentAwardNumber
+                        true,                              // primaryCurrent
+                        "771264"                           // documentNumber
+                ),
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 new AwardBudgetSummaryResponse(
                         2727052L, "105698-00001", 20, null, null, null, null,

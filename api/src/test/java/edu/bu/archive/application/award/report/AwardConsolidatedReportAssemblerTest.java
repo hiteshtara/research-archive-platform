@@ -494,14 +494,53 @@ class AwardConsolidatedReportAssemblerTest {
                 List.of(), Instant.parse("2026-01-01T00:00:00Z"));
     }
 
+    /*
+     * V078 widened AwardSummaryResponse from 23 to 39 components and
+     * regrouped them, so this fixture is written one-per-line: a
+     * positional record this wide is unreadable inline and a silently
+     * shifted argument would still compile.
+     */
     private static AwardSummaryResponse summary() {
-        Object[] args = new Object[39];
         return new AwardSummaryResponse(
-                5000L, "900000-00001", 1, "Synthetic Test Award", "Active",
-                "Test Sponsor", null, null, "Test Unit",
-                null, null, null, null,
-                BigDecimal.ZERO, BigDecimal.ZERO,
-                null, null, null, null,
-                null, null, true, "DOC-0001");
+                5000L,                  // awardId
+                "900000-00001",         // awardNumber
+                1,                      // sequenceNumber
+                "Synthetic Test Award", // title
+                "Active",               // status
+                null,                   // grantNumber
+                "Test Unit",            // leadUnit
+                null,                   // accountType
+                null,                   // activityType
+                null,                   // awardType
+                null,                   // federalClinicalTrial
+                "Test Sponsor",         // sponsor
+                null,                   // sponsorCode
+                null,                   // sponsorAwardNumber
+                null,                   // primeSponsor
+                null,                   // primeSponsorCode
+                null,                   // primeSponsorAwardId
+                null,                   // modificationNumber
+                null,                   // fainId
+                null,                   // nsfScienceCode
+                null,                   // nsfSequenceNumber
+                null,                   // alnNumber
+                null,                   // alnProgramTitleName
+                null,                   // awardEffectiveDate
+                null,                   // obligationStartDate
+                null,                   // awardExecutionDate
+                null,                   // beginDate
+                null,                   // closeoutDate
+                BigDecimal.ZERO,        // obligatedTotalAmount
+                BigDecimal.ZERO,        // anticipatedTotalAmount
+                null,                   // basisOfPaymentCode
+                null,                   // basisOfPaymentDescription
+                null,                   // methodOfPaymentCode
+                null,                   // methodOfPaymentDescription
+                null,                   // principalInvestigator
+                null,                   // rootAwardNumber
+                null,                   // parentAwardNumber
+                true,                   // primaryCurrent
+                "DOC-0001"              // documentNumber
+        );
     }
 }
