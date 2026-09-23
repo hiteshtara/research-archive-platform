@@ -34,7 +34,10 @@ public final class NegotiationFixtures {
                 null,
                 null,
                 1L,
-                "DOCUMENT-OBJECT-1"
+                "DOCUMENT-OBJECT-1",
+                // V081-era resolved attributes - not under test here
+                null, null, null, null, null,
+                null, null, null, null, null
         );
     }
 
@@ -77,7 +80,10 @@ public final class NegotiationFixtures {
                 null,
                 null,
                 1L,
-                "DOCUMENT-OBJECT-420"
+                "DOCUMENT-OBJECT-420",
+                // V081-era resolved attributes - not under test here
+                null, null, null, null, null,
+                null, null, null, null, null
         );
     }
 }

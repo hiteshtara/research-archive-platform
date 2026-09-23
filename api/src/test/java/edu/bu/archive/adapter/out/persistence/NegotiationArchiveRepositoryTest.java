@@ -93,9 +93,24 @@ class NegotiationArchiveRepositoryTest {
                 );
 
         String sql = firstSql(jdbc);
+        // The predicate is now table-qualified because the query LEFT
+        // JOINs archive.negotiation_search_attribute for the resolved
+        // workspace attributes. The guard is unchanged in substance:
+        // look up by negotiation_id, never by associated_document_id.
         assertThat(sql)
-                .contains("WHERE negotiation_id = :negotiationId")
+                .contains("WHERE n.negotiation_id = :negotiationId")
                 .doesNotContain("associated_document_id = :negotiationId");
+        // And the join must stay a plain key join - no resolver here.
+        // Comments are stripped first: the SQL's own header explains why
+        // there is no LATERAL, and matching that prose would assert on
+        // the comment rather than on the statement.
+        String statementOnly = sql.replaceAll("(?s)/\\*.*?\\*/", " ");
+        assertThat(statementOnly)
+                .contains("LEFT JOIN archive.negotiation_search_attribute a")
+                .contains("ON a.negotiation_id = n.negotiation_id")
+                .doesNotContain("LATERAL")
+                .doesNotContain("award_version")
+                .doesNotContain("negotiation_unassociated_detail");
         verify(statement).param("negotiationId", 420L);
         verify(statement, org.mockito.Mockito.never())
                 .param("negotiationId", 419L);

@@ -208,34 +208,62 @@ public class NegotiationArchiveRepository {
     ) {
         return jdbc.sql("""
                 SELECT
-                    negotiation_id,
-                    document_number,
-                    negotiation_status_id,
-                    negotiation_status_code,
-                    negotiation_status_description,
-                    negotiation_agreement_type_id,
-                    negotiation_agreement_type_code,
-                    negotiation_agreement_type_description,
-                    negotiation_association_type_id,
-                    negotiation_association_type_code,
-                    negotiation_association_type_description,
-                    negotiator_person_id,
-                    negotiator_full_name,
-                    negotiation_start_date,
-                    negotiation_end_date,
-                    anticipated_award_date,
-                    document_folder,
-                    associated_document_id,
-                    source_update_timestamp,
-                    source_update_user,
-                    source_version_number,
-                    source_object_id,
-                    document_source_update_timestamp,
-                    document_source_update_user,
-                    document_source_version_number,
-                    document_source_object_id
-                FROM archive.negotiation
-                WHERE negotiation_id = :negotiationId
+                    n.negotiation_id,
+                    n.document_number,
+                    n.negotiation_status_id,
+                    n.negotiation_status_code,
+                    n.negotiation_status_description,
+                    n.negotiation_agreement_type_id,
+                    n.negotiation_agreement_type_code,
+                    n.negotiation_agreement_type_description,
+                    n.negotiation_association_type_id,
+                    n.negotiation_association_type_code,
+                    n.negotiation_association_type_description,
+                    n.negotiator_person_id,
+                    n.negotiator_full_name,
+                    n.negotiation_start_date,
+                    n.negotiation_end_date,
+                    n.anticipated_award_date,
+                    n.document_folder,
+                    n.associated_document_id,
+                    n.source_update_timestamp,
+                    n.source_update_user,
+                    n.source_version_number,
+                    n.source_object_id,
+                    n.document_source_update_timestamp,
+                    n.document_source_update_user,
+                    n.document_source_version_number,
+                    n.document_source_object_id,
+
+                    /*
+                     * Resolved attributes, read from the table the V080
+                     * rebuild already materialized. A plain LEFT JOIN on
+                     * the primary key - no LATERAL, no precedence logic,
+                     * no second resolver. The rebuild guarantees exactly
+                     * one row per negotiation_id (10,775 negotiations,
+                     * 10,775 rows, 0 duplicates, 0 missing), so this
+                     * cannot fan out; LEFT rather than INNER only so a
+                     * future unrebuilt row degrades to nulls instead of
+                     * removing the Negotiation from its own workspace.
+                     *
+                     * These are the SAME column-to-field names the list
+                     * endpoint uses, so both endpoints report identical
+                     * values for a given Negotiation.
+                     */
+                    a.title,
+                    a.principal_investigator_name,
+                    a.sponsor_code,
+                    a.sponsor_name,
+                    a.prime_sponsor_code,
+                    a.prime_sponsor_name,
+                    a.lead_unit_number,
+                    a.lead_unit_name,
+                    a.sponsor_award_number,
+                    a.attribute_source
+                FROM archive.negotiation n
+                LEFT JOIN archive.negotiation_search_attribute a
+                       ON a.negotiation_id = n.negotiation_id
+                WHERE n.negotiation_id = :negotiationId
                 """)
                 .param("negotiationId", negotiationId)
                 .query(NegotiationRowResponse.class)

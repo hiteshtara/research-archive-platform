@@ -327,7 +327,10 @@ class NegotiationArchiveServiceTest {
                 base.documentSourceUpdateTimestamp(),
                 base.documentSourceUpdateUser(),
                 base.documentSourceVersionNumber(),
-                base.documentSourceObjectId()
+                base.documentSourceObjectId(),
+                // resolved attributes - not under test here
+                null, null, null, null, null,
+                null, null, null, null, null
         );
     }
 
