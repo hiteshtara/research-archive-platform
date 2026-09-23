@@ -130,7 +130,21 @@ class SubawardFrnSearchIntegrationTest {
                     (90003, '8888', 1, 'DOC-8888-1',
                      'Leading zero FRN family', '07. Executed',
                      'ORG-4', 'ACCT-8888', '0000000000', '0000000000',
-                     'ACTIVE', TIMESTAMP '2019-01-01 00:00:00')
+                     'ACTIVE', TIMESTAMP '2019-01-01 00:00:00'),
+                    -- Incidental "1920" collisions, copied from the real
+                    -- dev rows that outranked Subaward 1920: one matches
+                    -- only on document_number, the other only on the
+                    -- digits of its own primary key. Both are NEWER than
+                    -- 1920's ACTIVE row, which is exactly why they used
+                    -- to sort above it.
+                    (81920, '3760', 1, 'DOC-3760-1',
+                     'Unrelated, matches on subaward_id digits',
+                     '07. Executed', 'ORG-5', 'ACCT-3760', NULL, NULL,
+                     'ARCHIVED', TIMESTAMP '2023-11-13 11:21:23'),
+                    (85686, '2580', 52, '1091920',
+                     'Unrelated, matches on document_number',
+                     '07. Executed', 'ORG-6', 'ACCT-2580', NULL, NULL,
+                     'ACTIVE', TIMESTAMP '2024-08-29 16:09:55')
                     """);
 
             statement.execute("""
@@ -251,7 +265,8 @@ class SubawardFrnSearchIntegrationTest {
     /* 7. Every pre-existing search dimension still works. */
     @Test
     void theExistingSearchDimensionsStillWork() {
-        assertThat(codesFor("1920")).containsOnly("1920");
+        assertThat(codesFor("1920"))
+                .contains("1920", "3760", "2580");
         assertThat(codesFor("DOC-7777-1")).containsOnly("7777");
         assertThat(codesFor("ACCT-3210")).containsOnly("3210");
         assertThat(codesFor("Unrelated control")).containsOnly("7777");
@@ -295,5 +310,77 @@ class SubawardFrnSearchIntegrationTest {
             candidate = candidate.getParent();
         }
         throw new IOException("Could not locate database/migrations/");
+    }
+
+    /*
+     * --- Exact-code ranking -------------------------------------------
+     *
+     * Reproduces the real dev situation for q=1920: 1920's own ACTIVE
+     * record used to sit at rank 6, behind rows that matched only the
+     * digits of a document number or a primary key and happened to be
+     * updated more recently.
+     */
+    @Test
+    void anExactSubawardCodeRanksFirstAndItsActiveRecordLeads() {
+        List<SubawardSummaryResponse> rows =
+                repository.findSubawards("1920", 100, 0);
+
+        assertThat(rows.get(0).subawardCode()).isEqualTo("1920");
+        assertThat(rows.get(0).subawardId()).isEqualTo(69801L);
+        assertThat(rows.get(0).subawardSequenceStatus()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void theExactCodesArchivedVersionsFollowBeforeUnrelatedCollisions() {
+        List<String> codes = repository.findSubawards("1920", 100, 0)
+                .stream().map(SubawardSummaryResponse::subawardCode).toList();
+
+        assertThat(codes.subList(0, 2)).containsOnly("1920");
+        assertThat(codes.indexOf("3760")).isGreaterThan(codes.lastIndexOf("1920"));
+        assertThat(codes.indexOf("2580")).isGreaterThan(codes.lastIndexOf("1920"));
+    }
+
+    /*
+     * A query that matches no Subaward code must order exactly as it did
+     * before ranking existed: both CASE keys collapse to one constant,
+     * leaving source_update_timestamp DESC, sequence_number DESC,
+     * subaward_id DESC.
+     */
+    @Test
+    void aNonIdentifierTextQueryKeepsItsOriginalOrdering() {
+        List<SubawardSummaryResponse> rows =
+                repository.findSubawards("Unrelated", 100, 0);
+
+        assertThat(rows)
+                .extracting(SubawardSummaryResponse::subawardId)
+                .containsExactly(85686L, 81920L, 90002L);
+    }
+
+    /* Ranking is ORDER BY only - it cannot change how many rows match. */
+    @Test
+    void rankingDoesNotChangeTheCount() {
+        assertThat(repository.countSubawards("1920"))
+                .isEqualTo(repository.findSubawards("1920", 100, 0).size());
+        assertThat(repository.countSubawards("Unrelated"))
+                .isEqualTo(repository.findSubawards("Unrelated", 100, 0).size());
+    }
+
+    /*
+     * --- The FRN gate --------------------------------------------------
+     *
+     * A non-FRN-shaped query must not reach the FRN columns at all. This
+     * is the behavioural half of the performance gate: "1920" is four
+     * digits, so it can never be an FRN, and family 8888 - whose only
+     * link to any query is its 0000000000 FRN - must not appear.
+     */
+    @Test
+    void aQueryThatCannotBeAnFrnDoesNotSearchTheFrnColumns() {
+        assertThat(codesFor("1920")).doesNotContain("8888");
+        assertThat(codesFor("0000")).isEmpty();
+    }
+
+    @Test
+    void aTenDigitQueryStillReachesTheFrnColumns() {
+        assertThat(codesFor("0000000000")).containsOnly("8888");
     }
 }

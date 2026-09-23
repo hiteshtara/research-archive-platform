@@ -49,6 +49,38 @@ public class SubawardArchiveRepository {
         return count == null ? 0L : count;
     }
 
+    /*
+     * Result ordering, for a non-empty query, ranks an EXACT Subaward
+     * code match ahead of everything else, and that family's ACTIVE
+     * record ahead of its own archived versions.
+     *
+     * This exists because "1920" is four digits and the free-text
+     * predicate matches substrings of numeric identifiers. Measured on
+     * dev: q=1920 returns 87 rows across 26 families, and the five rows
+     * ranked above Subaward 1920 matched nothing but incidental digit
+     * collisions - document_number 1119202, 1091920 and 861920, and
+     * subaward_id 81920 and 71920. None of them matched subaward_code.
+     * They outranked the real record only because they happened to be
+     * updated more recently. Subaward 1920's ACTIVE sequence 56 sat at
+     * rank 6.
+     *
+     * The two CASE keys are ordering only - they change no predicate, so
+     * the result SET and the count are identical either way, and the
+     * grain is still one row per archive.subaward version.
+     *
+     * Both keys are guarded by the same exact-code test on purpose. For
+     * a query that matches no Subaward code - any title, sponsor or
+     * organization search - both keys evaluate to the same constant for
+     * every row and the ordering collapses to exactly what it was
+     * before: source_update_timestamp, sequence_number, subaward_id.
+     * Ranking ACTIVE rows globally would have reordered ordinary text
+     * searches too, which is not what was asked for and is not done.
+     *
+     * Exact-match on subaward_code mirrors how Award already treats its
+     * own identifiers - searchAwardVersions keeps awardNumber and
+     * documentNumber as exact-match sentinels while rawQuery stays a
+     * contains-search - rather than inventing a new convention.
+     */
     public List<SubawardSummaryResponse> findSubawards(
             String query,
             int limit,
@@ -62,9 +94,13 @@ public class SubawardArchiveRepository {
                 """
                 : """
                 ORDER BY
-                    source_update_timestamp DESC NULLS LAST,
-                    sequence_number DESC,
-                    subaward_id DESC
+                    CASE WHEN s.subaward_code = :query THEN 0 ELSE 1 END,
+                    CASE WHEN s.subaward_code = :query
+                          AND s.subaward_sequence_status = 'ACTIVE'
+                         THEN 0 ELSE 1 END,
+                    s.source_update_timestamp DESC NULLS LAST,
+                    s.sequence_number DESC,
+                    s.subaward_id DESC
                 """;
 
         String sql = """
@@ -150,6 +186,31 @@ public class SubawardArchiveRepository {
                    OR s.account_number ILIKE '%' || :query || '%'
                    OR s.award_prime_sponsor_name ILIKE '%' || :query || '%'
                    OR s.award_sponsor_name ILIKE '%' || :query || '%'
+                """ + frnFilter(normalizedQuery);
+    }
+
+    /*
+     * The two family-history FRN predicates, emitted ONLY when the query
+     * could be an FRN at all - see SubawardFrnQueryDetector for the
+     * measured rule and why it is length-based rather than prefixed.
+     *
+     * They are gated because they are unconditionally expensive:
+     * ILIKE '%x%' cannot use a btree, so each one is a full scan
+     * (archive.subaward, 88,818 rows; archive.subaward_amount, 181,777
+     * rows) that Postgres evaluates once per query as a hashed SubPlan
+     * whatever was typed. Ungated, an ordinary search measured 1085ms on
+     * dev against a 205ms baseline. Gated, a non-FRN query emits neither
+     * clause and pays nothing.
+     *
+     * Nothing is lost by gating: every FRN actually present in the
+     * archive is a 9- or 10-digit number, so a query that fails the
+     * detector could not have matched one of these columns anyway.
+     */
+    private String frnFilter(String normalizedQuery) {
+        if (!SubawardFrnQueryDetector.looksLikeFrn(normalizedQuery)) {
+            return "";
+        }
+        return """
                    OR EXISTS (
                           SELECT 1
                           FROM archive.subaward sv
