@@ -15,6 +15,7 @@ import {
 // DUMP().
 const AMOUNT_23974 = {
   subawardAmountInfoId: 23974,
+  purchaseOrderNum: "4500001614",
   effectiveDate: "2017-04-01",
   obligatedAmount: 293412,
   obligatedChange: 0,
@@ -31,6 +32,7 @@ const AMOUNT_23974 = {
 
 const AMOUNT_23973 = {
   subawardAmountInfoId: 23973,
+  purchaseOrderNum: null,
   effectiveDate: "2016-04-01",
   obligatedAmount: 293412,
   obligatedChange: 108013,
@@ -48,6 +50,7 @@ const AMOUNT_23973 = {
 
 const AMOUNT_23972 = {
   subawardAmountInfoId: 23972,
+  purchaseOrderNum: null,
   effectiveDate: "2015-03-31",
   obligatedAmount: 185399,
   obligatedChange: 105483,
@@ -64,6 +67,7 @@ const AMOUNT_23972 = {
 
 const AMOUNT_23971 = {
   subawardAmountInfoId: 23971,
+  purchaseOrderNum: null,
   effectiveDate: "2014-04-30",
   obligatedAmount: 79916,
   obligatedChange: 79916,
@@ -133,6 +137,7 @@ test("buildAmendmentTimeline maps every real Subaward 1012 amendment, matching t
     budgetPeriodEnd: "2018-03-31",
     obligatedChange: 0,
     anticipatedChange: 0,
+    purchaseOrderNum: "4500001614",
     comments: null,
     attachmentLabel: null,
   });
@@ -145,6 +150,7 @@ test("buildAmendmentTimeline maps every real Subaward 1012 amendment, matching t
     budgetPeriodEnd: "2017-03-31",
     obligatedChange: 108013,
     anticipatedChange: 108013,
+    purchaseOrderNum: null,
     comments: null,
     attachmentLabel: "FFATA_Sub 4500001614 Amend 002_KC 1012.pdf",
   });
@@ -167,4 +173,37 @@ test("sumAmendmentTotals ignores null change values instead of producing NaN", (
 
   assert.equal(totals.totalObligatedChange, 25);
   assert.equal(totals.totalAnticipatedChange, 50);
+});
+
+// FRN is BU's label for Kuali's PURCHASE_ORDER_NUM. The amendment
+// timeline must surface the FRN that applied to each amount row,
+// because an FRN rolls off the parent Subaward as it is amended -
+// family 1920's ACTIVE sequence 56 carries no purchase_order_num at
+// all, while its amount rows still carry three distinct FRNs.
+test("buildAmendmentTimeline passes the amount row's FRN through unchanged", () => {
+  const cards = buildAmendmentTimeline([
+    { ...AMOUNT_23974, purchaseOrderNum: "4500003867" },
+    { ...AMOUNT_23973, purchaseOrderNum: "4500003448" },
+  ]);
+
+  assert.deepEqual(
+    cards.map((card) => card.purchaseOrderNum),
+    ["4500003867", "4500003448"],
+  );
+});
+
+test("buildAmendmentTimeline reports a missing FRN as null, never invented", () => {
+  const [card] = buildAmendmentTimeline([
+    { ...AMOUNT_23974, purchaseOrderNum: null },
+  ]);
+
+  assert.equal(card.purchaseOrderNum, null);
+});
+
+test("buildAmendmentTimeline preserves an FRN's leading zeros", () => {
+  const [card] = buildAmendmentTimeline([
+    { ...AMOUNT_23974, purchaseOrderNum: "0000000000" },
+  ]);
+
+  assert.equal(card.purchaseOrderNum, "0000000000");
 });

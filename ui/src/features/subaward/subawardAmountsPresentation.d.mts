@@ -13,6 +13,8 @@ export interface AmendmentTimelineCard {
   budgetPeriodEnd: string | null;
   obligatedChange: number | null;
   anticipatedChange: number | null;
+  /* BU's "FRN" - Kuali's PURCHASE_ORDER_NUM, passed through unchanged. */
+  purchaseOrderNum: string | null;
   comments: string | null;
   attachmentLabel: string | null;
 }
