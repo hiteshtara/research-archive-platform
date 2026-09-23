@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
+import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -190,6 +191,74 @@ class NegotiationArchiveRepositorySchemaIntegrationTest {
                         'Y', '99999'
                     )
                     """);
+
+            /*
+             * Negotiation search fixtures, shaped from the real
+             * live-verified reconciliation record (Negotiation 120:
+             * Fully Executed / Material Transfer Agreement / lead unit
+             * 1242040000 ENG BIOMEDICAL ENG / sponsor 303630 Addgene /
+             * PI AHMAD KHALIL) plus the two cases that the resolution
+             * rule exists for.
+             *
+             * 2001 is the case this whole design turns on: an
+             * Award-associated Negotiation with NO
+             * negotiation_unassociated_detail row. Its PI and Sponsor
+             * live only on the associated Award, so it is invisible to
+             * any query that reads the detail table alone - which is
+             * 20.6% of the real archive.
+             *
+             * 3001 shares 120's PI but has a different Sponsor, so a
+             * PI+Sponsor filter that silently ORed instead of ANDed
+             * would wrongly return it.
+             */
+            statement.execute("""
+                    INSERT INTO archive.negotiation (
+                        negotiation_id, document_number,
+                        negotiation_status_description,
+                        negotiation_agreement_type_description,
+                        negotiation_association_type_description,
+                        negotiator_person_id, negotiator_full_name,
+                        negotiation_start_date, negotiation_end_date,
+                        associated_document_id, loaded_at
+                    ) VALUES
+                    (1201, '367521', 'Fully Executed',
+                     'Material Transfer Agreement', 'None',
+                     'U93001494', 'JESSICA L RIVIECCIO',
+                     DATE '2014-05-24', DATE '2014-06-02', '119',
+                     CURRENT_TIMESTAMP),
+                    (2001, '400001', 'In Progress',
+                     'Subaward', 'Award',
+                     'U00000001', 'OTHER NEGOTIATOR',
+                     DATE '2016-01-01', DATE '2016-06-01', '105698-00001',
+                     CURRENT_TIMESTAMP),
+                    (3001, '400002', 'Fully Executed',
+                     'Material Transfer Agreement', 'None',
+                     'U93001494', 'JESSICA L RIVIECCIO',
+                     DATE '2018-03-01', DATE '2018-04-01', '3000',
+                     CURRENT_TIMESTAMP)
+                    """);
+
+            statement.execute("""
+                    INSERT INTO archive.negotiation_search_attribute (
+                        negotiation_id, attribute_source, title,
+                        principal_investigator_name,
+                        principal_investigator_person_id,
+                        sponsor_code, sponsor_name,
+                        lead_unit_number, lead_unit_name
+                    ) VALUES
+                    (1201, 'UNASSOCIATED_DETAIL', '168333',
+                     'AHMAD KHALIL', 'U62893002',
+                     '303630', 'Addgene',
+                     '1242040000', 'ENG BIOMEDICAL ENG'),
+                    (2001, 'AWARD', 'Autism Study',
+                     'REAL AWARD PI', 'U222',
+                     '301045', 'NIH/National Institute on Aging',
+                     '1242040000', 'ENG BIOMEDICAL ENG'),
+                    (3001, 'UNASSOCIATED_DETAIL', 'Other Study',
+                     'AHMAD KHALIL', 'U62893002',
+                     '999999', 'Some Other Sponsor',
+                     '1240000000', 'ENG DEANS OFFICE')
+                    """);
         }
 
         repository = new NegotiationArchiveRepository(
@@ -319,8 +388,236 @@ class NegotiationArchiveRepositorySchemaIntegrationTest {
 
     @Test
     void findNegotiationsRunsCleanlyAgainstTheRealMigratedSchema() {
-        assertThatCode(() -> repository.findNegotiations("420", 25, 0))
+        assertThatCode(() -> repository.findNegotiations(
+                NegotiationSearchFilters.ofQuery("420"), 25, 0))
                 .doesNotThrowAnyException();
+    }
+
+    // --- structured multi-filter search -------------------------------
+
+    private static NegotiationSearchFilters filters(
+            String query, String status, String negotiator,
+            String agreementType, String principalInvestigator,
+            String sponsor, String leadUnit, String associationType,
+            String associationId, java.time.LocalDate startFrom,
+            java.time.LocalDate startTo, java.time.LocalDate endFrom,
+            java.time.LocalDate endTo
+    ) {
+        return new NegotiationSearchFilters(
+                query, status, negotiator, agreementType,
+                principalInvestigator, sponsor, leadUnit, associationType,
+                associationId, startFrom, startTo, endFrom, endTo);
+    }
+
+    private static List<Long> idsOf(
+            List<edu.bu.archive.adapter.in.web.dto.negotiation
+                    .NegotiationSummaryResponse> rows
+    ) {
+        return rows.stream()
+                .map(r -> r.negotiationId())
+                .filter(id -> id >= 1000L)
+                .sorted()
+                .toList();
+    }
+
+    @Test
+    void noFiltersImposeNoConditionAndReturnEveryNegotiation() {
+        assertThat(idsOf(repository.findNegotiations(
+                NegotiationSearchFilters.none(), 25, 0)))
+                .containsExactly(1201L, 2001L, 3001L);
+    }
+
+    @Test
+    void principalInvestigatorAndSponsorCombineWithAndNotOr() {
+        // The headline BU case: PI + Sponsor. 3001 shares the PI but
+        // has a different Sponsor and must NOT come back.
+        List<Long> ids = idsOf(repository.findNegotiations(filters(
+                null, null, null, null, "KHALIL", "Addgene",
+                null, null, null, null, null, null, null), 25, 0));
+
+        assertThat(ids).containsExactly(1201L);
+    }
+
+    @Test
+    void principalInvestigatorAloneMatchesBothOfThatPisNegotiations() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, "KHALIL", null,
+                null, null, null, null, null, null, null), 25, 0)))
+                .containsExactly(1201L, 3001L);
+    }
+
+    @Test
+    void threeFiltersAllApply() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, "Fully Executed", null, null, "KHALIL", "Addgene",
+                null, null, null, null, null, null, null), 25, 0)))
+                .containsExactly(1201L);
+
+        // Same three filters, but a status no matching row has.
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, "In Progress", null, null, "KHALIL", "Addgene",
+                null, null, null, null, null, null, null), 25, 0)))
+                .isEmpty();
+    }
+
+    @Test
+    void anAwardSourcedNegotiationIsFindableByItsAwardsPiAndSponsor() {
+        /*
+         * The 20.6% regression guard. 2001 has no unassociated-detail
+         * row at all - its PI and Sponsor come from the associated
+         * Award. If the resolved attributes were ever dropped from the
+         * query, this returns empty and a fifth of the archive becomes
+         * unsearchable while the total count still looks plausible.
+         */
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, "REAL AWARD PI", null,
+                null, null, null, null, null, null, null), 25, 0)))
+                .containsExactly(2001L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, "NIH",
+                null, null, null, null, null, null, null), 25, 0)))
+                .containsExactly(2001L);
+    }
+
+    @Test
+    void leadUnitMatchesByNameAndByNumber() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null,
+                "ENG BIOMEDICAL ENG", null, null,
+                null, null, null, null), 25, 0)))
+                .containsExactly(1201L, 2001L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null,
+                "1242040000", null, null,
+                null, null, null, null), 25, 0)))
+                .containsExactly(1201L, 2001L);
+    }
+
+    @Test
+    void sponsorMatchesByNameAndByCode() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, "Addgene",
+                null, null, null, null, null, null, null), 25, 0)))
+                .containsExactly(1201L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, "303630",
+                null, null, null, null, null, null, null), 25, 0)))
+                .containsExactly(1201L);
+    }
+
+    @Test
+    void dateRangeBoundsAreInclusiveOnBothEnds() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null, null, null, null,
+                java.time.LocalDate.of(2014, 5, 24),
+                java.time.LocalDate.of(2014, 5, 24),
+                null, null), 25, 0)))
+                .containsExactly(1201L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null, null, null, null,
+                java.time.LocalDate.of(2016, 1, 1), null,
+                null, null), 25, 0)))
+                .containsExactly(2001L, 3001L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null, null, null, null,
+                null, null,
+                null, java.time.LocalDate.of(2014, 6, 2)), 25, 0)))
+                .containsExactly(1201L);
+    }
+
+    @Test
+    void associationTypeAndIdFilterExactly() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null, null,
+                "Award", null, null, null, null, null), 25, 0)))
+                .containsExactly(2001L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, null, null, null, null,
+                null, "105698-00001", null, null, null, null), 25, 0)))
+                .containsExactly(2001L);
+    }
+
+    @Test
+    void agreementTypeAndNegotiatorFilter() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, null, "Subaward", null, null, null,
+                null, null, null, null, null, null), 25, 0)))
+                .containsExactly(2001L);
+
+        assertThat(idsOf(repository.findNegotiations(filters(
+                null, null, "RIVIECCIO", null, null, null, null,
+                null, null, null, null, null, null), 25, 0)))
+                .containsExactly(1201L, 3001L);
+    }
+
+    @Test
+    void freeTextIsAndedWithStructuredFiltersNotOred() {
+        // "Addgene" alone finds 1201 through the resolved sponsor name.
+        assertThat(idsOf(repository.findNegotiations(
+                NegotiationSearchFilters.ofQuery("Addgene"), 25, 0)))
+                .containsExactly(1201L);
+
+        // Combined with a status that 1201 does not have, the result is
+        // empty - it would be non-empty if free text were ORed in.
+        assertThat(idsOf(repository.findNegotiations(filters(
+                "Addgene", "In Progress", null, null, null, null, null,
+                null, null, null, null, null, null), 25, 0)))
+                .isEmpty();
+    }
+
+    @Test
+    void countAndPageAgreeOnTheSameFilters() {
+        NegotiationSearchFilters f = filters(
+                null, null, null, null, "KHALIL", null,
+                null, null, null, null, null, null, null);
+
+        assertThat(repository.countNegotiations(f)).isEqualTo(2L);
+        assertThat(idsOf(repository.findNegotiations(f, 25, 0)))
+                .hasSize(2);
+    }
+
+    @Test
+    void paginationPreservesFiltersAcrossPages() {
+        NegotiationSearchFilters f = filters(
+                null, null, null, null, "KHALIL", null,
+                null, null, null, null, null, null, null);
+
+        List<Long> first = idsOf(repository.findNegotiations(f, 1, 0));
+        List<Long> second = idsOf(repository.findNegotiations(f, 1, 1));
+
+        assertThat(first).hasSize(1);
+        assertThat(second).hasSize(1);
+        assertThat(first).isNotEqualTo(second);
+        assertThat(repository.countNegotiations(f)).isEqualTo(2L);
+    }
+
+    @Test
+    void resolvedAttributesAreMappedOntoTheResponse() {
+        var row = repository.findNegotiations(filters(
+                null, null, null, null, null, "Addgene",
+                null, null, null, null, null, null, null), 25, 0).get(0);
+
+        assertThat(row.title()).isEqualTo("168333");
+        assertThat(row.principalInvestigatorName()).isEqualTo("AHMAD KHALIL");
+        assertThat(row.sponsorCode()).isEqualTo("303630");
+        assertThat(row.sponsorName()).isEqualTo("Addgene");
+        assertThat(row.leadUnitNumber()).isEqualTo("1242040000");
+        assertThat(row.leadUnitName()).isEqualTo("ENG BIOMEDICAL ENG");
+        assertThat(row.attributeSource()).isEqualTo("UNASSOCIATED_DETAIL");
+    }
+
+    @Test
+    void aBlankFilterIsTreatedAsAbsentNotAsAnEmptyStringMatch() {
+        assertThat(idsOf(repository.findNegotiations(filters(
+                "   ", "", "  ", "", "", "", "", "", "",
+                null, null, null, null), 25, 0)))
+                .containsExactly(1201L, 2001L, 3001L);
     }
 
     @Test

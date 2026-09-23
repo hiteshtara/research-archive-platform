@@ -340,7 +340,8 @@ class GlobalSearchServiceTest {
                                 12345L, "763869", null, null, "Executed",
                                 null, null, "License Agreement",
                                 null, null, null, "202505-00002",
-                                null, "Jane Negotiator", null, null, null
+                                null, "Jane Negotiator", null, null, null,
+                                null, null, null, null, null, null, null
                         )),
                         0, 25, 1, 1, true, true
                 )

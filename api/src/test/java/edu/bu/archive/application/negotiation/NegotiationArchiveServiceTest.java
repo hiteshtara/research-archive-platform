@@ -4,6 +4,7 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAssociatedRecord
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
+import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.NegotiationArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.NegotiationArchivedAttachment;
@@ -44,9 +45,12 @@ class NegotiationArchiveServiceTest {
     void findPageAppliesAwardPaginationBounds() {
         NegotiationSummaryResponse summary = summary();
 
-        when(repository.countNegotiations("award"))
+        NegotiationSearchFilters filters =
+                NegotiationSearchFilters.ofQuery("award");
+
+        when(repository.countNegotiations(filters))
                 .thenReturn(205L);
-        when(repository.findNegotiations("award", 100, 0))
+        when(repository.findNegotiations(filters, 100, 0))
                 .thenReturn(List.of(summary));
 
         PageResponse<NegotiationSummaryResponse> result = service.findPage(
@@ -62,7 +66,7 @@ class NegotiationArchiveServiceTest {
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(result.first()).isTrue();
         assertThat(result.last()).isFalse();
-        verify(repository).findNegotiations("award", 100, 0);
+        verify(repository).findNegotiations(filters, 100, 0);
     }
 
     @Test
@@ -345,7 +349,14 @@ class NegotiationArchiveServiceTest {
                 "Negotiator",
                 null,
                 null,
-                null
+                null,
+                "Some Negotiation Title",
+                "AHMAD KHALIL",
+                "303630",
+                "Addgene",
+                "1242040000",
+                "ENG BIOMEDICAL ENG",
+                "UNASSOCIATED_DETAIL"
         );
     }
 

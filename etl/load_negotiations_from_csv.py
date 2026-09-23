@@ -10,12 +10,16 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
 from archive_etl.config.ecs import configure_ecs_environment
+from archive_etl.negotiation_search_attributes import (
+    run_rebuild_negotiation_search_attributes,
+)
 from archive_etl.pipeline.sources import OracleDataSource
 from archive_etl.reference_data import _upsert_rows
 from archive_etl.upload.bulk_copy import bulk_copy_dataframe
 from archive_etl.upload.migrations import apply_migrations
 from archive_etl.upload.postgres import create_postgres_engine
 from archive_etl.utils.redaction import redact_error_message
+
 
 def _resolve_project_root() -> Path:
     """Locate the directory containing oracle/negotiation/ and
@@ -321,6 +325,29 @@ def parse_args(
             "Negotiation is logged and skipped, not a whole-run abort. "
             "Mutually exclusive with --load-negotiation-id/"
             "--max-negotiations."
+        ),
+    )
+    parser.add_argument(
+        "--rebuild-search-attributes",
+        action="store_true",
+        help=(
+            "Rebuild archive.negotiation_search_attribute, the resolved "
+            "Title/PI/Sponsor/Prime Sponsor/Lead Unit values the "
+            "Negotiation list and filters read. Derived entirely from "
+            "already-archived PostgreSQL tables - it does NOT connect "
+            "to Oracle, so it needs no VPN or Oracle credentials. "
+            "INSERT ... ON CONFLICT DO UPDATE only, never DELETE or "
+            "TRUNCATE. Idempotent - combine with --dry-run to roll "
+            "back and still see the coverage report. Run it after any "
+            "Negotiation, Award, unit or sponsor load."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Roll the transaction back instead of committing. "
+            "Currently honoured by --rebuild-search-attributes."
         ),
     )
     parser.add_argument(
@@ -1143,6 +1170,15 @@ def main() -> None:
 
     if arguments.ecs:
         _run_ecs_setup()
+
+    if arguments.rebuild_search_attributes:
+        engine = create_postgres_engine()
+        if not arguments.ecs:
+            apply_migrations(engine, PROJECT_ROOT / "database" / "migrations")
+        run_rebuild_negotiation_search_attributes(
+            engine, dry_run=arguments.dry_run
+        )
+        return
 
     if arguments.load_all:
         run_full_load()

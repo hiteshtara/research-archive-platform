@@ -1218,6 +1218,22 @@ export interface NegotiationSummary {
   negotiationStartDate: string | null;
   negotiationEndDate: string | null;
   anticipatedAwardDate: string | null;
+
+  /*
+   * Resolved attributes from archive.negotiation_search_attribute.
+   * Title/PI/Sponsor/Lead Unit do not all live on the Negotiation row:
+   * unassociated Negotiations carry them on a detail row, Award-
+   * associated ones carry them on the associated Award. attributeSource
+   * says which supplied these values; "NONE" is a real, expected
+   * outcome for Subaward/Institutional-Proposal associations.
+   */
+  title: string | null;
+  principalInvestigatorName: string | null;
+  sponsorCode: string | null;
+  sponsorName: string | null;
+  leadUnitNumber: string | null;
+  leadUnitName: string | null;
+  attributeSource: string | null;
 }
 
 export interface NegotiationPageResponse

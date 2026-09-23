@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationNotificationResp
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationUnassociatedDetailResponse;
+import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -25,32 +26,96 @@ public class NegotiationArchiveRepository {
         this.jdbc = jdbc;
     }
 
-    public long countNegotiations(String query) {
-        String normalizedQuery = normalizeQuery(query);
-        String filter = normalizedQuery.isEmpty()
-                ? ""
-                : """
-                WHERE CAST(negotiation_id AS TEXT)
-                        ILIKE '%' || :query || '%'
-                   OR document_number ILIKE '%' || :query || '%'
-                   OR negotiation_status_description
-                        ILIKE '%' || :query || '%'
-                   OR negotiation_agreement_type_description
-                        ILIKE '%' || :query || '%'
-                   OR negotiation_association_type_description
-                        ILIKE '%' || :query || '%'
-                   OR associated_document_id ILIKE '%' || :query || '%'
-                   OR negotiator_full_name ILIKE '%' || :query || '%'
-                """;
+    /*
+     * The single FROM clause shared by the count and the page query, so
+     * the total and the rows can never disagree about what matched.
+     *
+     * archive.negotiation_search_attribute is a 1:1 join on the primary
+     * key, carrying the already-resolved Title/PI/Sponsor/Lead Unit. It
+     * replaces the correlated LATERALs against award_version and
+     * award_person that resolving those values at query time would
+     * otherwise require - measured on dev RDS, those LATERALs cost
+     * 2,489.8 ms on the COUNT(*) that drives pagination, because they
+     * were evaluated for all 10,775 rows. See V080's migration header.
+     */
+    private static final String SEARCH_FROM = """
+            FROM archive.negotiation n
+            LEFT JOIN archive.negotiation_search_attribute a
+                   ON a.negotiation_id = n.negotiation_id
+            """;
 
-        JdbcClient.StatementSpec statement = jdbc.sql("""
-                SELECT COUNT(*)
-                FROM archive.negotiation
-                """ + filter);
-        if (!normalizedQuery.isEmpty()) {
-            statement = statement.param("query", normalizedQuery);
-        }
-        Long count = statement
+    /*
+     * Every filter is expressed as "(:param IS NULL OR <predicate>)" so a
+     * single statement serves every combination of supplied filters and
+     * an omitted filter adds no condition at all. All values are bound
+     * parameters - no user input is ever concatenated into the SQL.
+     *
+     * The explicit CASTs are required, not cosmetic: PostgreSQL cannot
+     * infer a type for a null bind parameter appearing only in an IS NULL
+     * test, and fails with "could not determine data type of parameter".
+     *
+     * Free text is ANDed with the structured filters, not ORed, and it
+     * searches the resolved attributes too - so a free-text "Addgene"
+     * finds Negotiations whose sponsor resolved from an associated Award
+     * as well as those whose sponsor came from an unassociated-detail
+     * row.
+     */
+    private static final String SEARCH_WHERE = """
+            WHERE (CAST(:query AS TEXT) IS NULL OR (
+                       CAST(n.negotiation_id AS TEXT)
+                           ILIKE '%' || :query || '%'
+                    OR n.document_number ILIKE '%' || :query || '%'
+                    OR n.negotiation_status_description
+                           ILIKE '%' || :query || '%'
+                    OR n.negotiation_agreement_type_description
+                           ILIKE '%' || :query || '%'
+                    OR n.negotiation_association_type_description
+                           ILIKE '%' || :query || '%'
+                    OR n.associated_document_id ILIKE '%' || :query || '%'
+                    OR n.negotiator_full_name ILIKE '%' || :query || '%'
+                    OR a.title ILIKE '%' || :query || '%'
+                    OR a.principal_investigator_name
+                           ILIKE '%' || :query || '%'
+                    OR a.sponsor_name ILIKE '%' || :query || '%'
+                    OR a.sponsor_code ILIKE '%' || :query || '%'
+                    OR a.lead_unit_name ILIKE '%' || :query || '%'
+                    OR a.lead_unit_number ILIKE '%' || :query || '%'
+              ))
+              AND (CAST(:status AS TEXT) IS NULL
+                   OR n.negotiation_status_description = :status)
+              AND (CAST(:agreementType AS TEXT) IS NULL
+                   OR n.negotiation_agreement_type_description
+                      = :agreementType)
+              AND (CAST(:associationType AS TEXT) IS NULL
+                   OR n.negotiation_association_type_description
+                      = :associationType)
+              AND (CAST(:associationId AS TEXT) IS NULL
+                   OR n.associated_document_id = :associationId)
+              AND (CAST(:negotiator AS TEXT) IS NULL
+                   OR n.negotiator_full_name
+                      ILIKE '%' || :negotiator || '%')
+              AND (CAST(:principalInvestigator AS TEXT) IS NULL
+                   OR a.principal_investigator_name
+                      ILIKE '%' || :principalInvestigator || '%')
+              AND (CAST(:sponsor AS TEXT) IS NULL
+                   OR a.sponsor_name ILIKE '%' || :sponsor || '%'
+                   OR a.sponsor_code ILIKE '%' || :sponsor || '%')
+              AND (CAST(:leadUnit AS TEXT) IS NULL
+                   OR a.lead_unit_name ILIKE '%' || :leadUnit || '%'
+                   OR a.lead_unit_number ILIKE '%' || :leadUnit || '%')
+              AND (CAST(:startDateFrom AS DATE) IS NULL
+                   OR n.negotiation_start_date >= CAST(:startDateFrom AS DATE))
+              AND (CAST(:startDateTo AS DATE) IS NULL
+                   OR n.negotiation_start_date <= CAST(:startDateTo AS DATE))
+              AND (CAST(:endDateFrom AS DATE) IS NULL
+                   OR n.negotiation_end_date >= CAST(:endDateFrom AS DATE))
+              AND (CAST(:endDateTo AS DATE) IS NULL
+                   OR n.negotiation_end_date <= CAST(:endDateTo AS DATE))
+            """;
+
+    public long countNegotiations(NegotiationSearchFilters filters) {
+        Long count = bind(jdbc.sql(
+                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE), filters)
                 .query(Long.class)
                 .single();
 
@@ -58,59 +123,46 @@ public class NegotiationArchiveRepository {
     }
 
     public List<NegotiationSummaryResponse> findNegotiations(
-            String query,
+            NegotiationSearchFilters filters,
             int limit,
             int offset
     ) {
-        String normalizedQuery = normalizeQuery(query);
-        String filter = normalizedQuery.isEmpty()
-                ? ""
-                : """
-                WHERE CAST(negotiation_id AS TEXT)
-                        ILIKE '%' || :query || '%'
-                   OR document_number ILIKE '%' || :query || '%'
-                   OR negotiation_status_description
-                        ILIKE '%' || :query || '%'
-                   OR negotiation_agreement_type_description
-                        ILIKE '%' || :query || '%'
-                   OR negotiation_association_type_description
-                        ILIKE '%' || :query || '%'
-                   OR associated_document_id ILIKE '%' || :query || '%'
-                   OR negotiator_full_name ILIKE '%' || :query || '%'
-                """;
-
-        JdbcClient.StatementSpec statement = jdbc.sql("""
+        return bind(jdbc.sql("""
                 SELECT
-                    negotiation_id,
-                    document_number,
-                    negotiation_status_id,
-                    negotiation_status_code,
-                    negotiation_status_description,
-                    negotiation_agreement_type_id,
-                    negotiation_agreement_type_code,
-                    negotiation_agreement_type_description,
-                    negotiation_association_type_id,
-                    negotiation_association_type_code,
-                    negotiation_association_type_description,
-                    associated_document_id,
-                    negotiator_person_id,
-                    negotiator_full_name,
-                    negotiation_start_date,
-                    negotiation_end_date,
-                    anticipated_award_date
-                FROM archive.negotiation
-                """ + filter + """
+                    n.negotiation_id,
+                    n.document_number,
+                    n.negotiation_status_id,
+                    n.negotiation_status_code,
+                    n.negotiation_status_description,
+                    n.negotiation_agreement_type_id,
+                    n.negotiation_agreement_type_code,
+                    n.negotiation_agreement_type_description,
+                    n.negotiation_association_type_id,
+                    n.negotiation_association_type_code,
+                    n.negotiation_association_type_description,
+                    n.associated_document_id,
+                    n.negotiator_person_id,
+                    n.negotiator_full_name,
+                    n.negotiation_start_date,
+                    n.negotiation_end_date,
+                    n.anticipated_award_date,
+                    a.title,
+                    a.principal_investigator_name,
+                    a.sponsor_code,
+                    a.sponsor_name,
+                    a.lead_unit_number,
+                    a.lead_unit_name,
+                    a.attribute_source
+                """ + SEARCH_FROM + SEARCH_WHERE + """
                 ORDER BY
-                """ + orderBy(normalizedQuery) + """
-                    source_update_timestamp DESC NULLS LAST,
-                    negotiation_id DESC
+                    CASE WHEN CAST(n.negotiation_id AS TEXT) = :query
+                            THEN 0 ELSE 1 END,
+                    CASE WHEN n.document_number = :query THEN 0 ELSE 1 END,
+                    n.source_update_timestamp DESC NULLS LAST,
+                    n.negotiation_id DESC
                 LIMIT :limit
                 OFFSET :offset
-                """);
-        if (!normalizedQuery.isEmpty()) {
-            statement = statement.param("query", normalizedQuery);
-        }
-        return statement
+                """), filters)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(NegotiationSummaryResponse.class)
@@ -118,24 +170,37 @@ public class NegotiationArchiveRepository {
     }
 
     /*
-     * An exact negotiation_id or document_number match is prioritized
-     * ahead of the broad ILIKE substring matches the WHERE clause also
-     * allows (e.g. searching "420" also matches negotiation_id 14200 or
-     * a document_number containing "420") - otherwise a record a user
-     * searched for by its exact ID can be pushed past the first page by
-     * unrelated substring matches with a more recent
-     * source_update_timestamp. Only applies when a query is present;
-     * :query is unbound (and this CASE unreachable) on the empty-query
-     * "browse all" path.
+     * Binds every filter parameter on every call, including the null
+     * ones. JdbcClient rejects a statement whose named parameter was
+     * never supplied, and the "(:param IS NULL OR ...)" form needs the
+     * parameter present precisely so that it can be null.
+     *
+     * The ORDER BY's exact-match CASEs also reference :query, and are
+     * reached on the browse-all path where it is null - a null :query
+     * makes both CASE tests NULL, which falls to ELSE 1, leaving the
+     * ordering to source_update_timestamp as intended. Prioritizing an
+     * exact negotiation_id or document_number hit keeps a record someone
+     * searched for by its exact ID off page four, where unrelated
+     * substring matches with a newer timestamp would otherwise push it.
      */
-    private String orderBy(String normalizedQuery) {
-        return normalizedQuery.isEmpty()
-                ? ""
-                : """
-                CASE WHEN CAST(negotiation_id AS TEXT) = :query
-                        THEN 0 ELSE 1 END,
-                CASE WHEN document_number = :query THEN 0 ELSE 1 END,
-                """;
+    private JdbcClient.StatementSpec bind(
+            JdbcClient.StatementSpec statement,
+            NegotiationSearchFilters filters
+    ) {
+        return statement
+                .param("query", filters.query())
+                .param("status", filters.status())
+                .param("agreementType", filters.agreementType())
+                .param("associationType", filters.associationType())
+                .param("associationId", filters.associationId())
+                .param("negotiator", filters.negotiator())
+                .param("principalInvestigator", filters.principalInvestigator())
+                .param("sponsor", filters.sponsor())
+                .param("leadUnit", filters.leadUnit())
+                .param("startDateFrom", filters.startDateFrom())
+                .param("startDateTo", filters.startDateTo())
+                .param("endDateFrom", filters.endDateFrom())
+                .param("endDateTo", filters.endDateTo());
     }
 
     public Optional<NegotiationRowResponse> findById(
@@ -436,9 +501,5 @@ public class NegotiationArchiveRepository {
                 .optional()
                 .orElse(null);
         return id != null;
-    }
-
-    private String normalizeQuery(String query) {
-        return query == null ? "" : query.trim();
     }
 }

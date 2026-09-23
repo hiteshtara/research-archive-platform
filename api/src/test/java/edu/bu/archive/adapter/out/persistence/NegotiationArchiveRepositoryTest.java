@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationCustomDataRespon
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationNotificationResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationRowResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
+import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -120,7 +121,8 @@ class NegotiationArchiveRepositoryTest {
         NegotiationArchiveRepository repository =
                 new NegotiationArchiveRepository(jdbc);
 
-        repository.findNegotiations("award", 25, 50);
+        repository.findNegotiations(
+                NegotiationSearchFilters.ofQuery("award"), 25, 50);
 
         String sql = firstSql(jdbc);
 
@@ -154,21 +156,39 @@ class NegotiationArchiveRepositoryTest {
         NegotiationArchiveRepository repository =
                 new NegotiationArchiveRepository(jdbc);
 
-        repository.findNegotiations("420", 25, 0);
+        repository.findNegotiations(
+                NegotiationSearchFilters.ofQuery("420"), 25, 0);
 
         String sql = firstSql(jdbc);
 
         assertThat(sql)
                 .contains(
-                        "CASE WHEN CAST(negotiation_id AS TEXT) = :query"
+                        "CASE WHEN CAST(n.negotiation_id AS TEXT) = :query"
                 )
-                .contains("CASE WHEN document_number = :query");
-        assertThat(sql.indexOf("CASE WHEN CAST(negotiation_id AS TEXT)"))
-                .isLessThan(sql.indexOf("source_update_timestamp DESC"));
+                .contains("CASE WHEN n.document_number = :query");
+        assertThat(sql.indexOf("CASE WHEN CAST(n.negotiation_id AS TEXT)"))
+                .isLessThan(sql.indexOf("n.source_update_timestamp DESC"));
     }
 
+    /*
+     * The blank-query contract changed with structured filtering, and
+     * this test now pins the new one rather than the old SQL shape.
+     *
+     * Previously a blank query omitted the exact-match CASE from the
+     * SQL entirely and never bound :query. Now a single statement
+     * serves every filter combination, so the CASE is always present
+     * and :query is always bound - as null. That is not a behavioural
+     * regression: a null :query makes both CASE tests evaluate to NULL,
+     * which falls to ELSE 1 for every row, so no row is prioritized and
+     * the ordering falls through to source_update_timestamp exactly as
+     * before. Binding it is required, not optional: JdbcClient rejects
+     * a statement whose named parameter was never supplied.
+     *
+     * The real-schema integration test covers that this actually
+     * executes against PostgreSQL with a null query.
+     */
     @Test
-    void findNegotiationsOmitsTheExactMatchCaseWhenQueryIsBlank() {
+    void findNegotiationsBindsANullQueryRatherThanOmittingIt() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement =
                 mock(JdbcClient.StatementSpec.class);
@@ -185,13 +205,18 @@ class NegotiationArchiveRepositoryTest {
         NegotiationArchiveRepository repository =
                 new NegotiationArchiveRepository(jdbc);
 
-        repository.findNegotiations(null, 25, 0);
+        repository.findNegotiations(
+                NegotiationSearchFilters.none(), 25, 0);
 
         String sql = firstSql(jdbc);
 
-        assertThat(sql).doesNotContain("CASE WHEN");
-        verify(statement, org.mockito.Mockito.never())
-                .param(org.mockito.ArgumentMatchers.eq("query"), any());
+        // Present, but inert for a null :query.
+        assertThat(sql).contains("CASE WHEN");
+        // Bound as null, so no row is prioritized and JdbcClient is happy.
+        verify(statement).param("query", null);
+        // A blank filter must never become a condition.
+        verify(statement).param("status", null);
+        verify(statement).param("principalInvestigator", null);
     }
 
     @Test
