@@ -23,7 +23,6 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -121,10 +120,26 @@ class ProposalV1ControllerAttachmentSecurityTest {
                         get("/api/v1/proposals/91/attachments/81/download")
                                 .with(attachmentViewer())
                 )
-                .andExpect(status().isOk())
                 .andReturn();
 
-        mockMvc.perform(asyncDispatch(initial))
-                .andExpect(status().isOk());
+        // downloadAttachment streams its body via StreamingResponseBody.
+        // Do NOT add a second mockMvc.perform(asyncDispatch(initial)) here.
+        // For StreamingResponseBody that dispatch is a no-op for the
+        // RESULT - it re-invokes neither the handler nor the service and
+        // writes no further bytes - but it does drive the real Spring
+        // Security filter chain over this same MockHttpServletResponse a
+        // second time, while the first request's streaming worker may
+        // still be writing and committing it. Two passes writing headers
+        // into MockHttpServletResponse's LinkedCaseInsensitiveMap is what
+        // intermittently threw ConcurrentModificationException from
+        // HeaderWriterFilter under full-suite load.
+        //
+        // getAsyncResult() blocks until the streaming callable has
+        // finished, so the response is complete and quiescent before it
+        // is asserted on.
+        initial.getAsyncResult();
+        org.assertj.core.api.Assertions
+                .assertThat(initial.getResponse().getStatus())
+                .isEqualTo(200);
     }
 }
