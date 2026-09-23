@@ -61,7 +61,15 @@ def _postgres_available() -> bool:
 
 
 @unittest.skipUnless(_postgres_available(), "local PostgreSQL is not reachable")
-class NegotiationSearchAttributeRebuildTest(unittest.TestCase):
+class _NegotiationDatabaseTestCase(unittest.TestCase):
+    """Throwaway-database fixture plus the row helpers shared by every
+    Negotiation search-attribute test class in this module.
+
+    Subclasses supply their own _seed(). These helpers are inherited,
+    never borrowed by unbound assignment - that runs, but is not
+    type-safe and hides which classes depend on the fixture.
+    """
+
     db_prefix = "pytest_negotiation_search_attribute"
 
     def setUp(self) -> None:
@@ -243,6 +251,10 @@ class NegotiationSearchAttributeRebuildTest(unittest.TestCase):
                 .one()
             )
 
+
+class NegotiationSearchAttributeRebuildTest(_NegotiationDatabaseTestCase):
+    """The four resolution paths."""
+
     # ---------------------------------------------------------------
 
     def test_unassociated_negotiation_resolves_from_detail_and_reference_data(
@@ -363,7 +375,7 @@ class NegotiationSearchAttributeRebuildTest(unittest.TestCase):
         self.assertEqual(report["with_lead_unit_name"], 3)
 
 
-class AwardAssociatedPrecedenceRegressionTest(unittest.TestCase):
+class AwardAssociatedPrecedenceRegressionTest(_NegotiationDatabaseTestCase):
     """The verified Kuali precedence rule, pinned on the real records
     that establish it.
 
@@ -385,11 +397,6 @@ class AwardAssociatedPrecedenceRegressionTest(unittest.TestCase):
 
     db_prefix = "pytest_negotiation_precedence"
 
-    setUp = NegotiationSearchAttributeRebuildTest.setUp
-    tearDown = NegotiationSearchAttributeRebuildTest.tearDown
-    _negotiation = NegotiationSearchAttributeRebuildTest._negotiation
-    _detail = NegotiationSearchAttributeRebuildTest._detail
-    _attributes = NegotiationSearchAttributeRebuildTest._attributes
 
     # negotiation_id -> (award_number, detail PI, ACTIVE Award PI)
     PI_CASES = {
@@ -514,7 +521,7 @@ class AwardAssociatedPrecedenceRegressionTest(unittest.TestCase):
             self.assertEqual("304143", row["sponsor_code"])
 
 
-class AwardVersionSelectionTest(unittest.TestCase):
+class AwardVersionSelectionTest(_NegotiationDatabaseTestCase):
     """Which Award version an Award-associated Negotiation resolves to.
 
     Regression for a real defect: the loader selected MAX(award_id),
@@ -527,10 +534,6 @@ class AwardVersionSelectionTest(unittest.TestCase):
 
     db_prefix = "pytest_negotiation_award_version"
 
-    setUp = NegotiationSearchAttributeRebuildTest.setUp
-    tearDown = NegotiationSearchAttributeRebuildTest.tearDown
-    _negotiation = NegotiationSearchAttributeRebuildTest._negotiation
-    _attributes = NegotiationSearchAttributeRebuildTest._attributes
 
     def _seed(self) -> None:
         with self.engine.connect() as connection:
