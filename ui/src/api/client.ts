@@ -7,6 +7,10 @@ import {
 } from "../features/award/awardReportDownloadPresentation.mjs";
 import { accessToken } from "../auth";
 import {
+  isProposalWorkspacePayload,
+  isReservedProposalIdentifier,
+} from "../features/proposal/proposalWorkspacePresentation.mjs";
+import {
   buildAwardReportFileName,
   parseDownloadFilename,
 } from "../features/award/awardSectionsPresentation.mjs";
@@ -911,10 +915,21 @@ export function searchProposalFamilies(
   return request(`/api/proposals/search?${searchParameters.toString()}`, signal);
 }
 
-export function getProposalWorkspace(
+export async function getProposalWorkspace(
   proposalNumber: string,
 ): Promise<import("../types/api").ProposalWorkspaceResponse> {
-  return request(`/api/proposals/${encodeURIComponent(proposalNumber)}`);
+  const path = `/api/proposals/${encodeURIComponent(proposalNumber)}`;
+  // "search" and "families" are literal sibling routes, so the request
+  // would never reach the workspace endpoint: treat them as not found
+  // without asking (QA TC-033).
+  if (isReservedProposalIdentifier(proposalNumber)) {
+    throw new ApiRequestError(404, path);
+  }
+  const payload: unknown = await request(path);
+  if (!isProposalWorkspacePayload(payload)) {
+    throw new Error(`Unexpected Proposal workspace response: ${path}`);
+  }
+  return payload as import("../types/api").ProposalWorkspaceResponse;
 }
 
 export function getProposalHistory(
