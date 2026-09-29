@@ -439,9 +439,17 @@ for this project right now:
 - **No AWS CodeBuild project or CI-based deployment pipeline exists for
   this project as of 2026-08-13** — verified via `aws codebuild
   list-projects` (57 projects in the account, all belonging to unrelated
-  BU services) and `.github/workflows/ci.yml` (tests only: `mvn test` /
-  `npm test`+`lint`+`build` / `uv run pytest` — no Docker build, no ECR
-  push, no deploy step). An AWS-native build pipeline (CodeBuild or
+  BU services). **Correction (2026-09-29):** no GitHub workflow was ever
+  committed before that date: GitHub showed 0 workflows and 0 runs, and the
+  earlier `ci.yml` existed only in an uncommitted working tree.
+  `.github/workflows/ci.yml` was added on 2026-09-29. It runs tests only, on
+  GitHub-hosted runners with a read-only token and no secrets:
+  - UI tests, lint and build;
+  - API unit tests;
+  - the Testcontainers database suites, against throwaway PostgreSQL containers.
+
+  It has no Docker image build, no ECR push, no deploy step and no ETL tests.
+  An AWS-native build pipeline (CodeBuild or
   similar) is potential future work, not current functionality — do not
   document or assume one exists until it's actually built.
 - UI deploys go through the existing Amplify app, which auto-triggers a

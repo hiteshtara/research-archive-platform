@@ -133,10 +133,9 @@ remains available as a second working example once deployed.
    `git@github.com:bu-ist/research-archive-platform.git`; verify which one
    CI/CD watches before pushing, since pushing to the wrong remote silently
    does nothing for deployment).
-2. **Verify CI.** Check `.github/workflows/` (currently untracked in this
-   working tree — confirm it's committed before relying on it) or whatever
-   the project's actual CI pipeline is; confirm the push triggers a green
-   build.
+2. **Verify CI.** `.github/workflows/ci.yml` (committed 2026-09-29) runs the
+   tests on pull requests to `main` and on pushes to `main`. It does not
+   deploy. Confirm the relevant commit has a green run.
 3. **Deploy the application and ETL image to dev.** API/UI: whatever the
    project's standard deploy path is (Amplify auto-deploys `main` on push,
    per the job history in §1; the API/ECS side needs its own image
