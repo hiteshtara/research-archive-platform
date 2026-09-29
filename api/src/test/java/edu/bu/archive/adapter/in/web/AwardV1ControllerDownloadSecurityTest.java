@@ -183,4 +183,112 @@ class AwardV1ControllerDownloadSecurityTest {
                 )
                 .andExpect(status().isOk());
     }
+
+    // --- Consolidated report (report + archived attachments) ------------
+    //
+    // report-with-attachments.pdf embeds attachment FILE CONTENT, so it is
+    // held to the same ArchiveAttachmentViewer policy as the attachment
+    // list/download routes above. It previously skipped that check.
+
+    private static final String REPORT_WITH_ATTACHMENTS =
+            "/api/v1/awards/1833767/report-with-attachments.pdf";
+
+    private void givenReportData() {
+        edu.bu.archive.application.award.report.AwardReportData data =
+                org.mockito.Mockito.mock(
+                        edu.bu.archive.application.award.report.AwardReportData.class);
+        edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse summary =
+                org.mockito.Mockito.mock(
+                        edu.bu.archive.adapter.in.web.dto.award.AwardSummaryResponse.class);
+        when(summary.awardNumber()).thenReturn("105698-00001");
+        when(data.summary()).thenReturn(summary);
+        when(reportService.buildReportData(1833767L)).thenReturn(data);
+    }
+
+    @Test
+    void consolidatedReportWithoutAuthenticationIsRejected() throws Exception {
+        mockMvc.perform(get(REPORT_WITH_ATTACHMENTS))
+                .andExpect(status().isUnauthorized());
+
+        org.mockito.Mockito.verifyNoInteractions(reportService, consolidatedReportAssembler);
+    }
+
+    @Test
+    void consolidatedReportIsForbiddenWithoutTheAttachmentGroup() throws Exception {
+        givenReportData();
+
+        mockMvc.perform(get(REPORT_WITH_ATTACHMENTS).with(jwt()))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(
+                        org.hamcrest.Matchers.containsString("ATTACHMENT_ACCESS_DENIED")));
+
+        // Denied before anything is loaded or assembled: no report data,
+        // no attachment metadata, no attachment bytes.
+        org.mockito.Mockito.verify(reportService, org.mockito.Mockito.never())
+                .buildReportData(org.mockito.ArgumentMatchers.anyLong());
+        org.mockito.Mockito.verify(reportService, org.mockito.Mockito.never())
+                .findReportAttachments(org.mockito.ArgumentMatchers.anyLong());
+        org.mockito.Mockito.verifyNoInteractions(consolidatedReportAssembler);
+    }
+
+    @Test
+    void consolidatedReportIsForbiddenForAnUnrelatedGroup() throws Exception {
+        mockMvc.perform(get(REPORT_WITH_ATTACHMENTS)
+                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SomeOtherGroup"))))
+                .andExpect(status().isForbidden());
+
+        org.mockito.Mockito.verifyNoInteractions(consolidatedReportAssembler);
+    }
+
+    @Test
+    void attachmentViewerReceivesTheConsolidatedReport() throws Exception {
+        givenReportData();
+        List<edu.bu.archive.application.award.report.AwardReportAttachment> attachments =
+                List.of();
+        when(reportService.findReportAttachments(1833767L)).thenReturn(attachments);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            java.io.OutputStream out = invocation.getArgument(2);
+            out.write("%PDF-consolidated".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            return null;
+        }).when(consolidatedReportAssembler).assemble(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(attachments),
+                org.mockito.ArgumentMatchers.any());
+
+        var initial = mockMvc.perform(get(REPORT_WITH_ATTACHMENTS).with(attachmentViewer()))
+                .andReturn();
+        // See the streaming note in authenticatedAttachmentViewerCanDownloadAttachment.
+        initial.getAsyncResult();
+
+        org.assertj.core.api.Assertions.assertThat(initial.getResponse().getStatus())
+                .isEqualTo(200);
+        org.assertj.core.api.Assertions.assertThat(initial.getResponse().getContentType())
+                .isEqualTo("application/pdf");
+        org.assertj.core.api.Assertions.assertThat(initial.getResponse().getContentAsString())
+                .isEqualTo("%PDF-consolidated");
+        org.mockito.Mockito.verify(consolidatedReportAssembler).assemble(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(attachments),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void theReportWithoutAttachmentsStaysAvailableWithoutTheAttachmentGroup() throws Exception {
+        givenReportData();
+
+        var initial = mockMvc.perform(get("/api/v1/awards/1833767/report.pdf").with(jwt()))
+                .andReturn();
+        initial.getAsyncResult();
+
+        // Unchanged behaviour: report.pdf carries no attachment content, so
+        // it remains open to every authenticated user.
+        org.assertj.core.api.Assertions.assertThat(initial.getResponse().getStatus())
+                .isEqualTo(200);
+        org.mockito.Mockito.verify(reportPdfRenderer).render(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(java.io.OutputStream.class));
+        org.mockito.Mockito.verifyNoInteractions(consolidatedReportAssembler);
+        org.mockito.Mockito.verify(reportService, org.mockito.Mockito.never())
+                .findReportAttachments(org.mockito.ArgumentMatchers.anyLong());
+    }
 }

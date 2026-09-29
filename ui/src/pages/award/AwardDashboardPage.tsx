@@ -42,6 +42,11 @@ import { ComingSoonSection } from "../../components/award/ComingSoonSection";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { flattenHierarchyNodes } from "../../components/award/hierarchyUtils";
+import {
+  REPORT_WITH_ATTACHMENTS,
+  isReportActionAvailable,
+} from "../../features/award/awardReportDownloadPresentation.mjs";
+import { useAttachmentAccess } from "../../hooks/useAttachmentAccess";
 import type { AwardHierarchyNode } from "../../types/api";
 
 const SECTIONS = [
@@ -97,6 +102,7 @@ export function AwardDashboardPage() {
   const { awardId: awardIdParameter } = useParams<{ awardId: string }>();
   const awardId = Number(awardIdParameter);
   const navigate = useNavigate();
+  const attachmentAccess = useAttachmentAccess();
 
   const [activeSection, setActiveSection] = useState<SectionKey>("summary");
   const [reportDownloading, setReportDownloading] = useState(false);
@@ -276,29 +282,34 @@ export function AwardDashboardPage() {
             >
               {reportDownloading ? "Preparing report…" : "Download Award Report"}
             </Button>
-            <Tooltip title={REPORT_WITH_ATTACHMENTS_HELP}>
-              <span>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={
-                    attachmentsReportDownloading ? (
-                      <CircularProgress size={16} color="inherit" />
-                    ) : (
-                      <DownloadOutlined fontSize="small" />
-                    )
-                  }
-                  disabled={attachmentsReportDownloading}
-                  onClick={handleDownloadReportWithAttachments}
-                  aria-busy={attachmentsReportDownloading}
-                  aria-label={REPORT_WITH_ATTACHMENTS_HELP}
-                >
-                  {attachmentsReportDownloading
-                    ? "Preparing report…"
-                    : "Download Report + Attachments"}
-                </Button>
-              </span>
-            </Tooltip>
+            {/* Same fail-closed ArchiveAttachmentViewer check as the
+                Attachments section: this action embeds attachment files.
+                UI convenience only - the API enforces it on every request. */}
+            {isReportActionAvailable(REPORT_WITH_ATTACHMENTS, attachmentAccess) && (
+              <Tooltip title={REPORT_WITH_ATTACHMENTS_HELP}>
+                <span>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={
+                      attachmentsReportDownloading ? (
+                        <CircularProgress size={16} color="inherit" />
+                      ) : (
+                        <DownloadOutlined fontSize="small" />
+                      )
+                    }
+                    disabled={attachmentsReportDownloading}
+                    onClick={handleDownloadReportWithAttachments}
+                    aria-busy={attachmentsReportDownloading}
+                    aria-label={REPORT_WITH_ATTACHMENTS_HELP}
+                  >
+                    {attachmentsReportDownloading
+                      ? "Preparing report…"
+                      : "Download Report + Attachments"}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             <StatusPill status={summary.status} domain="award" />
           </Stack>
 

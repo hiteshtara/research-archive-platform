@@ -49,6 +49,16 @@ group membership is the only gate.
   - the cross-domain Archived File Finder), and `ExplorerController`'s
   `/attachments` endpoint (dev-only, `app.explorer.enabled`-gated, but
   still covered for defense in depth).
+- **2026-09-29 correction:** `AwardV1Controller`'s
+  `/{awardId}/report-with-attachments.pdf` (the consolidated report, added
+  after this list was written) embeds attachment file content but was
+  missing from this gate. It now calls the same
+  `requireAttachmentAccess` check first, before any report data or
+  attachment metadata is loaded, and the Award dashboard hides its button
+  behind the same fail-closed `useAttachmentAccess()` check. The plain
+  `/{awardId}/report.pdf` carries no attachment content and stays open to
+  every authenticated user. Regression tests:
+  `AwardV1ControllerDownloadSecurityTest` (`consolidatedReport*`).
 - **Cognito wiring already existed and needed no changes**:
   `SecurityConfiguration.jwtAuthenticationConverter()` already mapped
   every `cognito:groups` claim entry to a `ROLE_<group>` Spring
