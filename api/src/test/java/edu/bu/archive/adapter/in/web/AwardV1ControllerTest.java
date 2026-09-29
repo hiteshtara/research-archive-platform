@@ -45,6 +45,7 @@ import java.util.NoSuchElementException;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -954,7 +955,8 @@ class AwardV1ControllerTest {
         when(data.summary()).thenReturn(summary);
         when(reportService.buildReportData(3L)).thenReturn(data);
 
-        mockMvc.perform(get("/api/v1/awards/3/report.pdf"))
+        org.springframework.test.web.servlet.MvcResult initial =
+                mockMvc.perform(get("/api/v1/awards/3/report.pdf"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "application/pdf"))
                 .andExpect(header().string(
@@ -962,7 +964,14 @@ class AwardV1ControllerTest {
                         org.hamcrest.Matchers.containsString(
                                 "Award_900000-00001_Complete_Report.pdf"
                         )
-                ));
+                ))
+                .andReturn();
+
+        // The PDF is written by an async StreamingResponseBody; wait for it
+        // to finish before verifying the renderer, or the check races the
+        // async executor.
+        mockMvc.perform(asyncDispatch(initial))
+                .andExpect(status().isOk());
 
         verify(reportService).buildReportData(3L);
         verify(reportPdfRenderer).render(
