@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -114,24 +115,43 @@ public class GlobalSearchService {
         this.embeddingProviderObjectProvider = embeddingProviderObjectProvider;
     }
 
+    /**
+     * The record types a caller may restrict Global Search to. The only
+     * Global Search filter with the same meaning in every module - fields
+     * like sponsor or status mean different things per domain (see
+     * GlobalSearchItemResponse), so they are deliberately not offered here.
+     */
+    public static final Set<String> SELECTABLE_MODULES =
+            Set.of("AWARD", "PROPOSAL", "NEGOTIATION", "SUBAWARD");
+
     public GlobalSearchResponse search(String query) {
+        return search(query, Set.of());
+    }
+
+    /**
+     * @param modules record types to search; empty means every module
+     *                (the original behaviour). An unselected module is not
+     *                queried at all, and semantic hits are kept only for
+     *                selected modules, so the result set is exactly what
+     *                those modules return rather than a client-side slice.
+     */
+    public GlobalSearchResponse search(String query, Set<String> modules) {
         String normalizedQuery = query == null ? "" : query.trim();
+        Set<String> selected = normalizeModules(modules);
 
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
-                CompletableFuture.supplyAsync(() ->
-                        timed("IRB", () -> searchIrb(normalizedQuery)));
+                selected.isEmpty()
+                        ? CompletableFuture.supplyAsync(() ->
+                                timed("IRB", () -> searchIrb(normalizedQuery)))
+                        : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
-                CompletableFuture.supplyAsync(() ->
-                        timed("AWARD", () -> searchAward(normalizedQuery)));
+                startIfSelected(selected, "AWARD", () -> searchAward(normalizedQuery));
         CompletableFuture<List<GlobalSearchItemResponse>> negotiationFuture =
-                CompletableFuture.supplyAsync(() ->
-                        timed("NEGOTIATION", () -> searchNegotiation(normalizedQuery)));
+                startIfSelected(selected, "NEGOTIATION", () -> searchNegotiation(normalizedQuery));
         CompletableFuture<List<GlobalSearchItemResponse>> subawardFuture =
-                CompletableFuture.supplyAsync(() ->
-                        timed("SUBAWARD", () -> searchSubaward(normalizedQuery)));
+                startIfSelected(selected, "SUBAWARD", () -> searchSubaward(normalizedQuery));
         CompletableFuture<List<GlobalSearchItemResponse>> proposalFuture =
-                CompletableFuture.supplyAsync(() ->
-                        timed("PROPOSAL", () -> searchProposal(normalizedQuery)));
+                startIfSelected(selected, "PROPOSAL", () -> searchProposal(normalizedQuery));
 
         // Semantic search is a strictly optional 6th input - see the
         // class comment. It is never started at all (no Bedrock call,
@@ -162,6 +182,11 @@ public class GlobalSearchService {
                 semanticFuture != null
                         ? joinOrRecordFailure(semanticFuture, "SEMANTIC", failedModules)
                         : List.of();
+        if (!selected.isEmpty()) {
+            semanticResults = semanticResults.stream()
+                    .filter(item -> selected.contains(item.module()))
+                    .toList();
+        }
 
         List<GlobalSearchItemResponse> merged = new ArrayList<>(
                 irbResults.size() + awardResults.size()
@@ -187,6 +212,37 @@ public class GlobalSearchService {
                 deduplicated,
                 failedModules
         );
+    }
+
+    private static Set<String> normalizeModules(Set<String> modules) {
+        if (modules == null || modules.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> normalized = new java.util.LinkedHashSet<>();
+        for (String module : modules) {
+            if (module == null || module.isBlank()) {
+                continue;
+            }
+            String upper = module.trim().toUpperCase(java.util.Locale.ROOT);
+            if (!SELECTABLE_MODULES.contains(upper)) {
+                throw new IllegalArgumentException(
+                        "Unknown record type: " + module.trim()
+                                + " (expected one of AWARD, PROPOSAL, NEGOTIATION, SUBAWARD)");
+            }
+            normalized.add(upper);
+        }
+        return Set.copyOf(normalized);
+    }
+
+    private CompletableFuture<List<GlobalSearchItemResponse>> startIfSelected(
+            Set<String> selected,
+            String module,
+            java.util.function.Supplier<List<GlobalSearchItemResponse>> search
+    ) {
+        if (!selected.isEmpty() && !selected.contains(module)) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        return CompletableFuture.supplyAsync(() -> timed(module, search));
     }
 
     private List<GlobalSearchItemResponse> joinOrRecordFailure(

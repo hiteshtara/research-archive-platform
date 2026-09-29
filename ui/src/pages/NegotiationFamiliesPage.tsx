@@ -1,20 +1,13 @@
 import { Box, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
 
 import { getNegotiations } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
-import { FilterChips } from "../components/common/FilterChips";
-import {
-  FilterPanel,
-  FilterToggleButton,
-} from "../components/common/FilterPanel";
 import { PaginationFooter } from "../components/common/PaginationFooter";
 import { StatusPill } from "../components/common/StatusPill";
+import { FilteredSearchBar } from "../components/common/search/FilteredSearchBar";
 import { ResultCard } from "../components/common/search/ResultCard";
 import { ResultCount } from "../components/common/search/ResultCount";
-import { SearchBox } from "../components/common/search/SearchBox";
 import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
 import { SearchStates } from "../components/common/search/SearchStates";
 import {
@@ -22,24 +15,14 @@ import {
   resolveSearchState,
 } from "../features/common/searchPresentation.mjs";
 import {
+  NEGOTIATION_DATE_RANGES,
   NEGOTIATION_FILTER_FIELDS,
-  buildNegotiationFilterChips,
   buildNegotiationPath,
   buildNegotiationSearchParams,
-  buildNegotiationUrlParams,
-  clearNegotiationFilters,
-  countActiveNegotiationFilters,
   formatLeadUnit,
-  hasNegotiationSearchCriteria,
-  negotiationFiltersFromParams,
-  negotiationPageFromParams,
-  negotiationQueryFromParams,
-  removeNegotiationFilter,
 } from "../features/negotiation/negotiationSearchPresentation.mjs";
-import type {
-  NegotiationFilterKey,
-  NegotiationFilters,
-} from "../features/negotiation/negotiationSearchPresentation.d.mts";
+import type { NegotiationFilterKey } from "../features/negotiation/negotiationSearchPresentation.d.mts";
+import { useFilteredSearch } from "../hooks/useFilteredSearch";
 
 const PAGE_SIZE = 25;
 
@@ -58,38 +41,27 @@ function display(value: string | number | null) {
 }
 
 export function NegotiationFamiliesPage() {
-  // The applied search lives in the URL, like every other archive search
-  // page, so a reload or a shared link reproduces the same result set
-  // instead of dropping back to the empty state with populated inputs.
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const appliedSearch = negotiationQueryFromParams(searchParams);
-  const appliedFilters = negotiationFiltersFromParams(searchParams);
-  const page = negotiationPageFromParams(searchParams);
-
-  // `draft`/`filters` are what the inputs are editing; the URL holds what
-  // the last search actually used. Keeping them apart means typing does
-  // not fire a request per keystroke, and the chips always describe the
-  // result set on screen rather than a pending edit.
-  const [draft, setDraft] = useState(appliedSearch);
-  const [filters, setFilters] = useState<NegotiationFilters>(appliedFilters);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-
-  // Nothing is fetched until the user asks for something. This page used
-  // to query on mount, putting the first page of 10,775 Negotiations on
-  // screen before anyone had searched.
-  const hasSearched = hasNegotiationSearchCriteria({
-    query: appliedSearch,
-    filters: appliedFilters,
+  // Applied search state lives in the URL (shared useFilteredSearch), so a
+  // reload, a shared link or Back/Forward reproduces the same result set;
+  // the inputs edit a draft that only applies on Enter / Apply Filters.
+  const search = useFilteredSearch<NegotiationFilterKey>({
+    fields: NEGOTIATION_FILTER_FIELDS,
+    dateRanges: NEGOTIATION_DATE_RANGES,
   });
 
+  // Nothing is fetched until the user asks for something: free text or
+  // at least one applied filter.
+  const hasSearched = search.hasCriteria;
+
   const searchParameters = buildNegotiationSearchParams({
-    query: appliedSearch,
-    filters: appliedFilters,
-    page,
+    query: search.appliedQuery,
+    filters: search.appliedFilters,
+    page: search.page,
     size: PAGE_SIZE,
   });
 
+  // Keyed on the complete applied request and cancelled via `signal`, so a
+  // superseded response can never render under newer criteria.
   const query = useQuery({
     queryKey: ["negotiations", searchParameters],
     queryFn: ({ signal }) => getNegotiations(searchParameters, signal),
@@ -105,95 +77,26 @@ export function NegotiationFamiliesPage() {
     resultCount: results?.content.length ?? 0,
   });
 
-  const commit = (
-    nextQuery: string,
-    nextFilters: NegotiationFilters,
-    nextPage = 0,
-  ) => {
-    setSearchParams(
-      buildNegotiationUrlParams({
-        query: nextQuery,
-        filters: nextFilters,
-        page: nextPage,
-      }),
-    );
-  };
-
-  const applySearch = () => commit(draft.trim(), filters);
-
-  const changeFilter = (key: NegotiationFilterKey, value: string) => {
-    setFilters((current) => ({ ...current, [key]: value }));
-  };
-
-  // Removing a chip acts on the applied result set immediately, so it
-  // drops the filter from both the panel and the live search at once.
-  const removeChip = (key: NegotiationFilterKey) => {
-    const next = removeNegotiationFilter(appliedFilters, key);
-    setFilters(next);
-    commit(appliedSearch, next);
-  };
-
-  // Clear All removes the structured filters AND the free text, which
-  // returns the page to its initial state and stops it querying.
-  const clearAll = () => {
-    const cleared = clearNegotiationFilters();
-    setFilters(cleared);
-    setDraft("");
-    commit("", cleared);
-  };
-
   return (
     <SearchPageLayout
       title="Negotiations"
       subtitle="Search archived negotiations and their associated Kuali records."
       search={
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          spacing={1.5}
-          sx={{ alignItems: { xs: "stretch", sm: "center" } }}
-        >
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <SearchBox
-              value={draft}
-              onChange={setDraft}
-              onSubmit={applySearch}
-              placeholder="Negotiation ID, title, status, negotiator, PI, sponsor, lead unit..."
-              ariaLabel="Search Negotiations"
-            />
-          </Box>
-          <FilterToggleButton
-            open={filtersOpen}
-            activeCount={countActiveNegotiationFilters(filters)}
-            onClick={() => setFiltersOpen((open) => !open)}
-          />
-        </Stack>
+        <FilteredSearchBar
+          search={search}
+          fields={NEGOTIATION_FILTER_FIELDS}
+          placeholder="Negotiation ID, title, status, negotiator, PI, sponsor, lead unit..."
+          ariaLabel="Search Negotiations"
+          panelId="negotiation-filters"
+        />
       }
       belowSearch={
-        <>
-          <FilterPanel
-            open={filtersOpen}
-            fields={NEGOTIATION_FILTER_FIELDS}
-            values={filters}
-            onChange={changeFilter}
-            onApply={applySearch}
-            onClearAll={clearAll}
-          />
-          <FilterChips
-            chips={buildNegotiationFilterChips(appliedFilters)}
-            onRemove={removeChip}
-            onClearAll={clearAll}
-          />
-          {!hasSearched && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mt: 2.5 }}
-            >
-              Search by {SEARCH_DIMENSIONS.join(", ")}, or open Filters to
-              combine criteria.
-            </Typography>
-          )}
-        </>
+        !hasSearched && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
+            Search by {SEARCH_DIMENSIONS.join(", ")}, or open Filters to
+            combine criteria.
+          </Typography>
+        )
       }
     >
       <SearchStates
@@ -262,9 +165,7 @@ export function NegotiationFamiliesPage() {
                 <PaginationFooter
                   page={results.page}
                   totalPages={results.totalPages}
-                  onPageChange={(next) =>
-                    commit(appliedSearch, appliedFilters, next)
-                  }
+                  onPageChange={search.goToPage}
                 />
               </Box>
             )}

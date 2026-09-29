@@ -18,7 +18,16 @@ export interface NegotiationFilterField {
   key: NegotiationFilterKey;
   label: string;
   type?: "date";
+  helperText?: string;
 }
+
+export interface NegotiationDateRange {
+  from: NegotiationFilterKey;
+  to: NegotiationFilterKey;
+  label: string;
+}
+
+export const NEGOTIATION_DATE_RANGES: readonly NegotiationDateRange[];
 
 export interface NegotiationFilterChip {
   key: NegotiationFilterKey;

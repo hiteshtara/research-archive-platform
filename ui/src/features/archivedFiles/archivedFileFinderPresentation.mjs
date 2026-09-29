@@ -90,6 +90,80 @@ export function recordIdFieldLabel(recordType) {
   return "Award ID";
 }
 
+const VERSION_OPTIONS = [
+  { value: "all", label: "All versions" },
+  { value: "current", label: "Current version only" },
+  { value: "historical", label: "Historical versions only" },
+];
+
+// The complete, stable field list for the shared filter panel. Keys are
+// the API's own parameter names. Labels here are the generic ones;
+// archivedFileDisplayFields below swaps in the record-type-specific
+// labels and hides fields that do not apply.
+export const ARCHIVED_FILE_FILTER_FIELDS = [
+  {
+    key: "recordType",
+    label: "Record Type",
+    type: "select",
+    options: RECORD_TYPE_OPTIONS,
+    defaultValue: "ALL",
+  },
+  { key: "recordNumber", label: "Record Number", helperText: "Exact match" },
+  { key: "documentNumber", label: "Workflow Document Number", helperText: "Exact match" },
+  { key: "recordId", label: "Record ID", helperText: "Exact match" },
+  { key: "attachmentId", label: "Attachment ID", helperText: "Exact match" },
+  { key: "fileId", label: "File ID", helperText: "Exact match" },
+  {
+    key: "versionFilter",
+    label: "Versions",
+    type: "select",
+    options: VERSION_OPTIONS,
+    defaultValue: "all",
+  },
+];
+
+/**
+ * The fields the panel shows for a record type, in panel order, with
+ * record-type-specific labels ("Award Number", "Negotiation ID"). Driven
+ * by visibleFieldsForRecordType and versionFilterVisibleForRecordType so
+ * the panel and the identifier check can never disagree.
+ */
+export function archivedFileDisplayFields(recordType) {
+  const identifiers = visibleFieldsForRecordType(recordType);
+  return ARCHIVED_FILE_FILTER_FIELDS.filter((field) => {
+    if (field.key === "recordType") {
+      return true;
+    }
+    if (field.key === "versionFilter") {
+      return versionFilterVisibleForRecordType(recordType);
+    }
+    return identifiers.includes(field.key);
+  }).map((field) => {
+    if (field.key === "recordNumber") {
+      return { ...field, label: toTitleLabel(recordNumberFieldLabel(recordType)) };
+    }
+    if (field.key === "recordId") {
+      return { ...field, label: recordIdFieldLabel(recordType) };
+    }
+    return field;
+  });
+}
+
+function toTitleLabel(label) {
+  return label.replace(/\bnumber\b/, "Number");
+}
+
+/**
+ * Identifier fields that a record type does NOT show, so a draft can drop
+ * values the user can no longer see (never sent hidden, never chipped).
+ */
+export function hiddenIdentifierFields(recordType) {
+  const visible = visibleFieldsForRecordType(recordType);
+  return ["recordNumber", "documentNumber", "recordId", "attachmentId", "fileId"].filter(
+    (key) => !visible.includes(key),
+  );
+}
+
 // At least one exact identifier - among the fields actually visible
 // for the current recordType - is required before a search is
 // submitted. This mirrors the backend's own rejection of an all-blank

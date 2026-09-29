@@ -70,7 +70,7 @@ class GlobalSearchControllerTest {
         GlobalSearchResponse response = new GlobalSearchResponse(
                 "campbell", 1, List.of(item), List.of()
         );
-        when(service.search("campbell")).thenReturn(response);
+        when(service.search("campbell", java.util.Set.of())).thenReturn(response);
 
         mockMvc.perform(
                         get("/api/global-search").param("query", "campbell").with(jwt())
@@ -84,12 +84,12 @@ class GlobalSearchControllerTest {
                 .andExpect(jsonPath("$.results[0].matchedField").value("Workflow Document Number"))
                 .andExpect(jsonPath("$.failedModules").isEmpty());
 
-        verify(service).search("campbell");
+        verify(service).search("campbell", java.util.Set.of());
     }
 
     @Test
     void surfacesFailedModulesWhenOneDomainSearchFailed() throws Exception {
-        when(service.search("campbell")).thenReturn(
+        when(service.search("campbell", java.util.Set.of())).thenReturn(
                 new GlobalSearchResponse("campbell", 0, List.of(), List.of("AWARD"))
         );
 

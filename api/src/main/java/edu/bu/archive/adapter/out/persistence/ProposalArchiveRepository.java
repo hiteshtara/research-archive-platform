@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
+import edu.bu.archive.application.proposal.ProposalSearchFilters;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -85,6 +86,112 @@ public class ProposalArchiveRepository {
                 .param("limit", limit)
                 .query(ProposalFamilySummaryResponse.class)
                 .list();
+    }
+
+    /*
+     * Paged, filterable family search for the Proposals search page.
+     * Same latest-version ranking and free-text columns as findFamilies
+     * above (which Global Search keeps using unchanged); structured
+     * filters are ANDed on the latest version, and the count shares the
+     * exact same WHERE so totalElements always matches the pages.
+     */
+    private static final String FAMILY_PAGE_RANKED = """
+            WITH ranked AS (
+                SELECT
+                    proposal_id,
+                    proposal_number,
+                    version_number,
+                    title,
+                    proposal_sequence_status,
+                    sponsor_code,
+                    sponsor_name,
+                    lead_unit_number,
+                    lead_unit_name,
+                    principal_investigator_name,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY proposal_number
+                        ORDER BY
+                            version_number DESC,
+                            source_update_timestamp DESC NULLS LAST,
+                            proposal_id DESC
+                    ) AS row_rank
+                FROM archive.proposal_version
+            )
+            """;
+
+    private static final String FAMILY_PAGE_WHERE = """
+            WHERE row_rank = 1
+              AND (CAST(:query AS TEXT) IS NULL OR (
+                    proposal_number ILIKE '%' || :query || '%'
+                    OR title ILIKE '%' || :query || '%'
+                    OR sponsor_name ILIKE '%' || :query || '%'
+                    OR lead_unit_name ILIKE '%' || :query || '%'
+                    OR principal_investigator_name
+                        ILIKE '%' || :query || '%'
+              ))
+              AND (CAST(:sponsor AS TEXT) IS NULL
+                   OR sponsor_name ILIKE '%' || :sponsor || '%'
+                   OR sponsor_code ILIKE '%' || :sponsor || '%')
+              AND (CAST(:leadUnit AS TEXT) IS NULL
+                   OR lead_unit_name ILIKE '%' || :leadUnit || '%'
+                   OR lead_unit_number ILIKE '%' || :leadUnit || '%')
+              AND (CAST(:principalInvestigator AS TEXT) IS NULL
+                   OR principal_investigator_name
+                      ILIKE '%' || :principalInvestigator || '%')
+            """;
+
+    private static JdbcClient.StatementSpec bindFamilyPage(
+            JdbcClient.StatementSpec statement,
+            String query,
+            ProposalSearchFilters filters
+    ) {
+        String normalizedQuery =
+                query == null || query.isBlank() ? null : query.trim();
+        ProposalSearchFilters f =
+                filters == null ? ProposalSearchFilters.none() : filters;
+        return statement
+                .param("query", normalizedQuery)
+                .param("sponsor", f.sponsor())
+                .param("leadUnit", f.leadUnit())
+                .param("principalInvestigator", f.principalInvestigator());
+    }
+
+    public List<ProposalFamilySummaryResponse> findFamilyPage(
+            String query,
+            ProposalSearchFilters filters,
+            int limit,
+            int offset
+    ) {
+        return bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
+                SELECT
+                    proposal_number,
+                    title,
+                    proposal_sequence_status AS status,
+                    sponsor_name,
+                    lead_unit_name,
+                    principal_investigator_name
+                        AS principal_investigator,
+                    version_number AS latest_version_number,
+                    proposal_id AS current_proposal_id
+                FROM ranked
+                """ + FAMILY_PAGE_WHERE + """
+                ORDER BY proposal_number
+                LIMIT :limit OFFSET :offset
+                """), query, filters)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(ProposalFamilySummaryResponse.class)
+                .list();
+    }
+
+    public long countFamilyPage(String query, ProposalSearchFilters filters) {
+        Long count = bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
+                SELECT COUNT(*)
+                FROM ranked
+                """ + FAMILY_PAGE_WHERE), query, filters)
+                .query(Long.class)
+                .single();
+        return count == null ? 0L : count;
     }
 
     /*

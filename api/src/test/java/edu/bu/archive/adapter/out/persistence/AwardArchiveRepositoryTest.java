@@ -68,8 +68,12 @@ class AwardArchiveRepositoryTest {
                 .contains("ap2.full_name ILIKE :pattern")
                 .contains("UPPER(av.award_number) = UPPER(:rawQuery)")
                 .contains("LEFT JOIN LATERAL")
-                .contains("LEFT JOIN archive.award_hierarchy ah")
-                .contains("ORDER BY av.award_number")
+                .contains("FROM archive.award_hierarchy h WHERE h.award_number = av.award_number")
+                .contains("LIMIT 1 ) ah ON TRUE")
+                .doesNotContain("LEFT JOIN archive.award_hierarchy ah")
+                // award_id breaks ties: nothing constrains is_primary_current
+                // to one row per award_number, so paging must not depend on it.
+                .contains("ORDER BY av.award_number, av.award_id")
                 .doesNotContain("' + rawQuery")
                 .doesNotContain("\" + rawQuery");
         verify(statement).param("pattern", "%cancer%");

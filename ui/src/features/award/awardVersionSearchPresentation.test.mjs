@@ -149,10 +149,22 @@ test("Historical Award Records heading/helper text says results are individual A
   );
 });
 
-test("Historical Award Records still exposes the dedicated exact Award ID field", () => {
+test("Historical Award Records still exposes the dedicated exact Award ID field", async () => {
+  // The field now lives in the shared filter definitions the page renders,
+  // rather than as an inline TextField.
+  const { AWARD_VERSION_FILTER_FIELDS, AWARD_FILTER_FIELDS } = await import(
+    "../search/searchFilterFields.mjs"
+  );
   const source = readAwardVersionSearchPageSource();
 
-  assert.match(source, /label="Award ID \(exact\)"/);
+  const awardId = AWARD_VERSION_FILTER_FIELDS.find((field) => field.key === "awardId");
+  assert.equal(awardId?.label, "Award ID (exact)");
+  assert.match(source, /fields=\{AWARD_VERSION_FILTER_FIELDS\}/);
+  // ...and the current-Award search never gains one.
+  assert.equal(
+    AWARD_FILTER_FIELDS.some((field) => field.key === "awardId"),
+    false,
+  );
 });
 
 test("the Historical Awards page's helper link goes back to the current Award-family search", () => {

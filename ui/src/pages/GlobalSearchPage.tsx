@@ -10,7 +10,7 @@ import type { StatusDomain } from "../components/common/StatusPill";
 import { HintChips } from "../components/common/search/HintChips";
 import { ResultCard } from "../components/common/search/ResultCard";
 import { ResultCount } from "../components/common/search/ResultCount";
-import { SearchBox } from "../components/common/search/SearchBox";
+import { FilteredSearchBar } from "../components/common/search/FilteredSearchBar";
 import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
 import { SearchStates } from "../components/common/search/SearchStates";
 import {
@@ -21,7 +21,10 @@ import {
   describeResultCard,
   filterOutIrbResults,
 } from "../features/search/globalSearchPresentation.mjs";
-import { useSearchQueryParam } from "../hooks/useSearchQueryParam";
+import { GLOBAL_SEARCH_FILTER_FIELDS } from "../features/search/searchFilterFields.mjs";
+import { emptyResultsMessage } from "../features/common/filterPresentation.mjs";
+import type { GlobalSearchFilterKey } from "../features/search/searchFilterFields.d.mts";
+import { useFilteredSearch } from "../hooks/useFilteredSearch";
 
 const MINIMUM_QUERY_LENGTH = 2;
 
@@ -53,13 +56,31 @@ export function GlobalSearchPage() {
     }
   }, [legacyQuery, searchParams, setSearchParams]);
 
-  const { draft, setDraft, query, submit } = useSearchQueryParam();
+  const search = useFilteredSearch<GlobalSearchFilterKey>({
+    fields: GLOBAL_SEARCH_FILTER_FIELDS,
+  });
+  const query = search.appliedQuery;
+  const draft = search.draftQuery;
+  const modules = search.appliedActiveFilters.modules
+    ? [search.appliedActiveFilters.modules]
+    : [];
 
   const longEnough = query.trim().length >= MINIMUM_QUERY_LENGTH;
 
+  // Record Type narrows a text search; it never runs one on its own
+  // (the API requires at least two characters of text).
+  const submit = () => {
+    if (draft.trim().length >= MINIMUM_QUERY_LENGTH) {
+      search.apply();
+    }
+  };
+
+  // Keyed on the text AND the record-type restriction, cancelled via
+  // `signal`, so a superseded response never renders.
   const searchQuery = useQuery({
-    queryKey: ["global-search", query],
-    queryFn: async () => filterOutIrbResults(await globalSearch(query)),
+    queryKey: ["global-search", query, modules],
+    queryFn: async ({ signal }) =>
+      filterOutIrbResults(await globalSearch(query, { modules }, signal)),
     enabled: longEnough,
   });
 
@@ -77,23 +98,20 @@ export function GlobalSearchPage() {
       title="Search the Archive"
       subtitle="Search Awards, Proposals, Negotiations, and Subawards at once by document number, PI, sponsor, award number or title."
       search={
-        <SearchBox
-          value={draft}
-          onChange={setDraft}
-          onSubmit={(value) => {
-            if (value.trim().length >= MINIMUM_QUERY_LENGTH) {
-              submit(value);
-            }
-          }}
+        <FilteredSearchBar
+          search={search}
+          fields={GLOBAL_SEARCH_FILTER_FIELDS}
+          onSubmit={submit}
           placeholder="Search document number, PI, sponsor, award, title..."
           ariaLabel="Search the archive"
+          panelId="global-search-filters"
         />
       }
       belowSearch={
         <>
           <HintChips hints={SEARCH_DIMENSIONS} />
-          {draft.trim().length > 0 &&
-            draft.trim().length < MINIMUM_QUERY_LENGTH && (
+          {draft.trim().length < MINIMUM_QUERY_LENGTH &&
+            (draft.trim().length > 0 || search.hasUnappliedChanges) && (
               <Typography
                 variant="body2"
                 color="text.secondary"
@@ -123,7 +141,11 @@ export function GlobalSearchPage() {
             {results.results.length === 0 && (
               <EmptyState
                 variant="text"
-                message="No matching archive records were found."
+                message={emptyResultsMessage({
+                  noun: "archive records",
+                  query,
+                  filterCount: search.appliedCount,
+                })}
               />
             )}
 

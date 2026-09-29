@@ -17,6 +17,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import edu.bu.archive.application.subaward.SubawardSearchFilters;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,17 +33,19 @@ public class SubawardArchiveRepository {
     }
 
     public long countSubawards(String query) {
+        return countSubawards(query, SubawardSearchFilters.none());
+    }
+
+    public long countSubawards(String query, SubawardSearchFilters filters) {
         String normalizedQuery = normalizeQuery(query);
-        String filter = subawardFilter(normalizedQuery);
+        SubawardSearchFilters safeFilters =
+                filters == null ? SubawardSearchFilters.none() : filters;
 
         JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.subaward s
-                """ + filter);
-        if (!normalizedQuery.isEmpty()) {
-            statement = statement.param("query", normalizedQuery);
-        }
-        Long count = statement
+                """ + whereClause(normalizedQuery, safeFilters));
+        Long count = bind(statement, normalizedQuery, safeFilters)
                 .query(Long.class)
                 .single();
 
@@ -86,8 +89,19 @@ public class SubawardArchiveRepository {
             int limit,
             int offset
     ) {
+        return findSubawards(query, SubawardSearchFilters.none(), limit, offset);
+    }
+
+    public List<SubawardSummaryResponse> findSubawards(
+            String query,
+            SubawardSearchFilters filters,
+            int limit,
+            int offset
+    ) {
         String normalizedQuery = normalizeQuery(query);
-        String filter = subawardFilter(normalizedQuery);
+        SubawardSearchFilters safeFilters =
+                filters == null ? SubawardSearchFilters.none() : filters;
+        String filter = whereClause(normalizedQuery, safeFilters);
         String orderBy = normalizedQuery.isEmpty()
                 ? """
                 ORDER BY subaward_id DESC
@@ -124,11 +138,7 @@ public class SubawardArchiveRepository {
                 LIMIT :limit
                 OFFSET :offset
                 """.formatted(filter, orderBy);
-        JdbcClient.StatementSpec statement = jdbc.sql(sql);
-        if (!normalizedQuery.isEmpty()) {
-            statement = statement.param("query", normalizedQuery);
-        }
-        return statement
+        return bind(jdbc.sql(sql), normalizedQuery, safeFilters)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(SubawardSummaryResponse.class)
@@ -176,7 +186,7 @@ public class SubawardArchiveRepository {
         return normalizedQuery.isEmpty()
                 ? ""
                 : """
-                WHERE CAST(s.subaward_id AS TEXT)
+                CAST(s.subaward_id AS TEXT)
                         ILIKE '%' || :query || '%'
                    OR s.subaward_code ILIKE '%' || :query || '%'
                    OR s.document_number ILIKE '%' || :query || '%'
@@ -187,6 +197,87 @@ public class SubawardArchiveRepository {
                    OR s.award_prime_sponsor_name ILIKE '%' || :query || '%'
                    OR s.award_sponsor_name ILIKE '%' || :query || '%'
                 """ + frnFilter(normalizedQuery);
+    }
+
+    /*
+     * The complete WHERE: the free-text/FRN predicate (parenthesized - it
+     * is an OR chain) ANDed with each structured filter that is actually
+     * present. Absent filters emit no SQL and bind no parameter, so an
+     * unfiltered search is byte-for-byte the SQL it always was - including
+     * the empty-query fast path ordered by the primary key. See
+     * SubawardSearchFilters for the matching semantics.
+     */
+    private String whereClause(
+            String normalizedQuery,
+            SubawardSearchFilters filters
+    ) {
+        java.util.List<String> clauses = new java.util.ArrayList<>();
+        if (!normalizedQuery.isEmpty()) {
+            clauses.add("(\n" + subawardFilter(normalizedQuery) + ")");
+        }
+        if (filters.status() != null) {
+            clauses.add("""
+                    (UPPER(TRIM(s.status_description)) = UPPER(:status)
+                     OR UPPER(TRIM(regexp_replace(
+                            s.status_description, '^[0-9]+\\.\\s*', '')))
+                        = UPPER(:status))""");
+        }
+        if (filters.sponsor() != null) {
+            clauses.add("""
+                    (s.award_sponsor_name ILIKE '%' || :sponsor || '%'
+                     OR s.award_prime_sponsor_name ILIKE '%' || :sponsor || '%')""");
+        }
+        if (filters.organizationId() != null) {
+            clauses.add(
+                    "UPPER(TRIM(s.organization_id)) = UPPER(:organizationId)");
+        }
+        if (filters.startDateFrom() != null) {
+            clauses.add("s.start_date >= CAST(:startDateFrom AS DATE)");
+        }
+        if (filters.startDateTo() != null) {
+            clauses.add("s.start_date <= CAST(:startDateTo AS DATE)");
+        }
+        if (filters.endDateFrom() != null) {
+            clauses.add("s.end_date >= CAST(:endDateFrom AS DATE)");
+        }
+        if (filters.endDateTo() != null) {
+            clauses.add("s.end_date <= CAST(:endDateTo AS DATE)");
+        }
+        return clauses.isEmpty()
+                ? ""
+                : "WHERE " + String.join("\n  AND ", clauses) + "\n";
+    }
+
+    private static JdbcClient.StatementSpec bind(
+            JdbcClient.StatementSpec statement,
+            String normalizedQuery,
+            SubawardSearchFilters filters
+    ) {
+        if (!normalizedQuery.isEmpty()) {
+            statement = statement.param("query", normalizedQuery);
+        }
+        if (filters.status() != null) {
+            statement = statement.param("status", filters.status());
+        }
+        if (filters.sponsor() != null) {
+            statement = statement.param("sponsor", filters.sponsor());
+        }
+        if (filters.organizationId() != null) {
+            statement = statement.param("organizationId", filters.organizationId());
+        }
+        if (filters.startDateFrom() != null) {
+            statement = statement.param("startDateFrom", filters.startDateFrom());
+        }
+        if (filters.startDateTo() != null) {
+            statement = statement.param("startDateTo", filters.startDateTo());
+        }
+        if (filters.endDateFrom() != null) {
+            statement = statement.param("endDateFrom", filters.endDateFrom());
+        }
+        if (filters.endDateTo() != null) {
+            statement = statement.param("endDateTo", filters.endDateTo());
+        }
+        return statement;
     }
 
     /*

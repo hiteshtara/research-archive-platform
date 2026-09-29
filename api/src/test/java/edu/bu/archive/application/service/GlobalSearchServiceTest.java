@@ -1041,4 +1041,35 @@ class GlobalSearchServiceTest {
         assertThat(item.identifier()).startsWith("0");
     }
 
+    // --- Record type (modules) restriction ------------------------------
+
+    @Test
+    void restrictingModulesQueriesOnlyTheSelectedDomains() {
+        service.search("campbell", java.util.Set.of("award", " SUBAWARD "));
+
+        verify(awardArchiveService).search("campbell", 0, 25);
+        verify(subawardArchiveService).findPage("campbell", 0, 25);
+        verifyNoInteractions(negotiationArchiveService);
+        verify(proposalArchiveRepository, never()).findFamilies(anyString(), anyInt());
+        verifyNoInteractions(irbSearchRepository);
+    }
+
+    @Test
+    void anEmptyModuleSetSearchesEveryDomainAsBefore() {
+        service.search("campbell", java.util.Set.of());
+
+        verify(awardArchiveService).search("campbell", 0, 25);
+        verify(negotiationArchiveService).findPage("campbell", 0, 25);
+        verify(subawardArchiveService).findPage("campbell", 0, 25);
+        verify(proposalArchiveRepository).findFamilies("campbell", 25);
+    }
+
+    @Test
+    void anUnknownRecordTypeIsRejectedNotSilentlyIgnored() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.search("campbell", java.util.Set.of("IRB")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unknown record type");
+        verifyNoInteractions(awardArchiveService);
+    }
 }

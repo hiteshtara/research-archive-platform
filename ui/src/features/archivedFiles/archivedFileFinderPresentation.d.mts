@@ -8,6 +8,23 @@ export interface RecordTypeOption {
 export const RECORD_TYPES: RecordType[];
 export const RECORD_TYPE_OPTIONS: RecordTypeOption[];
 
+export type ArchivedFileFilterKey =
+  | "recordType"
+  | "recordNumber"
+  | "documentNumber"
+  | "recordId"
+  | "attachmentId"
+  | "fileId"
+  | "versionFilter";
+
+export const ARCHIVED_FILE_FILTER_FIELDS: readonly import("../common/filterPresentation.mjs").FilterFieldDefinition<ArchivedFileFilterKey>[];
+
+export function archivedFileDisplayFields(
+  recordType: string,
+): import("../common/filterPresentation.mjs").FilterFieldDefinition<ArchivedFileFilterKey>[];
+
+export function hiddenIdentifierFields(recordType: string): ArchivedFileFilterKey[];
+
 export function recordTypeLabel(recordType: string): string;
 
 export type ArchivedFileFinderField =

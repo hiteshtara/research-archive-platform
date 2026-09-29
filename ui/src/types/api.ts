@@ -959,6 +959,8 @@ export interface ProposalFamily {
   currentProposalId: number;
 }
 
+export interface ProposalFamilyPageResponse extends PageResponse<ProposalFamily> {}
+
 export interface ProposalRow {
   proposalId: number;
   proposalNumber: string;
