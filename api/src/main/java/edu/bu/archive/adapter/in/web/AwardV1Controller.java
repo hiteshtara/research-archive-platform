@@ -951,15 +951,27 @@ public class AwardV1Controller {
                     + "when a limit is reached the report and manifest are "
                     + "still produced and the omitted attachments are named. "
                     + "Never exposes S3 buckets, keys or any storage "
-                    + "internals."
+                    + "internals.\n\n"
+                    + "Requires the ArchiveAttachmentViewer group, exactly "
+                    + "like the attachment list and download endpoints: "
+                    + "this response carries attachment content. The "
+                    + "report without attachments (report.pdf) does not."
     )
     @ApiResponse(responseCode = "200", description = "The consolidated Award PDF.")
+    @ApiResponse(responseCode = "403", description = "Caller is not in the ArchiveAttachmentViewer group.")
     @ApiResponse(responseCode = "404", description = "No such award_id.")
     @GetMapping("/{awardId}/report-with-attachments.pdf")
     public ResponseEntity<StreamingResponseBody> reportWithAttachments(
             @PathVariable
-            long awardId
+            long awardId,
+
+            Authentication authentication
     ) {
+        // Checked first, before any report data or attachment metadata is
+        // loaded: this endpoint embeds attachment files, so it is held to
+        // the same policy as /attachments and /attachments/{id}/download.
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
+
         edu.bu.archive.application.award.report.AwardReportData data =
                 reportService.buildReportData(awardId);
         java.util.List<edu.bu.archive.application.award.report.AwardReportAttachment>

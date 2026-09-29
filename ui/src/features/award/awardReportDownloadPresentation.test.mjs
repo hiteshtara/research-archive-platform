@@ -6,6 +6,7 @@ import {
   REPORT_WITH_ATTACHMENTS,
   buildAwardReportFallbackFileName,
   buildAwardReportPath,
+  isReportActionAvailable,
   reportDownloadErrorMessage,
   resolveReportActionState,
 } from "./awardReportDownloadPresentation.mjs";
@@ -129,5 +130,41 @@ test("fallback filename is sanitized", () => {
   assert.equal(
     buildAwardReportFallbackFileName("../../etc/passwd", REPORT_ONLY),
     "Award_.._.._etc_passwd_Complete_Report.pdf",
+  );
+});
+
+// --- attachment gate (ArchiveAttachmentViewer) ------------------------
+test("the report with attachments is offered only with attachment access", () => {
+  assert.equal(isReportActionAvailable(REPORT_WITH_ATTACHMENTS, true), true);
+  assert.equal(isReportActionAvailable(REPORT_WITH_ATTACHMENTS, false), false);
+});
+
+test("the attachment gate fails closed on an unresolved or odd value", () => {
+  for (const value of [undefined, null, "true", 1]) {
+    assert.equal(isReportActionAvailable(REPORT_WITH_ATTACHMENTS, value), false);
+  }
+});
+
+test("the report-only action is unaffected by attachment access", () => {
+  assert.equal(isReportActionAvailable(REPORT_ONLY, false), true);
+  assert.equal(isReportActionAvailable(REPORT_ONLY, true), true);
+});
+
+test("a 403 on the report with attachments says access was denied", () => {
+  const message = reportDownloadErrorMessage(403, REPORT_WITH_ATTACHMENTS);
+  assert.match(message, /do not have access to Award attachments/);
+  assert.match(message, /was not downloaded/);
+});
+
+test("the dashboard gates the attachments action with the shared hook", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
+    new URL("../../pages/award/AwardDashboardPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /const attachmentAccess = useAttachmentAccess\(\);/);
+  assert.match(
+    source,
+    /isReportActionAvailable\(REPORT_WITH_ATTACHMENTS, attachmentAccess\) && \(/,
   );
 });

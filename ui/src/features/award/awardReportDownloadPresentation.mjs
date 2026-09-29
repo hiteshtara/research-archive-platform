@@ -59,10 +59,30 @@ export function buildAwardReportFallbackFileName(awardNumber, kind = REPORT_ONLY
     : `Award_${safe}_Complete_Report.pdf`;
 }
 
+/**
+ * Whether an action is offered at all.
+ *
+ * The report with attachments embeds attachment files, so it follows the
+ * same ArchiveAttachmentViewer policy as the Attachments section: hidden
+ * unless the (fail-closed) group check has resolved true. This is a UI
+ * convenience only - the API enforces the same rule on every request.
+ * The report-only action carries no attachment content and is always
+ * offered.
+ */
+export function isReportActionAvailable(kind, hasAttachmentAccess) {
+  return kind === REPORT_WITH_ATTACHMENTS ? hasAttachmentAccess === true : true;
+}
+
 /** User-facing message for a failed download. Never mentions storage. */
 export function reportDownloadErrorMessage(status, kind = REPORT_ONLY) {
   if (status === 404) {
     return "This Award's report could not be generated.";
+  }
+  if (status === 403) {
+    return kind === REPORT_WITH_ATTACHMENTS
+      ? "You do not have access to Award attachments, so the report with "
+        + "attachments was not downloaded."
+      : "You do not have access to this Award report.";
   }
   const what = kind === REPORT_WITH_ATTACHMENTS
     ? "report with attachments"

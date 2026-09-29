@@ -28,6 +28,11 @@ export function buildAwardReportFallbackFileName(
   kind?: AwardReportKind,
 ): string;
 
+export function isReportActionAvailable(
+  kind: AwardReportKind,
+  hasAttachmentAccess: boolean,
+): boolean;
+
 export function reportDownloadErrorMessage(
   status: number,
   kind?: AwardReportKind,
