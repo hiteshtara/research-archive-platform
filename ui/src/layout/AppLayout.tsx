@@ -1,6 +1,7 @@
 import {
   AccountCircleOutlined,
   ArchiveOutlined,
+  CloseOutlined,
   DashboardOutlined,
   DescriptionOutlined,
   FindInPageOutlined,
@@ -90,7 +91,9 @@ export function AppLayout() {
   // button, so the page gets the full width on phones and small tablets.
   // At md and up it stays the permanent sidebar it has always been.
   const theme = useTheme();
-  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+  // noSsr: read the real viewport on the first render, so a desktop
+  // never briefly mounts the temporary drawer before switching.
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"), { noSsr: true });
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
@@ -142,16 +145,31 @@ export function AppLayout() {
     }
   }
 
-  // One navigation list, rendered by whichever drawer is in use.
-  const navigationContent = (
+  // One navigation list, rendered by whichever drawer is in use. The
+  // temporary drawer adds its own close button: on phones the header sits
+  // under the drawer's backdrop, so the menu button is not reachable.
+  const renderNavigationContent = (onClose?: () => void) => (
     <>
-      <Typography
-        variant="overline"
-        color="text.secondary"
-        sx={{ px: 3, pt: 2 }}
+      <Stack
+        sx={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          px: 3,
+          pt: onClose ? 1 : 2,
+          pr: onClose ? 1 : 3,
+        }}
       >
-        Navigation
-      </Typography>
+        <Typography variant="overline" color="text.secondary">
+          Navigation
+        </Typography>
+
+        {onClose && (
+          <IconButton aria-label="Close navigation menu" onClick={onClose}>
+            <CloseOutlined />
+          </IconButton>
+        )}
+      </Stack>
 
       <List sx={{ px: 1.5 }}>
         {visibleNavigation.map((item) => (
@@ -192,7 +210,10 @@ export function AppLayout() {
       <AppBar
         position="fixed"
         sx={{
-          zIndex: (theme) => theme.zIndex.drawer + 1,
+          // Above the permanent sidebar on desktop only. Below md the
+          // temporary drawer is a modal: it and its backdrop must cover
+          // the header, which the modal also hides from assistive tech.
+          zIndex: { md: theme.zIndex.drawer + 1 },
           backgroundColor: "#ffffff",
           color: "#172033",
           borderBottom: "1px solid #e7e9ee",
@@ -319,9 +340,11 @@ export function AppLayout() {
         </Toolbar>
       </AppBar>
 
+      {/* A landmark only when it holds the permanent sidebar; the
+          temporary drawer's paper is its own "Primary" nav. */}
       <Box
-        component="nav"
-        aria-label="Primary"
+        component={isDesktop ? "nav" : "div"}
+        aria-label={isDesktop ? "Primary" : undefined}
         sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
       >
         {isDesktop ? (
@@ -339,7 +362,7 @@ export function AppLayout() {
               },
             }}
           >
-            {navigationContent}
+            {renderNavigationContent()}
           </Drawer>
         ) : (
           <Drawer
@@ -348,16 +371,20 @@ export function AppLayout() {
             open={mobileOpen}
             onClose={() => setMobileOpen(false)}
             ModalProps={{ keepMounted: true }}
+            // The modal renders in a portal outside the <nav> above, so
+            // the paper carries the navigation landmark itself.
+            slotProps={{
+              paper: { component: "nav", "aria-label": "Primary" },
+            }}
             sx={{
               "& .MuiDrawer-paper": {
                 width: drawerWidth,
                 maxWidth: "85vw",
                 boxSizing: "border-box",
-                pt: 1,
               },
             }}
           >
-            {navigationContent}
+            {renderNavigationContent(() => setMobileOpen(false))}
           </Drawer>
         )}
       </Box>
