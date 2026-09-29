@@ -54,6 +54,45 @@ class ProposalArchiveControllerTest {
         verify(service, never()).findWorkspace("families");
     }
 
+    /*
+     * QA TC-033: /api/proposals/search is the paginated Proposals search.
+     * The literal route must win over {proposalNumber}, so "search" is never
+     * looked up as a Proposal number - which is also why the UI's workspace
+     * client treats "search" as not found instead of calling this URL.
+     */
+    @Test
+    void searchUsesTheLiteralRouteInsteadOfProposalNumber()
+            throws Exception {
+        mockMvc.perform(get("/api/proposals/search")
+                        .param("sponsor", "nih")
+                        .param("page", "1")
+                        .param("size", "25"))
+                .andExpect(status().isOk());
+
+        verify(service).findFamilyPage(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.argThat(
+                        filters -> "nih".equals(filters.sponsor())),
+                org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(25)
+        );
+        verify(service, never()).findWorkspace("search");
+    }
+
+    @Test
+    void workspaceStillResolvesARealProposalNumber() throws Exception {
+        mockMvc.perform(get("/api/proposals/01091939"))
+                .andExpect(status().isOk());
+
+        verify(service).findWorkspace("01091939");
+        verify(service, never()).findFamilyPage(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt()
+        );
+    }
+
     @Test
     void familiesClampsTheLimitToTheAwardBounds() {
         ProposalFamilySummaryResponse family =

@@ -1,9 +1,10 @@
-import { Alert } from "@mui/material";
+import { Alert, Link } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { Navigate, useParams } from "react-router-dom";
+import { Navigate, Link as RouterLink, useParams } from "react-router-dom";
 
-import { getProposalWorkspace } from "../api/client";
+import { ApiRequestError, getProposalWorkspace } from "../api/client";
 import { LoadingState } from "../components/common/LoadingState";
+import { proposalWorkspaceErrorMessage } from "../features/proposal/proposalWorkspacePresentation.mjs";
 
 // Retired: this page's own General/Awards/History tabs predated the
 // current ProposalDashboardPage (Summary/Versions/Funded Awards/
@@ -20,8 +21,14 @@ export function ProposalWorkspacePage() {
     queryKey: ["proposal-workspace", proposalNumber],
     enabled: !!proposalNumber,
     queryFn: () => getProposalWorkspace(proposalNumber!),
+    // A missing Proposal will not appear on retry.
+    retry: (failureCount, error) =>
+      !(error instanceof ApiRequestError && error.status === 404) && failureCount < 2,
   });
 
+  // getProposalWorkspace validates the payload, so a successful result
+  // always carries current.proposalId (a search page or family list is
+  // rejected as an error rather than rendered).
   if (workspaceQuery.isSuccess && workspaceQuery.data) {
     return (
       <Navigate
@@ -32,7 +39,20 @@ export function ProposalWorkspacePage() {
   }
 
   if (workspaceQuery.isError) {
-    return <Alert severity="error">Unable to load Proposal workspace.</Alert>;
+    const notFound =
+      workspaceQuery.error instanceof ApiRequestError &&
+      workspaceQuery.error.status === 404;
+    return (
+      <Alert severity={notFound ? "warning" : "error"}>
+        {proposalWorkspaceErrorMessage(
+          notFound ? "not-found" : "unavailable",
+          proposalNumber ?? "",
+        )}{" "}
+        <Link component={RouterLink} to="/proposals">
+          Search Proposals
+        </Link>
+      </Alert>
+    );
   }
 
   return <LoadingState />;
