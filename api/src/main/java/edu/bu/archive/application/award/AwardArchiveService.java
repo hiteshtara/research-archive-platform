@@ -478,6 +478,23 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        return search(query, AwardSearchFilters.none(), page, size);
+    }
+
+    /*
+     * Structured filters AND with the free-text query and with each
+     * other, in SQL, so paging and totalElements always describe the
+     * complete filtered result set (see AwardSearchFilters). Filters alone,
+     * with no free text, are a valid search.
+     */
+    public AwardSearchResponse search(
+            String query,
+            AwardSearchFilters filters,
+            int page,
+            int size
+    ) {
+        AwardSearchFilters safeFilters =
+                filters == null ? AwardSearchFilters.none() : filters;
         String rawQuery = query == null ? "" : query.trim();
         String pattern = AwardSearchPattern.toLikePattern(rawQuery);
 
@@ -485,7 +502,7 @@ public class AwardArchiveService {
         int safeSize = PaginationSupport.clampSize(size);
 
         long totalElements =
-                repository.countSearchAwards(pattern, rawQuery);
+                repository.countSearchAwards(pattern, rawQuery, safeFilters);
 
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
@@ -500,6 +517,7 @@ public class AwardArchiveService {
                 repository.searchAwards(
                         pattern,
                         rawQuery,
+                        safeFilters,
                         safeSize,
                         offset
                 );
@@ -510,9 +528,15 @@ public class AwardArchiveService {
         // substring match by construction, since the frontend renders
         // exactDocumentMatch before results.content rather than merging
         // the two into one ordered list.
+        //
+        // Suppressed while structured filters are applied: the callout is
+        // not subject to them, so showing it would contradict the filtered
+        // result set directly beneath it.
         AwardDocumentNumberMatchResponse exactDocumentMatch =
-                repository.findExactWorkflowDocumentMatch(rawQuery)
-                        .orElse(null);
+                safeFilters.hasStructuredFilters()
+                        ? null
+                        : repository.findExactWorkflowDocumentMatch(rawQuery)
+                                .orElse(null);
 
         PageResponse<AwardSearchResultResponse> results = new PageResponse<>(
                 content,
@@ -770,6 +794,23 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        return searchVersions(query, awardNumber, documentNumber, awardId,
+                versionFilter, AwardSearchFilters.none(), sort, page, size);
+    }
+
+    public PageResponse<AwardVersionSearchResultResponse> searchVersions(
+            String query,
+            String awardNumber,
+            String documentNumber,
+            String awardId,
+            String versionFilter,
+            AwardSearchFilters filters,
+            String sort,
+            int page,
+            int size
+    ) {
+        AwardSearchFilters safeFilters =
+                filters == null ? AwardSearchFilters.none() : filters;
         String rawQuery = query == null ? "" : query.trim();
         String pattern = AwardSearchPattern.toLikePattern(rawQuery);
         String safeAwardNumber = awardNumber == null ? "" : awardNumber.trim();
@@ -784,7 +825,8 @@ public class AwardArchiveService {
         int safeSize = PaginationSupport.clampSize(size);
 
         long totalElements = repository.countSearchAwardVersions(
-                pattern, rawQuery, safeAwardNumber, safeDocumentNumber, safeAwardId, safeVersionFilter
+                pattern, rawQuery, safeAwardNumber, safeDocumentNumber, safeAwardId, safeVersionFilter,
+                safeFilters
         );
 
         PaginationSupport.PageMetadata pageMetadata =
@@ -800,6 +842,7 @@ public class AwardArchiveService {
                         safeDocumentNumber,
                         safeAwardId,
                         safeVersionFilter,
+                        safeFilters,
                         sortSql,
                         safeSize,
                         offset

@@ -17,10 +17,12 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardWorkspaceResponse;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.subaward.SubawardArchiveService;
 import edu.bu.archive.application.subaward.SubawardAttachmentDownload;
+import edu.bu.archive.application.subaward.SubawardSearchFilters;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -53,10 +56,40 @@ public class SubawardArchiveController {
         this.attachmentAuthorizationService = attachmentAuthorizationService;
     }
 
+    /*
+     * Structured filters are optional and AND with the free-text query;
+     * see SubawardSearchFilters for per-field matching. Dates are ISO
+     * yyyy-MM-dd and inclusive on both ends.
+     */
     @GetMapping
     public ResponseEntity<SubawardPageResponse> search(
             @RequestParam(required = false)
             String query,
+
+            @RequestParam(required = false)
+            String status,
+
+            @RequestParam(required = false)
+            String sponsor,
+
+            @RequestParam(required = false)
+            String organizationId,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate startDateFrom,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate startDateTo,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate endDateFrom,
+
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate endDateTo,
 
             @RequestParam(defaultValue = "0")
             int page,
@@ -64,7 +97,13 @@ public class SubawardArchiveController {
             @RequestParam(defaultValue = "25")
             int size
     ) {
-        return ResponseEntity.ok(service.findPage(query, page, size));
+        return ResponseEntity.ok(service.findPage(
+                query,
+                new SubawardSearchFilters(status, sponsor, organizationId,
+                        startDateFrom, startDateTo, endDateFrom, endDateTo),
+                page,
+                size
+        ));
     }
 
     @GetMapping("/{subawardId}")

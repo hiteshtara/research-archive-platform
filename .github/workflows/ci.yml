@@ -1,0 +1,120 @@
+# Tests only: no deployment, no AWS credentials, no secrets, no live databases.
+# Database suites run against throwaway Testcontainers PostgreSQL containers on the
+# GitHub-hosted runner and are discarded with it.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    name: UI - test, lint, typecheck, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Same version as the verified local build; satisfies Vite 8's ^20.19.0.
+          node-version: "20.20.2"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npm run test
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck and build
+        run: npm run build
+
+  api-unit:
+    name: API - unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # The Testcontainers suites run in api-db. Four of them use plain
+      # @Testcontainers, which errors (rather than skips) without Docker, so
+      # they are excluded here by name.
+      - name: mvn test (database suites excluded)
+        run: >
+          mvn -B -ntp test
+          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest'
+          -Dsurefire.failIfNoSpecifiedTests=false
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-unit-surefire-reports
+          path: api/target/surefire-reports/
+          retention-days: 7
+
+  api-db:
+    name: API - PostgreSQL integration (disposable Testcontainers)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # Fail closed if anything could point the tests at a real database or a
+      # remote Docker host. Each suite builds its DataSource from its own
+      # container's JDBC URL; the application's datasource settings are unused.
+      - name: Guard - no live database, AWS or remote Docker configuration
+        run: |
+          leaked=$(env | cut -d= -f1 | grep -E '^(POSTGRES_|PGHOST$|PGHOSTADDR$|PGPORT$|PGUSER$|PGPASSWORD$|PGDATABASE$|PGSERVICE$|SPRING_DATASOURCE_|DATABASE_URL|AWS_|DOCKER_HOST$|TESTCONTAINERS_HOST_OVERRIDE$|TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE$)' || true)
+          if [ -n "$leaked" ]; then
+            echo "Refusing to run database suites; unexpected variables set: $leaked"
+            exit 1
+          fi
+          docker version --format 'Docker server {{.Server.Version}}, API {{.Server.APIVersion}}'
+      # Each suite starts a throwaway pgvector/pgvector:pg17 container and applies
+      # every git-tracked database/migrations/*.sql file (V001 onwards, V078
+      # included) to it.
+      - name: mvn test (database suites)
+        run: >
+          mvn -B -ntp test
+          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest'
+          -Dsurefire.failIfNoSpecifiedTests=false
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-db-surefire-reports
+          path: api/target/surefire-reports/
+          retention-days: 7

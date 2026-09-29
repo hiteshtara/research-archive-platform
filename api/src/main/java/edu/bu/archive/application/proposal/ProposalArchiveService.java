@@ -1,6 +1,7 @@
 package edu.bu.archive.application.proposal;
 
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
+import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
@@ -21,6 +22,39 @@ public class ProposalArchiveService {
             ProposalArchiveRepository repository
     ) {
         this.repository = repository;
+    }
+
+    /*
+     * Paged Proposal family search: free text and structured filters are
+     * ANDed in SQL, so the page and totalElements always describe the
+     * complete filtered result set rather than a capped first slice.
+     */
+    public PageResponse<ProposalFamilySummaryResponse> findFamilyPage(
+            String query,
+            ProposalSearchFilters filters,
+            int page,
+            int size
+    ) {
+        int safePage = PaginationSupport.clampPage(page);
+        int safeSize = PaginationSupport.clampSize(size);
+        long totalElements = repository.countFamilyPage(query, filters);
+        PaginationSupport.PageMetadata pageMetadata =
+                PaginationSupport.metadata(safePage, safeSize, totalElements);
+
+        List<ProposalFamilySummaryResponse> content =
+                repository.findFamilyPage(
+                        query, filters, safeSize, safePage * safeSize
+                );
+
+        return new PageResponse<>(
+                content,
+                safePage,
+                safeSize,
+                totalElements,
+                pageMetadata.totalPages(),
+                pageMetadata.first(),
+                pageMetadata.last()
+        );
     }
 
     public ProposalWorkspaceResponse findWorkspace(

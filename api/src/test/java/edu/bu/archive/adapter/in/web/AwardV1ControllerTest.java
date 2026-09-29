@@ -24,6 +24,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardVersionSummaryResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
+import edu.bu.archive.application.award.AwardSearchFilters;
 import edu.bu.archive.application.award.AwardContactService;
 import edu.bu.archive.application.award.report.AwardReportPdfRenderer;
 import edu.bu.archive.application.award.report.AwardReportService;
@@ -44,6 +45,7 @@ import java.util.NoSuchElementException;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -94,7 +96,7 @@ class AwardV1ControllerTest {
         PageResponse<AwardSearchResultResponse> page = new PageResponse<>(
                 List.of(result), 1, 10, 1L, 1, false, true
         );
-        when(service.search("cancer", 1, 10))
+        when(service.search("cancer", AwardSearchFilters.none(), 1, 10))
                 .thenReturn(new AwardSearchResponse(null, page));
 
         mockMvc.perform(
@@ -112,12 +114,12 @@ class AwardV1ControllerTest {
                                 .value("100004-00003")
                 );
 
-        verify(service).search("cancer", 1, 10);
+        verify(service).search("cancer", AwardSearchFilters.none(), 1, 10);
     }
 
     @Test
     void searchDefaultsPageAndSizeWhenOmitted() throws Exception {
-        when(service.search(null, 0, 25)).thenReturn(new AwardSearchResponse(
+        when(service.search(null, AwardSearchFilters.none(), 0, 25)).thenReturn(new AwardSearchResponse(
                 null,
                 new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true)
         ));
@@ -125,7 +127,7 @@ class AwardV1ControllerTest {
         mockMvc.perform(get("/api/v1/awards/search"))
                 .andExpect(status().isOk());
 
-        verify(service).search(null, 0, 25);
+        verify(service).search(null, AwardSearchFilters.none(), 0, 25);
     }
 
     @Test
@@ -136,7 +138,7 @@ class AwardV1ControllerTest {
                         1135067L, "100567-00001", 6, "328797", "Award",
                         "Title", "Approved Award"
                 );
-        when(service.search("328797", 0, 25)).thenReturn(
+        when(service.search("328797", AwardSearchFilters.none(), 0, 25)).thenReturn(
                 new AwardSearchResponse(
                         match,
                         new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true)
@@ -157,7 +159,7 @@ class AwardV1ControllerTest {
                                 .value("328797")
                 );
 
-        verify(service).search("328797", 0, 25);
+        verify(service).search("328797", AwardSearchFilters.none(), 0, 25);
     }
 
     @Test
@@ -179,7 +181,7 @@ class AwardV1ControllerTest {
                         "Approved Award", "Boston University", "PI NAME",
                         "MEDICINE", null, null, false
                 );
-        when(service.searchVersions("carbx", null, null, null, "all", "sequence", 0, 25))
+        when(service.searchVersions("carbx", null, null, null, "all", AwardSearchFilters.none(), "sequence", 0, 25))
                 .thenReturn(new PageResponse<>(
                         List.of(current, historical), 0, 25, 2L, 1, true, true
                 ));
@@ -194,7 +196,7 @@ class AwardV1ControllerTest {
                 .andExpect(jsonPath("$.content[1].sequenceNumber").value(543))
                 .andExpect(jsonPath("$.content[1].primaryCurrent").value(false));
 
-        verify(service).searchVersions("carbx", null, null, null, "all", "sequence", 0, 25);
+        verify(service).searchVersions("carbx", null, null, null, "all", AwardSearchFilters.none(), "sequence", 0, 25);
     }
 
     @Test
@@ -218,7 +220,7 @@ class AwardV1ControllerTest {
                 );
         when(service.searchVersions(
                 "200086-00001", "200086-00001", null, null,
-                "all", "sequence", 0, 25
+                "all", AwardSearchFilters.none(), "sequence", 0, 25
         )).thenReturn(new PageResponse<>(
                 List.of(currentVersion), 0, 25, 165L, 7, true, false
         ));
@@ -235,19 +237,19 @@ class AwardV1ControllerTest {
 
         verify(service).searchVersions(
                 "200086-00001", "200086-00001", null, null,
-                "all", "sequence", 0, 25
+                "all", AwardSearchFilters.none(), "sequence", 0, 25
         );
     }
 
     @Test
     void searchVersionsDefaultsFiltersAndSortWhenOmitted() throws Exception {
-        when(service.searchVersions(null, null, null, null, "all", "sequence", 0, 25))
+        when(service.searchVersions(null, null, null, null, "all", AwardSearchFilters.none(), "sequence", 0, 25))
                 .thenReturn(new PageResponse<>(List.of(), 0, 25, 0L, 0, true, true));
 
         mockMvc.perform(get("/api/v1/awards/versions/search"))
                 .andExpect(status().isOk());
 
-        verify(service).searchVersions(null, null, null, null, "all", "sequence", 0, 25);
+        verify(service).searchVersions(null, null, null, null, "all", AwardSearchFilters.none(), "sequence", 0, 25);
     }
 
     @Test
@@ -258,7 +260,7 @@ class AwardV1ControllerTest {
                         "Approved Award", "Boston University", "PI NAME",
                         "MEDICINE", null, null, false
                 );
-        when(service.searchVersions(null, null, null, "3561589", "all", "sequence", 0, 25))
+        when(service.searchVersions(null, null, null, "3561589", "all", AwardSearchFilters.none(), "sequence", 0, 25))
                 .thenReturn(new PageResponse<>(List.of(historical), 0, 25, 1L, 1, true, true));
 
         mockMvc.perform(
@@ -269,12 +271,12 @@ class AwardV1ControllerTest {
                 .andExpect(jsonPath("$.content[0].sequenceNumber").value(543))
                 .andExpect(jsonPath("$.content[0].primaryCurrent").value(false));
 
-        verify(service).searchVersions(null, null, null, "3561589", "all", "sequence", 0, 25);
+        verify(service).searchVersions(null, null, null, "3561589", "all", AwardSearchFilters.none(), "sequence", 0, 25);
     }
 
     @Test
     void searchVersionsReturns400NotAServerErrorForAnInvalidAwardId() throws Exception {
-        when(service.searchVersions(null, null, null, "not-a-number", "all", "sequence", 0, 25))
+        when(service.searchVersions(null, null, null, "not-a-number", "all", AwardSearchFilters.none(), "sequence", 0, 25))
                 .thenThrow(new IllegalArgumentException(
                         "Award ID must be a valid whole number: not-a-number"
                 ));
@@ -953,7 +955,8 @@ class AwardV1ControllerTest {
         when(data.summary()).thenReturn(summary);
         when(reportService.buildReportData(3L)).thenReturn(data);
 
-        mockMvc.perform(get("/api/v1/awards/3/report.pdf"))
+        org.springframework.test.web.servlet.MvcResult initial =
+                mockMvc.perform(get("/api/v1/awards/3/report.pdf"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "application/pdf"))
                 .andExpect(header().string(
@@ -961,7 +964,14 @@ class AwardV1ControllerTest {
                         org.hamcrest.Matchers.containsString(
                                 "Award_900000-00001_Complete_Report.pdf"
                         )
-                ));
+                ))
+                .andReturn();
+
+        // The PDF is written by an async StreamingResponseBody; wait for it
+        // to finish before verifying the renderer, or the check races the
+        // async executor.
+        mockMvc.perform(asyncDispatch(initial))
+                .andExpect(status().isOk());
 
         verify(reportService).buildReportData(3L);
         verify(reportPdfRenderer).render(

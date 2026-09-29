@@ -32,6 +32,7 @@ import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyHistoryEntryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionResponse;
 import edu.bu.archive.application.award.AwardArchiveService;
+import edu.bu.archive.application.award.AwardSearchFilters;
 import edu.bu.archive.application.award.AwardAttachmentDownload;
 import edu.bu.archive.application.award.AwardContactService;
 import edu.bu.archive.application.award.report.AwardReportPdfRenderer;
@@ -48,6 +49,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -62,6 +64,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 
 /*
@@ -123,7 +126,11 @@ public class AwardV1Controller {
                     + "Results are always ordered by award_number "
                     + "ascending (unique per is_primary_current row - "
                     + "a stable, deterministic sort with no explicit "
-                    + "sort parameter needed yet)."
+                    + "sort parameter needed yet). Optional structured "
+                    + "filters (status, sponsor, principalInvestigator, "
+                    + "leadUnit, projectStartDateFrom/To) AND with the "
+                    + "query and each other; filters alone are a valid "
+                    + "search."
     )
     @ApiResponse(responseCode = "200", description = "A page of matching Awards, plus an exact workflow document-number match if the query matched one.")
     @ApiResponse(responseCode = "400", description = "page/size out of range.")
@@ -134,6 +141,32 @@ public class AwardV1Controller {
                     + "all current Awards, paginated.")
             @RequestParam(name = "q", required = false)
             String q,
+
+            @Parameter(description = "Exact status (case-insensitive), e.g. the value shown on a result.")
+            @RequestParam(required = false)
+            String status,
+
+            @Parameter(description = "Sponsor name or code, contains (case-insensitive).")
+            @RequestParam(required = false)
+            String sponsor,
+
+            @Parameter(description = "Principal Investigator name, contains (case-insensitive); PI role only.")
+            @RequestParam(required = false)
+            String principalInvestigator,
+
+            @Parameter(description = "Lead unit name or number, contains (case-insensitive).")
+            @RequestParam(required = false)
+            String leadUnit,
+
+            @Parameter(description = "Project Start Date (award_effective_date) on or after, ISO yyyy-MM-dd.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate projectStartDateFrom,
+
+            @Parameter(description = "Project Start Date (award_effective_date) on or before, ISO yyyy-MM-dd.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate projectStartDateTo,
 
             @Parameter(description = "Zero-based page index.")
             @RequestParam(defaultValue = "0")
@@ -147,7 +180,13 @@ public class AwardV1Controller {
             int size
     ) {
         return ResponseEntity.ok(
-                service.search(q, page, size)
+                service.search(
+                        q,
+                        new AwardSearchFilters(status, sponsor, principalInvestigator,
+                                leadUnit, projectStartDateFrom, projectStartDateTo),
+                        page,
+                        size
+                )
         );
     }
 
@@ -190,6 +229,32 @@ public class AwardV1Controller {
             @RequestParam(defaultValue = "all")
             String versionFilter,
 
+            @Parameter(description = "Exact status (case-insensitive), e.g. the value shown on a result.")
+            @RequestParam(required = false)
+            String status,
+
+            @Parameter(description = "Sponsor name or code, contains (case-insensitive).")
+            @RequestParam(required = false)
+            String sponsor,
+
+            @Parameter(description = "Principal Investigator name, contains (case-insensitive); PI role only.")
+            @RequestParam(required = false)
+            String principalInvestigator,
+
+            @Parameter(description = "Lead unit name or number, contains (case-insensitive).")
+            @RequestParam(required = false)
+            String leadUnit,
+
+            @Parameter(description = "Project Start Date (award_effective_date) on or after, ISO yyyy-MM-dd.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate projectStartDateFrom,
+
+            @Parameter(description = "Project Start Date (award_effective_date) on or before, ISO yyyy-MM-dd.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate projectStartDateTo,
+
             @Parameter(description = "\"sequence\" (default) or \"date\".")
             @RequestParam(defaultValue = "sequence")
             String sort,
@@ -207,7 +272,10 @@ public class AwardV1Controller {
     ) {
         return ResponseEntity.ok(
                 service.searchVersions(
-                        q, awardNumber, documentNumber, awardId, versionFilter, sort, page, size
+                        q, awardNumber, documentNumber, awardId, versionFilter,
+                        new AwardSearchFilters(status, sponsor, principalInvestigator,
+                                leadUnit, projectStartDateFrom, projectStartDateTo),
+                        sort, page, size
                 )
         );
     }

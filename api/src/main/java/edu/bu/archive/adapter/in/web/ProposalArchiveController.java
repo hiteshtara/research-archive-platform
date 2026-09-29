@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 import edu.bu.archive.application.proposal.ProposalArchiveService;
+import edu.bu.archive.application.proposal.ProposalSearchFilters;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,6 +49,41 @@ public class ProposalArchiveController {
         return repository.findFamilies(
                 query,
                 safeLimit
+        );
+    }
+
+    /*
+     * Paged, filterable Proposal family search - what the Proposals search
+     * page uses. /families above is kept unchanged for existing callers
+     * (it is unpaged and capped at 200, so it cannot describe a complete
+     * filtered result set). Filters AND with the free text and each other;
+     * see ProposalSearchFilters.
+     */
+    @GetMapping("/search")
+    public PageResponse<ProposalFamilySummaryResponse> search(
+            @RequestParam(required = false)
+            String query,
+
+            @RequestParam(required = false)
+            String sponsor,
+
+            @RequestParam(required = false)
+            String principalInvestigator,
+
+            @RequestParam(required = false)
+            String leadUnit,
+
+            @RequestParam(defaultValue = "0")
+            int page,
+
+            @RequestParam(defaultValue = "25")
+            int size
+    ) {
+        return service.findFamilyPage(
+                query,
+                new ProposalSearchFilters(sponsor, principalInvestigator, leadUnit),
+                page,
+                size
         );
     }
 

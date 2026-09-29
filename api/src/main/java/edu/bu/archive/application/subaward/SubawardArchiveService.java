@@ -45,9 +45,23 @@ public class SubawardArchiveService {
             int page,
             int size
     ) {
+        return findPage(query, SubawardSearchFilters.none(), page, size);
+    }
+
+    /*
+     * Structured filters AND with the free-text query (and its FRN
+     * branch) in SQL, so paging and totalElements describe the complete
+     * filtered result set. Filters alone are a valid search.
+     */
+    public SubawardPageResponse findPage(
+            String query,
+            SubawardSearchFilters filters,
+            int page,
+            int size
+    ) {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
-        long totalElements = repository.countSubawards(query);
+        long totalElements = repository.countSubawards(query, filters);
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
                         safePage,
@@ -59,6 +73,7 @@ public class SubawardArchiveService {
         List<SubawardSummaryResponse> content =
                 repository.findSubawards(
                         query,
+                        filters,
                         safeSize,
                         offset
                 );

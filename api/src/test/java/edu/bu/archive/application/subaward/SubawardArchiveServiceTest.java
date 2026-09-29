@@ -45,8 +45,8 @@ class SubawardArchiveServiceTest {
                 101L, "1004", 4, "DOC-101", "Title", 1L, "Active",
                 "ORG-1", "ACCOUNT-1", null, null, "ACTIVE", null
         );
-        when(repository.countSubawards("1004")).thenReturn(205L);
-        when(repository.findSubawards("1004", 100, 0))
+        when(repository.countSubawards("1004", SubawardSearchFilters.none())).thenReturn(205L);
+        when(repository.findSubawards("1004", SubawardSearchFilters.none(), 100, 0))
                 .thenReturn(List.of(summary));
 
         SubawardPageResponse result = service.findPage("1004", -1, 500);
@@ -58,7 +58,7 @@ class SubawardArchiveServiceTest {
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(result.first()).isTrue();
         assertThat(result.last()).isFalse();
-        verify(repository).findSubawards("1004", 100, 0);
+        verify(repository).findSubawards("1004", SubawardSearchFilters.none(), 100, 0);
     }
 
     @Test

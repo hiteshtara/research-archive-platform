@@ -1,27 +1,26 @@
-import { Chip, Stack, Typography } from "@mui/material";
+import { Box, Chip, Stack } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 
-import { getProposalFamilies } from "../api/client";
+import { searchProposalFamilies } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
+import { PaginationFooter } from "../components/common/PaginationFooter";
 import { StatusPill } from "../components/common/StatusPill";
+import { FilteredSearchBar } from "../components/common/search/FilteredSearchBar";
 import { HintChips } from "../components/common/search/HintChips";
 import { ResultCard } from "../components/common/search/ResultCard";
 import { ResultCount } from "../components/common/search/ResultCount";
-import { SearchBox } from "../components/common/search/SearchBox";
 import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
 import { SearchStates } from "../components/common/search/SearchStates";
+import { emptyResultsMessage } from "../features/common/filterPresentation.mjs";
 import {
   joinMetadata,
   resolveSearchState,
 } from "../features/common/searchPresentation.mjs";
-import { useSearchQueryParam } from "../hooks/useSearchQueryParam";
+import { PROPOSAL_FILTER_FIELDS } from "../features/search/searchFilterFields.mjs";
+import type { ProposalFilterKey } from "../features/search/searchFilterFields.d.mts";
+import { useFilteredSearch } from "../hooks/useFilteredSearch";
 
-// The Proposal families endpoint returns a plain capped array, not a
-// paginated page. That API contract is left exactly as it is - changing
-// it merely to gain a pagination control would be changing API semantics
-// for styling - so this page shows the cap honestly instead of implying
-// the count is a total.
-const RESULT_LIMIT = 100;
+const PAGE_SIZE = 25;
 
 const SEARCH_DIMENSIONS = [
   "Proposal Number",
@@ -31,27 +30,35 @@ const SEARCH_DIMENSIONS = [
   "Title",
 ];
 
+// One result per Proposal Number (its latest version). Uses the paged,
+// filterable GET /api/proposals/search, so the count is a real total and
+// every match is reachable - the older capped /families endpoint could
+// only show the first 100.
 export function ProposalFamiliesPage() {
-  const { draft, setDraft, query, submit, hasSearched } =
-    useSearchQueryParam();
+  const search = useFilteredSearch<ProposalFilterKey>({
+    fields: PROPOSAL_FILTER_FIELDS,
+  });
+  const { appliedQuery, appliedActiveFilters, page, hasCriteria } = search;
 
+  // Keyed on the complete applied request and cancelled via `signal`.
   const searchQuery = useQuery({
-    queryKey: ["proposal-families", query],
+    queryKey: ["proposal-search", appliedQuery, appliedActiveFilters, page],
     queryFn: ({ signal }) =>
-      getProposalFamilies({ query, limit: RESULT_LIMIT }, signal),
-    // Nothing is fetched until a search is run. This page used to load
-    // 100 Proposal families on mount; a primary search page must not put
-    // rows on screen merely because data exists.
-    enabled: hasSearched,
+      searchProposalFamilies(
+        { query: appliedQuery, page, size: PAGE_SIZE, filters: appliedActiveFilters },
+        signal,
+      ),
+    // Nothing is fetched until a search is run.
+    enabled: hasCriteria,
   });
 
   const results = searchQuery.data ?? null;
 
   const state = resolveSearchState({
-    hasSearched,
+    hasSearched: hasCriteria,
     isLoading: searchQuery.isLoading,
     isError: searchQuery.isError,
-    resultCount: results?.length ?? 0,
+    resultCount: results?.content.length ?? 0,
   });
 
   return (
@@ -59,12 +66,12 @@ export function ProposalFamiliesPage() {
       title="Find a Proposal"
       subtitle="Search archived Proposal records by Proposal number, PI, sponsor, lead unit or title. One result per Proposal Number."
       search={
-        <SearchBox
-          value={draft}
-          onChange={setDraft}
-          onSubmit={submit}
+        <FilteredSearchBar
+          search={search}
+          fields={PROPOSAL_FILTER_FIELDS}
           placeholder="Proposal number, Orsmond, NIH..."
           ariaLabel="Search Proposals"
+          panelId="proposal-filters"
         />
       }
       belowSearch={<HintChips hints={SEARCH_DIMENSIONS} />}
@@ -75,17 +82,21 @@ export function ProposalFamiliesPage() {
       >
         {results && (
           <>
-            <ResultCount total={results.length} singular="proposal" />
+            <ResultCount total={results.totalElements} singular="proposal" />
 
-            {results.length === 0 && (
+            {results.content.length === 0 && (
               <EmptyState
                 variant="text"
-                message={`No proposals match "${query}".`}
+                message={emptyResultsMessage({
+                  noun: "proposals",
+                  query: appliedQuery,
+                  filterCount: search.appliedCount,
+                })}
               />
             )}
 
             <Stack spacing={1.25}>
-              {results.map((proposal) => (
+              {results.content.map((proposal) => (
                 <ResultCard
                   key={proposal.proposalNumber}
                   to={`/proposals/dashboard/${encodeURIComponent(proposal.currentProposalId)}`}
@@ -111,15 +122,14 @@ export function ProposalFamiliesPage() {
               ))}
             </Stack>
 
-            {results.length === RESULT_LIMIT && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mt: 2, textAlign: "center" }}
-              >
-                Showing the first {RESULT_LIMIT} matches. Narrow the search
-                to see more specific results.
-              </Typography>
+            {results.totalPages > 1 && (
+              <Box sx={{ mt: 3 }}>
+                <PaginationFooter
+                  page={results.page}
+                  totalPages={results.totalPages}
+                  onPageChange={search.goToPage}
+                />
+              </Box>
             )}
           </>
         )}

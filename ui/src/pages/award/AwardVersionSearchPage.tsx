@@ -1,26 +1,18 @@
-import {
-  Box,
-  Chip,
-  Grid,
-  Link,
-  MenuItem,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Box, Chip, Link, Stack, TextField, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Link as RouterLink, useSearchParams } from "react-router-dom";
+import { Link as RouterLink } from "react-router-dom";
 
 import { searchAwardVersionsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PaginationFooter } from "../../components/common/PaginationFooter";
 import { StatusPill } from "../../components/common/StatusPill";
+import { FilteredSearchBar } from "../../components/common/search/FilteredSearchBar";
 import { ResultCard } from "../../components/common/search/ResultCard";
 import { ResultCount } from "../../components/common/search/ResultCount";
-import { SearchBox } from "../../components/common/search/SearchBox";
 import { SearchPageLayout } from "../../components/common/search/SearchPageLayout";
 import { SearchStates } from "../../components/common/search/SearchStates";
+import { emptyResultsMessage } from "../../features/common/filterPresentation.mjs";
+import type { FilterErrors } from "../../features/common/filterPresentation.mjs";
 import { resolveSearchState } from "../../features/common/searchPresentation.mjs";
 import {
   describeVersionSearchResults,
@@ -28,139 +20,85 @@ import {
   versionCurrentLabel,
   versionDetailPath,
 } from "../../features/award/awardVersionSearchPresentation.mjs";
-import { useDebouncedCallback } from "../../hooks/useDebouncedCallback";
+import {
+  AWARD_VERSION_DATE_RANGES,
+  AWARD_VERSION_FILTER_FIELDS,
+  AWARD_VERSION_SORT_OPTIONS,
+} from "../../features/search/searchFilterFields.mjs";
+import type { AwardVersionFilterKey } from "../../features/search/searchFilterFields.d.mts";
+import { useFilteredSearch } from "../../hooks/useFilteredSearch";
+import type { ExtraParamDefinition } from "../../hooks/useFilteredSearch";
 
 const PAGE_SIZE = 25;
-const SEARCH_DEBOUNCE_MS = 350;
 
-// Keeps a text field feeling instantly responsive to typing (local
-// state, updated synchronously) while the URL/query-param update it
-// eventually commits - and therefore the network request it triggers,
-// since q/awardNumber/documentNumber/awardId all feed the search
-// queryKey - is debounced to fire only once typing pauses. Stays in
-// sync with external URL changes (e.g. browser back/forward) via the
-// effect below.
-function useDebouncedUrlParam(
-  urlValue: string,
-  commit: (value: string) => void,
-): [string, (value: string) => void] {
-  const [draft, setDraft] = useState(urlValue);
-  const debouncedCommit = useDebouncedCallback(commit, SEARCH_DEBOUNCE_MS);
+// Sort is ordering, not a filter: it is never counted or chipped, and
+// changing it applies immediately (from page 1).
+const EXTRA: readonly ExtraParamDefinition[] = [
+  { key: "sort", defaultValue: "sequence", allowed: ["sequence", "date"] },
+];
 
-  useEffect(() => {
-    setDraft(urlValue);
-    // Only external (e.g. back/forward) changes to urlValue should
-    // resync draft - not every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlValue]);
-
-  function handleChange(value: string) {
-    setDraft(value);
-    debouncedCommit(value);
-  }
-
-  return [draft, handleChange];
+// Award ID is an exact numeric identifier, never a partial/substring
+// search - validated before it is applied so an obviously bad value never
+// reaches the API (which validates independently too).
+function validateAwardId(
+  filters: Record<AwardVersionFilterKey, string>,
+): FilterErrors<AwardVersionFilterKey> {
+  const value = filters.awardId ?? "";
+  return value.trim().length > 0 && !isValidAwardIdInput(value)
+    ? { awardId: "Award ID must be a whole number." }
+    : {};
 }
 
-// Historical Award Records explorer: one result per award_id (a
-// specific version), never scoped to the current version - the
-// version-level counterpart to AwardSearchPage. Every filter (q,
-// awardNumber, documentNumber, awardId, versionFilter, sort, page)
-// lives in the URL's own search params rather than component state, so
-// browser back/forward naturally restores the exact search that was
-// active, not just the page shell.
+// Historical Award Records explorer: one result per award_id (a specific
+// version), never scoped to the current version - the version-level
+// counterpart to AwardSearchPage. The exact identifiers, the Versions
+// filter and the Award attribute filters share the one filter panel;
+// applied state lives in the URL, so Back/Forward restores the exact
+// search that was active.
 export function AwardVersionSearchPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const search = useFilteredSearch<AwardVersionFilterKey>({
+    fields: AWARD_VERSION_FILTER_FIELDS,
+    dateRanges: AWARD_VERSION_DATE_RANGES,
+    extra: EXTRA,
+    extraValidate: validateAwardId,
+  });
+  const { appliedQuery, appliedActiveFilters, appliedExtra, page } = search;
+  const sort = appliedExtra.sort === "date" ? "date" : "sequence";
 
-  const q = searchParams.get("q") ?? "";
-  const awardNumber = searchParams.get("awardNumber") ?? "";
-  const documentNumber = searchParams.get("documentNumber") ?? "";
-  const awardId = searchParams.get("awardId") ?? "";
-  const rawVersionFilter = searchParams.get("versionFilter");
-  const versionFilter: "all" | "current" | "historical" =
-    rawVersionFilter === "current" || rawVersionFilter === "historical"
-      ? rawVersionFilter
-      : "all";
-  const rawSort = searchParams.get("sort");
-  const sort: "sequence" | "date" = rawSort === "date" ? "date" : "sequence";
-  const page = Number(searchParams.get("page") ?? "0") || 0;
-
-  // Award ID is an exact numeric identifier, never a partial/substring
-  // search - validated client-side so an obviously bad value never
-  // reaches the API at all (the API validates independently too, as
-  // defense in depth for direct callers - see AwardArchiveService).
-  const awardIdIsValid = isValidAwardIdInput(awardId);
-  const awardIdError = awardId.trim().length > 0 && !awardIdIsValid;
-
+  // The Versions filter narrows but never starts a search on its own:
+  // "historical" alone would list every archived version.
+  const { versionFilter, awardNumber, documentNumber, awardId, ...attributeFilters } =
+    appliedActiveFilters;
+  // A hand-edited or old link can carry a non-numeric Award ID that never
+  // went through the panel's validation: never send it, say why instead.
+  const appliedAwardIdError = validateAwardId(search.appliedFilters).awardId;
   const hasSearched =
-    q.trim().length > 0 ||
-    awardNumber.trim().length > 0 ||
-    documentNumber.trim().length > 0 ||
-    (awardId.trim().length > 0 && awardIdIsValid);
+    !appliedAwardIdError &&
+    (appliedQuery.trim().length > 0 ||
+      Object.keys(appliedActiveFilters).some((key) => key !== "versionFilter"));
 
   const searchQuery = useQuery({
-    queryKey: [
-      "award-version-search-v1",
-      q,
-      awardNumber,
-      documentNumber,
-      awardId,
-      versionFilter,
-      sort,
-      page,
-    ],
+    queryKey: ["award-version-search-v1", appliedQuery, appliedActiveFilters, sort, page],
     queryFn: ({ signal }) =>
       searchAwardVersionsV1(
         {
-          q,
+          q: appliedQuery,
           awardNumber,
           documentNumber,
-          awardId: awardIdIsValid ? awardId.trim() : "",
-          versionFilter,
+          awardId,
+          versionFilter:
+            versionFilter === "current" || versionFilter === "historical"
+              ? versionFilter
+              : "all",
           sort,
           page,
           size: PAGE_SIZE,
+          filters: attributeFilters,
         },
         signal,
       ),
-    enabled: hasSearched && !awardIdError,
+    enabled: hasSearched,
   });
-
-  function updateParam(name: string, value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value) {
-      next.set(name, value);
-    } else {
-      next.delete(name);
-    }
-    next.delete("page");
-    setSearchParams(next);
-  }
-
-  // Debounced drafts for display/typing only - q/awardNumber/
-  // documentNumber/awardId above (URL-sourced) remain the values that
-  // actually drive the search query, unchanged until typing pauses.
-  const [qDraft, setQDraft] = useDebouncedUrlParam(q, (value) =>
-    updateParam("q", value),
-  );
-  const [awardNumberDraft, setAwardNumberDraft] = useDebouncedUrlParam(
-    awardNumber,
-    (value) => updateParam("awardNumber", value),
-  );
-  const [documentNumberDraft, setDocumentNumberDraft] = useDebouncedUrlParam(
-    documentNumber,
-    (value) => updateParam("documentNumber", value),
-  );
-  const [awardIdDraft, setAwardIdDraft] = useDebouncedUrlParam(
-    awardId,
-    (value) => updateParam("awardId", value),
-  );
-
-  function setPage(nextPage: number) {
-    const next = new URLSearchParams(searchParams);
-    next.set("page", String(nextPage));
-    setSearchParams(next);
-  }
 
   const { totalElements, totalPages, content } =
     describeVersionSearchResults(searchQuery.data);
@@ -170,86 +108,21 @@ export function AwardVersionSearchPage() {
       title="Search Historical Awards"
       subtitle="Each result is an individual archived Award version, not a family or current-record summary - every historical sequence is searchable, including by its exact internal Award ID. Selecting a result opens that exact version."
       search={
-        <SearchBox
-          value={qDraft}
-          onChange={setQDraft}
-          onSubmit={(value) => updateParam("q", value)}
+        <FilteredSearchBar
+          search={search}
+          fields={AWARD_VERSION_FILTER_FIELDS}
           placeholder="Title, sponsor, PI, or lead unit..."
           ariaLabel="Search Historical Award Records"
+          panelId="award-version-filters"
         />
       }
       belowSearch={
         <>
-          {/*
-            Every filter this page already had is preserved. Typing
-            still commits to the URL on a debounce, so live searching
-            is unchanged; Enter now also submits immediately, which is
-            the behaviour shared with every other archive search page.
-          */}
-          <Grid container spacing={2} sx={{ mt: 1, textAlign: "left" }}>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Award number (exact)"
-                value={awardNumberDraft}
-                onChange={(event) => setAwardNumberDraft(event.target.value)}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Document number (exact)"
-                value={documentNumberDraft}
-                onChange={(event) => setDocumentNumberDraft(event.target.value)}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Award ID (exact)"
-                placeholder="e.g. 3561589"
-                value={awardIdDraft}
-                onChange={(event) => setAwardIdDraft(event.target.value)}
-                error={awardIdError}
-                helperText={
-                  awardIdError ? "Award ID must be a whole number." : " "
-                }
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                select
-                label="Version"
-                value={versionFilter}
-                onChange={(event) =>
-                  updateParam("versionFilter", event.target.value)
-                }
-              >
-                <MenuItem value="all">All versions</MenuItem>
-                <MenuItem value="current">Current only</MenuItem>
-                <MenuItem value="historical">Historical only</MenuItem>
-              </TextField>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                select
-                label="Sort by"
-                value={sort}
-                onChange={(event) => updateParam("sort", event.target.value)}
-              >
-                <MenuItem value="sequence">Sequence number</MenuItem>
-                <MenuItem value="date">Last updated</MenuItem>
-              </TextField>
-            </Grid>
-          </Grid>
-
+          {appliedAwardIdError && (
+            <Typography role="alert" variant="body2" color="error" sx={{ mt: 2 }}>
+              {appliedAwardIdError} Correct it in Filters to search.
+            </Typography>
+          )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
             Looking for the current record for an Award number instead?{" "}
             <Link component={RouterLink} to="/awards/search">
@@ -262,7 +135,7 @@ export function AwardVersionSearchPage() {
     >
       <SearchStates
         state={resolveSearchState({
-          hasSearched: hasSearched && !awardIdError,
+          hasSearched,
           isLoading: searchQuery.isLoading,
           isError: searchQuery.isError,
           resultCount: content.length,
@@ -271,12 +144,46 @@ export function AwardVersionSearchPage() {
       >
         {searchQuery.data && (
           <>
-            <ResultCount total={totalElements} singular="version" />
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1}
+              sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}
+            >
+              <ResultCount total={totalElements} singular="version" />
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1.5 }}>
+                <Typography
+                  component="label"
+                  htmlFor="award-version-sort"
+                  variant="body2"
+                  sx={{ fontWeight: 600, whiteSpace: "nowrap" }}
+                >
+                  Sort by
+                </Typography>
+                <TextField
+                  select
+                  size="small"
+                  id="award-version-sort"
+                  value={sort}
+                  onChange={(event) => search.setExtra("sort", event.target.value)}
+                  slotProps={{ select: { native: true } }}
+                >
+                  {AWARD_VERSION_SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </TextField>
+              </Stack>
+            </Stack>
 
             {content.length === 0 && (
               <EmptyState
                 variant="text"
-                message="No Award versions match this search."
+                message={emptyResultsMessage({
+                  noun: "Award versions",
+                  query: appliedQuery,
+                  filterCount: search.appliedCount,
+                })}
               />
             )}
 
@@ -322,7 +229,7 @@ export function AwardVersionSearchPage() {
               <PaginationFooter
                 totalPages={totalPages}
                 page={page}
-                onPageChange={setPage}
+                onPageChange={search.goToPage}
               />
             </Box>
           </>

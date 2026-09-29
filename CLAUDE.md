@@ -158,8 +158,13 @@ non-production ECR → ECS Fargate` (`ops/deploy-api.sh`, run against a
 clean detached worktree at the exact commit being released, never the
 live working directory) is the real, established, and only API
 deployment path — no AWS CodeBuild/CI-based pipeline exists (verified
-2026-08-13: zero CodeBuild projects belong to this repo; `.github/workflows/ci.yml`
-runs tests only). This is normal, expected, and documented — not a
+2026-08-13: zero CodeBuild projects belong to this repo). GitHub Actions
+never deploys. No workflow was committed before 2026-09-29, so nothing ran.
+`.github/workflows/ci.yml` was added then. It runs on pull requests to
+`main`, on pushes to `main` and manually, using GitHub-hosted runners and a
+read-only token with no secrets. It covers UI tests, lint and build, API unit
+tests, and the five Testcontainers database suites against throwaway
+PostgreSQL containers. It does not run the ETL tests. This is normal, expected, and documented — not a
 workaround to be avoided or replaced with a fictitious "AWS-native"
 alternative.
 

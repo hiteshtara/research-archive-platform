@@ -50,6 +50,7 @@ import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.TimeAndMoneyTransactionHeaderRow;
 
+import edu.bu.archive.application.award.AwardSearchFilters;
 import edu.bu.archive.application.award.report.AwardReportAttachment;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -659,53 +660,59 @@ public class AwardArchiveRepository {
      * indicator - most Awards have no hierarchy row at all, hence LEFT
      * JOIN.
      */
-    public List<AwardSearchResultResponse> searchAwards(
-            String pattern,
-            String rawQuery,
-            int limit,
-            int offset
+    /*
+     * Structured filters shared by the family search, its count, and the
+     * Historical Award Records version search and count - one fragment so
+     * the page query and its total can never drift apart again (the family
+     * count once omitted the Grant Number branch its page query had).
+     * Every condition applies to the row being returned (`av`); see
+     * AwardSearchFilters for the per-field matching semantics.
+     */
+    private static final String AWARD_STRUCTURED_FILTERS = """
+                  AND (CAST(:status AS TEXT) IS NULL
+                       OR UPPER(TRIM(av.status_description))
+                          = UPPER(CAST(:status AS TEXT)))
+                  AND (CAST(:sponsor AS TEXT) IS NULL
+                       OR av.sponsor_name ILIKE '%' || :sponsor || '%'
+                       OR av.sponsor_code ILIKE '%' || :sponsor || '%')
+                  AND (CAST(:leadUnit AS TEXT) IS NULL
+                       OR av.lead_unit_name ILIKE '%' || :leadUnit || '%'
+                       OR av.lead_unit_number ILIKE '%' || :leadUnit || '%')
+                  AND (CAST(:principalInvestigator AS TEXT) IS NULL
+                       OR EXISTS (
+                           SELECT 1 FROM archive.award_person apf
+                           WHERE apf.award_id = av.award_id
+                             AND UPPER(TRIM(apf.contact_role_code)) = 'PI'
+                             AND apf.full_name
+                                 ILIKE '%' || :principalInvestigator || '%'
+                       ))
+                  AND (CAST(:projectStartDateFrom AS DATE) IS NULL
+                       OR av.award_effective_date
+                          >= CAST(:projectStartDateFrom AS DATE))
+                  AND (CAST(:projectStartDateTo AS DATE) IS NULL
+                       OR av.award_effective_date
+                          <= CAST(:projectStartDateTo AS DATE))
+            """;
+
+    private static JdbcClient.StatementSpec bindAwardFilters(
+            JdbcClient.StatementSpec statement,
+            AwardSearchFilters filters
     ) {
-        return jdbc.sql("""
-                SELECT
-                    av.award_id,
-                    av.award_number,
-                    av.sequence_number AS latest_sequence_number,
-                    av.title,
-                    av.status_description AS status,
-                    pi.full_name AS principal_investigator,
-                    av.sponsor_name AS sponsor,
-                    av.lead_unit_name AS lead_unit,
-                    ext.grant_number,
-                    amt.obligated_total_amount AS current_obligated_amount,
-                    ah.root_award_number,
-                    ah.parent_award_number
-                FROM archive.award_version av
-                LEFT JOIN LATERAL (
-                    SELECT ap.full_name
-                    FROM archive.award_person ap
-                    WHERE ap.award_id = av.award_id
-                    ORDER BY
-                        CASE
-                            WHEN UPPER(TRIM(ap.contact_role_code)) = 'PI'
-                            THEN 0
-                            ELSE 1
-                        END,
-                        ap.full_name NULLS LAST,
-                        ap.award_person_id
-                    LIMIT 1
-                ) pi ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT ai.obligated_total_amount
-                    FROM archive.award_amount_info ai
-                    WHERE ai.award_id = av.award_id
-                    ORDER BY
-                        ai.award_amount_info_id DESC
-                    LIMIT 1
-                ) amt ON TRUE
-                LEFT JOIN archive.award_extension ext
-                    ON ext.award_id = av.award_id
-                LEFT JOIN archive.award_hierarchy ah
-                    ON ah.award_number = av.award_number
+        AwardSearchFilters f = filters == null ? AwardSearchFilters.none() : filters;
+        return statement
+                .param("status", f.status())
+                .param("sponsor", f.sponsor())
+                .param("leadUnit", f.leadUnit())
+                .param("principalInvestigator", f.principalInvestigator())
+                .param("projectStartDateFrom", f.projectStartDateFrom())
+                .param("projectStartDateTo", f.projectStartDateTo());
+    }
+
+    /*
+     * Current-Award (family) free-text WHERE, shared verbatim by
+     * searchAwards and countSearchAwards.
+     */
+    private static final String AWARD_FAMILY_SEARCH_WHERE = """
                 WHERE av.is_primary_current = TRUE
                   AND (
                         :rawQuery = ''
@@ -748,9 +755,86 @@ public class AwardArchiveRepository {
                               )
                         )
                   )
-                ORDER BY av.award_number
+            """ + AWARD_STRUCTURED_FILTERS;
+
+    public List<AwardSearchResultResponse> searchAwards(
+            String pattern,
+            String rawQuery,
+            int limit,
+            int offset
+    ) {
+        return searchAwards(pattern, rawQuery, AwardSearchFilters.none(), limit, offset);
+    }
+
+    public List<AwardSearchResultResponse> searchAwards(
+            String pattern,
+            String rawQuery,
+            AwardSearchFilters filters,
+            int limit,
+            int offset
+    ) {
+        return bindAwardFilters(jdbc.sql("""
+                SELECT
+                    av.award_id,
+                    av.award_number,
+                    av.sequence_number AS latest_sequence_number,
+                    av.title,
+                    av.status_description AS status,
+                    pi.full_name AS principal_investigator,
+                    av.sponsor_name AS sponsor,
+                    av.lead_unit_name AS lead_unit,
+                    ext.grant_number,
+                    amt.obligated_total_amount AS current_obligated_amount,
+                    ah.root_award_number,
+                    ah.parent_award_number
+                FROM archive.award_version av
+                LEFT JOIN LATERAL (
+                    SELECT ap.full_name
+                    FROM archive.award_person ap
+                    WHERE ap.award_id = av.award_id
+                    ORDER BY
+                        CASE
+                            WHEN UPPER(TRIM(ap.contact_role_code)) = 'PI'
+                            THEN 0
+                            ELSE 1
+                        END,
+                        ap.full_name NULLS LAST,
+                        ap.award_person_id
+                    LIMIT 1
+                ) pi ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT ai.obligated_total_amount
+                    FROM archive.award_amount_info ai
+                    WHERE ai.award_id = av.award_id
+                    ORDER BY
+                        ai.award_amount_info_id DESC
+                    LIMIT 1
+                ) amt ON TRUE
+                LEFT JOIN archive.award_extension ext
+                    ON ext.award_id = av.award_id
+                /*
+                 * One hierarchy row per Award, never a plain join:
+                 * award_hierarchy has no unique constraint on award_number
+                 * (V049 indexes it but does not constrain it), so a family
+                 * with more than one row would appear twice on the page
+                 * while countSearchAwards - which never joins it - counts
+                 * it once. Active first (the hierarchy builder treats
+                 * anything but 'N' as active), then newest, then id.
+                 */
+                LEFT JOIN LATERAL (
+                    SELECT h.root_award_number, h.parent_award_number
+                    FROM archive.award_hierarchy h
+                    WHERE h.award_number = av.award_number
+                    ORDER BY
+                        CASE WHEN UPPER(TRIM(h.active)) = 'N' THEN 1 ELSE 0 END,
+                        h.source_update_timestamp DESC NULLS LAST,
+                        h.award_hierarchy_id DESC
+                    LIMIT 1
+                ) ah ON TRUE
+                """ + AWARD_FAMILY_SEARCH_WHERE + """
+                ORDER BY av.award_number, av.award_id
                 LIMIT :limit OFFSET :offset
-                """)
+                """), filters)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
                 .param("limit", limit)
@@ -760,27 +844,18 @@ public class AwardArchiveRepository {
     }
 
     public long countSearchAwards(String pattern, String rawQuery) {
-        Long count = jdbc.sql("""
+        return countSearchAwards(pattern, rawQuery, AwardSearchFilters.none());
+    }
+
+    public long countSearchAwards(
+            String pattern,
+            String rawQuery,
+            AwardSearchFilters filters
+    ) {
+        Long count = bindAwardFilters(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_version av
-                WHERE av.is_primary_current = TRUE
-                  AND (
-                        :rawQuery = ''
-                        OR UPPER(av.award_number) = UPPER(:rawQuery)
-                        OR av.award_number ILIKE :pattern
-                        OR av.title ILIKE :pattern
-                        OR av.sponsor_code ILIKE :pattern
-                        OR av.sponsor_name ILIKE :pattern
-                        OR av.lead_unit_number ILIKE :pattern
-                        OR av.lead_unit_name ILIKE :pattern
-                        OR av.modification_number ILIKE :pattern
-                        OR EXISTS (
-                            SELECT 1 FROM archive.award_person ap2
-                            WHERE ap2.award_id = av.award_id
-                              AND ap2.full_name ILIKE :pattern
-                        )
-                  )
-                """)
+                """ + AWARD_FAMILY_SEARCH_WHERE), filters)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
                 .query(Long.class)
@@ -1085,6 +1160,30 @@ public class AwardArchiveRepository {
      * above - those two sentinels are unchanged; this only widens what
      * counts as a *free-text* hit.
      */
+    private static final String AWARD_VERSION_SEARCH_WHERE = """
+                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
+                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
+                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
+                  AND (
+                        :rawQuery = ''
+                        OR av.award_number ILIKE :pattern
+                        OR av.workflow_document_number ILIKE :pattern
+                        OR av.title ILIKE :pattern
+                        OR av.sponsor_name ILIKE :pattern
+                        OR av.lead_unit_name ILIKE :pattern
+                        OR EXISTS (
+                            SELECT 1 FROM archive.award_person ap2
+                            WHERE ap2.award_id = av.award_id
+                              AND ap2.full_name ILIKE :pattern
+                        )
+                  )
+                  AND (
+                        :versionFilter = 'all'
+                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
+                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
+                  )
+            """ + AWARD_STRUCTURED_FILTERS;
+
     public List<AwardVersionSearchResultResponse> searchAwardVersions(
             String pattern,
             String rawQuery,
@@ -1096,7 +1195,23 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        return searchAwardVersions(pattern, rawQuery, awardNumber, documentNumber,
+                awardId, versionFilter, AwardSearchFilters.none(), sortSql, limit, offset);
+    }
+
+    public List<AwardVersionSearchResultResponse> searchAwardVersions(
+            String pattern,
+            String rawQuery,
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            String versionFilter,
+            AwardSearchFilters filters,
+            String sortSql,
+            int limit,
+            int offset
+    ) {
+        return bindAwardFilters(jdbc.sql("""
                 SELECT
                     av.award_id,
                     av.award_number,
@@ -1125,30 +1240,9 @@ public class AwardArchiveRepository {
                         ap.award_person_id
                     LIMIT 1
                 ) pi ON TRUE
-                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
-                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
-                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
-                  AND (
-                        :rawQuery = ''
-                        OR av.award_number ILIKE :pattern
-                        OR av.workflow_document_number ILIKE :pattern
-                        OR av.title ILIKE :pattern
-                        OR av.sponsor_name ILIKE :pattern
-                        OR av.lead_unit_name ILIKE :pattern
-                        OR EXISTS (
-                            SELECT 1 FROM archive.award_person ap2
-                            WHERE ap2.award_id = av.award_id
-                              AND ap2.full_name ILIKE :pattern
-                        )
-                  )
-                  AND (
-                        :versionFilter = 'all'
-                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
-                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
-                  )
-                """ + sortSql + """
+                """ + AWARD_VERSION_SEARCH_WHERE + sortSql + """
                 LIMIT :limit OFFSET :offset
-                """)
+                """), filters)
                 .param("pattern", pattern)
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)
@@ -1169,31 +1263,23 @@ public class AwardArchiveRepository {
             Long awardId,
             String versionFilter
     ) {
-        Long count = jdbc.sql("""
+        return countSearchAwardVersions(pattern, rawQuery, awardNumber, documentNumber,
+                awardId, versionFilter, AwardSearchFilters.none());
+    }
+
+    public long countSearchAwardVersions(
+            String pattern,
+            String rawQuery,
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            String versionFilter,
+            AwardSearchFilters filters
+    ) {
+        Long count = bindAwardFilters(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_version av
-                WHERE (:awardNumber = '' OR UPPER(av.award_number) = UPPER(:awardNumber))
-                  AND (:documentNumber = '' OR UPPER(av.workflow_document_number) = UPPER(:documentNumber))
-                  AND (CAST(:awardId AS BIGINT) IS NULL OR av.award_id = :awardId)
-                  AND (
-                        :rawQuery = ''
-                        OR av.award_number ILIKE :pattern
-                        OR av.workflow_document_number ILIKE :pattern
-                        OR av.title ILIKE :pattern
-                        OR av.sponsor_name ILIKE :pattern
-                        OR av.lead_unit_name ILIKE :pattern
-                        OR EXISTS (
-                            SELECT 1 FROM archive.award_person ap2
-                            WHERE ap2.award_id = av.award_id
-                              AND ap2.full_name ILIKE :pattern
-                        )
-                  )
-                  AND (
-                        :versionFilter = 'all'
-                        OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
-                        OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
-                  )
-                """)
+                """ + AWARD_VERSION_SEARCH_WHERE), filters)
                 .param("pattern", pattern)
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)

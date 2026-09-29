@@ -220,15 +220,39 @@ export function searchDocumentExplorer(
   );
 }
 
+/**
+ * Adds each non-empty structured filter to a request's query string.
+ * Filters are already reduced to active ones by buildFilterRequestParams
+ * or activeFilters, so this never sends an empty condition.
+ */
+function appendFilters(
+  searchParameters: URLSearchParams,
+  filters: Partial<Record<string, string>> | undefined,
+) {
+  for (const [key, value] of Object.entries(filters ?? {})) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed) {
+      searchParameters.set(key, trimmed);
+    }
+  }
+}
+
 export function globalSearch(
   query: string,
+  options: { modules?: readonly string[] } = {},
+  signal?: AbortSignal,
 ): Promise<import("../types/api").GlobalSearchResponse> {
   const parameters = new URLSearchParams({
     query: query.trim(),
   });
+  // Record Type restriction; omitted means every module.
+  for (const module of options.modules ?? []) {
+    parameters.append("modules", module);
+  }
 
   return request<import("../types/api").GlobalSearchResponse>(
     `/api/global-search?${parameters.toString()}`,
+    signal,
   );
 }
 
@@ -239,6 +263,8 @@ export function searchAwardsV1(
     q?: string;
     page?: number;
     size?: number;
+    /** status, sponsor, principalInvestigator, leadUnit, projectStartDateFrom/To */
+    filters?: Partial<Record<string, string>>;
   } = {},
   signal?: AbortSignal,
 ): Promise<import("../types/api").AwardSearchResponseV1> {
@@ -250,6 +276,7 @@ export function searchAwardsV1(
   if (parameters.q?.trim()) {
     searchParameters.set("q", parameters.q.trim());
   }
+  appendFilters(searchParameters, parameters.filters);
 
   return request(`/api/v1/awards/search?${searchParameters.toString()}`, signal);
 }
@@ -336,6 +363,8 @@ export function searchAwardVersionsV1(
     sort?: "sequence" | "date";
     page?: number;
     size?: number;
+    /** status, sponsor, principalInvestigator, leadUnit, projectStartDateFrom/To */
+    filters?: Partial<Record<string, string>>;
   } = {},
   signal?: AbortSignal,
 ): Promise<import("../types/api").AwardVersionSearchPageResponse> {
@@ -358,6 +387,7 @@ export function searchAwardVersionsV1(
   if (parameters.awardId?.trim()) {
     searchParameters.set("awardId", parameters.awardId.trim());
   }
+  appendFilters(searchParameters, parameters.filters);
 
   return request(
     `/api/v1/awards/versions/search?${searchParameters.toString()}`,
@@ -853,25 +883,32 @@ export function searchAwardEvidence(
   );
 }
 
-export function getProposalFamilies(
+/**
+ * Paged, filterable Proposal family search (GET /api/proposals/search).
+ * Replaces the UI's use of the unpaged, 200-capped /api/proposals/families,
+ * which stays unchanged server-side for its other callers.
+ */
+export function searchProposalFamilies(
   parameters: {
     query?: string;
-    limit?: number;
+    page?: number;
+    size?: number;
+    /** sponsor, principalInvestigator, leadUnit */
+    filters?: Partial<Record<string, string>>;
   } = {},
   signal?: AbortSignal,
-): Promise<import("../types/api").ProposalFamily[]> {
+): Promise<import("../types/api").ProposalFamilyPageResponse> {
   const searchParameters = new URLSearchParams({
-    limit: String(parameters.limit ?? 50),
+    page: String(parameters.page ?? 0),
+    size: String(parameters.size ?? 25),
   });
 
   if (parameters.query?.trim()) {
     searchParameters.set("query", parameters.query.trim());
   }
+  appendFilters(searchParameters, parameters.filters);
 
-  return request(
-    `/api/proposals/families?${searchParameters.toString()}`,
-    signal,
-  );
+  return request(`/api/proposals/search?${searchParameters.toString()}`, signal);
 }
 
 export function getProposalWorkspace(
@@ -1202,6 +1239,8 @@ export function getSubawards(
     query?: string;
     page?: number;
     size?: number;
+    /** status, sponsor, organizationId, startDateFrom/To, endDateFrom/To */
+    filters?: Partial<Record<string, string>>;
   } = {},
   signal?: AbortSignal,
 ): Promise<import("../types/api").SubawardPageResponse> {
@@ -1213,6 +1252,7 @@ export function getSubawards(
   if (parameters.query?.trim()) {
     searchParameters.set("query", parameters.query.trim());
   }
+  appendFilters(searchParameters, parameters.filters);
 
   return request(`/api/subawards?${searchParameters.toString()}`, signal);
 }

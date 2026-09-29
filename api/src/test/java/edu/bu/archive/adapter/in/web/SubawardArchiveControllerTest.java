@@ -5,6 +5,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardPageResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse;
 import edu.bu.archive.application.security.AttachmentAuthorizationService;
 import edu.bu.archive.application.subaward.SubawardArchiveService;
+import edu.bu.archive.application.subaward.SubawardSearchFilters;
 import edu.bu.archive.application.subaward.SubawardAttachmentDownload;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +49,7 @@ class SubawardArchiveControllerTest {
         SubawardPageResponse page = new SubawardPageResponse(
                 List.of(), 2, 10, 0, 0, false, true
         );
-        when(service.findPage("1004", 2, 10)).thenReturn(page);
+        when(service.findPage("1004", SubawardSearchFilters.none(), 2, 10)).thenReturn(page);
 
         mockMvc.perform(
                         get("/api/subawards")
@@ -60,7 +61,7 @@ class SubawardArchiveControllerTest {
                 .andExpect(jsonPath("$.page").value(2))
                 .andExpect(jsonPath("$.size").value(10));
 
-        verify(service).findPage("1004", 2, 10);
+        verify(service).findPage("1004", SubawardSearchFilters.none(), 2, 10);
     }
 
     @Test

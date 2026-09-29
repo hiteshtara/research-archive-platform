@@ -1,12 +1,12 @@
 import { Button, Chip, Stack } from "@mui/material";
 
 /**
- * Removable active-filter chips plus Clear All.
+ * Removable APPLIED-filter chips plus Clear All.
  *
- * Shared for the same reason as FilterPanel: this pattern did not exist
- * in Awards, so it is introduced in components/common rather than inside
- * one module, and any module can adopt it. Each chip's label is supplied
- * by the caller so business terminology stays module-specific.
+ * Shared for the same reason as FilterPanel. Each chip's label is
+ * supplied by the caller so business terminology stays module-specific.
+ * A chip with onDelete is focusable and removable with Backspace/Delete,
+ * and carries an explicit "Remove filter ..." name for screen readers.
  */
 
 export interface FilterChip<Key extends string = string> {
@@ -32,14 +32,31 @@ export function FilterChips<Key extends string>({
     <Stack
       direction="row"
       spacing={1}
-      sx={{ mt: 2, flexWrap: "wrap", rowGap: 1, alignItems: "center" }}
+      role="group"
+      aria-label="Applied filters"
+      sx={{
+        mt: 2,
+        flexWrap: "wrap",
+        rowGap: 1,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
     >
       {chips.map((chip) => (
         <Chip
           key={chip.key}
           size="small"
           label={chip.label}
+          aria-label={`Remove filter ${chip.label}`}
           onDelete={() => onRemove(chip.key)}
+          // Wraps instead of truncating, so the applied value stays readable
+          // on narrow screens.
+          sx={{
+            maxWidth: "100%",
+            height: "auto",
+            py: 0.25,
+            "& .MuiChip-label": { whiteSpace: "normal", overflowWrap: "break-word" },
+          }}
         />
       ))}
       <Button size="small" onClick={onClearAll}>

@@ -39,17 +39,34 @@ import {
  */
 export const NEGOTIATION_FILTER_FIELDS = [
   { key: "principalInvestigator", label: "Principal Investigator (BU)" },
-  { key: "sponsor", label: "Sponsor" },
+  { key: "sponsor", label: "Sponsor", helperText: "Name or code" },
   { key: "negotiator", label: "Negotiator" },
-  { key: "agreementType", label: "Agreement Type" },
-  { key: "status", label: "Negotiation Status" },
-  { key: "leadUnit", label: "Lead Unit" },
-  { key: "associationType", label: "Negotiation Association Type" },
-  { key: "associationId", label: "Negotiation Association ID" },
-  { key: "startDateFrom", label: "Negotiation Start Date From", type: "date" },
-  { key: "startDateTo", label: "Negotiation Start Date To", type: "date" },
-  { key: "endDateFrom", label: "Negotiation End Date From", type: "date" },
-  { key: "endDateTo", label: "Negotiation End Date To", type: "date" },
+  // The server matches these three EXACTLY (they are Kuali lookup
+  // values); the helper text says so, because no endpoint yet supplies
+  // their value lists for a proper select.
+  { key: "agreementType", label: "Agreement Type", helperText: "Exact match" },
+  { key: "status", label: "Negotiation Status", helperText: "Exact match" },
+  { key: "leadUnit", label: "Lead Unit", helperText: "Name or number" },
+  {
+    key: "associationType",
+    label: "Negotiation Association Type",
+    helperText: "Exact match",
+  },
+  {
+    key: "associationId",
+    label: "Negotiation Association ID",
+    helperText: "Exact match",
+  },
+  { key: "startDateFrom", label: "Negotiation Start Date From", type: "date", helperText: "Inclusive" },
+  { key: "startDateTo", label: "Negotiation Start Date To", type: "date", helperText: "Inclusive" },
+  { key: "endDateFrom", label: "Negotiation End Date From", type: "date", helperText: "Inclusive" },
+  { key: "endDateTo", label: "Negotiation End Date To", type: "date", helperText: "Inclusive" },
+];
+
+/** Start/end date bounds, validated From <= To before they are applied. */
+export const NEGOTIATION_DATE_RANGES = [
+  { from: "startDateFrom", to: "startDateTo", label: "Negotiation Start Date" },
+  { from: "endDateFrom", to: "endDateTo", label: "Negotiation End Date" },
 ];
 
 /** Every filter empty - the initial and the "Clear All" state. */

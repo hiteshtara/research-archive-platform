@@ -6,16 +6,22 @@ import { searchAwardsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PaginationFooter } from "../../components/common/PaginationFooter";
 import { StatusPill } from "../../components/common/StatusPill";
+import { FilteredSearchBar } from "../../components/common/search/FilteredSearchBar";
 import { HintChips } from "../../components/common/search/HintChips";
 import { ResultCard } from "../../components/common/search/ResultCard";
 import { ResultCount } from "../../components/common/search/ResultCount";
-import { SearchBox } from "../../components/common/search/SearchBox";
 import { SearchPageLayout } from "../../components/common/search/SearchPageLayout";
 import { SearchStates } from "../../components/common/search/SearchStates";
+import { emptyResultsMessage } from "../../features/common/filterPresentation.mjs";
 import { resolveSearchState } from "../../features/common/searchPresentation.mjs";
 import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
 import { describeSearchResults } from "../../features/award/awardSearchPresentation.mjs";
-import { useSearchQueryParam } from "../../hooks/useSearchQueryParam";
+import {
+  AWARD_DATE_RANGES,
+  AWARD_FILTER_FIELDS,
+} from "../../features/search/searchFilterFields.mjs";
+import type { AwardFilterKey } from "../../features/search/searchFilterFields.d.mts";
+import { useFilteredSearch } from "../../hooks/useFilteredSearch";
 
 const PAGE_SIZE = 25;
 
@@ -33,23 +39,26 @@ const SEARCH_DIMENSIONS = [
 // Entry point of the primary Award workflow: Search -> Search Results ->
 // Award Hierarchy -> Award Dashboard.
 //
-// Awards is the visual reference for every archive search page, so this
-// page now consumes the shared SearchPageLayout/SearchBox/HintChips/
-// ResultCount/ResultCard/SearchStates rather than owning that markup:
-// the shared components were extracted FROM this page, and it must
-// render identically after the extraction. The only deliberate
-// behavioural change is that each result card is now a real anchor
-// instead of a div with an onClick, so Cmd-click, middle-click, "Open
-// in new tab" and "Copy link address" work.
+// Current Award FAMILIES only (one current record per Award number); the
+// structured filters apply to that current record, server-side. Every
+// archived version lives on Historical Awards instead.
 export function AwardSearchPage() {
-  const { draft, setDraft, query, page, submit, goToPage, hasSearched } =
-    useSearchQueryParam();
+  const search = useFilteredSearch<AwardFilterKey>({
+    fields: AWARD_FILTER_FIELDS,
+    dateRanges: AWARD_DATE_RANGES,
+  });
+  const { appliedQuery, appliedActiveFilters, page, hasCriteria } = search;
 
+  // Keyed on the complete applied request and cancelled via `signal`, so a
+  // superseded response can never render under newer criteria.
   const searchQuery = useQuery({
-    queryKey: ["award-search-v1", query, page],
+    queryKey: ["award-search-v1", appliedQuery, appliedActiveFilters, page],
     queryFn: ({ signal }) =>
-      searchAwardsV1({ q: query, page, size: PAGE_SIZE }, signal),
-    enabled: hasSearched,
+      searchAwardsV1(
+        { q: appliedQuery, page, size: PAGE_SIZE, filters: appliedActiveFilters },
+        signal,
+      ),
+    enabled: hasCriteria,
   });
 
   const results = searchQuery.data
@@ -62,7 +71,7 @@ export function AwardSearchPage() {
     (results?.content.length ?? 0) + (results?.exactDocumentMatch ? 1 : 0);
 
   const state = resolveSearchState({
-    hasSearched,
+    hasSearched: hasCriteria,
     isLoading: searchQuery.isLoading,
     isError: searchQuery.isError,
     resultCount,
@@ -73,12 +82,12 @@ export function AwardSearchPage() {
       title="Find an Award"
       subtitle="Search by Award number, Grant Number, PI, sponsor, lead unit, title, or document number. Use *text* for a wildcard search."
       search={
-        <SearchBox
-          value={draft}
-          onChange={setDraft}
-          onSubmit={submit}
+        <FilteredSearchBar
+          search={search}
+          fields={AWARD_FILTER_FIELDS}
           placeholder="105698, *105698*, Orsmond, NIH..."
           ariaLabel="Search Awards"
+          panelId="award-filters"
         />
       }
       belowSearch={
@@ -132,7 +141,11 @@ export function AwardSearchPage() {
             {results.content.length === 0 && !results.exactDocumentMatch && (
               <EmptyState
                 variant="text"
-                message={`No awards match "${query}".`}
+                message={emptyResultsMessage({
+                  noun: "awards",
+                  query: appliedQuery,
+                  filterCount: search.appliedCount,
+                })}
               />
             )}
 
@@ -163,7 +176,7 @@ export function AwardSearchPage() {
               <PaginationFooter
                 totalPages={results.totalPages}
                 page={page}
-                onPageChange={goToPage}
+                onPageChange={search.goToPage}
               />
             </Box>
           </>
