@@ -1,10 +1,17 @@
 import { ExpandLessOutlined, ExpandMoreOutlined } from "@mui/icons-material";
 import { Box, IconButton, Stack, Typography } from "@mui/material";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AwardHierarchyNode } from "../../types/api";
 
 import { StatusPill } from "../common/StatusPill";
+import {
+  FOCUSED_NODE_SCROLL_OPTIONS,
+  HIERARCHY_NODE_SCROLL_MARGIN_SX,
+  HIERARCHY_SCROLL_CONTAINER_SX,
+  HIERARCHY_TREE_CANVAS_SX,
+  SELECTED_NODE_SCROLL_OPTIONS,
+} from "../../features/award/awardHierarchyLayout.mjs";
 import { formatCurrencyAmount as fmt } from "../../features/award/awardSectionsPresentation.mjs";
 
 interface AwardHierarchyTreeProps {
@@ -18,19 +25,30 @@ interface AwardHierarchyTreeProps {
 // same layout, spacing, and connecting-line presentation, fully
 // recursive (every level of the real hierarchy renders, not just the
 // two levels the mockup's static demo data happened to have).
+//
+// The tree sits in its own horizontal scroll area, so a family wider than
+// the page is scrolled rather than pushed under the sidebar or off the
+// right edge - see awardHierarchyLayout.mjs for why centring is done with
+// auto margins instead of flex.
 export function AwardHierarchyTree({
   root,
   selectedAwardNumber,
   onSelect,
 }: AwardHierarchyTreeProps) {
   return (
-    <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-      <TreeBranch
-        node={root}
-        isRoot
-        selectedAwardNumber={selectedAwardNumber}
-        onSelect={onSelect}
-      />
+    <Box
+      role="region"
+      aria-label="Award hierarchy tree"
+      sx={HIERARCHY_SCROLL_CONTAINER_SX}
+    >
+      <Box sx={HIERARCHY_TREE_CANVAS_SX}>
+        <TreeBranch
+          node={root}
+          isRoot
+          selectedAwardNumber={selectedAwardNumber}
+          onSelect={onSelect}
+        />
+      </Box>
     </Box>
   );
 }
@@ -141,13 +159,28 @@ function TreeNodeCard({
   expanded: boolean;
   onToggleExpand: () => void;
 }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Bring the requested Award into view once, even in a very wide family.
+  useEffect(() => {
+    if (selected) {
+      cardRef.current?.scrollIntoView?.(SELECTED_NODE_SCROLL_OPTIONS);
+    }
+    // Only when this card first becomes the selected one.
+  }, [selected]);
+
   return (
     <Box
+      ref={cardRef}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
       aria-label={`Open Award ${node.awardNumber}`}
       onClick={onSelect}
+      // Keyboard focus can land on a card scrolled out of the tree's area.
+      onFocus={(event) => {
+        event.currentTarget.scrollIntoView?.(FOCUSED_NODE_SCROLL_OPTIONS);
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -155,6 +188,7 @@ function TreeNodeCard({
         }
       }}
       sx={{
+        ...HIERARCHY_NODE_SCROLL_MARGIN_SX,
         width: 220,
         backgroundColor: "background.paper",
         border: "1.5px solid",
