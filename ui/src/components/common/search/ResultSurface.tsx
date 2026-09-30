@@ -82,25 +82,36 @@ export function ResultSurface({
       <CardContent
         sx={{
           display: "flex",
+          // On phones the right-hand summary or actions drop below the
+          // text instead of squeezing it; from sm up the layout is unchanged.
+          flexDirection: { xs: "column", sm: "row" },
           justifyContent: "space-between",
-          alignItems: "center",
+          alignItems: { xs: "flex-start", sm: "center" },
           gap: 2,
           "&:last-child": { pb: 2 },
         }}
       >
-        <Box sx={{ minWidth: 0 }}>
+        <Box sx={{ minWidth: 0, maxWidth: "100%" }}>
           {banner && (
             <Stack
               direction="row"
-              spacing={1}
-              sx={{ alignItems: "center", mb: 0.5 }}
+              useFlexGap
+              sx={{ alignItems: "center", mb: 0.5, gap: 1, flexWrap: "wrap" }}
             >
               {banner}
             </Stack>
           )}
 
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-            <Typography sx={{ fontWeight: 700 }}>{identifier}</Typography>
+          <Stack
+            direction="row"
+            useFlexGap
+            sx={{ alignItems: "center", gap: 1, flexWrap: "wrap", minWidth: 0 }}
+          >
+            {/* Long identifiers (file names, document numbers) wrap rather
+                than pushing the card wider than the screen. */}
+            <Typography sx={{ fontWeight: 700, minWidth: 0, overflowWrap: "anywhere" }}>
+              {identifier}
+            </Typography>
             {secondaryIdentifier}
             {status}
           </Stack>
@@ -109,8 +120,18 @@ export function ResultSurface({
             <Typography
               variant="body2"
               color="text.secondary"
-              noWrap
-              sx={{ mt: 0.5 }}
+              // Below md (phones, tablets, zoomed desktops) this line wraps,
+              // so nothing at its end - a File Finder document number, say -
+              // is cut off. From md up it stays one line with an ellipsis,
+              // and the full text is the tooltip.
+              title={typeof title === "string" ? title : undefined}
+              sx={{
+                mt: 0.5,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: { xs: "normal", md: "nowrap" },
+                overflowWrap: "anywhere",
+              }}
             >
               {title}
             </Typography>

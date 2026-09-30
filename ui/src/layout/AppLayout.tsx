@@ -1,6 +1,7 @@
 import {
   AccountCircleOutlined,
   ArchiveOutlined,
+  CloseOutlined,
   DashboardOutlined,
   DescriptionOutlined,
   FindInPageOutlined,
@@ -8,6 +9,7 @@ import {
   HandshakeOutlined,
   HistoryOutlined,
   LogoutOutlined,
+  MenuOutlined,
   SearchOutlined,
 } from "@mui/icons-material";
 import {
@@ -16,6 +18,7 @@ import {
   Button,
   Chip,
   Drawer,
+  IconButton,
   List,
   ListItemButton,
   ListItemIcon,
@@ -23,9 +26,11 @@ import {
   Stack,
   Toolbar,
   Typography,
+  useMediaQuery,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { currentUser, logout } from "../auth";
 import { sidebarNavigationItems } from "../features/navigation/navigationPresentation.mjs";
@@ -40,7 +45,7 @@ import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 const ATTACHMENT_GATED_PATH = "/archived-files";
 
 const drawerWidth = 250;
-
+const NAVIGATION_ID = "app-navigation";
 
 // Icons are JSX and can't live in the plain-data presentation-helper
 // module, so each item's icon is looked up here by key instead - same
@@ -81,6 +86,20 @@ export function AppLayout() {
   const [signedInUser, setSignedInUser] = useState("Signed in");
   const [signingOut, setSigningOut] = useState(false);
   const attachmentAccess = useAttachmentAccess();
+
+  // Below md the navigation is a temporary drawer opened from the menu
+  // button, so the page gets the full width on phones and small tablets.
+  // At md and up it stays the permanent sidebar it has always been.
+  const theme = useTheme();
+  // noSsr: read the real viewport on the first render, so a desktop
+  // never briefly mounts the temporary drawer before switching.
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"), { noSsr: true });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     let active = true;
@@ -126,12 +145,75 @@ export function AppLayout() {
     }
   }
 
+  // One navigation list, rendered by whichever drawer is in use. The
+  // temporary drawer adds its own close button: on phones the header sits
+  // under the drawer's backdrop, so the menu button is not reachable.
+  const renderNavigationContent = (onClose?: () => void) => (
+    <>
+      <Stack
+        sx={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          px: 3,
+          pt: onClose ? 1 : 2,
+          pr: onClose ? 1 : 3,
+        }}
+      >
+        <Typography variant="overline" color="text.secondary">
+          Navigation
+        </Typography>
+
+        {onClose && (
+          <IconButton aria-label="Close navigation menu" onClick={onClose}>
+            <CloseOutlined />
+          </IconButton>
+        )}
+      </Stack>
+
+      <List sx={{ px: 1.5 }}>
+        {visibleNavigation.map((item) => (
+          <ListItemButton
+            key={item.path}
+            component={NavLink}
+            to={item.path}
+            onClick={() => setMobileOpen(false)}
+            sx={{
+              my: 0.4,
+              borderRadius: 2,
+              "&.active": {
+                backgroundColor: "rgba(139, 24, 50, 0.10)",
+                color: "primary.main",
+                "& .MuiListItemIcon-root": {
+                  color: "primary.main",
+                },
+              },
+            }}
+          >
+            <ListItemIcon sx={{ minWidth: 42 }}>
+              {item.icon}
+            </ListItemIcon>
+
+            <ListItemText primary={item.label} />
+
+            {item.badge && (
+              <Chip label={item.badge} size="small" variant="outlined" />
+            )}
+          </ListItemButton>
+        ))}
+      </List>
+    </>
+  );
+
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
       <AppBar
         position="fixed"
         sx={{
-          zIndex: (theme) => theme.zIndex.drawer + 1,
+          // Above the permanent sidebar on desktop only. Below md the
+          // temporary drawer is a modal: it and its backdrop must cover
+          // the header, which the modal also hides from assistive tech.
+          zIndex: { md: theme.zIndex.drawer + 1 },
           backgroundColor: "#ffffff",
           color: "#172033",
           borderBottom: "1px solid #e7e9ee",
@@ -139,8 +221,20 @@ export function AppLayout() {
         }}
       >
         <Toolbar>
+          <IconButton
+            edge="start"
+            aria-label="Open navigation menu"
+            aria-controls={NAVIGATION_ID}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen(true)}
+            sx={{ mr: 1, display: { xs: "inline-flex", md: "none" } }}
+          >
+            <MenuOutlined />
+          </IconButton>
+
           <Box
             sx={{
+              flexShrink: 0,
               width: 38,
               height: 38,
               borderRadius: 2,
@@ -157,25 +251,38 @@ export function AppLayout() {
 
           <Stack
             sx={{
-              width: "100%",
+              // Take the space left after the menu button and logo, and
+              // allow shrinking, so the title truncates instead of pushing
+              // Sign out off the screen on phones.
+              flex: 1,
+              minWidth: 0,
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "space-between",
               gap: 2,
             }}
           >
-            <Box>
-              <Typography variant="h6">
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                variant="h6"
+                noWrap
+                sx={{ fontSize: { xs: "1rem", sm: "1.25rem" } }}
+              >
                 Boston University Research Data Hub
               </Typography>
 
-              <Typography variant="caption" color="text.secondary">
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: { xs: "none", sm: "block" } }}
+              >
                 Legacy research administration archive
               </Typography>
             </Box>
 
             <Stack
               sx={{
+                flexShrink: 0,
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 1.5,
@@ -214,67 +321,73 @@ export function AppLayout() {
                 startIcon={<LogoutOutlined />}
                 disabled={signingOut}
                 onClick={() => void handleSignOut()}
+                sx={{ display: { xs: "none", sm: "inline-flex" } }}
               >
                 {signingOut ? "Signing out..." : "Sign out"}
               </Button>
+
+              {/* Phones: the same action as an icon, so the header fits. */}
+              <IconButton
+                aria-label={signingOut ? "Signing out" : "Sign out"}
+                disabled={signingOut}
+                onClick={() => void handleSignOut()}
+                sx={{ display: { xs: "inline-flex", sm: "none" } }}
+              >
+                <LogoutOutlined />
+              </IconButton>
             </Stack>
           </Stack>
         </Toolbar>
       </AppBar>
 
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          "& .MuiDrawer-paper": {
-            width: drawerWidth,
-            boxSizing: "border-box",
-            pt: 9,
-            borderRight: "1px solid #e7e9ee",
-          },
-        }}
+      {/* A landmark only when it holds the permanent sidebar; the
+          temporary drawer's paper is its own "Primary" nav. */}
+      <Box
+        component={isDesktop ? "nav" : "div"}
+        aria-label={isDesktop ? "Primary" : undefined}
+        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
       >
-        <Typography
-          variant="overline"
-          color="text.secondary"
-          sx={{ px: 3, pt: 2 }}
-        >
-          Navigation
-        </Typography>
-
-        <List sx={{ px: 1.5 }}>
-          {visibleNavigation.map((item) => (
-            <ListItemButton
-              key={item.path}
-              component={NavLink}
-              to={item.path}
-              sx={{
-                my: 0.4,
-                borderRadius: 2,
-                "&.active": {
-                  backgroundColor: "rgba(139, 24, 50, 0.10)",
-                  color: "primary.main",
-                  "& .MuiListItemIcon-root": {
-                    color: "primary.main",
-                  },
-                },
-              }}
-            >
-              <ListItemIcon sx={{ minWidth: 42 }}>
-                {item.icon}
-              </ListItemIcon>
-
-              <ListItemText primary={item.label} />
-
-              {item.badge && (
-                <Chip label={item.badge} size="small" variant="outlined" />
-              )}
-            </ListItemButton>
-          ))}
-        </List>
-
-      </Drawer>
+        {isDesktop ? (
+          <Drawer
+            id={NAVIGATION_ID}
+            variant="permanent"
+            sx={{
+              width: drawerWidth,
+              flexShrink: 0,
+              "& .MuiDrawer-paper": {
+                width: drawerWidth,
+                boxSizing: "border-box",
+                pt: 9,
+                borderRight: "1px solid #e7e9ee",
+              },
+            }}
+          >
+            {renderNavigationContent()}
+          </Drawer>
+        ) : (
+          <Drawer
+            id={NAVIGATION_ID}
+            variant="temporary"
+            open={mobileOpen}
+            onClose={() => setMobileOpen(false)}
+            ModalProps={{ keepMounted: true }}
+            // The modal renders in a portal outside the <nav> above, so
+            // the paper carries the navigation landmark itself.
+            slotProps={{
+              paper: { component: "nav", "aria-label": "Primary" },
+            }}
+            sx={{
+              "& .MuiDrawer-paper": {
+                width: drawerWidth,
+                maxWidth: "85vw",
+                boxSizing: "border-box",
+              },
+            }}
+          >
+            {renderNavigationContent(() => setMobileOpen(false))}
+          </Drawer>
+        )}
+      </Box>
 
       <Box
         component="main"
