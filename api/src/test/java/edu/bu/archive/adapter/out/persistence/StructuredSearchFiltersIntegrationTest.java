@@ -183,7 +183,31 @@ class StructuredSearchFiltersIntegrationTest {
                      '7777', 'CHEMISTRY', 'JANE SMITH'),
                     (7101, 'P0002', 1, 'Other', '0200', 'National Institutes of Health',
                      '7777', 'CHEMISTRY', 'ANN JONES'),
-                    (7201, 'P0003', 1, 'No attributes', NULL, NULL, NULL, NULL, NULL)
+                    (7201, 'P0003', 1, 'No attributes', NULL, NULL, NULL, NULL, NULL),
+                    -- PI known only from the denormalised name (no person rows):
+                    -- exercises the temporary PI-name fallback.
+                    (7301, 'P0004', 1, 'Name only', NULL, NULL, NULL, NULL, 'NAME ONLY'),
+                    -- Stored PI name shared with a COI person row on the same version.
+                    (7401, 'P0005', 1, 'Same name', NULL, NULL, NULL, NULL, 'LEE SAMENAME')
+                    """);
+            // Req 12 (PI filter = PI or MPI), joined by proposal_id only.
+            statement.execute("""
+                    INSERT INTO archive.proposal_person (
+                        proposal_person_id, proposal_id, proposal_number, sequence_number,
+                        full_name, contact_role_code
+                    ) VALUES
+                    (8001, 7002, 'P0001', 2, 'JANE SMITH', 'PI'),
+                    (8002, 7002, 'P0001', 2, 'MIA MULTI', 'MPI'),
+                    (8003, 7002, 'P0001', 2, 'SAM SMITHERS', 'MPI'),
+                    (8004, 7001, 'P0001', 1, 'OLD MULTIPI', 'MPI'),
+                    (8005, 7101, 'P0002', 1, 'ANN JONES', 'PI'),
+                    (8006, 7101, 'P0002', 1, 'RAY COINV', 'COI'),
+                    (8007, 7101, 'P0002', 1, 'KIT KEYPERSON', 'KP'),
+                    (8008, 7101, 'P0002', 0, 'SEQ EARLIER', 'MPI'),
+                    (8009, 7002, 'P0001', 2, 'PAT DUAL', 'MPI'),
+                    (8010, 7101, 'P0002', 1, 'PAT DUAL', 'PI'),
+                    (8011, 7201, 'P0003', 1, 'VAL SPACED', ' mpi '),
+                    (8012, 7401, 'P0005', 1, 'LEE SAMENAME', 'COI')
                     """);
         }
 
@@ -381,11 +405,100 @@ class StructuredSearchFiltersIntegrationTest {
         List<ProposalFamilySummaryResponse> rows = proposals.findFamilyPage(null, smith, 25, 0);
         assertThat(rows).extracting(ProposalFamilySummaryResponse::proposalNumber).containsExactly("P0001");
         assertThat(proposals.countFamilyPage(null, smith)).isEqualTo(1);
-        assertThat(proposals.countFamilyPage(null, ProposalSearchFilters.none())).isEqualTo(3);
+        assertThat(proposals.countFamilyPage(null, ProposalSearchFilters.none())).isEqualTo(5);
         assertThat(proposals.findFamilyPage(null, ProposalSearchFilters.none(), 2, 2))
-                .extracting(ProposalFamilySummaryResponse::proposalNumber).containsExactly("P0003");
+                .extracting(ProposalFamilySummaryResponse::proposalNumber).containsExactly("P0003", "P0004");
         // NULL attributes never match a filter
         assertThat(proposals.countFamilyPage(null, new ProposalSearchFilters("a", null, null))).isEqualTo(2);
+    }
+
+    private static List<String> proposalNumbers(String query, ProposalSearchFilters filters) {
+        List<ProposalFamilySummaryResponse> page = proposals.findFamilyPage(query, filters, 100, 0);
+        assertThat(proposals.countFamilyPage(query, filters))
+                .as("count equals the unpaged result size")
+                .isEqualTo(page.size());
+        return page.stream().map(ProposalFamilySummaryResponse::proposalNumber).toList();
+    }
+
+    private static ProposalSearchFilters pi(String name) {
+        return new ProposalSearchFilters(null, name, null);
+    }
+
+    @Test
+    void proposalPiFilterMatchesPiAndMpiOnTheLatestVersion() {
+        assertThat(proposalNumbers(null, pi("jane smith"))).containsExactly("P0001"); // PI
+        assertThat(proposalNumbers(null, pi("mia multi"))).containsExactly("P0001");  // MPI
+    }
+
+    @Test
+    void proposalPiFilterExcludesCoInvestigatorsAndKeyPersons() {
+        assertThat(proposalNumbers(null, pi("coinv"))).isEmpty();
+        assertThat(proposalNumbers(null, pi("keyperson"))).isEmpty();
+    }
+
+    @Test
+    void proposalPiFilterIgnoresPeopleOnOlderVersions() {
+        assertThat(proposalNumbers(null, pi("multipi"))).isEmpty(); // MPI on P0001 v1 only
+    }
+
+    @Test
+    void proposalPersonWithAnEarlierSequenceNumberStillMatches() {
+        // Kuali relates PROPOSAL_PERSONS to a version by PROPOSAL_ID only.
+        assertThat(proposalNumbers(null, pi("seq earlier"))).containsExactly("P0002");
+    }
+
+    @Test
+    void proposalPersonWhoIsMpiOnOneProposalAndPiOnAnotherMatchesBoth() {
+        assertThat(proposalNumbers(null, pi("dual"))).containsExactly("P0001", "P0002");
+    }
+
+    @Test
+    void proposalRoleCodesAreTrimmedAndCaseInsensitive() {
+        assertThat(proposalNumbers(null, pi("spaced"))).containsExactly("P0003");
+    }
+
+    @Test
+    void proposalPiAndMpiOnTheSameVersionReturnOneResultCountedOnce() {
+        // JANE SMITH (PI) and SAM SMITHERS (MPI) both match "smith" on P0001 v2.
+        assertThat(proposalNumbers(null, pi("smith"))).containsExactly("P0001");
+    }
+
+    @Test
+    void aCoInvestigatorRowAloneNeverQualifiesEvenThroughTheFallback() {
+        // RAY COINV is COI on P0002, whose stored PI name is someone else.
+        assertThat(proposalNumbers(null, pi("ray coinv"))).isEmpty();
+    }
+
+    @Test
+    void aStoredPiNameMatchIsNotSuppressedByASameNamePersonRowWithAnotherRole() {
+        // P0005's stored PI name matches; the only person row with that name is COI.
+        // The fallback keeps today's match; the COI row neither adds nor removes it.
+        assertThat(proposalNumbers(null, pi("samename"))).containsExactly("P0005");
+    }
+
+    @Test
+    void proposalPiNameFallbackPreservesPiMatchesWithoutPersonRows() {
+        // P0004 has no person rows; only its denormalised PI name matches.
+        // The fallback is PI-only: no MPI can ever be found for such a version.
+        assertThat(proposalNumbers(null, pi("name only"))).containsExactly("P0004");
+    }
+
+    @Test
+    void proposalFreeTextIsUnchanged() {
+        // Free text still reads principal_investigator_name only - never person rows.
+        assertThat(proposalNumbers("coinv", ProposalSearchFilters.none())).isEmpty();
+        assertThat(proposalNumbers("mia multi", ProposalSearchFilters.none())).isEmpty();
+        assertThat(proposalNumbers("jane smith", ProposalSearchFilters.none())).containsExactly("P0001");
+    }
+
+    @Test
+    void proposalPiFilterPagesStablyWithCountParity() {
+        ProposalSearchFilters a = pi("a"); // PI/MPI names or PI-name fallback on all five families
+        assertThat(proposals.findFamilyPage(null, a, 2, 0))
+                .extracting(ProposalFamilySummaryResponse::proposalNumber).containsExactly("P0001", "P0002");
+        assertThat(proposals.findFamilyPage(null, a, 2, 2))
+                .extracting(ProposalFamilySummaryResponse::proposalNumber).containsExactly("P0003", "P0004");
+        assertThat(proposals.countFamilyPage(null, a)).isEqualTo(5);
     }
 
     @Test

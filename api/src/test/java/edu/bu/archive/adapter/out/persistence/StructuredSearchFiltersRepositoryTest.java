@@ -167,7 +167,13 @@ class StructuredSearchFiltersRepositoryTest {
                 .contains("sponsor_code ILIKE '%' || :sponsor || '%'")
                 .contains("lead_unit_name ILIKE '%' || :leadUnit || '%'")
                 .contains("lead_unit_number ILIKE '%' || :leadUnit || '%'")
-                .contains("principal_investigator_name ILIKE '%' || :principalInvestigator || '%'")
+                // PI filter: PI or MPI person rows, joined by proposal_id only
+                .contains("FROM archive.proposal_person ppf WHERE ppf.proposal_id = ranked.proposal_id")
+                .contains("UPPER(TRIM(ppf.contact_role_code)) IN ('PI', 'MPI')")
+                .contains("ppf.full_name ILIKE '%' || :principalInvestigator || '%'")
+                .doesNotContain("ppf.sequence_number")
+                // temporary PI-name fallback (DQ-2) is still present
+                .contains("OR principal_investigator_name ILIKE '%' || :principalInvestigator || '%'")
                 .contains("ORDER BY proposal_number LIMIT :limit OFFSET :offset");
         verify(statement).param("query", "cancer");
         verify(statement).param("sponsor", "NIH");
