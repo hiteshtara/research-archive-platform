@@ -10,8 +10,11 @@ package edu.bu.archive.application.proposal;
  *
  * <p>Matching: {@code sponsor} and {@code leadUnit} are contains,
  * case-insensitive, against BOTH name and code/number;
- * {@code principalInvestigator} is contains, case-insensitive, against
- * {@code principal_investigator_name}.
+ * {@code principalInvestigator} is contains, case-insensitive, against the
+ * latest version's {@code archive.proposal_person} rows whose role is PI or
+ * MPI (BU's "Co-PI"), joined by {@code proposal_id} only; COI and KP never
+ * match. A temporary fallback also matches {@code principal_investigator_name}
+ * (PI only) for versions whose person rows are missing from the archive.
  *
  * <p>No status filter: the only status this search returns is
  * {@code proposal_sequence_status} (a version-lifecycle flag), not the

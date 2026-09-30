@@ -667,6 +667,11 @@ public class AwardArchiveRepository {
      * count once omitted the Grant Number branch its page query had).
      * Every condition applies to the row being returned (`av`); see
      * AwardSearchFilters for the per-field matching semantics.
+     *
+     * The PI filter matches role PI or MPI - MPI is what BU's Kuali labels
+     * "Co-PI" (EPS_PROP_PERSON_ROLE, verified against staging 2026-09-29).
+     * COI and KP are deliberately excluded. Free text (AWARD_FAMILY_SEARCH_WHERE
+     * / AWARD_VERSION_SEARCH_WHERE) still matches a person of any role.
      */
     private static final String AWARD_STRUCTURED_FILTERS = """
                   AND (CAST(:status AS TEXT) IS NULL
@@ -682,7 +687,7 @@ public class AwardArchiveRepository {
                        OR EXISTS (
                            SELECT 1 FROM archive.award_person apf
                            WHERE apf.award_id = av.award_id
-                             AND UPPER(TRIM(apf.contact_role_code)) = 'PI'
+                             AND UPPER(TRIM(apf.contact_role_code)) IN ('PI', 'MPI')
                              AND apf.full_name
                                  ILIKE '%' || :principalInvestigator || '%'
                        ))
