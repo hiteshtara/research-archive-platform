@@ -15,3 +15,15 @@ export declare const SELECTED_NODE_SCROLL_OPTIONS: Readonly<{
   block: "nearest";
   inline: "center";
 }>;
+
+export declare const FOCUSED_NODE_SCROLL_OPTIONS: Readonly<{
+  block: "nearest";
+  inline: "nearest";
+}>;
+
+export declare const HIERARCHY_NODE_SCROLL_MARGIN_SX: Readonly<{
+  scrollMarginTop: number;
+  scrollMarginBottom: number;
+  scrollMarginLeft: number;
+  scrollMarginRight: number;
+}>;

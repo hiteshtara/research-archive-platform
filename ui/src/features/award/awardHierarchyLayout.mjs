@@ -44,3 +44,27 @@ export const SELECTED_NODE_SCROLL_OPTIONS = Object.freeze({
   block: "nearest",
   inline: "center",
 });
+
+/**
+ * Where a node is scrolled when it receives keyboard focus. The browser's
+ * own focus scrolling can leave a card partly outside the scroll area in a
+ * wide row, so each card brings itself fully into view: `nearest` on both
+ * axes moves the tree only as far as needed and never re-centres a node
+ * that is already visible (so clicking a visible card does not jump).
+ */
+export const FOCUSED_NODE_SCROLL_OPTIONS = Object.freeze({
+  block: "nearest",
+  inline: "nearest",
+});
+
+/**
+ * Scroll margins on each node card. The app header is `position: fixed`
+ * (about 64 px), so without a top margin a card scrolled into view near the
+ * top of the window lands underneath it. 80 px clears the header with a gap.
+ */
+export const HIERARCHY_NODE_SCROLL_MARGIN_SX = Object.freeze({
+  scrollMarginTop: 80,
+  scrollMarginBottom: 16,
+  scrollMarginLeft: 8,
+  scrollMarginRight: 8,
+});

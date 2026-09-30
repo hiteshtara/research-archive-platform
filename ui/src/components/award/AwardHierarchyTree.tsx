@@ -6,6 +6,8 @@ import type { AwardHierarchyNode } from "../../types/api";
 
 import { StatusPill } from "../common/StatusPill";
 import {
+  FOCUSED_NODE_SCROLL_OPTIONS,
+  HIERARCHY_NODE_SCROLL_MARGIN_SX,
   HIERARCHY_SCROLL_CONTAINER_SX,
   HIERARCHY_TREE_CANVAS_SX,
   SELECTED_NODE_SCROLL_OPTIONS,
@@ -175,6 +177,10 @@ function TreeNodeCard({
       aria-pressed={selected}
       aria-label={`Open Award ${node.awardNumber}`}
       onClick={onSelect}
+      // Keyboard focus can land on a card scrolled out of the tree's area.
+      onFocus={(event) => {
+        event.currentTarget.scrollIntoView?.(FOCUSED_NODE_SCROLL_OPTIONS);
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -182,6 +188,7 @@ function TreeNodeCard({
         }
       }}
       sx={{
+        ...HIERARCHY_NODE_SCROLL_MARGIN_SX,
         width: 220,
         backgroundColor: "background.paper",
         border: "1.5px solid",

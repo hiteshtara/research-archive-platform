@@ -4,6 +4,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  FOCUSED_NODE_SCROLL_OPTIONS,
+  HIERARCHY_NODE_SCROLL_MARGIN_SX,
   HIERARCHY_SCROLL_CONTAINER_SX,
   HIERARCHY_TREE_CANVAS_SX,
   SELECTED_NODE_SCROLL_OPTIONS,
@@ -32,6 +34,21 @@ test("the tree is centred with auto margins, which cannot push nodes off the lef
 test("the selected Award is scrolled into view without moving the page vertically", () => {
   assert.equal(SELECTED_NODE_SCROLL_OPTIONS.block, "nearest");
   assert.equal(SELECTED_NODE_SCROLL_OPTIONS.inline, "center");
+});
+
+test("a node that receives keyboard focus is scrolled fully into view, only as far as needed", () => {
+  assert.equal(FOCUSED_NODE_SCROLL_OPTIONS.block, "nearest");
+  assert.equal(FOCUSED_NODE_SCROLL_OPTIONS.inline, "nearest");
+  assert.match(
+    treeSource,
+    /onFocus=\{\(event\) => \{\s*event\.currentTarget\.scrollIntoView\?\.\(FOCUSED_NODE_SCROLL_OPTIONS\);/,
+  );
+});
+
+test("a node scrolled into view is never left under the fixed app header", () => {
+  // The header is position: fixed and about 64 px tall.
+  assert.ok(HIERARCHY_NODE_SCROLL_MARGIN_SX.scrollMarginTop >= 72);
+  assert.match(treeSource, /\.\.\.HIERARCHY_NODE_SCROLL_MARGIN_SX,/);
 });
 
 test("AwardHierarchyTree uses the contained layout (QA-D1 regression)", () => {
