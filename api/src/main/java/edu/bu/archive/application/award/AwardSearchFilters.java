@@ -23,8 +23,9 @@ import java.time.LocalDate;
  *   <li>{@code sponsor}, {@code leadUnit} - contains, case-insensitive,
  *       against BOTH the name and the code/number.</li>
  *   <li>{@code principalInvestigator} - contains, case-insensitive, against
- *       {@code award_person} rows whose contact role is PI on that
- *       version.</li>
+ *       {@code award_person} rows whose contact role is PI or MPI (BU's
+ *       "Co-PI") on that version. COI and KP never match; free text still
+ *       matches a person of any role.</li>
  *   <li>{@code projectStartDateFrom/To} - Kuali's "Project Start Date",
  *       which is {@code award_effective_date} (never {@code begin_date},
  *       populated on 2 of 267,386 rows). Inclusive on both ends.</li>
