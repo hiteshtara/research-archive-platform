@@ -141,9 +141,9 @@ against what is actually shipped.
 | DataDictionary XML | Business object | Oracle table | Type | Archive table | Status | Notes |
 |---|---|---|---|---|---|---|
 | `InstitutionalProposalContact.xml` | `InstitutionalProposalContact` (abstract) | none (abstract base) | Abstract base class | — | **NOT APPLICABLE** | Confirmed `public abstract class` in `InstitutionalProposalContact.java`; shared base for `InstitutionalProposalPerson` and `InstitutionalProposalUnitContact` below, not itself persisted — mirrors `AwardContact.xml` |
-| `InstitutionalProposalPerson.xml` | `InstitutionalProposalPerson` | `PROPOSAL_PERSONS` | Persisted entity | — (removed) | **NOT APPLICABLE** | Deliberately removed by explicit decision, not merely un-built: `archive.proposal_person` was created (`V015`, expanded in `V016`) then dropped (`V033__drop_award_unit_contact_and_proposal_person.sql`) because no verified Oracle extraction query existed for the full person/role/effort/credit-split shape — see `docs/DECISIONS.md`. The PI's `person_id`/`full_name` alone survive, folded into `archive.proposal_version.principal_investigator_id`/`principal_investigator_name` via a windowed join in `01_proposal_versions.sql` — that is not a substitute for the removed feature |
+| `InstitutionalProposalPerson.xml` | `InstitutionalProposalPerson` | `PROPOSAL_PERSONS` | Persisted entity | `archive.proposal_person` | **ARCHIVED** | Created in `V015`/`V016`, dropped in `V033` for lack of a verified extraction query, then recreated by `V061` (commit 84411a9) from a verified query (`sql/extract/proposal/03_proposal_persons.sql`). Roles PI/MPI/COI/KP; related to a version by `proposal_id` only, as in Kuali. Known gap at 2026-09-30: 37 PI rows present at staging are missing from dev (DQ-2) |
 | `InstitutionalProposalPersonCreditSplit.xml` | `InstitutionalProposalPersonCreditSplit` | `PROPOSAL_PER_CREDIT_SPLIT` | Persisted entity, child of Person | — | **NOT APPLICABLE** | Child of the removed Person feature above; no independent archival value without its parent |
-| `InstitutionalProposalPersonUnit.xml` | `InstitutionalProposalPersonUnit` | `PROPOSAL_PERSON_UNITS` | Persisted entity, child of Person | — | **NOT APPLICABLE** | Same reasoning as above |
+| `InstitutionalProposalPersonUnit.xml` | `InstitutionalProposalPersonUnit` | `PROPOSAL_PERSON_UNITS` | Persisted entity, child of Person | `archive.proposal_person_unit` | **ARCHIVED** | Recreated with its parent by `V061` (`sql/extract/proposal/04_proposal_person_units.sql`) |
 | `InstitutionalProposalPersonUnitCreditSplit.xml` | `InstitutionalProposalPersonUnitCreditSplit` | `PROPOSAL_PERS_UNIT_CRED_SPLITS` | Persisted entity, child of PersonUnit | — | **NOT APPLICABLE** | Same reasoning as above |
 | `InstitutionalProposalUnitContact.xml` | `InstitutionalProposalUnitContact` | `PROPOSAL_UNIT_CONTACTS` | Persisted entity, concrete `InstitutionalProposalContact` subclass | — | **NOT YET ARCHIVED** | **Not covered by the Person removal decision above** — a separate table/feature (unit-level administrative contacts, not project personnel) that was simply never built; `archive.proposal_unit_contact` has never existed in any migration. Distinct from Award's own `AwardUnitContact` (COMPLETE on the Award side) |
 
@@ -294,8 +294,13 @@ review/exemption) remains entirely unbuilt on the Proposal side.
   InstitutionalProposal record) — documented here as explicitly
   out-of-scope rather than silently skipped, but excluded from the
   24-file total and the Totals section.
+- **Superseded (2026-09-30):** `InstitutionalProposalPerson` is now
+  **ARCHIVED** — `V061` recreated `archive.proposal_person` (see the row
+  above), and `V061` also archives `PROPOSAL_PERSON_UNITS`. The note below
+  is kept as history of the original decision; it no longer describes the
+  current schema. The credit-split child remains not archived.
 - Proposal's People feature (`InstitutionalProposalPerson` and its three
-  child tables) is marked **NOT APPLICABLE**, not **NOT YET ARCHIVED** —
+  child tables) was marked **NOT APPLICABLE**, not **NOT YET ARCHIVED** —
   reflecting the deliberate removal decision already recorded in
   `docs/DECISIONS.md` (no verified Oracle extraction query for the full
   person/role/effort/credit-split shape; `archive.proposal_person` was

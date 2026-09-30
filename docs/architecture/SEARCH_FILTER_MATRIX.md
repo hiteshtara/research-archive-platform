@@ -55,9 +55,19 @@ version. Stable order: `proposal_number` (unique per family).
 |---|---|---|---|
 | Search box | `query` (`q` in URL) | contains over proposal number, title, sponsor name, lead unit name, PI name | existing semantics |
 | Sponsor | `sponsor` | contains, name **or** code | new |
-| Principal Investigator | `principalInvestigator` | contains | new |
+| Principal Investigator | `principalInvestigator` | contains; latest version's `proposal_person` rows with role PI or MPI (BU "Co-PI"), joined by `proposal_id` only, plus a temporary PI-only fallback on `principal_investigator_name` (see coverage note below) | new |
 | Lead Unit | `leadUnit` | contains, name **or** number | new |
 | Paging | `page`, `size` | server-side, with total count | **new** (the old page showed the first 100 only) |
+
+**Proposal PI filter coverage (2026-09-30, dev archive vs Kuali staging).**
+MPI person rows are complete. 37 PI person rows present at staging are
+missing from dev (23 on latest versions; data-quality issue DQ-2). The
+`principal_investigator_name` fallback keeps today's PI-name matches for
+those versions where that name is populated; it can never find an MPI, and
+whether it is populated for all 37 has not been measured. Fixing DQ-2 does
+not by itself justify removing the fallback: first prove that the person-row
+branch alone preserves every valid match, including name-format differences
+between `principal_investigator_name` and `proposal_person.full_name`.
 
 `GET /api/proposals/families` is **unchanged** (unpaged, capped at 200); Global
 Search still calls its repository method directly. No status filter: the only

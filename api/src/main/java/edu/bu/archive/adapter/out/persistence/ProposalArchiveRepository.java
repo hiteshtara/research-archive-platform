@@ -119,6 +119,31 @@ public class ProposalArchiveRepository {
             )
             """;
 
+    /*
+     * Structured PI filter (Req 12): matches the latest version's people
+     * whose role is PI or MPI - MPI is what BU's Kuali labels "Co-PI". COI
+     * and KP never match. Free text (the :query block) is unchanged and
+     * still reads only principal_investigator_name.
+     *
+     * The person join is by proposal_id ONLY, because that is Kuali's own
+     * relationship (InstitutionalProposal.projectPersons inverse-foreignkey
+     * proposalId). Some PROPOSAL_PERSONS rows carry an earlier
+     * SEQUENCE_NUMBER than their version (145 at staging, 2026-09-30); a
+     * sequence join would silently drop them. Qualify ranked.proposal_id -
+     * a bare proposal_id would bind to ppf and make the EXISTS always true.
+     *
+     * The principal_investigator_name branch is a TEMPORARY fallback that
+     * preserves every match the filter made before this change. 37 PI person
+     * rows were missing from dev at 2026-09-30 (data-quality issue DQ-2); how
+     * many of those versions have a stored PI name is unknown, so this does
+     * NOT claim complete PI coverage. It is an OR: a stored-name match is
+     * never suppressed by a same-name person row with another role, and a
+     * COI/KP row alone never qualifies. It is PI-only and can never find an
+     * MPI. Do NOT remove it automatically once DQ-2 is fixed: first prove
+     * that the person-row branch alone returns every valid match the
+     * fallback returns today, including name-format differences between
+     * principal_investigator_name and proposal_person.full_name.
+     */
     private static final String FAMILY_PAGE_WHERE = """
             WHERE row_rank = 1
               AND (CAST(:query AS TEXT) IS NULL OR (
@@ -136,6 +161,12 @@ public class ProposalArchiveRepository {
                    OR lead_unit_name ILIKE '%' || :leadUnit || '%'
                    OR lead_unit_number ILIKE '%' || :leadUnit || '%')
               AND (CAST(:principalInvestigator AS TEXT) IS NULL
+                   OR EXISTS (
+                       SELECT 1 FROM archive.proposal_person ppf
+                       WHERE ppf.proposal_id = ranked.proposal_id
+                         AND UPPER(TRIM(ppf.contact_role_code)) IN ('PI', 'MPI')
+                         AND ppf.full_name ILIKE '%' || :principalInvestigator || '%'
+                   )
                    OR principal_investigator_name
                       ILIKE '%' || :principalInvestigator || '%')
             """;
