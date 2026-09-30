@@ -139,7 +139,10 @@ public class ProposalArchiveRepository {
      * NOT claim complete PI coverage. It is an OR: a stored-name match is
      * never suppressed by a same-name person row with another role, and a
      * COI/KP row alone never qualifies. It is PI-only and can never find an
-     * MPI. Remove it once DQ-2 is fixed and person rows reconcile.
+     * MPI. Do NOT remove it automatically once DQ-2 is fixed: first prove
+     * that the person-row branch alone returns every valid match the
+     * fallback returns today, including name-format differences between
+     * principal_investigator_name and proposal_person.full_name.
      */
     private static final String FAMILY_PAGE_WHERE = """
             WHERE row_rank = 1

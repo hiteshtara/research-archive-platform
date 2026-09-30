@@ -64,8 +64,10 @@ MPI person rows are complete. 37 PI person rows present at staging are
 missing from dev (23 on latest versions; data-quality issue DQ-2). The
 `principal_investigator_name` fallback keeps today's PI-name matches for
 those versions where that name is populated; it can never find an MPI, and
-whether it is populated for all 37 has not been measured. Remove the
-fallback once DQ-2 is fixed and person rows reconcile.
+whether it is populated for all 37 has not been measured. Fixing DQ-2 does
+not by itself justify removing the fallback: first prove that the person-row
+branch alone preserves every valid match, including name-format differences
+between `principal_investigator_name` and `proposal_person.full_name`.
 
 `GET /api/proposals/families` is **unchanged** (unpaged, capped at 200); Global
 Search still calls its repository method directly. No status filter: the only
