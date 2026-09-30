@@ -12,6 +12,11 @@
 
 const INCLUSIVE = "Inclusive";
 
+// Awards, Historical Award Records and Proposals match people whose role is
+// PI or MPI - BU's Kuali labels MPI "Co-PI" (Req 12). Co-Investigators and
+// Key Persons never match. Negotiations and Subawards keep their own labels.
+const PI_CO_PI = "PI / Co-PI";
+
 /* --- Awards (current Award families) --------------------------------- */
 
 const AWARD_ATTRIBUTE_FIELDS = [
@@ -21,7 +26,7 @@ const AWARD_ATTRIBUTE_FIELDS = [
     helperText: "Exact, e.g. Approved Award",
   },
   { key: "sponsor", label: "Sponsor", helperText: "Name or code" },
-  { key: "principalInvestigator", label: "Principal Investigator" },
+  { key: "principalInvestigator", label: PI_CO_PI },
   { key: "leadUnit", label: "Lead Unit", helperText: "Name or number" },
   {
     key: "projectStartDateFrom",
@@ -84,7 +89,7 @@ export const AWARD_VERSION_SORT_OPTIONS = [
 
 export const PROPOSAL_FILTER_FIELDS = [
   { key: "sponsor", label: "Sponsor", helperText: "Name or code" },
-  { key: "principalInvestigator", label: "Principal Investigator" },
+  { key: "principalInvestigator", label: PI_CO_PI },
   { key: "leadUnit", label: "Lead Unit", helperText: "Name or number" },
 ];
 

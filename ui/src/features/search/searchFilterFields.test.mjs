@@ -45,6 +45,18 @@ test("each module's filter keys are exactly its API parameter names", () => {
   assert.deepEqual(keys(GLOBAL_SEARCH_FILTER_FIELDS), ["modules"]);
 });
 
+// Req 12: the Award, Historical Award and Proposal PI filters match PI and
+// MPI (Co-PI) - the label says so. Negotiations keep "Principal Investigator
+// (BU)", a different, single-PI field.
+test("the PI filter is labelled PI / Co-PI on Awards, Historical Awards and Proposals only", () => {
+  const piLabel = (fields) => fields.find((field) => field.key === "principalInvestigator")?.label;
+  assert.equal(piLabel(AWARD_FILTER_FIELDS), "PI / Co-PI");
+  assert.equal(piLabel(AWARD_VERSION_FILTER_FIELDS), "PI / Co-PI");
+  assert.equal(piLabel(PROPOSAL_FILTER_FIELDS), "PI / Co-PI");
+  assert.equal(piLabel(NEGOTIATION_FILTER_FIELDS), "Principal Investigator (BU)");
+  assert.equal(piLabel(SUBAWARD_FILTER_FIELDS), undefined);
+});
+
 test("the API parameter names really exist on the controllers", () => {
   const api = (path) => readFileSync(new URL(`../../../../api/src/main/java/edu/bu/archive/${path}`, import.meta.url), "utf8");
   const award = api("adapter/in/web/AwardV1Controller.java");
