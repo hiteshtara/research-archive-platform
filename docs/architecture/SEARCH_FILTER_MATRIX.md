@@ -22,7 +22,7 @@ Filters apply to that current version.
 | Search box | `q` | contains (`*` wildcard supported) over award number, title, sponsor code/name, lead unit number/name, modification number, any person's name, family-wide Grant Number (exact or contains); exact Award number match | `award_version`, `award_person`, `award_extension` | existing |
 | Status | `status` | exact, case-insensitive (not contains: "Active" ≠ "Inactive") | `status_description` | new |
 | Sponsor | `sponsor` | contains, name **or** code | `sponsor_name`, `sponsor_code` | new |
-| Principal Investigator | `principalInvestigator` | contains; people with contact role PI on the current version | `award_person.full_name` | new |
+| PI / Co-PI | `principalInvestigator` | contains; people with contact role PI or MPI (BU "Co-PI") on the current version. COI and KP never match; free text still matches any role | `award_person.full_name` | new |
 | Lead Unit | `leadUnit` | contains, name **or** number | `lead_unit_name`, `lead_unit_number` | new |
 | Project Start Date from / to | `projectStartDateFrom` / `projectStartDateTo` | inclusive dates | `award_effective_date` (Kuali "Project Start Date"; never `begin_date`) | new |
 | (count) | — | the count now includes the family-wide Grant Number branch its page query always had | — | **bug fix** |
@@ -39,7 +39,7 @@ Grain: one row per `award_id` (version). Filters apply to each version.
 | Document Number (exact) | `documentNumber` | exact, case-insensitive (workflow document number) | existing (moved into the panel) |
 | Award ID (exact) | `awardId` | exact whole number; non-numeric rejected in the UI and 400 from the API | existing (moved into the panel) |
 | Versions | `versionFilter` | `all` (default) / `current` / `historical` on `is_primary_current` | existing (moved into the panel) |
-| Status, Sponsor, Principal Investigator, Lead Unit, Project Start Date from/to | as Awards | as Awards, per version | new |
+| Status, Sponsor, PI / Co-PI, Lead Unit, Project Start Date from/to | as Awards | as Awards, per version | new |
 | Sort (outside the panel) | `sort` | `sequence` (default) / `date`; not a filter, not counted | existing |
 
 The current-family vs historical-version distinction is preserved: two pages,
@@ -55,9 +55,19 @@ version. Stable order: `proposal_number` (unique per family).
 |---|---|---|---|
 | Search box | `query` (`q` in URL) | contains over proposal number, title, sponsor name, lead unit name, PI name | existing semantics |
 | Sponsor | `sponsor` | contains, name **or** code | new |
-| Principal Investigator | `principalInvestigator` | contains | new |
+| PI / Co-PI | `principalInvestigator` | contains; latest version's `proposal_person` rows with role PI or MPI (BU "Co-PI"), joined by `proposal_id` only, plus a temporary PI-only fallback on `principal_investigator_name` (see coverage note below) | new |
 | Lead Unit | `leadUnit` | contains, name **or** number | new |
 | Paging | `page`, `size` | server-side, with total count | **new** (the old page showed the first 100 only) |
+
+**Proposal PI filter coverage (2026-09-30, dev archive vs Kuali staging).**
+MPI person rows are complete. 37 PI person rows present at staging are
+missing from dev (23 on latest versions; data-quality issue DQ-2). The
+`principal_investigator_name` fallback keeps today's PI-name matches for
+those versions where that name is populated; it can never find an MPI, and
+whether it is populated for all 37 has not been measured. Fixing DQ-2 does
+not by itself justify removing the fallback: first prove that the person-row
+branch alone preserves every valid match, including name-format differences
+between `principal_investigator_name` and `proposal_person.full_name`.
 
 `GET /api/proposals/families` is **unchanged** (unpaged, capped at 200); Global
 Search still calls its repository method directly. No status filter: the only
@@ -214,7 +224,7 @@ no time-of-day cut-off.
     - a family matched only by Grant Number is counted;
     - status is exact and case-insensitive, never a substring match;
     - sponsor and lead unit match name or code;
-    - the PI filter matches the PI role only;
+    - the PI filter matches roles PI and MPI (Co-PI) only - not COI or KP - and free text still matches any role;
     - Project Start Date bounds are inclusive;
     - family filters apply to the current version only;
     - filters AND with the text query.

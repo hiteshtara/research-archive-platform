@@ -150,7 +150,7 @@ public class AwardV1Controller {
             @RequestParam(required = false)
             String sponsor,
 
-            @Parameter(description = "Principal Investigator name, contains (case-insensitive); PI role only.")
+            @Parameter(description = "Principal Investigator name, contains (case-insensitive); matches role PI or MPI (Co-PI), not COI or KP.")
             @RequestParam(required = false)
             String principalInvestigator,
 
@@ -237,7 +237,7 @@ public class AwardV1Controller {
             @RequestParam(required = false)
             String sponsor,
 
-            @Parameter(description = "Principal Investigator name, contains (case-insensitive); PI role only.")
+            @Parameter(description = "Principal Investigator name, contains (case-insensitive); matches role PI or MPI (Co-PI), not COI or KP.")
             @RequestParam(required = false)
             String principalInvestigator,
 

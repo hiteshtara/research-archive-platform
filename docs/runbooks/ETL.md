@@ -30,9 +30,11 @@ proposal_version
 
 proposal_award
 
-Proposal people (`archive.proposal_person`) had no verified Oracle
-extraction query and has been removed entirely (API, UI, ETL, and schema —
-see [`docs/DECISIONS.md`](../DECISIONS.md)).
+Proposal people (`archive.proposal_person`) were removed in V033 for lack
+of a verified Oracle extraction query, then rebuilt: `V061` recreated the
+table and the Proposal ETL loads it from
+`sql/extract/proposal/03_proposal_persons.sql` (see
+[`docs/DECISIONS.md`](../DECISIONS.md)).
 
 -------------------------------------------------------------------------------
 

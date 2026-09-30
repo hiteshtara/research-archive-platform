@@ -28,8 +28,11 @@ tabs/client functions/types, and the `archive.award_unit_contact`/
 This project is a new build with no production data to preserve, so this
 is a straightforward schema/feature removal, not a data-migration concern.
 See the removed features' history in this file's version control log if
-ever revisiting Award unit contacts or Proposal people with a verified
-Oracle extraction query. S3 is retained only for document/attachment binary
+ever revisiting Award unit contacts with a verified Oracle extraction query.
+**Superseded for Proposal people:** a verified extraction query was later
+written, and `V061__create_proposal_person_and_unit_contact.sql` (commit
+84411a9) recreated `archive.proposal_person`, loaded by the Proposal ETL.
+Only the Award unit-contact removal still stands. S3 is retained only for document/attachment binary
 storage and legacy IRB's separate Excel/Parquet export pipeline — neither
 is affected by this decision. The S3 "data" bucket's `processed/`/
 `rejected/` prefixes and the `processed/` lifecycle rule were removed from
