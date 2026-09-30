@@ -22,7 +22,7 @@ Filters apply to that current version.
 | Search box | `q` | contains (`*` wildcard supported) over award number, title, sponsor code/name, lead unit number/name, modification number, any person's name, family-wide Grant Number (exact or contains); exact Award number match | `award_version`, `award_person`, `award_extension` | existing |
 | Status | `status` | exact, case-insensitive (not contains: "Active" ≠ "Inactive") | `status_description` | new |
 | Sponsor | `sponsor` | contains, name **or** code | `sponsor_name`, `sponsor_code` | new |
-| Principal Investigator | `principalInvestigator` | contains; people with contact role PI on the current version | `award_person.full_name` | new |
+| Principal Investigator | `principalInvestigator` | contains; people with contact role PI or MPI (BU "Co-PI") on the current version. COI and KP never match; free text still matches any role | `award_person.full_name` | new |
 | Lead Unit | `leadUnit` | contains, name **or** number | `lead_unit_name`, `lead_unit_number` | new |
 | Project Start Date from / to | `projectStartDateFrom` / `projectStartDateTo` | inclusive dates | `award_effective_date` (Kuali "Project Start Date"; never `begin_date`) | new |
 | (count) | — | the count now includes the family-wide Grant Number branch its page query always had | — | **bug fix** |
@@ -214,7 +214,7 @@ no time-of-day cut-off.
     - a family matched only by Grant Number is counted;
     - status is exact and case-insensitive, never a substring match;
     - sponsor and lead unit match name or code;
-    - the PI filter matches the PI role only;
+    - the PI filter matches roles PI and MPI (Co-PI) only - not COI or KP - and free text still matches any role;
     - Project Start Date bounds are inclusive;
     - family filters apply to the current version only;
     - filters AND with the text query.

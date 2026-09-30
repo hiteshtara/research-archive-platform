@@ -137,6 +137,21 @@ class StructuredSearchFiltersIntegrationTest {
                     (2, 2001, '900002-00001', 1, 'JOHN SMITH', 'KP'),
                     (3, 3001, '900003-00001', 1, 'ANN JONES', 'PI')
                     """);
+            // Req 12 (PI filter = PI or MPI): one person per role case,
+            // added to existing versions only so family counts don't change.
+            statement.execute("""
+                    INSERT INTO archive.award_person (
+                        award_person_id, award_id, award_number, sequence_number,
+                        full_name, contact_role_code
+                    ) VALUES
+                    (11, 1002, '900001-00001', 2, 'SAM SMITHERS', 'MPI'),
+                    (12, 3001, '900003-00001', 1, 'LEE MULTI', 'MPI'),
+                    (13, 3001, '900003-00001', 1, 'ROSS COINV', 'COI'),
+                    (14, 1001, '900001-00001', 1, 'OLD MULTIPI', 'MPI'),
+                    (15, 2001, '900002-00001', 1, 'PAT DUAL', 'MPI'),
+                    (16, 3001, '900003-00001', 1, 'PAT DUAL', 'PI'),
+                    (17, 4001, '900004-00001', 1, 'VAL SPACED', ' mpi ')
+                    """);
             statement.execute("""
                     INSERT INTO archive.award_extension (award_id, grant_number)
                     VALUES (1001, '50105698')
@@ -235,9 +250,55 @@ class StructuredSearchFiltersIntegrationTest {
     }
 
     @Test
-    void principalInvestigatorMatchesOnlyThePiRole() {
+    void principalInvestigatorMatchesPiAndMpiButNotKeyPersons() {
+        // JANE SMITH (PI) and SAM SMITHERS (MPI) on 900001; JOHN SMITH is KP.
         assertThat(familyNumbers("", "", award(null, null, "smith", null, null, null)))
-                .containsExactly("900001-00001"); // JOHN SMITH is not PI
+                .containsExactly("900001-00001");
+    }
+
+    @Test
+    void anMpiOnlyPersonMatchesThePrincipalInvestigatorFilter() {
+        assertThat(familyNumbers("", "", award(null, null, "multi", null, null, null)))
+                .containsExactly("900003-00001"); // LEE MULTI is MPI; OLD MULTIPI is on a non-current version
+    }
+
+    @Test
+    void coInvestigatorsAndKeyPersonsDoNotMatchThePrincipalInvestigatorFilter() {
+        assertThat(familyNumbers("", "", award(null, null, "coinv", null, null, null))).isEmpty();
+        assertThat(familyNumbers("", "", award(null, null, "john smith", null, null, null))).isEmpty();
+    }
+
+    @Test
+    void freeTextStillMatchesAPersonOfAnyRole() {
+        assertThat(familyNumbers("%coinv%", "coinv", AwardSearchFilters.none()))
+                .containsExactly("900003-00001");
+        assertThat(familyNumbers("%john smith%", "john smith", AwardSearchFilters.none()))
+                .containsExactly("900002-00001");
+    }
+
+    @Test
+    void aPersonWhoIsMpiOnOneAwardAndPiOnAnotherMatchesBoth() {
+        assertThat(familyNumbers("", "", award(null, null, "dual", null, null, null)))
+                .containsExactly("900002-00001", "900003-00001");
+    }
+
+    @Test
+    void roleCodesAreTrimmedAndCaseInsensitive() {
+        assertThat(familyNumbers("", "", award(null, null, "spaced", null, null, null)))
+                .containsExactly("900004-00001");
+    }
+
+    @Test
+    void principalInvestigatorFilterPagesStablyWithCountParity() {
+        // "a" matches PI or MPI names on all four current versions.
+        AwardSearchFilters a = award(null, null, "a", null, null, null);
+        List<String> first = awards.searchAwards("", "", a, 2, 0).stream()
+                .map(AwardSearchResultResponse::awardNumber).toList();
+        List<String> second = awards.searchAwards("", "", a, 2, 2).stream()
+                .map(AwardSearchResultResponse::awardNumber).toList();
+        assertThat(first).containsExactly("900001-00001", "900002-00001");
+        assertThat(second).containsExactly("900003-00001", "900004-00001");
+        assertThat(awards.countSearchAwards("", "", a)).isEqualTo(4);
     }
 
     @Test
@@ -281,8 +342,9 @@ class StructuredSearchFiltersIntegrationTest {
 
     @Test
     void duplicateRelationshipsNeverDuplicateAFamily() {
-        // Two PI rows on 900001's current version both match "smith"; two
-        // hierarchy rows exist for 900001. Still exactly one result, counted once.
+        // Two PI rows and one MPI row on 900001's current version all match
+        // "smith"; two hierarchy rows exist for 900001. Still exactly one
+        // result, counted once.
         assertThat(familyNumbers("", "", award(null, null, "smith", null, null, null)))
                 .containsExactly("900001-00001");
         List<AwardSearchResultResponse> rows =
@@ -318,6 +380,19 @@ class StructuredSearchFiltersIntegrationTest {
         assertThat(rows).extracting(AwardVersionSearchResultResponse::awardId).containsExactly(1001L);
         assertThat(awards.countSearchAwardVersions("", "", "", "", null, "all", closed)).isEqualTo(1);
         assertThat(awards.countSearchAwardVersions("", "", "", "", null, "current", closed)).isZero();
+    }
+
+    @Test
+    void anMpiOnAnOlderVersionMatchesOnlyThatVersion() {
+        AwardSearchFilters multipi = award(null, null, "multipi", null, null, null);
+        // Family search represents 900001 by its current v2, which has no such person.
+        assertThat(familyNumbers("", "", multipi)).isEmpty();
+        List<AwardVersionSearchResultResponse> rows = awards.searchAwardVersions(
+                "", "", "", "", null, "all", multipi,
+                "ORDER BY av.sequence_number DESC, av.award_number, av.award_id DESC\n", 100, 0);
+        assertThat(rows).extracting(AwardVersionSearchResultResponse::awardId).containsExactly(1001L);
+        assertThat(awards.countSearchAwardVersions("", "", "", "", null, "all", multipi)).isEqualTo(1);
+        assertThat(awards.countSearchAwardVersions("", "", "", "", null, "current", multipi)).isZero();
     }
 
     // --- Subawards --------------------------------------------------------

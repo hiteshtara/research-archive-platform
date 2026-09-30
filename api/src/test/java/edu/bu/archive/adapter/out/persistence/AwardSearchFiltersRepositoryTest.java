@@ -115,8 +115,9 @@ class AwardSearchFiltersRepositoryTest {
                 .contains("av.sponsor_code ILIKE '%' || :sponsor || '%'")
                 .contains("av.lead_unit_name ILIKE '%' || :leadUnit || '%'")
                 .contains("av.lead_unit_number ILIKE '%' || :leadUnit || '%'")
-                // PI: contains, PI role only, on the returned version
-                .contains("UPPER(TRIM(apf.contact_role_code)) = 'PI'")
+                // PI: contains, role PI or MPI (Co-PI) only, on the returned version
+                .contains("UPPER(TRIM(apf.contact_role_code)) IN ('PI', 'MPI')")
+                .doesNotContain("apf.contact_role_code)) = 'PI'")
                 .contains("apf.award_id = av.award_id")
                 // Project Start Date is award_effective_date, inclusive
                 .contains("av.award_effective_date >= CAST(:projectStartDateFrom AS DATE)")
