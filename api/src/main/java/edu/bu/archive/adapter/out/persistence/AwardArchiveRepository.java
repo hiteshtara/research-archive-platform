@@ -2240,7 +2240,11 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        // Record authorization: the scope predicate sits in the same WHERE
+        // as the filters, so the page and the count see only in-scope
+        // versions (empty for Central or with enforcement off).
+        var authzScope = awardScope();
+        return bindScope(jdbc.sql("""
                 SELECT
                     av.award_id AS parent_id,
                     av.award_number AS parent_number,
@@ -2290,7 +2294,7 @@ public class AwardArchiveRepository {
                         OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
                         OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
                   )
-                """ + sortSql + """
+                """ + authzScope.sql() + sortSql + """
                 LIMIT :limit OFFSET :offset
                 """)
                 .param("awardNumber", awardNumber)
@@ -2300,7 +2304,7 @@ public class AwardArchiveRepository {
                 .param("fileId", fileId)
                 .param("versionFilter", versionFilter)
                 .param("limit", limit)
-                .param("offset", offset)
+                .param("offset", offset), authzScope)
                 .query(AttachmentSearchRow.class)
                 .list();
     }
@@ -2313,7 +2317,8 @@ public class AwardArchiveRepository {
             Long fileId,
             String versionFilter
     ) {
-        Long count = jdbc.sql("""
+        var authzScope = awardScope();
+        Long count = bindScope(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_attachment aa
                 JOIN archive.award_version av ON av.award_id = aa.award_id
@@ -2329,13 +2334,13 @@ public class AwardArchiveRepository {
                         OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
                         OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
                   )
-                """)
+                """ + authzScope.sql())
                 .param("awardNumber", awardNumber)
                 .param("documentNumber", documentNumber)
                 .param("awardId", awardId)
                 .param("attachmentId", attachmentId)
                 .param("fileId", fileId)
-                .param("versionFilter", versionFilter)
+                .param("versionFilter", versionFilter), authzScope)
                 .query(Long.class)
                 .single();
 

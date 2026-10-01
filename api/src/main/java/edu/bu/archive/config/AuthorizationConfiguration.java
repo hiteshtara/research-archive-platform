@@ -12,7 +12,6 @@ import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.AccessScopeResolver;
 import edu.bu.archive.application.authorization.AuthorizationProperties;
 import edu.bu.archive.application.authorization.CurrentIdentityProvider;
-import edu.bu.archive.application.authorization.DisabledIoResolver;
 import edu.bu.archive.application.authorization.IdentityLinkRepository;
 import edu.bu.archive.application.authorization.IdentityResolver;
 import edu.bu.archive.application.authorization.IoResolver;
@@ -38,14 +37,15 @@ public class AuthorizationConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    IoResolver ioResolver() {
-        return new DisabledIoResolver();
+    IoResolver ioResolver(org.springframework.jdbc.core.simple.JdbcClient jdbc) {
+        // IO grants match the Award account number (approved decision D-A).
+        return new edu.bu.archive.adapter.out.persistence.authorization.AwardAccountNumberIoResolver(jdbc);
     }
 
     @Bean
     @ConditionalOnMissingBean
     IoSqlStrategy ioSqlStrategy() {
-        return IoSqlStrategy.NONE;
+        return new edu.bu.archive.adapter.out.persistence.authorization.AwardAccountNumberIoSql();
     }
 
     @Bean
@@ -54,8 +54,10 @@ public class AuthorizationConfiguration {
     }
 
     @Bean
-    AccessScopeResolver accessScopeResolver(AccessGrantRepository grants) {
-        return new AccessScopeResolver(grants, Clock.systemUTC());
+    AccessScopeResolver accessScopeResolver(AccessGrantRepository grants, AuthorizationProperties properties,
+                                            org.springframework.jdbc.core.simple.JdbcClient jdbc) {
+        return new AccessScopeResolver(grants, Clock.systemUTC(), properties::policy,
+                new edu.bu.archive.adapter.out.persistence.authorization.JdbcContactRelationships(jdbc));
     }
 
     @Bean
