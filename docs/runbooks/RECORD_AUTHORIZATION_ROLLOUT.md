@@ -135,9 +135,12 @@ uses the task role.
 app:
   authorization:
     enforcement-enabled: false            # turn on LAST (section 7)
-    version-scope: <PER_VERSION|FAMILY_WIDE>
-    department-match: <EXACT_LEAD_UNIT|LEAD_UNIT_WITH_DESCENDANTS>
-    research-staff-roles: <PI,MPI,COI>
+    # Approved policy (2026-10-01): family-wide within one Award number (never children or
+    # related records); sub-units only when a grant's include-sub-units flag is set;
+    # Key Person excluded. There are no code defaults - these must be set explicitly.
+    version-scope: FAMILY_WIDE
+    department-match: LEAD_UNIT_WITH_DESCENDANTS
+    research-staff-roles: PI,MPI,COI
     contact-derivation: VERIFIED_PRINCIPAL
     enrollment:
       enabled: true
