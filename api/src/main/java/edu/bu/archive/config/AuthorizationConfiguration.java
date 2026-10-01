@@ -114,7 +114,8 @@ public class AuthorizationConfiguration {
         return new IdentityEnrollmentService(
                 new IdentityEnrollmentService.Settings(settings.getSamlProviderName(),
                         settings.getIdentifierAttribute(), settings.getCrosswalkAttributeName(),
-                        Duration.ofSeconds(Math.max(0, settings.getRefusalRetrySeconds()))),
+                        Duration.ofSeconds(Math.max(0, settings.getRefusalRetrySeconds())),
+                        settings.getUserPoolId().trim()),
                 reader,
                 new JdbcEnrollmentStore(jdbc, new TransactionTemplate(transactionManager)),
                 Clock.systemUTC());
@@ -133,6 +134,12 @@ public class AuthorizationConfiguration {
                         .socketTimeout(Duration.ofSeconds(5)))
                 .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(8)));
         if (settings.getEndpointOverride() != null && !settings.getEndpointOverride().isBlank()) {
+            // Only a local test endpoint (the identity lab's simulated Cognito) may replace AWS.
+            String host = URI.create(settings.getEndpointOverride().trim()).getHost();
+            if (host == null || !java.util.Set.of("localhost", "127.0.0.1", "::1").contains(host)) {
+                throw new IllegalStateException(
+                        "app.authorization.enrollment.endpoint-override is allowed only for a loopback host");
+            }
             // Only for a local lab's simulated user pool.
             builder.endpointOverride(URI.create(settings.getEndpointOverride().trim()));
         }

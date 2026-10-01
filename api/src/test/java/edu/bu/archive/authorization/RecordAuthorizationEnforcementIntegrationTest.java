@@ -27,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -48,6 +49,7 @@ import edu.bu.archive.application.authorization.IoResolver;
 import edu.bu.archive.application.authorization.IoSqlStrategy;
 import edu.bu.archive.application.authorization.RecordModule;
 import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
+import edu.bu.archive.application.port.out.EmbeddingProvider;
 
 /**
  * Record authorization ENFORCED, end to end: the real application, real
@@ -75,7 +77,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
         "app.ai.stub-enabled=true",
         "app.ai.provider=stub",
         "app.explorer.enabled=true",
-        "app.search.semantic.enabled=false"
+        "app.search.semantic.enabled=true"
 })
 @AutoConfigureMockMvc
 class RecordAuthorizationEnforcementIntegrationTest {
@@ -113,6 +115,7 @@ class RecordAuthorizationEnforcementIntegrationTest {
                 s.execute(Files.readString(migration));
             }
             s.execute(Files.readString(root.resolve("api/src/test/resources/authz/synthetic-seed.sql")));
+            s.execute(EVIDENCE_FIXTURES);
         }
         // Real stored files for the seed attachments (app.attachments.local-directory below).
         Path files = Path.of("target/authz-test-attachments/synthetic");
@@ -121,6 +124,35 @@ class RecordAuthorizationEnforcementIntegrationTest {
             Files.writeString(files.resolve(name), "%PDF-1.4\n% " + name + " - FICTIONAL attachment\n%%EOF\n");
         }
     }
+
+    /**
+     * TEST-ONLY Evidence Search fixtures on Award D (990004-00001, a one-version family Pat
+     * can see entirely): two funding-proposal links (Proposal 1, which Pat cannot open;
+     * Proposal 2, which Pat can) and one evidence row per type, all with the same synthetic
+     * embedding so every row is equally near the stub query vector.
+     */
+    private static final String EVIDENCE_FIXTURES = """
+            INSERT INTO archive.award_funding_proposal (award_funding_proposal_id, award_id, proposal_id, active_flag) VALUES
+              (9400101, 9000401, 8000101, 'Y'),
+              (9400102, 9000401, 8000201, 'Y');
+            INSERT INTO archive.search_embedding (module, record_id, canonical_family_id, business_number, source_text,
+                source_hash, embedding, embedding_model, document_type, parent_module, parent_business_identifier,
+                exact_record_id, source_table, source_primary_key)
+            SELECT 'AWARD', v.pk, 9000401, '990004-00001', v.text, 'syn-' || v.pk,
+                   array_fill(0.1::real, ARRAY[1024])::vector, 'synthetic-test', v.type, 'AWARD', '990004-00001',
+                   v.pk, v.source_table, v.pk
+            FROM (VALUES
+              (9000401, 'AWARD_VERSION', 'archive.award_version', 'Award 990004-00001 version 1: SYNTHETIC Award D.'),
+              (9400101, 'RELATED_PROPOSAL', 'archive.award_funding_proposal',
+               'Award 990004-00001 version 1 is funded by Proposal SYN-PRP-0001: SYNTHETIC Proposal 1 - related to Award A.'),
+              (9400102, 'RELATED_PROPOSAL', 'archive.award_funding_proposal',
+               'Award 990004-00001 version 1 is funded by Proposal SYN-PRP-0002: SYNTHETIC Proposal 2 - Pat is PI.'),
+              (9500001, 'RELATED_NEGOTIATION', 'archive.negotiation',
+               'Negotiation SYN-NDOC-01 associated with Award 990004-00001, negotiator SYNTHETIC NEGOTIATOR.'),
+              (9610001, 'RELATED_SUBAWARD', 'archive.subaward_funding',
+               'Subaward SYN-SUB-01 (document SYN-SDOC-01) is linked to Award 990004-00001.')
+            ) AS v(pk, type, source_table, text);
+            """;
 
     /** TEST-ONLY sign-in replacement and synthetic IO mapping (mirrors the demo build). */
     @TestConfiguration
@@ -131,6 +163,17 @@ class RecordAuthorizationEnforcementIntegrationTest {
             return () -> Optional.ofNullable(RequestContextHolder.getRequestAttributes())
                     .map(a -> ((ServletRequestAttributes) a).getRequest().getHeader("X-Test-Persona"))
                     .map(key -> new ValidatedCognitoIdentity(ISSUER, "demo-" + key));
+        }
+
+        /** TEST-ONLY: no Bedrock call; the same vector as every synthetic evidence row. */
+        @Bean
+        @Primary
+        EmbeddingProvider testEmbeddings() {
+            return text -> {
+                float[] vector = new float[1024];
+                java.util.Arrays.fill(vector, 0.1f);
+                return vector;
+            };
         }
 
 
@@ -566,5 +609,125 @@ class RecordAuthorizationEnforcementIntegrationTest {
             jdbc.sql("UPDATE authz.access_grant SET revoked_at = NULL, revoked_by = NULL "
                     + "WHERE institutional_identifier = 'SYN-INST-0006' AND grant_type = 'IO'").update();
         }
+    }
+
+    // --- Evidence Search, Proposal sections, search-row hierarchy numbers -----------------
+
+    private JsonNode evidence(String persona, String awardNumber, String requestJson) throws Exception {
+        MvcResult result = mvc.perform(post("/api/ai/awards/" + awardNumber + "/evidence-search")
+                .header("X-Test-Persona", persona)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson)).andReturn();
+        assertThat(result.getResponse().getStatus()).as(persona + " evidence " + requestJson).isEqualTo(200);
+        return json.readTree(result.getResponse().getContentAsString());
+    }
+
+    private static List<String> evidenceKeys(JsonNode response) {
+        List<String> keys = new ArrayList<>();
+        response.get("results").forEach(r ->
+                keys.add(r.get("documentType").asText() + ":" + r.get("sourcePrimaryKey").asText()));
+        return keys;
+    }
+
+    @Test
+    void evidenceSearchOmitsRelatedRecordsTheCallerCannotOpen() throws Exception {
+        JsonNode pi = evidence("pi", "990004-00001", "{\"query\":\"negotiation proposal subaward\"}");
+        assertThat(evidenceKeys(pi)).containsExactlyInAnyOrder("AWARD_VERSION:9000401", "RELATED_PROPOSAL:9400102");
+        assertThat(pi.toString()).doesNotContain("SYN-PRP-0001", "SYN-NDOC-01", "SYN-SUB-01", "NEGOTIATOR");
+
+        // topK is applied AFTER filtering: hidden rows never use up the caller's results.
+        assertThat(evidenceKeys(evidence("pi", "990004-00001", "{\"query\":\"q\",\"topK\":2}")))
+                .containsExactlyInAnyOrder("AWARD_VERSION:9000401", "RELATED_PROPOSAL:9400102");
+        // Asking only for types the caller may not see returns nothing (no stub, no count).
+        JsonNode onlyHidden = evidence("pi", "990004-00001",
+                "{\"query\":\"q\",\"documentTypes\":[\"RELATED_NEGOTIATION\",\"RELATED_SUBAWARD\"]}");
+        assertThat(onlyHidden.get("results")).isEmpty();
+
+        // Central: unchanged.
+        assertThat(evidenceKeys(evidence("central", "990004-00001", "{\"query\":\"q\"}")))
+                .containsExactlyInAnyOrder("AWARD_VERSION:9000401", "RELATED_PROPOSAL:9400101",
+                        "RELATED_PROPOSAL:9400102", "RELATED_NEGOTIATION:9500001", "RELATED_SUBAWARD:9610001");
+        assertThat(evidenceKeys(evidence("central", "990004-00001", "{\"query\":\"q\",\"topK\":2}")))
+                .containsExactly("AWARD_VERSION:9000401", "RELATED_PROPOSAL:9400101");
+    }
+
+    @Test
+    void proposalVersionsAndHistoryListOnlyVisibleVersionsAndPageAfterFiltering() throws Exception {
+        JsonNode dept = body("department", "/api/v1/proposals/8000403/versions?size=1");
+        assertThat(dept.get("totalElements").asLong()).isEqualTo(2);
+        assertThat(dept.get("totalPages").asLong()).isEqualTo(2);
+        Set<Long> ids = new TreeSet<>();
+        for (int page = 0; page < 2; page++) {
+            body("department", "/api/v1/proposals/8000403/versions?size=1&page=" + page).get("content")
+                    .forEach(n -> ids.add(n.get("proposalId").asLong()));
+        }
+        assertThat(ids).containsExactly(8000401L, 8000403L);
+        assertThat(body("central", "/api/v1/proposals/8000403/versions").get("totalElements").asLong()).isEqualTo(3);
+
+        JsonNode history = body("department", "/api/proposals/SYN-PRP-0004/history");
+        assertThat(history.get("totalElements").asLong()).isEqualTo(2);
+        Set<Long> historyIds = new TreeSet<>();
+        history.get("content").forEach(n -> historyIds.add(n.get("proposalId").asLong()));
+        assertThat(historyIds).containsExactly(8000401L, 8000403L);
+        assertThat(history.toString()).doesNotContain("other-unit version");
+        assertThat(body("central", "/api/proposals/SYN-PRP-0004/history").get("totalElements").asLong()).isEqualTo(3);
+
+        assertThat(status("department", "/api/v1/proposals/8000402/versions")).isEqualTo(404);
+    }
+
+    @Test
+    void proposalCommentsAndFundedAwardsFollowVersionAndRecordVisibility() throws Exception {
+        JsonNode dept = body("department", "/api/v1/proposals/8000403/comments");
+        JsonNode deptCategory = category(dept, "12");
+        assertThat(deptCategory.get("history")).hasSize(1);
+        assertThat(deptCategory.get("history").get(0).get("proposalId").asLong()).isEqualTo(8000401L);
+        assertThat(dept.toString()).doesNotContain("other-unit Proposal 4 v2");
+        assertThat(category(body("central", "/api/v1/proposals/8000403/comments"), "12").get("history")).hasSize(2);
+
+        JsonNode funded = body("department", "/api/v1/proposals/8000403/funded-awards");
+        assertThat(funded).hasSize(1);
+        assertThat(funded.get(0).get("sourceRelationshipId").asLong()).isEqualTo(9400011L);
+        assertThat(funded.toString()).doesNotContain("990002-00001");
+        assertThat(body("central", "/api/v1/proposals/8000403/funded-awards")).hasSize(4);
+
+        JsonNode awards = body("department", "/api/proposals/SYN-PRP-0004/awards");
+        assertThat(awards).hasSize(1);
+        assertThat(awards.get(0).get("awardId").asLong()).isEqualTo(9000102L);
+        assertThat(awards.get(0).get("proposalId").asLong()).isEqualTo(8000401L);
+        assertThat(body("central", "/api/proposals/SYN-PRP-0004/awards")).hasSize(3);
+    }
+
+    @Test
+    void unknownProposalSubPathsAreClosedToNonCentralUsers() throws Exception {
+        MvcResult unknown = call("department", "/api/v1/proposals/8000403/not-a-section", false);
+        assertThat(unknown.getResponse().getStatus()).isEqualTo(403);
+        assertThat(unknown.getResponse().getContentAsString()).contains("NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION");
+        assertThat(status("central", "/api/v1/proposals/8000403/not-a-section")).isEqualTo(404);
+    }
+
+    private static JsonNode searchRow(JsonNode results, String awardNumber) {
+        for (JsonNode row : results.get("content")) {
+            if (awardNumber.equals(row.get("awardNumber").asText())) {
+                return row;
+            }
+        }
+        throw new AssertionError("no search row " + awardNumber);
+    }
+
+    @Test
+    void searchRowsShowRootAndParentNumbersOnlyWhenVisible() throws Exception {
+        JsonNode piD = searchRow(body("pi", "/api/v1/awards/search?size=100").get("results"), "990004-00001");
+        assertThat(piD.get("rootAwardNumber").isNull()).isTrue();
+        assertThat(piD.get("parentAwardNumber").isNull()).isTrue();
+        JsonNode centralD = searchRow(body("central", "/api/v1/awards/search?size=100").get("results"), "990004-00001");
+        assertThat(centralD.get("rootAwardNumber").asText()).isEqualTo("990002-00001");
+        assertThat(centralD.get("parentAwardNumber").asText()).isEqualTo("990002-00001");
+        // A visible parent stays.
+        JsonNode deptChild = searchRow(body("department", "/api/v1/awards/search?size=100").get("results"), "990001-00002");
+        assertThat(deptChild.get("parentAwardNumber").asText()).isEqualTo("990001-00001");
+        // The number never appears anywhere in the restricted search or Global Search payloads.
+        assertThat(body("pi", "/api/v1/awards/search?size=100").toString()).doesNotContain("990002-00001");
+        assertThat(body("pi", "/api/v1/awards/versions/search?size=100").toString()).doesNotContain("990002-00001");
+        assertThat(body("pi", "/api/global-search?query=990004").toString()).doesNotContain("990002-00001");
     }
 }

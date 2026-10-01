@@ -105,8 +105,13 @@ psql_c -q -c "INSERT INTO authz.identity_link (cognito_issuer, cognito_subject, 
     'AUTO_VERIFIED', 'ACTIVE', 'api-enrollment', now())"
 admin link-revoke --institutional-id SYN-V-1 --revoked-by SYN-ADM-2 --reason it >/dev/null
 expect "link revoked" "SELECT status || ':' || revoked_by FROM authz.identity_link" "REVOKED:SYN-ADM-2"
+psql_c -q -c "INSERT INTO authz.identity_link (cognito_issuer, cognito_subject, institutional_identifier, kuali_person_id,
+    method, status, verified_by, verified_at) VALUES ('https://idp.invalid/pool', 'sub-2', 'SYN-V-2', 'SYNP-2',
+    'AUTO_VERIFIED', 'ACTIVE', 'api-enrollment', now())"
 admin crosswalk-revoke --prncpl-id SYNP-2 --attribute synAttr --revoked-by SYN-ADM-2 --reason it >/dev/null
 expect "crosswalk row revoked" "SELECT status FROM authz.principal_crosswalk WHERE prncpl_id = 'SYNP-2'" "REVOKED"
+expect "its sign-in link revoked in the same transaction" \
+    "SELECT status || ':' || revoked_by FROM authz.identity_link WHERE cognito_subject = 'sub-2'" "REVOKED:SYN-ADM-2"
 admin suspend --institutional-id SYN-V-2 --changed-by SYN-ADM-2 --reason it >/dev/null
 expect "suspended" "SELECT suspended FROM authz.person_status WHERE institutional_identifier = 'SYN-V-2'" "t"
 admin unsuspend --institutional-id SYN-V-2 --changed-by SYN-ADM-2 --reason it >/dev/null
@@ -115,7 +120,10 @@ expect "unsuspended" "SELECT suspended FROM authz.person_status WHERE institutio
 # --- audit ----------------------------------------------------------------------------------
 expect "every write audited in its own transaction (no dry-run or refused rows)" \
     "SELECT string_agg(action, ',' ORDER BY audit_id) FROM authz.access_audit" \
-    "CROSSWALK_IMPORTED,CROSSWALK_IMPORTED,GRANT_ADDED,GRANT_ADDED,GRANT_REVOKED,LINK_REVOKED,CROSSWALK_REVOKED,PERSON_SUSPENDED,PERSON_UNSUSPENDED"
+    "CROSSWALK_IMPORTED,CROSSWALK_IMPORTED,GRANT_ADDED,GRANT_ADDED,GRANT_REVOKED,LINK_REVOKED,CROSSWALK_REVOKED,LINK_REVOKED,PERSON_SUSPENDED,PERSON_UNSUSPENDED"
+expect "every audit row records the database role actually used" \
+    "SELECT count(*) FROM authz.access_audit WHERE detail ? 'db_current_user'" \
+    "$(psql_c -c "SELECT count(*) FROM authz.access_audit")"
 if psql_c -c "DELETE FROM authz.access_audit" >/dev/null 2>&1; then fail "audit rows could be deleted"; fi
 echo "ok  audit is append-only"
 
