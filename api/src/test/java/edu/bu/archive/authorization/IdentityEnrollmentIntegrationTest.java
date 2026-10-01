@@ -152,7 +152,10 @@ class IdentityEnrollmentIntegrationTest {
                     .filter(r -> r.getHeader("X-Test-Sub") != null)
                     .map(r -> new ValidatedCognitoIdentity(
                             Optional.ofNullable(r.getHeader("X-Test-Issuer")).orElse(ISSUER),
-                            r.getHeader("X-Test-Sub"), r.getHeader("X-Test-Username")));
+                            r.getHeader("X-Test-Sub"), r.getHeader("X-Test-Username"),
+                            // the token's auth_time: one value per sign-in session
+                            java.time.Instant.ofEpochSecond(Long.parseLong(
+                                    Optional.ofNullable(r.getHeader("X-Test-Auth-Time")).orElse("1790000000")))));
         }
 
         @Bean
@@ -320,12 +323,39 @@ class IdentityEnrollmentIntegrationTest {
     }
 
     @Test
-    void anAdminVerifiedSeedLinkIsUnaffectedByEnrollment() throws Exception {
+    void anAdminVerifiedSeedLinkWithoutVerifiableSignInEvidenceIsDeniedButNotRevoked() throws Exception {
+        // No token username / no federated profile: the session cannot be re-verified, so the
+        // request fails closed; the administrator's link itself is left for an administrator.
         MvcResult result = mvc.perform(get("/api/v1/awards/9000201/summary")
                 .header("X-Test-Issuer", SEED_ISSUER).header("X-Test-Sub", "demo-central")).andReturn();
-        assertThat(result.getResponse().getStatus()).isEqualTo(200);
+        assertThat(result.getResponse().getStatus()).isEqualTo(403);
         assertThat(jdbc.sql("SELECT status FROM authz.identity_link WHERE cognito_subject = 'demo-central'")
                 .query(String.class).single()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void aReassignedNameIdThatNowCarriesAnotherIdentifierLosesTheLinkAtTheNextSignIn() throws Exception {
+        jdbc.sql("INSERT INTO authz.kim_principal (prncpl_id, entity_id, actv_ind, load_ref) "
+                + "VALUES ('SYNP-OTHER-07', 'SYNE-R', 'Y', 'test') ON CONFLICT DO NOTHING").update();
+        jdbc.sql("INSERT INTO authz.principal_crosswalk (attribute_name, attribute_value, prncpl_id, evidence_ref, "
+                + "verified_by) VALUES ('syntheticPrincipalAttr', 'SYN-ATTR-REASSIGN', 'SYNP-OTHER-07', 'x', 'x')").update();
+        // Linked and working in sign-in session 1 (SYNP-OTHER-07 is PI on Award H).
+        String username = federated("enr-reassign", PROVIDER, "SYN-ATTR-REASSIGN");
+        assertThat(callAt("enr-reassign", username, 1_790_000_000L, "/api/v1/awards/search").getResponse().getStatus())
+                .isEqualTo(200);
+        // BU reassigns the NameID: same Cognito username and sub, but the assertion (and so the
+        // profile) now carries a different person's identifier. Session 2 must not inherit access.
+        federated("enr-reassign", PROVIDER, "SYN-ATTR-NOBODY");
+        MvcResult next = callAt("enr-reassign", username, 1_790_003_600L, "/api/v1/awards/search");
+        assertThat(next.getResponse().getStatus()).isEqualTo(403);
+        assertThat(jdbc.sql("SELECT status FROM authz.identity_link WHERE cognito_subject = 'enr-reassign'")
+                .query(String.class).single()).isEqualTo("REVOKED");
+        assertThat(auditOutcomes("enr-reassign")).contains("REVOKED_IDENTITY_EVIDENCE_CHANGED");
+    }
+
+    private MvcResult callAt(String sub, String username, long authTime, String path) throws Exception {
+        return mvc.perform(get(path).header("X-Test-Sub", sub).header("X-Test-Username", username)
+                .header("X-Test-Auth-Time", String.valueOf(authTime))).andReturn();
     }
 
     @Test
