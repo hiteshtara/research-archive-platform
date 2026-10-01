@@ -50,11 +50,13 @@ class RecordAuthorizationInterceptorTest {
         verify(authorization).requireProposal(55L);
         assertThat(pass("/api/proposals/SYN-1/history")).isTrue();
         verify(authorization).requireProposalNumber("SYN-1");
+        // Documents: scoped per module inside the query (Award/Proposal; other modules excluded).
+        assertThat(pass("/api/v1/documents")).isTrue();
+        assertThat(pass("/api/documents/search")).isTrue();
+        assertThatThrownBy(() -> pass("/api/v1/documents/extra")).isInstanceOf(AuthorizationPathNotScopedException.class);
 
         assertThatThrownBy(() -> pass("/api/negotiations")).isInstanceOf(AuthorizationPathNotScopedException.class);
-        assertThatThrownBy(() -> pass("/api/v1/documents")).isInstanceOf(AuthorizationPathNotScopedException.class);
         assertThatThrownBy(() -> pass("/api/ai/awards/990001-00001/summary/extra")).isInstanceOf(AuthorizationPathNotScopedException.class);
-        assertThatThrownBy(() -> pass("/api/documents/search")).isInstanceOf(AuthorizationPathNotScopedException.class);
         assertThatThrownBy(() -> pass("/api/awards/990001-00001/history")).isInstanceOf(AuthorizationPathNotScopedException.class);
         assertThatThrownBy(() -> pass("/api/v1/explorer/units")).isInstanceOf(AuthorizationPathNotScopedException.class);
         assertThatThrownBy(() -> pass("/api/v1/negotiations/1")).isInstanceOf(AuthorizationPathNotScopedException.class);

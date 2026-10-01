@@ -19,9 +19,34 @@ import java.util.List;
 public class AttachmentSearchRepository {
 
     private final JdbcClient jdbc;
+    private final AwardArchiveRepository.RecordScope scope;
 
+    /** Unrestricted - for tests and tools that bypass the web request. */
     public AttachmentSearchRepository(JdbcClient jdbc) {
+        this(jdbc, AwardArchiveRepository.RecordScope.UNRESTRICTED);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AttachmentSearchRepository(
+            JdbcClient jdbc,
+            edu.bu.archive.application.authorization.RecordAuthorizationService authorization
+    ) {
+        this(jdbc, authorization::scopeSql);
+    }
+
+    public AttachmentSearchRepository(JdbcClient jdbc, AwardArchiveRepository.RecordScope scope) {
         this.jdbc = jdbc;
+        this.scope = scope;
+    }
+
+    /**
+     * The SQL with each module branch's record-authorization predicate filled in: Award and
+     * Proposal rows scoped like their searches; Negotiation rows excluded for a restricted caller.
+     */
+    private JdbcClient.StatementSpec scoped(String template) {
+        DocumentRecordScope.Rendered rendered = DocumentRecordScope.render(template, scope);
+        JdbcClient.StatementSpec spec = jdbc.sql(rendered.sql());
+        return rendered.params().isEmpty() ? spec : spec.params(rendered.params());
     }
 
     /*
@@ -67,7 +92,7 @@ public class AttachmentSearchRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        return scoped("""
                 SELECT
                     pv.proposal_id AS parent_id,
                     pv.proposal_number AS parent_number,
@@ -109,7 +134,7 @@ public class AttachmentSearchRepository {
                         :versionFilter = 'all'
                         OR (:versionFilter = 'current' AND pv.proposal_id = current_pv.proposal_id)
                         OR (:versionFilter = 'historical' AND pv.proposal_id != current_pv.proposal_id)
-                  )
+                  ) {{PROPOSAL_SCOPE}}
                 """ + sortSql + """
                 LIMIT :limit OFFSET :offset
                 """)
@@ -131,7 +156,7 @@ public class AttachmentSearchRepository {
             Long attachmentId,
             String versionFilter
     ) {
-        Long count = jdbc.sql("""
+        Long count = scoped("""
                 SELECT COUNT(*)
                 FROM archive.proposal_attachment pa
                 JOIN archive.proposal_version pv ON pv.proposal_id = pa.proposal_id
@@ -153,7 +178,7 @@ public class AttachmentSearchRepository {
                         :versionFilter = 'all'
                         OR (:versionFilter = 'current' AND pv.proposal_id = current_pv.proposal_id)
                         OR (:versionFilter = 'historical' AND pv.proposal_id != current_pv.proposal_id)
-                  )
+                  ) {{PROPOSAL_SCOPE}}
                 """)
                 .param("recordNumber", recordNumber)
                 .param("documentNumber", documentNumber)
@@ -213,7 +238,7 @@ public class AttachmentSearchRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        return scoped("""
                 SELECT
                     n.negotiation_id AS parent_id,
                     n.document_number AS parent_number,
@@ -242,7 +267,7 @@ public class AttachmentSearchRepository {
                   AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
                   AND (CAST(:recordId AS BIGINT) IS NULL OR n.negotiation_id = :recordId)
                   AND (CAST(:attachmentId AS BIGINT) IS NULL OR aa.archived_attachment_id = :attachmentId)
-                  AND (:versionFilter <> 'historical')
+                  AND (:versionFilter <> 'historical') {{NEGOTIATION_SCOPE}}
                 """ + sortSql + """
                 LIMIT :limit OFFSET :offset
                 """)
@@ -264,7 +289,7 @@ public class AttachmentSearchRepository {
             Long attachmentId,
             String versionFilter
     ) {
-        Long count = jdbc.sql("""
+        Long count = scoped("""
                 SELECT COUNT(*)
                 FROM archive.archived_attachment aa
                 JOIN archive.negotiation n ON n.negotiation_id = aa.parent_record_id
@@ -273,7 +298,7 @@ public class AttachmentSearchRepository {
                   AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
                   AND (CAST(:recordId AS BIGINT) IS NULL OR n.negotiation_id = :recordId)
                   AND (CAST(:attachmentId AS BIGINT) IS NULL OR aa.archived_attachment_id = :attachmentId)
-                  AND (:versionFilter <> 'historical')
+                  AND (:versionFilter <> 'historical') {{NEGOTIATION_SCOPE}}
                 """)
                 .param("recordNumber", recordNumber)
                 .param("documentNumber", documentNumber)
@@ -307,7 +332,7 @@ public class AttachmentSearchRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        return scoped("""
                 SELECT * FROM (
                     SELECT
                         'AWARD' AS record_type,
@@ -355,7 +380,7 @@ public class AttachmentSearchRepository {
                             :versionFilter = 'all'
                             OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
                             OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
-                      )
+                      ) {{AWARD_SCOPE}}
 
                     UNION ALL
 
@@ -399,7 +424,7 @@ public class AttachmentSearchRepository {
                             :versionFilter = 'all'
                             OR (:versionFilter = 'current' AND pv.proposal_id = current_pv.proposal_id)
                             OR (:versionFilter = 'historical' AND pv.proposal_id != current_pv.proposal_id)
-                      )
+                      ) {{PROPOSAL_SCOPE}}
 
                     UNION ALL
 
@@ -430,7 +455,7 @@ public class AttachmentSearchRepository {
                     WHERE aa2.module_code = 'NEGOTIATION'
                       AND (:recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber))
                       AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
-                      AND (:versionFilter <> 'historical')
+                      AND (:versionFilter <> 'historical') {{NEGOTIATION_SCOPE}}
                 ) combined
                 """ + sortSql + """
                 LIMIT :limit OFFSET :offset
@@ -449,7 +474,7 @@ public class AttachmentSearchRepository {
             String documentNumber,
             String versionFilter
     ) {
-        Long count = jdbc.sql("""
+        Long count = scoped("""
                 SELECT COUNT(*) FROM (
                     SELECT av.award_id
                     FROM archive.award_attachment aa
@@ -460,7 +485,7 @@ public class AttachmentSearchRepository {
                             :versionFilter = 'all'
                             OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
                             OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
-                      )
+                      ) {{AWARD_SCOPE}}
 
                     UNION ALL
 
@@ -483,7 +508,7 @@ public class AttachmentSearchRepository {
                             :versionFilter = 'all'
                             OR (:versionFilter = 'current' AND pv.proposal_id = current_pv.proposal_id)
                             OR (:versionFilter = 'historical' AND pv.proposal_id != current_pv.proposal_id)
-                      )
+                      ) {{PROPOSAL_SCOPE}}
 
                     UNION ALL
 
@@ -493,7 +518,7 @@ public class AttachmentSearchRepository {
                     WHERE aa2.module_code = 'NEGOTIATION'
                       AND (:recordNumber = '' OR UPPER(n.document_number) = UPPER(:recordNumber))
                       AND (:documentNumber = '' OR UPPER(n.document_number) = UPPER(:documentNumber))
-                      AND (:versionFilter <> 'historical')
+                      AND (:versionFilter <> 'historical') {{NEGOTIATION_SCOPE}}
                 ) combined
                 """)
                 .param("recordNumber", recordNumber)

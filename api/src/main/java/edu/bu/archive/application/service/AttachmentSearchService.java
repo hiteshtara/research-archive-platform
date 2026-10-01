@@ -133,13 +133,13 @@ public class AttachmentSearchService {
     }
 
     /*
-     * Record authorization (restricted callers only): Award rows only,
-     * with the record-scope predicate in the same SQL WHERE as the
-     * filters (AwardArchiveRepository.searchAwardAttachments), so the page
-     * and the count contain only versions the caller may open. Proposal
-     * and Negotiation attachment rows are not yet brought under this path
-     * and are omitted - recordType=ALL returns the caller's Award rows,
-     * PROPOSAL/NEGOTIATION return an empty page.
+     * Record authorization (restricted callers only): Award and Proposal
+     * rows, each with its record-scope predicate in the same SQL WHERE as
+     * the filters (AwardArchiveRepository.searchAwardAttachments;
+     * AttachmentSearchRepository via DocumentRecordScope), so the page and
+     * the count contain only versions the caller may open. Negotiation
+     * attachment rows have no non-Central rule yet: excluded from ALL, and
+     * NEGOTIATION returns an empty page.
      */
     private PageResponse<AttachmentSearchResultResponse> searchRestricted(
             String recordType,
@@ -153,11 +153,12 @@ public class AttachmentSearchService {
             int size
     ) {
         return switch (recordType) {
-            case RECORD_TYPE_ALL -> awardArchiveService.searchAttachments(
-                    recordNumber, documentNumber, null, null, null, versionFilter, page, size
-            );
+            case RECORD_TYPE_ALL -> searchAll(recordNumber, documentNumber, versionFilter, page, size);
             case RECORD_TYPE_AWARD -> awardArchiveService.searchAttachments(
                     recordNumber, documentNumber, recordId, attachmentId, fileId, versionFilter, page, size
+            );
+            case RECORD_TYPE_PROPOSAL -> searchProposal(
+                    recordNumber, documentNumber, recordId, attachmentId, versionFilter, page, size
             );
             default -> {
                 int safePage = PaginationSupport.clampPage(page);

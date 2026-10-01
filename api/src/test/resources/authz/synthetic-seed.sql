@@ -287,3 +287,11 @@ UPDATE archive.attachment_object SET upload_status = 'UPLOADED', s3_bucket = 'lo
        s3_key = 'synthetic/' || file_name, file_size_bytes = 400 WHERE file_id IN (9300001, 9300002);
 
 COMMIT;
+
+-- Proposal attachments (File Finder scoping): Pat's Proposal 2, Proposal 1 (not Pat's) and the
+-- other-unit version of Proposal 4 (the department sees it only family-wide).
+INSERT INTO archive.proposal_attachment (proposal_attachment_id, proposal_id, proposal_number, sequence_number,
+    attachment_title, file_name, content_type) VALUES
+  (9700001, 8000201, 'SYN-PRP-0002', 1, 'SYNTHETIC Proposal 2 narrative', 'SYNTHETIC-proposal-2.pdf', 'application/pdf'),
+  (9700002, 8000101, 'SYN-PRP-0001', 1, 'SYNTHETIC Proposal 1 narrative', 'SYNTHETIC-proposal-1.pdf', 'application/pdf'),
+  (9700003, 8000402, 'SYN-PRP-0004', 2, 'SYNTHETIC Proposal 4 v2 budget', 'SYNTHETIC-proposal-4-v2.pdf', 'application/pdf');

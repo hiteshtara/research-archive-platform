@@ -88,7 +88,8 @@ Rules that apply to every scoped path:
 |---|---|
 | `/api/v1/awards/search`, `/api/v1/awards/versions/search`, `/api/proposals/search` | scope predicate in the same SQL WHERE as the filters (page **and** count). Award family rows: `rootAwardNumber`/`parentAwardNumber` blanked unless `canSeeAwardNumber` (same rule as `…/summary`); version rows carry no hierarchy numbers |
 | `/api/global-search` | Award and Proposal branches scoped (the access outcome is propagated to worker threads); other modules and semantic search not run. Award rows come from the scoped Award search above (no hierarchy numbers in the item payload) |
-| `/api/dashboard` | counts from the same scope predicates; other modules 0 |
+| `/api/dashboard` | counts from the same scope predicates; Kuali Documents = the caller's Award and Proposal documents; other modules 0 |
+| `/api/v1/documents` (Document Explorer), `/api/documents/search` | **Award and Proposal documents**: each module branch of the fixed union carries the Award / Proposal scope predicate in its own WHERE (`DocumentRecordScope`), so page, count, module facets and ordering see only in-scope rows, on the unfiltered fast path too. Same rule as the Award and Proposal searches (family-wide versions, sub-units by grant flag, PI/MPI/COI, IO = Award account). **Negotiation, Subaward and IRB documents are excluded** (branch renders FALSE) until their rule is decided: excluded, not supported |
 | `/api/v1/awards/by-number/{n}` | current version checked before any query |
 | `/api/v1/awards/{n}/hierarchy` | requested Award checked; out-of-scope nodes omitted; re-rooted if an ancestor is hidden |
 | `/api/v1/awards/{id}` + **explicit sub-path allow-list** | `requireAward(id)` before any query; **any other sub-path → 403** (a new Award endpoint is closed until reviewed) |
@@ -108,7 +109,7 @@ Rules that apply to every scoped path:
 | `…/attachments`, `…/attachments/{n}/download` | record check. The download also refuses an attachment that belongs to another record. No separate group (approved decision) |
 | `…/report.pdf` | allowed for an in-scope Award: built from the same scoped service methods |
 | `…/report-with-attachments.pdf` | as `report.pdf`; its attachment list covers this `award_id` only |
-| `/api/v1/attachments/search` (Archived File Finder) | **Award rows only**, with the Award scope predicate in the SQL WHERE (page and count). `recordType=ALL` returns the caller's Award rows; `PROPOSAL` and `NEGOTIATION` return an empty page |
+| `/api/v1/attachments/search` (Archived File Finder) | **Award and Proposal rows**, each with its scope predicate in the SQL WHERE (page and count). `recordType=ALL` returns the caller's Award and Proposal rows; **Negotiation rows are excluded** and `NEGOTIATION` returns an empty page (no non-Central rule yet) |
 | `/api/v1/explorer/awards?awardNumber=` | `requireAwardNumber` (the response is that current version only) |
 | `/api/v1/explorer/award-versions?awardId=` | `requireAward`; exactly one well-formed parameter value, else 404 |
 | `/api/ai/awards/{n}/summary\|questions\|evidence-search` | `requireAwardNumber` (else 404), **and** every version of the family must be visible, else `403 AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` (see POLICY P3 below). Summary/Questions context (`AwardContextBuilder`, fact resolver, diff builder) holds only this Award family's own rows: no related records |
@@ -128,13 +129,12 @@ Rules that apply to every scoped path:
 
 Every other path returns `403 NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION` to non-Central users. This includes:
 
-- Negotiation, Subaward and IRB (all paths);
-- Document Explorer `/api/v1/documents` and `/api/documents/search`;
+- Negotiation, Subaward and IRB (all paths), and their documents inside Document Explorer and document search (excluded rows, not an error);
 - the other Explorer paths: workflows, units, unit administrators, award contacts, persons, rolodex, sponsors, attachments, proposals;
 - legacy `/api/awards/**`;
 - any Award or Proposal sub-path not on its allow-list.
 
-Proposal and Negotiation rows in the Archived File Finder are omitted for restricted users. A Proposal scope predicate exists but is not yet wired into `AttachmentSearchRepository`.
+Negotiation rows in the Archived File Finder are excluded for restricted users.
 
 ### Policy-dependent behaviour (P3/P4/P6 now APPROVED, see above; the settings remain explicit with no code defaults)
 

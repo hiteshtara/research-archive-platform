@@ -95,6 +95,12 @@ public class RecordAuthorizationInterceptor implements HandlerInterceptor {
                  "/api/proposals/search", "/api/global-search", "/api/dashboard" -> {
                 return true;   // scoped inside the query
             }
+            case "/api/v1/documents", "/api/documents/search" -> {
+                // Document Explorer and document search: Award and Proposal documents scoped in
+                // SQL per module branch (DocumentRecordScope); Negotiation, Subaward and IRB
+                // documents excluded for restricted callers until their rule is decided.
+                return true;
+            }
             case "/api/v1/attachments/search" -> {
                 // Archived File Finder: Award rows scoped in SQL, other
                 // modules omitted (AttachmentSearchService); the
