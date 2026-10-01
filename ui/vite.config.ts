@@ -23,7 +23,37 @@ function authzDemoAuth(): Plugin {
   }
 }
 
+/*
+ * "identity-lab" mode only (scripts/identity-lab/start.sh): keeps the
+ * production src/auth.ts and its Amplify sign-in, adding one line so every
+ * Cognito user-pool API call (refresh, sign-out) goes to the lab's simulated
+ * Cognito instead of AWS. Fails the build if auth.ts no longer matches.
+ */
+function identityLabUserPoolEndpoint(): Plugin {
+  const authFile = path.resolve(__dirname, 'src/auth.ts')
+  return {
+    name: 'identity-lab-user-pool-endpoint',
+    enforce: 'pre',
+    transform(code, id) {
+      if (id !== authFile) {
+        return null
+      }
+      const anchor = '      userPoolClientId,\n'
+      if (!code.includes(anchor)) {
+        throw new Error('identity-lab: src/auth.ts changed; cannot point Amplify at the simulated Cognito')
+      }
+      return code.replace(anchor, anchor + '      userPoolEndpoint: import.meta.env.VITE_LAB_USER_POOL_ENDPOINT,\n')
+    },
+  }
+}
+
+function modePlugins(mode: string): Plugin[] {
+  if (mode === 'authz-demo') return [authzDemoAuth()]
+  if (mode === 'identity-lab') return [identityLabUserPoolEndpoint()]
+  return []
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
-  plugins: mode === 'authz-demo' ? [authzDemoAuth(), react()] : [react()],
+  plugins: [...modePlugins(mode), react()],
 }))

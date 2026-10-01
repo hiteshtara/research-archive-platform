@@ -116,3 +116,4 @@ Award_*_Complete_Report.pdf
 # api/src/**/.obsidian/ collision currently exists - anchor defensively.
 /bu/
 /.obsidian/
+.identity-lab/

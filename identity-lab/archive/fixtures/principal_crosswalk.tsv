@@ -1,0 +1,12 @@
+attribute_name	attribute_value	prncpl_id	evidence_ref	verified_by
+labInstitutionalId	SYN-INST-0001	SYNP-CEN-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0002	SYNP-DEP-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0003	SYNP-PI-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0005	SYNP-OAV-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0006	SYNP-MULTI-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0007	SYNP-NG-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0009	SYNP-SUS-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0010	SYNP-REUSE-01	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0011	SYNP-KIM-11	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0012	SYNP-KIM-12	FICTIONAL-LAB-FIXTURE	lab-seed
+labInstitutionalId	SYN-INST-0013	SYNP-KIM-13	FICTIONAL-LAB-FIXTURE	lab-seed

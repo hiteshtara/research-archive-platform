@@ -1,0 +1,3 @@
+# Example FICTIONAL account so core/ runs on its own. Applications mount their own file.
+# uid	password	institutionalId(- = absent)	displayName	note
+lab-example	Lab-Example-2026	EXAMPLE-0001	Alex Example (FICTIONAL)	core example

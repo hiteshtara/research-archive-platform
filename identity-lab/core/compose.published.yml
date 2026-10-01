@@ -1,0 +1,89 @@
+# Local SAML integration - Cognito simulated: REUSABLE identity core, PUBLISHED images.
+# Same as compose.yml but pulls versioned images instead of building them (see PUBLISHED.md).
+# Application-neutral; an application adds fixtures and a post-sign-in hook in
+# its own overlay file (the archive's: ../archive/compose.archive.yml).
+#
+# Isolation: every lab service is on `lab`, an internal-only network with no
+# route off the Docker host. Only the socat relays (edge-*) also join `edge`,
+# and they publish on 127.0.0.1 only.
+name: identity-lab
+
+x-pinned-postgres: &pinned-postgres
+  image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+
+networks:
+  lab:
+    internal: true
+  edge: {}
+
+volumes:
+  ldap-data: {}
+  pool-db: {}
+
+services:
+  ldap:
+    image: mukadder/identity-lab:ldap-${LAB_VERSION:-0.1.0}
+    environment:
+      LAB_LDAP_ROOT_PASSWORD: ${LAB_LDAP_ROOT_PASSWORD:?}
+      LAB_LDAP_READER_PASSWORD: ${LAB_LDAP_READER_PASSWORD:?}
+    volumes:
+      - ldap-data:/var/lib/openldap/lab
+      - ${LAB_USERS_FILE:-./core/ldap/example-users.tsv}:/lab/users.tsv:ro
+    networks: [lab]
+    hostname: lab-ldap
+    container_name: lab-ldap
+
+  idp:
+    image: mukadder/identity-lab:idp-${LAB_VERSION:-0.1.0}
+    environment:
+      LAB_LDAP_READER_PASSWORD: ${LAB_LDAP_READER_PASSWORD:?}
+      LAB_PERSISTENT_ID_SALT: ${LAB_PERSISTENT_ID_SALT:?}
+    volumes:
+      - ${LAB_CREDS_DIR:?}:/lab/creds:ro
+    networks: [lab]
+    container_name: lab-idp
+    depends_on: [ldap]
+
+  pool-db:
+    <<: *pinned-postgres
+    environment:
+      POSTGRES_USER: lab_pool
+      POSTGRES_PASSWORD: ${LAB_POOL_DB_PASSWORD:?}
+      POSTGRES_DB: lab_pool
+    volumes:
+      - pool-db:/var/lib/postgresql/data
+    networks: [lab]
+    container_name: lab-pool-db
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "lab_pool", "-d", "lab_pool"]
+      interval: 2s
+      retries: 30
+
+  cognito:
+    image: mukadder/identity-lab:cognito-${LAB_VERSION:-0.1.0}
+    environment:
+      LAB_POOL_DATABASE_URL: postgresql://lab_pool:${LAB_POOL_DB_PASSWORD:?}@pool-db:5432/lab_pool
+      LAB_UI_ORIGIN: ${LAB_UI_ORIGIN:-http://localhost:5198}
+      LAB_POST_SIGN_IN_HOOK: ${LAB_POST_SIGN_IN_HOOK:-}
+      LAB_GROUP_SEED_FILE: ${LAB_GROUP_SEED_FILE:-}
+    volumes:
+      - ${LAB_CREDS_DIR:?}:/lab/creds:ro
+    networks: [lab]
+    container_name: lab-cognito
+    depends_on:
+      pool-db: {condition: service_healthy}
+
+  edge-idp:
+    image: mukadder/identity-lab:proxy-${LAB_VERSION:-0.1.0}
+    environment: {LISTEN_PORT: "8443", TARGET: "idp:443"}
+    ports: ["127.0.0.1:8443:8443"]
+    networks: [lab, edge]
+    container_name: lab-edge-idp
+
+  edge-cognito:
+    image: mukadder/identity-lab:proxy-${LAB_VERSION:-0.1.0}
+    environment: {LISTEN_PORT: "9443", TARGET: "cognito:9443"}
+    ports: ["127.0.0.1:9443:9443"]
+    networks: [lab, edge]
+    container_name: lab-edge-cognito
+    depends_on: [edge-idp]

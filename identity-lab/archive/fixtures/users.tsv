@@ -1,0 +1,16 @@
+# FICTIONAL test accounts for the local SAML lab. Not real people; passwords are test-only.
+# uid	password	institutionalId(- = attribute absent)	displayName	note
+lab-central	Lab-Central-2026	SYN-INST-0001	Casey Central (FICTIONAL)	CENTRAL grant
+lab-dept	Lab-Dept-2026	SYN-INST-0002	Dana Department (FICTIONAL)	UNIT grant SYN-U-100
+lab-pat	Lab-Pat-2026	SYN-INST-0003	Pat Example (FICTIONAL)	contact-derived (PI on A)
+lab-io	Lab-Io-2026	SYN-INST-0005	Indra Io (FICTIONAL)	IO grant SYN-IO-7001
+lab-multi	Lab-Multi-2026	SYN-INST-0006	Morgan Multi (FICTIONAL)	UNIT SYN-U-300 + IO SYN-IO-7002
+lab-nogrants	Lab-Nogrants-2026	SYN-INST-0007	Noel Nogrants (FICTIONAL)	linked, no grants
+lab-suspended	Lab-Suspended-2026	SYN-INST-0009	Sam Suspended (FICTIONAL)	suspended person
+lab-noattr	Lab-Noattr-2026	-	Nico Noattr (FICTIONAL)	institutional id attribute missing
+lab-stranger	Lab-Stranger-2026	SYN-INST-0099	Sasha Stranger (FICTIONAL)	not in the crosswalk
+lab-kim-pi	Lab-Kim-Pi-2026	SYN-INST-0011	Kim Principalpi (FICTIONAL)	KIM principal, PI on Award J, no grants
+lab-kim-only	Lab-Kim-Only-2026	SYN-INST-0012	Kai Kimonly (FICTIONAL)	KIM principal, nobody's contact
+lab-kim-inactive	Lab-Kim-Inactive-2026	SYN-INST-0013	Ira Inactive (FICTIONAL)	inactive KIM principal
+lab-kim-ambiguous	Lab-Kim-Ambiguous-2026	SYN-INST-0014	Ari Ambiguous (FICTIONAL)	maps to two principals
+lab-rolodex	Lab-Rolodex-2026	SYN-INST-0016	Robin Rolodex (FICTIONAL)	mapped to a non-employee rolodex id

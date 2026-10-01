@@ -1,0 +1,64 @@
+# LOCAL SAML INTEGRATION - COGNITO SIMULATED. Only in builds made with -Pauthz-demo.
+# Production SecurityConfiguration, pointed at the lab's simulated issuer through
+# the same properties production sets from COGNITO_ISSUER_URI / COGNITO_CLIENT_ID.
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:${LAB_ARCHIVE_DB_PORT:55433}/identity_lab
+    username: lab_archive
+    password: ${LAB_ARCHIVE_DB_PASSWORD}
+  flyway:
+    enabled: false
+
+server:
+  port: ${LAB_API_PORT:8092}
+
+app:
+  security:
+    enabled: true
+    cognito:
+      issuer-uri: https://localhost:9443/us-east-1_LabSimSaml
+      client-id: labsimulatedclient
+  cors:
+    allowed-origins: http://localhost:${LAB_UI_PORT:5198}
+  identity-lab:
+    disposable-database: true
+  authorization:
+    enforcement-enabled: true
+    # APPROVED by Hitesh 2026-10-01 (design section 14); overridable per run so the previous
+    # demo settings can still be compared (acceptance.sh --alternatives).
+    # Overridable per run (LAB_VERSION_SCOPE etc.) so alternatives are tested separately.
+    version-scope: ${LAB_VERSION_SCOPE:FAMILY_WIDE}
+    department-match: ${LAB_DEPARTMENT_MATCH:LEAD_UNIT_WITH_DESCENDANTS}
+    research-staff-roles: ${LAB_RESEARCH_STAFF_ROLES:PI,MPI,COI}
+    # Approved 2026-10-01 (design section 13): contact access via the verified KIM principal.
+    contact-derivation: ${LAB_CONTACT_DERIVATION:VERIFIED_PRINCIPAL}
+    # Required with enforcement: a refreshed session keeps auth_time, so this ends it.
+    max-sign-in-age: ${LAB_MAX_SIGN_IN_AGE:PT8H}
+    # Real server-side enrollment (production code) against the SIMULATED Cognito's AdminGetUser.
+    enrollment:
+      enabled: true
+      user-pool-id: us-east-1_LabSimSaml
+      region: us-east-1
+      endpoint-override: https://localhost:9443
+      saml-provider-name: LabShibboleth
+      identifier-attribute: custom:institutional_id
+      crosswalk-attribute-name: labInstitutionalId
+      # The lab maps an attribute (custom:institutional_id) - an accepted lab risk. Production should
+      # use identities.userId (the NameID) unless BU guarantees the attribute is sent on every sign-in.
+      accept-mapped-attribute-identifier: true
+      refusal-retry-seconds: 0
+  attachments:
+    storage: local
+    local-directory: ${LAB_ATTACHMENT_DIR:/tmp/identity-lab-attachments}
+  explorer:
+    enabled: true
+  ai:
+    # Deterministic stub provider only (no network), so AI paths can be exercised.
+    enabled: true
+    stub-enabled: true
+    provider: stub
+    questions-enabled: true
+  search:
+    semantic:
+      # Evidence Search with the lab-only fixed embedding provider (IdentityLabConfiguration).
+      enabled: true

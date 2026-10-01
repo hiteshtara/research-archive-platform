@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Local SAML integration - Cognito simulated: the one trusted SP, from a local file. -->
+<MetadataProvider id="ShibbolethMetadata" xsi:type="ChainingMetadataProvider"
+    xmlns="urn:mace:shibboleth:2.0:metadata"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="urn:mace:shibboleth:2.0:metadata http://shibboleth.net/schema/idp/shibboleth-metadata.xsd">
+    <MetadataProvider id="LabSimulatedCognito" xsi:type="FilesystemMetadataProvider"
+        metadataFile="%{idp.home}/metadata/lab-sp-metadata.xml" />
+</MetadataProvider>

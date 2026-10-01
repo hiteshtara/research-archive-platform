@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "node --test src/features/ai/*.test.mjs src/features/archivedFiles/*.test.mjs src/features/award/*.test.mjs src/features/common/*.test.mjs src/features/dashboard/*.test.mjs src/features/documents/*.test.mjs src/features/explorer/*.test.mjs src/features/navigation/*.test.mjs src/features/negotiation/*.test.mjs src/features/proposal/*.test.mjs src/features/search/*.test.mjs src/features/subaward/*.test.mjs",
     "preview": "vite preview",
+    "lab:identity": "vite --mode identity-lab",
     "demo:authz": "vite --mode authz-demo --port 5199 --strictPort"
   },
   "dependencies": {

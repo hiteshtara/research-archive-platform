@@ -47,6 +47,17 @@ if (import.meta.env.MODE === "authz-demo") {
   });
 }
 
+// Local SAML integration - Cognito simulated: only in Vite mode "identity-lab"
+// (identity-lab/), with the same build-time guard as the demo above.
+if (import.meta.env.MODE === "identity-lab") {
+  void import("./demo/identity-lab/LabBanner").then(({ LabBanner }) => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    document.body.style.paddingBottom = "76px";
+    ReactDOM.createRoot(host).render(<LabBanner />);
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
