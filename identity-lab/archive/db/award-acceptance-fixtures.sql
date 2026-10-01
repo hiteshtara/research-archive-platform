@@ -49,7 +49,8 @@ SELECT 9400000 + (av.award_id - 9000000), av.award_id, av.award_number, av.seque
        2000 * av.sequence_number, 1000 * av.sequence_number, 3000 * av.sequence_number,
        'SYN-TNM-' || right(av.award_number, 11)
 FROM archive.award_version av
-WHERE av.award_number LIKE '99000_-0000_';
+WHERE av.award_number LIKE '99000_-0000_'
+  AND NOT EXISTS (SELECT 1 FROM archive.award_amount_info x WHERE x.award_id = av.award_id);
 
 INSERT INTO archive.award_amount_transaction (award_amount_transaction_id, award_number, document_number,
     transaction_type_code, transaction_type_description, notice_date, comments)
@@ -75,14 +76,14 @@ FROM archive.award_version av WHERE av.award_number LIKE '99000_-0000_';
 -- Stored attachment files: the existing A (seq 2) and B attachments become real
 -- files, plus one on A seq 1 only (another version) and one on A's child.
 UPDATE archive.attachment_object SET upload_status = 'UPLOADED', s3_bucket = 'local-fixtures', s3_key = 'synthetic/' || file_name,
-       file_size_bytes = 400 WHERE file_id IN (9300001, 9300002);
+       file_size_bytes = 400 WHERE file_id IN (9300001, 9300002, 9300003);
 INSERT INTO archive.attachment_object (file_id, file_name, content_type, upload_status, s3_key, file_size_bytes, s3_bucket) VALUES
-  (9300003, 'SYNTHETIC-award-A-seq1.pdf', 'application/pdf', 'UPLOADED', 'synthetic/SYNTHETIC-award-A-seq1.pdf', 400, 'local-fixtures'),
-  (9300004, 'SYNTHETIC-award-A-child.pdf', 'application/pdf', 'UPLOADED', 'synthetic/SYNTHETIC-award-A-child.pdf', 400, 'local-fixtures'),
-  (9300009, 'SYNTHETIC-award-I-seq2.pdf', 'application/pdf', 'UPLOADED', 'synthetic/SYNTHETIC-award-I-seq2.pdf', 400, 'local-fixtures');
+  (9301003, 'SYNTHETIC-award-A-seq1.pdf', 'application/pdf', 'UPLOADED', 'synthetic/SYNTHETIC-award-A-seq1.pdf', 400, 'local-fixtures'),
+  (9301004, 'SYNTHETIC-award-A-child.pdf', 'application/pdf', 'UPLOADED', 'synthetic/SYNTHETIC-award-A-child.pdf', 400, 'local-fixtures'),
+  (9301009, 'SYNTHETIC-award-I-seq2.pdf', 'application/pdf', 'UPLOADED', 'synthetic/SYNTHETIC-award-I-seq2.pdf', 400, 'local-fixtures');
 INSERT INTO archive.award_attachment (award_attachment_id, award_id, award_number, sequence_number, file_id,
     type_code, description) VALUES
-  (9300003, 9000101, '990001-00001', 1, 9300003, '1', 'SYNTHETIC attachment on Award A seq 1 only'),
-  (9300004, 9000111, '990001-00002', 1, 9300004, '1', 'SYNTHETIC attachment on Award A child'),
-  (9300009, 9000902, '990009-00001', 2, 9300009, '1', 'SYNTHETIC attachment on Award I seq 2');
+  (9301003, 9000101, '990001-00001', 1, 9301003, '1', 'SYNTHETIC attachment on Award A seq 1 only'),
+  (9301004, 9000111, '990001-00002', 1, 9301004, '1', 'SYNTHETIC attachment on Award A child'),
+  (9301009, 9000902, '990009-00001', 2, 9301009, '1', 'SYNTHETIC attachment on Award I seq 2');
 COMMIT;

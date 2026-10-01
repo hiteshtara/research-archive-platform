@@ -104,8 +104,14 @@ def test_pi_sees_only_contact_records():
     assert status(t, "/api/v1/awards/by-number/990002-00001") == 404   # B: other unit, not a contact
     assert status(t, "/api/v1/awards/9000501/summary") == 404          # E: KP excluded
     assert status(t, "/api/v1/awards/9000111/summary") == 404          # A's child: not inherited
-    assert status(t, "/api/v1/awards/9000102/attachments") == 403      # no ArchiveAttachmentViewer group
+    # Approved 2026-10-01: record access covers its files - no ArchiveAttachmentViewer group needed.
+    assert status(t, "/api/v1/awards/9000102/attachments") == 200
+    r = api(t, "/api/v1/awards/9000102/attachments/9300001/download")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF") and b"FICTIONAL" in r.content
+    assert status(t, "/api/v1/awards/9000201/attachments/9300002/download") == 404   # B: not authorized
+    assert status(t, "/api/v1/awards/9000102/attachments/9300002/download") == 404   # B's file via A's URL
     assert status(t, "/api/v1/awards/9000201/report.pdf") == 404
+    assert status(t, "/api/v1/awards/9000102/report.pdf") == 200
     assert api(t, "/api/v1/awards/9000102/funding-proposals").json() == []
 
 
@@ -138,7 +144,7 @@ def test_multiple_grants_are_a_union():
 
 def test_unfinished_paths_stay_closed_for_non_central_users():
     t = sign_in("lab-dept")
-    for path in ("/api/v1/awards/9000102/report.pdf", "/api/negotiations/search?q=SYNTHETIC"):
+    for path in ("/api/negotiations/search?q=SYNTHETIC", "/api/v1/documents?q=SYNTHETIC"):
         assert status(t, path) in (403, 404), path
 
 

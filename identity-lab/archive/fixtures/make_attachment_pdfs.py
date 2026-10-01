@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 NAMES = ["SYNTHETIC-award-A.pdf", "SYNTHETIC-award-B.pdf", "SYNTHETIC-award-A-seq1.pdf",
-         "SYNTHETIC-award-A-child.pdf", "SYNTHETIC-award-I-seq2.pdf"]
+         "SYNTHETIC-award-A-child.pdf", "SYNTHETIC-award-I-seq2.pdf", "SYNTHETIC-award-A-other-unit.pdf"]
 
 
 def pdf(text):

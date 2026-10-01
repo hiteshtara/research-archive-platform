@@ -13,7 +13,7 @@ restart_api() {
   pkill -f "spring-boot.run.profiles=identity-lab" 2>/dev/null || true
   while curl -sf "http://127.0.0.1:$API_PORT/actuator/health" >/dev/null 2>&1; do sleep 1; done
   rm -f "$STATE/api.pid"
-  LAB_POLICY_ENV="$1" "$(dirname "${BASH_SOURCE[0]}")/start.sh" >/dev/null
+  LAB_POLICY_ENV="$1" "$ROOT/scripts/identity-lab/start.sh" >/dev/null
 }
 if [ "${1:-}" = "--alternatives" ]; then
   restart_api "LAB_VERSION_SCOPE=FAMILY_WIDE LAB_DEPARTMENT_MATCH=LEAD_UNIT_WITH_DESCENDANTS LAB_RESEARCH_STAFF_ROLES=PI,MPI,COI,KP"

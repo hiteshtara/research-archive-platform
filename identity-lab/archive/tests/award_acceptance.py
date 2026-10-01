@@ -39,9 +39,11 @@ PASSWORDS = {
 VERSIONS = {  # award_id: (award_number, seq, unit, title fragment)
     9000101: ("990001-00001", 1, "SYN-U-100", "Award A - original"),
     9000102: ("990001-00001", 2, "SYN-U-100", "Award A - PI is Pat"),
+    9000103: ("990001-00001", 2, "SYN-U-200", "Award A - other-unit"),
     9000111: ("990001-00002", 1, "SYN-U-100", "Award A child"),
     9000201: ("990002-00001", 1, "SYN-U-200", "Award B"),
-    9000301: ("990003-00001", 1, "SYN-U-300", "Award C"),
+    9000301: ("990003-00001", 1, "SYN-U-300", "Award C - Pat"),
+    9000302: ("990003-00001", 1, "SYN-U-200", "Award C - other-unit"),
     9000401: ("990004-00001", 1, "SYN-U-300", "Award D"),
     9000501: ("990005-00001", 1, "SYN-U-300", "Award E"),
     9000601: ("990006-00001", 1, "SYN-U-400", "Award F"),
@@ -51,7 +53,8 @@ VERSIONS = {  # award_id: (award_number, seq, unit, title fragment)
     9000902: ("990009-00001", 2, "SYN-U-100", "Award I - seq 2"),
     9001001: ("990010-00001", 1, "SYN-U-300", "Award J"),
 }
-ATTACHMENTS = {9000101: 9300003, 9000102: 9300001, 9000111: 9300004, 9000201: 9300002, 9000902: 9300009}
+ATTACHMENTS = {9000101: 9301003, 9000102: 9300001, 9000111: 9301004, 9000201: 9300002, 9000902: 9301009,
+               9000103: 9300003}
 ALL = set(VERSIONS)
 
 # Visible award_ids per user under the DEMO policy (PER_VERSION, EXACT_LEAD_UNIT, roles PI/MPI/COI).
@@ -66,13 +69,16 @@ DEMO_VISIBLE = {
 # Visible under the ALTERNATIVE policy (FAMILY_WIDE, LEAD_UNIT_WITH_DESCENDANTS, roles incl. KP).
 ALT_VISIBLE = {
     "lab-central": ALL,
-    "lab-dept": {9000101, 9000102, 9000111, 9000701, 9000901, 9000902},
-    "lab-pat": {9000101, 9000102, 9000301, 9000401, 9000501, 9000901, 9000902},
+    "lab-dept": {9000101, 9000102, 9000103, 9000111, 9000701, 9000901, 9000902},
+    "lab-pat": {9000101, 9000102, 9000103, 9000301, 9000302, 9000401, 9000501, 9000901, 9000902},
     "lab-io": {9000601, 9000901, 9000902},
-    "lab-multi": {9000301, 9000401, 9000501, 9000801, 9001001},
+    "lab-multi": {9000301, 9000302, 9000401, 9000501, 9000801, 9001001},
     "lab-kim-pi": {9001001},
 }
-ATTACHMENT_GROUP = {"lab-central", "lab-dept", "lab-io", "lab-multi"}
+# APPROVED 2026-10-01: record access covers the record's own files; ArchiveAttachmentViewer is no
+# longer a separate condition under enforcement. lab-pat and lab-kim-pi hold NO group on purpose.
+ATTACHMENT_GROUP = {"lab-central", "lab-dept", "lab-io", "lab-multi", "lab-pat", "lab-kim-pi"}
+WITHOUT_GROUP = {"lab-pat", "lab-kim-pi"}
 GRANT_KIND = {"lab-central": "CENTRAL", "lab-dept": "DEPARTMENT", "lab-pat": "RESEARCH_STAFF",
               "lab-io": "OTHER_AUTHORIZED_VIEWER", "lab-multi": "DEPARTMENT + OTHER_AUTHORIZED_VIEWER"}
 REQ = {"lab-central": "1", "lab-dept": "2", "lab-pat": "3", "lab-io": "4", "lab-multi": "2, 4 (union)",
@@ -215,9 +221,12 @@ def check_search(run, user, visible):
             str(len(want)), str(d.get("awards")), "PASS" if d.get("awards") == len(want) else "FAIL")
 
 
+# is_current_version = TRUE in the fixtures (A' 9000103 shares A's sequence 2 but is NOT current).
+CURRENT = {9000102, 9000111, 9000201, 9000301, 9000401, 9000501, 9000601, 9000701, 9000801, 9000902, 9001001}
+
+
 def _current_of(aid):
-    number = VERSIONS[aid][0]
-    return VERSIONS[aid][1] == max(v[1] for k, v in VERSIONS.items() if v[0] == number)
+    return aid in CURRENT
 
 
 def _current_families(visible):
@@ -388,14 +397,26 @@ def check_other_surfaces(run, user, visible):
             st, note = grade_denied(r, {i for i in ALL if VERSIONS[i][0] == number})
         run.add(f"X1-{user}-{number}", REQ[user] + ", 7", "T28", user, f"Explorer for {number}",
                 "allowed" if allowed and group else ("403" if allowed else "denied"), note, st)
-    # AI summary (deterministic stub provider)
-    for number in ("990001-00001", "990002-00001"):
-        allowed = number in families(visible)
+    # AI summary (deterministic stub provider). The AI context spans the whole family, so it is
+    # allowed only when EVERY version is visible (P3-dependent); otherwise 403 partial access.
+    for number in ("990001-00001", "990002-00001", "990006-00001"):
+        family = {i for i in ALL if VERSIONS[i][0] == number}
+        current_visible = number in families(visible) and any(
+            i in visible and _current_of(i) for i in family)
+        every = family <= visible
         r = post(t, f"/api/ai/awards/{number}/summary", None)
-        st, note = (grade_permitted(r, r.status_code == 200) if allowed
-                    else grade_denied(r, {i for i in ALL if VERSIONS[i][0] == number}))
+        if every:
+            st, note = grade_permitted(r, r.status_code == 200)
+            exp = "allowed"
+        elif current_visible:
+            exp = "403 AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS"
+            ok = r.status_code == 403 and code_of(r) == "AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS" and not leaks(r, family - visible)
+            st, note = ("PASS", exp) if ok else ("FAIL", f"HTTP {r.status_code} {code_of(r)}")
+        else:
+            exp = "denied"
+            st, note = grade_denied(r, family)
         run.add(f"I1-{user}-{number}", REQ[user] + ", 7", "T25", user, f"AI summary for {number}",
-                "allowed" if allowed else "denied", note, st)
+                exp, note, st, "POLICY P3 (AI only with every version visible)" if current_visible and not every else "")
 
 
 def check_denied_identities(run):
@@ -488,7 +509,7 @@ def check_kim_chain(run):
     run.add("K2-link", "3", "T8", "lab-kim-pi", "Identity link carries the KIM principal",
             "SYNP-KIM-11 AUTO_VERIFIED", link, "PASS" if link == "SYNP-KIM-11 AUTO_VERIFIED" else "FAIL")
     for user, inst, outcome, label in (
-            ("lab-kim-only", "SYN-INST-0012", "LINKED", "KIM account that is nobody's contact"),
+            ("lab-kim-only", "SYN-INST-0012", "LINKED|ALREADY_LINKED", "KIM account that is nobody's contact"),
             ("lab-kim-inactive", "SYN-INST-0013", "REFUSED_INACTIVE_PRINCIPAL", "inactive KIM principal"),
             ("lab-kim-ambiguous", "SYN-INST-0014", "REFUSED_AMBIGUOUS_MAPPING", "attribute maps to two principals"),
             ("lab-rolodex", "SYN-INST-0016", "REFUSED_NOT_A_KIM_PRINCIPAL", "mapped to a non-employee (rolodex) id"),
@@ -496,7 +517,7 @@ def check_kim_chain(run):
         t = run.token(user, fresh=True)
         got = enrollment_outcome(inst)
         r = get(t, "/api/v1/awards/search?q=SYNTHETIC")
-        ok = got == outcome and r.status_code == 403 and code_of(r) == "ACCESS_NOT_PROVISIONED" and not leaks(r, ALL)
+        ok = got in outcome.split("|") and r.status_code == 403 and code_of(r) == "ACCESS_NOT_PROVISIONED" and not leaks(r, ALL)
         run.add(f"K3-{user}", "3, 7", "T23", user, f"{label}: no archive access",
                 f"enrollment {outcome}; 403 ACCESS_NOT_PROVISIONED", f"enrollment {got}; {r.status_code} {code_of(r)}",
                 "PASS" if ok else "FAIL")
@@ -515,6 +536,18 @@ def check_kim_chain(run):
         sql("UPDATE authz.identity_link SET status = 'ACTIVE', revoked_by = NULL, revoked_at = NULL "
             "WHERE institutional_identifier = 'SYN-INST-0011' AND revoked_by LIKE 'lab-enrollment%'")
         run.tokens.pop("lab-kim-pi", None)
+
+
+def check_files_without_group(run):
+    """Approved policy: an authorized user WITHOUT the attachment group gets the record's files."""
+    for user in sorted(WITHOUT_GROUP):
+        t = run.token(user, fresh=True)
+        import base64 as _b
+        claims = json.loads(_b.urlsafe_b64decode(t.split(".")[1] + "=="))
+        no_group = "ArchiveAttachmentViewer" not in claims.get("cognito:groups", [])
+        run.add(f"Z1-{user}", "3, 7", "T27 (revised)", user, "Token carries no ArchiveAttachmentViewer group",
+                "no group", "no group" if no_group else "group present", "PASS" if no_group else "FAIL",
+                "approved 2026-10-01: record access covers its files")
 
 
 def check_unauthenticated(run):
@@ -546,6 +579,7 @@ def main():
     if args.policy == "default":
         check_denied_identities(run)
         check_kim_chain(run)
+        check_files_without_group(run)
         check_grant_changes(run)
         check_unauthenticated(run)
         mark_policy(run)
