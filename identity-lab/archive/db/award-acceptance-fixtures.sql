@@ -86,4 +86,24 @@ INSERT INTO archive.award_attachment (award_attachment_id, award_id, award_numbe
   (9301003, 9000101, '990001-00001', 1, 9301003, '1', 'SYNTHETIC attachment on Award A seq 1 only'),
   (9301004, 9000111, '990001-00002', 1, 9301004, '1', 'SYNTHETIC attachment on Award A child'),
   (9301009, 9000902, '990009-00001', 2, 9301009, '1', 'SYNTHETIC attachment on Award I seq 2');
+-- Evidence Search rows (FICTIONAL; fixed lab embedding): Award A's own version plus one excerpt of
+-- every related type (Proposal SYN-PRP-0001, which Pat cannot open; Negotiation; Subaward), and
+-- Award B's version for the forbidden case.
+INSERT INTO archive.search_embedding (module, record_id, canonical_family_id, business_number, source_text,
+    source_hash, embedding, embedding_model, document_type, parent_module, parent_business_identifier,
+    exact_record_id, source_table, source_primary_key)
+SELECT 'AWARD', v.pk, v.family, v.num, v.text, 'lab-' || v.pk, array_fill(0.1::real, ARRAY[1024])::vector,
+       'identity-lab-fixed', v.type, 'AWARD', v.num, v.pk, v.source_table, v.pk
+FROM (VALUES
+  (9000102, 9000102, '990001-00001', 'AWARD_VERSION', 'archive.award_version',
+   'Award 990001-00001 version 2: SYNTHETIC Award A - PI is Pat Example.'),
+  (9400001, 9000102, '990001-00001', 'RELATED_PROPOSAL', 'archive.award_funding_proposal',
+   'Award 990001-00001 version 2 is funded by Proposal SYN-PRP-0001: SYNTHETIC Proposal 1 - related to Award A.'),
+  (9500001, 9000102, '990001-00001', 'RELATED_NEGOTIATION', 'archive.negotiation',
+   'Negotiation SYN-NDOC-01 associated with Award 990001-00001, negotiator SYNTHETIC NEGOTIATOR.'),
+  (9610001, 9000102, '990001-00001', 'RELATED_SUBAWARD', 'archive.subaward_funding',
+   'Subaward SYN-SUB-01 (document SYN-SDOC-01) is linked to Award 990001-00001.'),
+  (9000201, 9000201, '990002-00001', 'AWARD_VERSION', 'archive.award_version',
+   'Award 990002-00001 version 1: SYNTHETIC Award B - unrelated.')
+) AS v(pk, family, num, type, source_table, text);
 COMMIT;

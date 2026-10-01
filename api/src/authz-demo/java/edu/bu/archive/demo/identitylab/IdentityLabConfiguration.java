@@ -65,4 +65,19 @@ public class IdentityLabConfiguration {
     }
 
     // IO grants use the production rule (Award account number, approved decision D-A).
+
+    /**
+     * LAB-ONLY embeddings: a fixed vector, no network (never Bedrock). Every synthetic evidence
+     * row uses the same vector, so Evidence Search returns them all and authorization alone
+     * decides what a user sees.
+     */
+    @org.springframework.context.annotation.Bean
+    @org.springframework.context.annotation.Primary
+    edu.bu.archive.application.port.out.EmbeddingProvider identityLabEmbeddings() {
+        return text -> {
+            float[] vector = new float[1024];
+            java.util.Arrays.fill(vector, 0.1f);
+            return vector;
+        };
+    }
 }

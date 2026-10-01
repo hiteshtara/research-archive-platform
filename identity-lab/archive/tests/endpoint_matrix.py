@@ -43,8 +43,6 @@ LOSS = {
 
 # Endpoints whose feature is not available in the lab at all (not an authorization result).
 FEATURE_OFF = {
-    "/api/ai/awards/{awardNumber}/evidence-search":
-        "needs semantic search (an embedding provider); off in the lab - covered by the API integration tests",
 }
 
 QUERY = {

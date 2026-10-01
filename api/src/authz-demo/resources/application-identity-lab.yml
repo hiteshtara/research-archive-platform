@@ -41,6 +41,9 @@ app:
       saml-provider-name: LabShibboleth
       identifier-attribute: custom:institutional_id
       crosswalk-attribute-name: labInstitutionalId
+      # The lab maps an attribute (custom:institutional_id) - an accepted lab risk. Production should
+      # use identities.userId (the NameID) unless BU guarantees the attribute is sent on every sign-in.
+      accept-mapped-attribute-identifier: true
       refusal-retry-seconds: 0
   attachments:
     storage: local
@@ -55,4 +58,5 @@ app:
     questions-enabled: true
   search:
     semantic:
-      enabled: false
+      # Evidence Search with the lab-only fixed embedding provider (IdentityLabConfiguration).
+      enabled: true

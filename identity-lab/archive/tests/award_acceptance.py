@@ -624,6 +624,32 @@ def check_approved_boundaries(run):
             "A closed; F and I (both versions) stay via IO", f"{result}", "PASS" if ok else "FAIL")
 
 
+def check_evidence_search(run):
+    """Evidence Search (lab-only fixed embeddings): only excerpts of records the user may open."""
+    related = {"Proposal SYN-PRP-0001": "SYN-PRP-0001", "Negotiation": "SYNTHETIC NEGOTIATOR",
+               "Subaward": "SYN-SUB-01"}
+    for user, may_see in (("lab-central", set(related)), ("lab-pat", set()), ("lab-dept", set())):
+        t = run.token(user, fresh=True)
+        r = post(t, "/api/ai/awards/990001-00001/evidence-search", {"query": "funding and agreements"})
+        if r.status_code != 200:
+            run.add(f"E1-{user}", REQ.get(user, "1") + ", 7", "T25", user, "Evidence Search on Award A",
+                    "200", f"{r.status_code} {code_of(r)}", "FAIL")
+            continue
+        text = r.text
+        own = "SYNTHETIC Award A" in text
+        shown = {k for k, marker in related.items() if marker in text}
+        ok = own and shown == may_see
+        run.add(f"E1-{user}", REQ.get(user, "1") + ", 7", "T25/T11", user,
+                "Evidence Search on Award A: related excerpts only if that record is visible",
+                f"A's own excerpt; related: {sorted(may_see) or 'none'}", f"own={own}; related: {sorted(shown) or 'none'}",
+                "PASS" if ok else "FAIL")
+    t = run.token("lab-pat", fresh=True)
+    r = post(t, "/api/ai/awards/990002-00001/evidence-search", {"query": "anything"})
+    ok = r.status_code == 404 and "Award B" not in r.text
+    run.add("E2-lab-pat-forbidden", "3, 7", "T15/T25", "lab-pat", "Evidence Search on Award B (not permitted)",
+            "404, nothing of B", f"{r.status_code}", "PASS" if ok else "FAIL")
+
+
 def check_unauthenticated(run):
     import requests
     r = requests.get(c.API + "/api/v1/awards/search?q=SYNTHETIC", timeout=30)
@@ -655,6 +681,7 @@ def main():
         check_kim_chain(run)
         check_files_without_group(run)
         check_approved_boundaries(run)
+        check_evidence_search(run)
         check_grant_changes(run)
         check_unauthenticated(run)
         mark_policy(run)
