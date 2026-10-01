@@ -16,6 +16,9 @@ The design and decisions are maintained privately (authorization design rev 3.6a
 | **Department access follows the record's lead unit** (design 4.2) | UNIT grants match `lead_unit_number`; whether sub-units count is still P6 (see below) |
 | **IO grants use the Award account number** (decision D-A) | `AwardAccountNumberIoResolver` and `AwardAccountNumberIoSql` match `TRIM(award_version.account_number)` exactly. They apply to Awards only, never through relationships |
 | **Record access includes all content of that record** (replaces P5) | Under enforcement, `AttachmentAuthorizationService` relies on the parent record's authorization. `ArchiveAttachmentViewer` is no longer a separate condition for attachments, reports with attachments or the File Finder. While enforcement is **off**, the group rule stays exactly as before |
+| **P3 version scope: family-wide within one Award number** | `version-scope: FAMILY_WIDE`. Access to any version of an Award number opens all its versions, never its children or related records. Consequence: a unit that led any version sees the whole Award |
+| **P6 sub-units: only when the grant says so** | `department-match: LEAD_UNIT_WITH_DESCENDANTS`, which honours each UNIT grant's `include_descendants` flag. Grants without the flag stay exact |
+| **P4 Research Staff roles: PI, MPI (Co-PI), COI** | `research-staff-roles: PI,MPI,COI`. Key Person is excluded |
 | **One record never authorizes another** | Child Awards, other versions, related Proposals, Negotiations and Subawards each need their own authorization (unchanged) |
 | **Research Staff via verified KIM principal** (design section 13) | `app.authorization.contact-derivation=VERIFIED_PRINCIPAL`. A verified link's PERSON_ID gives contact access with no grant row, but only while that person is a qualifying contact somewhere. `EXPLICIT_GRANT` keeps the earlier rule. The setting has no default |
 
@@ -133,7 +136,7 @@ Every other path returns `403 NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION` to non-C
 
 Proposal and Negotiation rows in the Archived File Finder are omitted for restricted users. A Proposal scope predicate exists but is not yet wired into `AttachmentSearchRepository`.
 
-### Policy-dependent omissions
+### Policy-dependent behaviour (P3/P4/P6 now APPROVED, see above; the settings remain explicit with no code defaults)
 
 These follow from the unapproved policy choices. Revisit them when the policy is approved.
 
