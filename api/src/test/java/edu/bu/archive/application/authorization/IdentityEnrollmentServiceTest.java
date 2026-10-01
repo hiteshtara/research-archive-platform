@@ -495,4 +495,31 @@ class IdentityEnrollmentServiceTest {
         assertThat(service.prepare(token("s-nofed"))).isEqualTo(EnrollmentOutcome.REFUSED_NOT_FEDERATED);
         assertThat(store.links).isEmpty();
     }
+
+    // --- trust boundary: self-editable tokens, and the NameID as identifier source -------------
+
+    @Test
+    void aTokenThatCouldEditItsOwnAttributesIsNeverTrustedForEnrollment() {
+        profile("s-admin-scope", PROVIDER, "SYN-V-1");
+        var selfEditable = new ValidatedCognitoIdentity(ISSUER, "s-admin-scope", PROVIDER + "_s-admin-scope", SIGN_IN,
+                java.util.Set.of("openid", ValidatedCognitoIdentity.SELF_SERVICE_SCOPE));
+        assertThat(service.prepare(selfEditable)).isEqualTo(EnrollmentOutcome.REFUSED_SELF_EDITABLE_TOKEN);
+        assertThat(store.links).isEmpty();
+        // and an existing link is not honoured for such a token either
+        linked("s-linked", "SYN-V-2");
+        var later = new ValidatedCognitoIdentity(ISSUER, "s-linked", PROVIDER + "_s-linked", SIGN_IN,
+                java.util.Set.of(ValidatedCognitoIdentity.SELF_SERVICE_SCOPE));
+        assertThat(service.prepare(later).deniesRequest()).isTrue();
+    }
+
+    @Test
+    void theFederatedNameIdCanBeTheIdentifierSource() {
+        var byNameId = new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
+                PROVIDER, IdentityEnrollmentService.FEDERATED_USER_ID, CROSSWALK, Duration.ZERO), reader, store, clock);
+        // profile(...) records the NameID as "nameid-<sub>"; the attribute is deliberately different.
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "nameid-s-nid", "SYNP-1", true));
+        profile("s-nid", PROVIDER, "SYN-V-2");
+        assertThat(byNameId.prepare(token("s-nid"))).isEqualTo(EnrollmentOutcome.LINKED);
+        assertThat(onlyLink().identifier()).isEqualTo("nameid-s-nid");
+    }
 }

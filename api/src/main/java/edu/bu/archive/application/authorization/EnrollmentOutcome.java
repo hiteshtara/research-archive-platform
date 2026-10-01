@@ -19,6 +19,8 @@ public enum EnrollmentOutcome {
 
     REFUSED_PREVIOUSLY_REVOKED,
     REFUSED_NO_USERNAME,
+    /** The token carries aws.cognito.signin.user.admin: its holder could have edited the identifier. */
+    REFUSED_SELF_EDITABLE_TOKEN,
     REFUSED_PROFILE_NOT_FOUND,
     REFUSED_SUBJECT_MISMATCH,
     REFUSED_PROFILE_DISABLED,
