@@ -390,6 +390,31 @@ public class ProposalV1Repository {
     }
 
     /*
+     * Record authorization: the exact Proposal version (proposal_id) each
+     * funded-Award relationship row of this family belongs to, keyed by
+     * award_funding_proposal_id (findFundedAwardRows' sourceRelationshipId).
+     * Kept separate so the public ProposalFundedAwardResponse shape does not
+     * change; read only for restricted callers.
+     */
+    public java.util.Map<Long, Long> findFundedAwardRowProposalIds(String proposalNumber) {
+        java.util.Map<Long, Long> owners = new java.util.HashMap<>();
+        jdbc.sql("""
+                SELECT pa.award_funding_proposal_id, pa.proposal_id
+                FROM archive.proposal_version pv
+                JOIN archive.proposal_award pa
+                    ON pa.proposal_id = pv.proposal_id
+                WHERE pv.proposal_number = :proposalNumber
+                """)
+                .param("proposalNumber", proposalNumber)
+                .query((rs, n) -> {
+                    owners.put(rs.getLong(1), rs.getLong(2));
+                    return null;
+                })
+                .list();
+        return owners;
+    }
+
+    /*
      * --- Custom Data ---------------------------------------------------
      *
      * Scoped to this exact proposal_id (version-scoped, never

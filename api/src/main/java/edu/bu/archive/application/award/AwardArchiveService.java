@@ -552,6 +552,16 @@ public class AwardArchiveService {
                         offset
                 );
 
+        if (!visibility.unrestricted()) {
+            // Record authorization: a row's root/parent are OTHER Awards;
+            // their numbers are shown only when the caller may open them
+            // (same rule as findSummary).
+            java.util.function.Predicate<String> visibleNumber = visibleAwardNumbers();
+            content = content.stream()
+                    .map(row -> withVisibleHierarchyNumbers(row, visibleNumber))
+                    .toList();
+        }
+
         // Additive, unrelated to the family-level results above (never
         // scoped to is_primary_current) - an exact match against a real
         // workflow document number ranks ahead of any title/sponsor/etc
@@ -827,6 +837,21 @@ public class AwardArchiveService {
             return summary;
         }
         return withHierarchyNumbers(summary, root, parent);
+    }
+
+    private static AwardSearchResultResponse withVisibleHierarchyNumbers(
+            AwardSearchResultResponse r, java.util.function.Predicate<String> visibleNumber
+    ) {
+        String root = r.rootAwardNumber() == null || visibleNumber.test(r.rootAwardNumber())
+                ? r.rootAwardNumber() : null;
+        String parent = r.parentAwardNumber() == null || visibleNumber.test(r.parentAwardNumber())
+                ? r.parentAwardNumber() : null;
+        if (Objects.equals(root, r.rootAwardNumber()) && Objects.equals(parent, r.parentAwardNumber())) {
+            return r;
+        }
+        return new AwardSearchResultResponse(r.awardId(), r.awardNumber(), r.latestSequenceNumber(), r.title(),
+                r.status(), r.principalInvestigator(), r.sponsor(), r.leadUnit(), r.grantNumber(),
+                r.currentObligatedAmount(), root, parent);
     }
 
     private String visibleAwardNumberOrNull(String awardNumber) {

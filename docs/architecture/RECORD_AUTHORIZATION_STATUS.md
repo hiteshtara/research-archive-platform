@@ -83,8 +83,8 @@ Rules that apply to every scoped path:
 
 | Path | How it is enforced |
 |---|---|
-| `/api/v1/awards/search`, `/api/v1/awards/versions/search`, `/api/proposals/search` | scope predicate in the same SQL WHERE as the filters (page **and** count) |
-| `/api/global-search` | Award and Proposal branches scoped (the access outcome is propagated to worker threads); other modules and semantic search not run |
+| `/api/v1/awards/search`, `/api/v1/awards/versions/search`, `/api/proposals/search` | scope predicate in the same SQL WHERE as the filters (page **and** count). Award family rows: `rootAwardNumber`/`parentAwardNumber` blanked unless `canSeeAwardNumber` (same rule as `…/summary`); version rows carry no hierarchy numbers |
+| `/api/global-search` | Award and Proposal branches scoped (the access outcome is propagated to worker threads); other modules and semantic search not run. Award rows come from the scoped Award search above (no hierarchy numbers in the item payload) |
 | `/api/dashboard` | counts from the same scope predicates; other modules 0 |
 | `/api/v1/awards/by-number/{n}` | current version checked before any query |
 | `/api/v1/awards/{n}/hierarchy` | requested Award checked; out-of-scope nodes omitted; re-rooted if an ancestor is hidden |
@@ -108,11 +108,18 @@ Rules that apply to every scoped path:
 | `/api/v1/attachments/search` (Archived File Finder) | **Award rows only**, with the Award scope predicate in the SQL WHERE (page and count). `recordType=ALL` returns the caller's Award rows; `PROPOSAL` and `NEGOTIATION` return an empty page |
 | `/api/v1/explorer/awards?awardNumber=` | `requireAwardNumber` (the response is that current version only) |
 | `/api/v1/explorer/award-versions?awardId=` | `requireAward`; exactly one well-formed parameter value, else 404 |
-| `/api/ai/awards/{n}/summary\|questions\|evidence-search` | `requireAwardNumber` (else 404), **and** every version of the family must be visible, else `403 AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` (see POLICY P3 below) |
-| `/api/v1/proposals/{id}/**`, `/api/proposals/{n}[/history\|/awards]` | record checked before any query; Proposal → Award lists filtered |
+| `/api/ai/awards/{n}/summary\|questions\|evidence-search` | `requireAwardNumber` (else 404), **and** every version of the family must be visible, else `403 AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` (see POLICY P3 below). Summary/Questions context (`AwardContextBuilder`, fact resolver, diff builder) holds only this Award family's own rows: no related records |
+| `…/evidence-search` related excerpts | `RELATED_NEGOTIATION`/`RELATED_SUBAWARD` removed from the searched types (no non-Central rule). `RELATED_PROPOSAL` kept only when the linked Proposal (`canSeeProposalNumber`) **and** the link's own Award version (`canSeeAward`) are visible, looked up from `award_funding_proposal_id`. Unknown types are dropped (fail closed). `topK` is applied **after** filtering |
+| `/api/v1/proposals/{id}` + **explicit sub-path allow-list** (`""`, `/versions`, `/people`, `/units`, `/attachments`, `/attachments/{n}/download`, `/comments`, `/funded-awards`, `/custom-data`) | `requireProposal(id)` before any query; **any other sub-path → 403** (a new Proposal endpoint is closed until reviewed) |
+| `…/versions` (v1), `/api/proposals/{n}/history` | versions filtered by `canSeeProposal(proposal_id)`; count and paging after filtering |
+| `…/people`, `/units`, `/attachments`, `/custom-data` | version-scoped by query (`proposal_id`) |
+| `…/comments` | comments on invisible versions become the no-comment placeholder; a comment with no version key is family-level and shown only when every version is visible (`canSeeEveryProposalVersion`) |
+| `…/funded-awards` | a row needs its own Proposal version, the exact linked Award version and the Award's current version all visible |
+| `/api/proposals/{n}` | latest version checked |
+| `/api/proposals/{n}/awards` | computed only over links made on visible Proposal versions; then the linked Award version and the Award must be visible |
 | `/api/v1/me/access` | access mode and grant kinds only (no identifiers) |
 
-"Every version of the family is visible" is computed per `award_id` with the same rule as `canSeeAward` (`RecordVisibility.canSeeEveryAwardVersion`). It is never assumed from the version-scope setting.
+"Every version of the family is visible" is computed per `award_id` with the same rule as `canSeeAward` (`RecordVisibility.canSeeEveryAwardVersion`), and per `proposal_id` for Proposals (`canSeeEveryProposalVersion`). It is never assumed from the version-scope setting.
 
 ### Still closed (NOT IMPLEMENTED for restricted users)
 
@@ -122,7 +129,7 @@ Every other path returns `403 NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION` to non-C
 - Document Explorer `/api/v1/documents` and `/api/documents/search`;
 - the other Explorer paths: workflows, units, unit administrators, award contacts, persons, rolodex, sponsors, attachments, proposals;
 - legacy `/api/awards/**`;
-- any Award sub-path not on the allow-list.
+- any Award or Proposal sub-path not on its allow-list.
 
 Proposal and Negotiation rows in the Archived File Finder are omitted for restricted users. A Proposal scope predicate exists but is not yet wired into `AttachmentSearchRepository`.
 
@@ -139,7 +146,7 @@ These follow from the unapproved policy choices. Revisit them when the policy is
 | — | T&M transactions are refused if **any** node they name is invisible (stricter than the source/destination pair). |
 | — | `restricted_view` notepad entries are never shown to non-Central users. |
 
-Verified by `RecordAuthorizationEnforcementIntegrationTest`: the full application on Testcontainers with the synthetic seed. It covers every persona, direct URLs, counts and pages, attachments, related lists, hierarchy, dashboard, Global Search, every section fix above (including the cross-award T&M read), reports, the File Finder, Explorer, AI, closed paths, revocation, and agreement between the SQL scope and the per-record checks. The allow-list is unit-tested in `RecordAuthorizationInterceptorTest`.
+Verified by `RecordAuthorizationEnforcementIntegrationTest`: the full application on Testcontainers with the synthetic seed. It covers every persona, direct URLs, counts and pages, attachments, related lists, hierarchy, dashboard, Global Search, every section fix above (including the cross-award T&M read), Evidence Search related excerpts (with `topK` after filtering), Proposal versions/history/comments/funded Awards, search-row root/parent numbers, reports, the File Finder, Explorer, AI, closed paths, revocation, and agreement between the SQL scope and the per-record checks. The Award and Proposal allow-lists are unit-tested in `RecordAuthorizationInterceptorTest`.
 
 ## Not implemented yet
 
