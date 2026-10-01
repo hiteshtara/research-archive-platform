@@ -10,7 +10,11 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -273,5 +277,139 @@ class RecordAuthorizationApprovedPolicyIntegrationTest {
                     + "WHERE cognito_subject = 'demo-oav'").update();
         }
         assertThat(signedInAgo("oav", "0", "/api/v1/awards/9000601/summary").getStatus()).isEqualTo(200);
+    }
+
+    // --- Document Explorer and document search: Award and Proposal documents scoped ---------
+
+    /** (module:documentNumber) for every row the Document Explorer returns, all pages. */
+    private Set<String> explorerDocuments(String persona, String query) throws Exception {
+        JsonNode page = body(persona, "/api/v1/documents?size=100" + query).get("results");
+        assertThat(page.get("totalElements").asLong()).isEqualTo(page.get("content").size());
+        Set<String> docs = new TreeSet<>();
+        page.get("content").forEach(n -> docs.add(n.get("module").asText() + ":" + n.get("documentNumber").asText()));
+        return docs;
+    }
+
+    private Set<String> searchDocuments(String persona, String query) throws Exception {
+        JsonNode page = body(persona, "/api/documents/search?size=100" + query);
+        assertThat(page.get("totalElements").asLong()).isEqualTo(page.get("content").size());
+        Set<String> docs = new TreeSet<>();
+        page.get("content").forEach(n -> docs.add(n.get("module").asText() + ":" + n.get("documentNumber").asText()));
+        return docs;
+    }
+
+    private Map<String, Long> facets(String persona, String query) throws Exception {
+        Map<String, Long> facets = new TreeMap<>();
+        body(persona, "/api/v1/documents?size=100" + query).get("moduleFacets")
+                .forEach(f -> facets.put(f.get("value").asText(), f.get("count").asLong()));
+        return facets;
+    }
+
+    /** Every Award and Proposal document of the families the persona's own searches return. */
+    private Set<String> documentsOfSearchableRecords(String persona) throws Exception {
+        Set<String> awardFamilies = new TreeSet<>();
+        body(persona, "/api/v1/awards/search?size=100").get("results").get("content")
+                .forEach(n -> awardFamilies.add(n.get("awardNumber").asText()));
+        Set<String> proposals = new TreeSet<>();
+        body(persona, "/api/proposals/search?size=100").get("content")
+                .forEach(n -> proposals.add(n.get("proposalNumber").asText()));
+        Set<String> expected = new TreeSet<>();
+        if (!awardFamilies.isEmpty()) {
+            jdbc.sql("SELECT workflow_document_number FROM archive.award_version WHERE workflow_document_number IS NOT NULL "
+                    + "AND award_number IN (:f)").param("f", awardFamilies).query(String.class).list()
+                    .forEach(d -> expected.add("AWARD:" + d));
+        }
+        if (!proposals.isEmpty()) {
+            jdbc.sql("SELECT document_number FROM archive.proposal_version WHERE document_number IS NOT NULL "
+                    + "AND proposal_number IN (:p)").param("p", proposals).query(String.class).list()
+                    .forEach(d -> expected.add("PROPOSAL:" + d));
+        }
+        return expected;
+    }
+
+    @Test
+    void documentExplorerShowsExactlyTheCallersAwardAndProposalDocuments() throws Exception {
+        // Pat: every version of A, C and D (family-wide, including the other-unit versions A' and C'),
+        // and Proposal 2. Never A's child, Key-Person-only E, unrelated B, or Negotiation/Subaward.
+        Set<String> pat = Set.of("AWARD:SYN-DOC-0101", "AWARD:SYN-DOC-0102", "AWARD:SYN-DOC-0103",
+                "AWARD:SYN-DOC-0301", "AWARD:SYN-DOC-0302", "AWARD:SYN-DOC-0401", "PROPOSAL:SYN-PDOC-02");
+        assertThat(explorerDocuments("pi", "")).isEqualTo(pat);             // default page (fast path)
+        assertThat(explorerDocuments("pi", "&query=SYN")).isEqualTo(pat);   // filtered path
+        assertThat(searchDocuments("pi", "")).isEqualTo(pat);               // /api/documents/search
+        assertThat(facets("pi", "")).isEqualTo(Map.of("AWARD", 6L, "PROPOSAL", 1L));
+        assertThat(facets("pi", "&query=SYN")).isEqualTo(Map.of("AWARD", 6L, "PROPOSAL", 1L));
+        assertThat(body("pi", "/api/dashboard").get("documents").asLong()).isEqualTo(7);
+
+        // The same scope as the caller's Award and Proposal searches, for every restricted persona.
+        for (String persona : List.of("pi", "department", "oav", "multi")) {
+            Set<String> expected = documentsOfSearchableRecords(persona);
+            assertThat(explorerDocuments(persona, "")).as(persona).isEqualTo(expected);
+            assertThat(explorerDocuments(persona, "&query=SYN")).as(persona).isEqualTo(expected);
+            assertThat(searchDocuments(persona, "")).as(persona).isEqualTo(expected);
+        }
+        // IO = Award account: the IO viewer gets Award F's document and no Proposal documents.
+        assertThat(explorerDocuments("oav", "")).isEqualTo(Set.of("AWARD:SYN-DOC-0601"));
+        // No grant at all: not provisioned, so no document is listed (403, not an empty page).
+        assertThat(status("nogrants", "/api/v1/documents")).isEqualTo(403);
+        assertThat(status("nogrants", "/api/documents/search")).isEqualTo(403);
+    }
+
+    @Test
+    void forbiddenDocumentsCannotBeFoundByNumberModuleOrFilter() throws Exception {
+        for (String q : List.of("&documentNumber=SYN-DOC-0201", "&documentNumber=SYN-DOC-0111",
+                "&documentNumber=SYN-DOC-0501", "&businessRecordNumber=990002-00001", "&module=NEGOTIATION",
+                "&module=SUBAWARD", "&query=SYN-NDOC", "&query=SYN-SDOC", "&documentNumber=SYN-PDOC-01")) {
+            assertThat(explorerDocuments("pi", q)).as(q).isEmpty();
+            assertThat(facets("pi", q)).as(q).isEmpty();
+        }
+        for (String q : List.of("&documentNumber=SYN-DOC-0201", "&module=NEGOTIATION", "&module=SUBAWARD",
+                "&module=IRB", "&documentNumber=SYN-NDOC-01", "&documentNumber=SYN-SDOC-01")) {
+            assertThat(searchDocuments("pi", q)).as(q).isEmpty();
+        }
+        // Central keeps every module, including the Negotiation and Subaward documents.
+        assertThat(explorerDocuments("central", "&query=SYN"))
+                .contains("NEGOTIATION:SYN-NDOC-01", "SUBAWARD:SYN-SDOC-01", "AWARD:SYN-DOC-0201");
+        assertThat(searchDocuments("central", "&documentNumber=SYN-NDOC-01")).containsExactly("NEGOTIATION:SYN-NDOC-01");
+    }
+
+    @Test
+    void revokingTheGrantRemovesItsDocumentsOnTheNextRequest() throws Exception {
+        long unit = grant("SYN-INST-0007", "UNIT", "SYN-U-500", false, null);       // Proposal 2's unit
+        try {
+            assertThat(explorerDocuments("nogrants", "")).containsExactly("PROPOSAL:SYN-PDOC-02");
+        } finally {
+            revoke(unit);
+        }
+        assertThat(status("nogrants", "/api/v1/documents")).isEqualTo(403);         // nothing left: not provisioned
+    }
+
+    // --- Archived File Finder: Award and Proposal files ---------------------------------------
+
+    private Set<String> finderRows(String persona, String query) throws Exception {
+        JsonNode page = body(persona, "/api/v1/attachments/search?size=100&" + query);
+        assertThat(page.get("totalElements").asLong()).isEqualTo(page.get("content").size());
+        Set<String> rows = new TreeSet<>();
+        page.get("content").forEach(n -> rows.add(n.get("recordType").asText() + ":" + n.get("parentId").asLong()));
+        return rows;
+    }
+
+    @Test
+    void fileFinderReturnsTheCallersAwardAndProposalFilesOnly() throws Exception {
+        // Family-wide: Pat sees the files on both A versions (A and the other-unit A').
+        assertThat(finderRows("pi", "recordNumber=990001-00001")).containsExactly("AWARD:9000102", "AWARD:9000103");
+        assertThat(finderRows("pi", "recordType=ALL&recordNumber=990001-00001"))
+                .containsExactly("AWARD:9000102", "AWARD:9000103");
+        assertThat(finderRows("pi", "recordType=PROPOSAL&recordNumber=SYN-PRP-0002")).containsExactly("PROPOSAL:8000201");
+        assertThat(finderRows("pi", "recordType=ALL&recordNumber=SYN-PRP-0002")).containsExactly("PROPOSAL:8000201");
+        // Not Pat's: Proposal 1 (related to Award A - a relationship never authorizes) and Award B.
+        assertThat(finderRows("pi", "recordType=PROPOSAL&recordNumber=SYN-PRP-0001")).isEmpty();
+        assertThat(finderRows("pi", "recordType=ALL&recordNumber=SYN-PRP-0001")).isEmpty();
+        assertThat(finderRows("pi", "recordType=ALL&recordNumber=990002-00001")).isEmpty();
+        assertThat(finderRows("pi", "recordType=NEGOTIATION&recordNumber=SYN-NDOC-01")).isEmpty();
+        // The department sees Proposal 4's other-unit version file family-wide; the IO viewer no Proposal files.
+        assertThat(finderRows("department", "recordType=PROPOSAL&recordNumber=SYN-PRP-0004")).containsExactly("PROPOSAL:8000402");
+        assertThat(finderRows("oav", "recordType=ALL&recordNumber=SYN-PRP-0002")).isEmpty();
+        // Central: everything.
+        assertThat(finderRows("central", "recordType=ALL&recordNumber=SYN-PRP-0001")).containsExactly("PROPOSAL:8000101");
     }
 }

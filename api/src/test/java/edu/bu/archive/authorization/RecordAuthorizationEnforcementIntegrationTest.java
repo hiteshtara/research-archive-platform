@@ -502,7 +502,18 @@ class RecordAuthorizationEnforcementIntegrationTest {
         assertThat(other.get("totalElements").asLong()).isZero();
         JsonNode proposals = json.readTree(call("department", "/api/v1/attachments/search?recordType=PROPOSAL&recordNumber=SYN-PRP-0003", true)
                 .getResponse().getContentAsString());
-        assertThat(proposals.get("totalElements").asLong()).isZero();
+        assertThat(proposals.get("totalElements").asLong()).isZero();          // Proposal 3 has no files
+        // PER_VERSION: the department does not see Proposal 4's other-unit version file; Pat sees Proposal 2's.
+        JsonNode p4 = json.readTree(call("department", "/api/v1/attachments/search?recordType=PROPOSAL&recordNumber=SYN-PRP-0004", false)
+                .getResponse().getContentAsString());
+        assertThat(p4.get("totalElements").asLong()).isZero();
+        JsonNode p2 = json.readTree(call("pi", "/api/v1/attachments/search?recordType=ALL&recordNumber=SYN-PRP-0002", false)
+                .getResponse().getContentAsString());
+        assertThat(p2.get("totalElements").asLong()).isEqualTo(1);
+        assertThat(p2.get("content").get(0).get("recordType").asText()).isEqualTo("PROPOSAL");
+        JsonNode p1 = json.readTree(call("pi", "/api/v1/attachments/search?recordType=PROPOSAL&recordNumber=SYN-PRP-0001", false)
+                .getResponse().getContentAsString());
+        assertThat(p1.get("totalElements").asLong()).isZero();
     }
 
     @Test
@@ -530,9 +541,23 @@ class RecordAuthorizationEnforcementIntegrationTest {
     }
 
     @Test
+    void documentsFollowThePerVersionPolicyWhenThatIsConfigured() throws Exception {
+        // PER_VERSION: Pat sees only the versions they qualify on (not A' or C'), and Proposal 2.
+        Set<String> docs = new TreeSet<>();
+        body("pi", "/api/v1/documents?size=100").get("results").get("content")
+                .forEach(n -> docs.add(n.get("module").asText() + ":" + n.get("documentNumber").asText()));
+        assertThat(docs).containsExactly("AWARD:SYN-DOC-0101", "AWARD:SYN-DOC-0102", "AWARD:SYN-DOC-0301",
+                "AWARD:SYN-DOC-0401", "PROPOSAL:SYN-PDOC-02");
+        Set<String> searched = new TreeSet<>();
+        body("pi", "/api/documents/search?size=100").get("content")
+                .forEach(n -> searched.add(n.get("module").asText() + ":" + n.get("documentNumber").asText()));
+        assertThat(searched).isEqualTo(docs);
+        assertThat(body("pi", "/api/dashboard").get("documents").asLong()).isEqualTo(5);
+    }
+
+    @Test
     void stillClosedPathsStayClosed() throws Exception {
-        for (String path : List.of("/api/v1/documents?q=SYNTHETIC", "/api/documents/search?q=SYNTHETIC",
-                "/api/awards/990001-00001", "/api/v1/explorer/proposals")) {
+        for (String path : List.of("/api/awards/990001-00001", "/api/v1/explorer/proposals")) {
             assertThat(status("pi", path)).as(path).isEqualTo(403);
         }
     }

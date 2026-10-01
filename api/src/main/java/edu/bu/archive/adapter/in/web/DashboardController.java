@@ -115,8 +115,9 @@ public class DashboardController {
     /*
      * Record authorization: counts for a restricted caller come from the SAME
      * scope predicates as search - never archive-wide numbers. Modules with
-     * no non-Central scoping yet (IRB, Negotiation, Subaward, documents)
-     * report 0 rather than an archive-wide total.
+     * no non-Central scoping yet (IRB, Negotiation, Subaward) report 0
+     * rather than an archive-wide total; Kuali Documents counts only the
+     * caller's Award and Proposal documents, as the Documents page shows.
      */
     private DashboardDto scopedDashboard() {
         var award = authorization.scopeSql(edu.bu.archive.application.authorization.RecordModule.AWARD, "av");
@@ -141,6 +142,21 @@ public class DashboardController {
             proposalSpec = proposalSpec.params(proposal.params());
         }
         var proposals = proposalSpec.query((rs, i) -> new long[] {rs.getLong("families"), rs.getLong("versions")}).single();
-        return new DashboardDto(0, 0, 0, 0, awards[0], awards[1], proposals[0], proposals[1], 0, 0, 0);
+        var awardDocs = authorization.scopeSql(edu.bu.archive.application.authorization.RecordModule.AWARD, "av")
+                .withParameterPrefix("da_");
+        var proposalDocs = authorization.scopeSql(edu.bu.archive.application.authorization.RecordModule.PROPOSAL, "pv")
+                .withParameterPrefix("dp_");
+        var documentSpec = jdbcClient.sql(
+                "SELECT (SELECT COUNT(DISTINCT av.workflow_document_number) FROM archive.award_version av"
+                        + " WHERE av.workflow_document_number IS NOT NULL" + awardDocs.sql() + ")"
+                        + " + (SELECT COUNT(DISTINCT pv.document_number) FROM archive.proposal_version pv"
+                        + " WHERE pv.document_number IS NOT NULL" + proposalDocs.sql() + ")");
+        java.util.Map<String, Object> documentParams = new java.util.LinkedHashMap<>(awardDocs.params());
+        documentParams.putAll(proposalDocs.params());
+        if (!documentParams.isEmpty()) {
+            documentSpec = documentSpec.params(documentParams);
+        }
+        long documents = documentSpec.query(Long.class).single();
+        return new DashboardDto(0, 0, 0, 0, awards[0], awards[1], proposals[0], proposals[1], 0, 0, documents);
     }
 }

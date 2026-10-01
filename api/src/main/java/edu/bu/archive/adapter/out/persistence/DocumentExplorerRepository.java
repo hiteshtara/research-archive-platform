@@ -138,7 +138,7 @@ public class DocumentExplorerRepository {
                 LEFT JOIN award_pi pi ON pi.award_id = av.award_id
                 LEFT JOIN award_unit_counts auc ON auc.award_id = av.award_id
                 LEFT JOIN award_person_counts apc ON apc.award_id = av.award_id
-                WHERE av.workflow_document_number IS NOT NULL
+                WHERE av.workflow_document_number IS NOT NULL {{AWARD_SCOPE}}
 
                 UNION ALL
 
@@ -174,7 +174,7 @@ public class DocumentExplorerRepository {
                     CASE WHEN pv.principal_investigator_name IS NOT NULL THEN 1 ELSE 0 END,
                     0
                 FROM archive.proposal_version pv
-                WHERE pv.document_number IS NOT NULL
+                WHERE pv.document_number IS NOT NULL {{PROPOSAL_SCOPE}}
 
                 UNION ALL
 
@@ -211,7 +211,7 @@ public class DocumentExplorerRepository {
                     0
                 FROM archive.negotiation n
                 LEFT JOIN negotiation_associated_award naa ON naa.negotiation_id = n.negotiation_id
-                WHERE n.document_number IS NOT NULL
+                WHERE n.document_number IS NOT NULL {{NEGOTIATION_SCOPE}}
 
                 UNION ALL
 
@@ -251,7 +251,7 @@ public class DocumentExplorerRepository {
                 FROM archive.subaward s
                 LEFT JOIN subaward_sponsor ss ON ss.subaward_id = s.subaward_id
                 LEFT JOIN subaward_contact_counts scc ON scc.subaward_id = s.subaward_id
-                WHERE s.document_number IS NOT NULL
+                WHERE s.document_number IS NOT NULL {{SUBAWARD_SCOPE}}
             )
             """;
 
@@ -350,7 +350,7 @@ public class DocumentExplorerRepository {
                     0 AS sponsor_count,
                     av.award_id::text AS source_record_id
                 FROM archive.award_version av
-                WHERE av.workflow_document_number IS NOT NULL
+                WHERE av.workflow_document_number IS NOT NULL {{AWARD_SCOPE}}
 
                 UNION ALL
 
@@ -387,7 +387,7 @@ public class DocumentExplorerRepository {
                     0,
                     pv.proposal_id::text || ':' || pv.version_number::text
                 FROM archive.proposal_version pv
-                WHERE pv.document_number IS NOT NULL
+                WHERE pv.document_number IS NOT NULL {{PROPOSAL_SCOPE}}
 
                 UNION ALL
 
@@ -425,7 +425,7 @@ public class DocumentExplorerRepository {
                     n.negotiation_id::text
                 FROM archive.negotiation n
                 LEFT JOIN negotiation_associated_award naa ON naa.negotiation_id = n.negotiation_id
-                WHERE n.document_number IS NOT NULL
+                WHERE n.document_number IS NOT NULL {{NEGOTIATION_SCOPE}}
 
                 UNION ALL
 
@@ -466,7 +466,7 @@ public class DocumentExplorerRepository {
                 FROM archive.subaward s
                 LEFT JOIN subaward_sponsor ss ON ss.subaward_id = s.subaward_id
                 LEFT JOIN subaward_contact_counts scc ON scc.subaward_id = s.subaward_id
-                WHERE s.document_number IS NOT NULL
+                WHERE s.document_number IS NOT NULL {{SUBAWARD_SCOPE}}
             )
             """;
 
@@ -589,14 +589,36 @@ public class DocumentExplorerRepository {
             """;
 
     private final JdbcClient jdbc;
+    private final AwardArchiveRepository.RecordScope scope;
 
+    /** Unrestricted - for tests and tools that bypass the web request. */
     public DocumentExplorerRepository(JdbcClient jdbc) {
+        this(jdbc, AwardArchiveRepository.RecordScope.UNRESTRICTED);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DocumentExplorerRepository(
+            JdbcClient jdbc,
+            edu.bu.archive.application.authorization.RecordAuthorizationService authorization
+    ) {
+        this(jdbc, authorization::scopeSql);
+    }
+
+    public DocumentExplorerRepository(JdbcClient jdbc, AwardArchiveRepository.RecordScope scope) {
         this.jdbc = jdbc;
+        this.scope = scope;
+    }
+
+    /** The SQL with each module branch's record-authorization predicate filled in. */
+    private JdbcClient.StatementSpec scoped(String template) {
+        DocumentRecordScope.Rendered rendered = DocumentRecordScope.render(template, scope);
+        JdbcClient.StatementSpec spec = jdbc.sql(rendered.sql());
+        return rendered.params().isEmpty() ? spec : spec.params(rendered.params());
     }
 
     public List<DocumentExplorerRow> search(DocumentExplorerFilter filter, int limit, int offset) {
         return bind(
-                jdbc.sql(EXPLORER_CTE + SELECT_LIST + FILTER_WHERE + orderByClause(filter.sort())
+                scoped(EXPLORER_CTE + SELECT_LIST + FILTER_WHERE + orderByClause(filter.sort())
                         + " LIMIT :limit OFFSET :offset"),
                 filter
         )
@@ -608,7 +630,7 @@ public class DocumentExplorerRepository {
 
     public long count(DocumentExplorerFilter filter) {
         Long count = bind(
-                jdbc.sql(EXPLORER_CTE + "SELECT COUNT(*) FROM documents " + FILTER_WHERE),
+                scoped(EXPLORER_CTE + "SELECT COUNT(*) FROM documents " + FILTER_WHERE),
                 filter
         )
                 .query(Long.class)
@@ -618,7 +640,7 @@ public class DocumentExplorerRepository {
 
     public List<ModuleFacetRow> moduleFacets(DocumentExplorerFilter filter) {
         return bind(
-                jdbc.sql(EXPLORER_CTE
+                scoped(EXPLORER_CTE
                         + "SELECT module, COUNT(*) AS n FROM documents "
                         + FILTER_WHERE
                         + " GROUP BY module"),
@@ -646,11 +668,18 @@ public class DocumentExplorerRepository {
     // by it. ---
 
     public long countDefault() {
-        Long count = jdbc.sql(DEFAULT_COUNT_SQL).query(Long.class).single();
+        // A restricted caller counts the scoped light union, never the archive-wide tables.
+        Long count = DocumentRecordScope.restricted(scope)
+                ? scoped(LIGHT_SUPPORTING_CTE + "SELECT COUNT(*) FROM documents_light").query(Long.class).single()
+                : jdbc.sql(DEFAULT_COUNT_SQL).query(Long.class).single();
         return count == null ? 0L : count;
     }
 
     public List<ModuleFacetRow> moduleFacetsDefault() {
+        if (DocumentRecordScope.restricted(scope)) {
+            return scoped(LIGHT_SUPPORTING_CTE + "SELECT module, COUNT(*) AS n FROM documents_light GROUP BY module")
+                    .query(ModuleFacetRow.class).list();
+        }
         return jdbc.sql(DEFAULT_FACETS_SQL).query(ModuleFacetRow.class).list();
     }
 
@@ -662,7 +691,7 @@ public class DocumentExplorerRepository {
                 + AWARD_ENRICHMENT_CTE
                 + DEFAULT_PAGE_SELECT
                 + lightOrderByClause(sort, "p.");
-        return jdbc.sql(sql)
+        return scoped(sql)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(DocumentExplorerRow.class)

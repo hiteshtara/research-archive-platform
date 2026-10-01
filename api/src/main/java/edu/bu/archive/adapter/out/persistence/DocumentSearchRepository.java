@@ -39,7 +39,7 @@ public class DocumentSearchRepository {
                     av.begin_date AS relevant_date,
                     av.award_id::text AS target_id
                 FROM archive.award_version av
-                WHERE av.workflow_document_number IS NOT NULL
+                WHERE av.workflow_document_number IS NOT NULL {{AWARD_SCOPE}}
 
                 UNION ALL
 
@@ -53,7 +53,7 @@ public class DocumentSearchRepository {
                     pv.initial_start_date,
                     pv.proposal_number
                 FROM archive.proposal_version pv
-                WHERE pv.document_number IS NOT NULL
+                WHERE pv.document_number IS NOT NULL {{PROPOSAL_SCOPE}}
 
                 UNION ALL
 
@@ -67,7 +67,7 @@ public class DocumentSearchRepository {
                     n.negotiation_start_date,
                     n.negotiation_id::text
                 FROM archive.negotiation n
-                WHERE n.document_number IS NOT NULL
+                WHERE n.document_number IS NOT NULL {{NEGOTIATION_SCOPE}}
 
                 UNION ALL
 
@@ -81,7 +81,7 @@ public class DocumentSearchRepository {
                     s.start_date,
                     s.subaward_id::text
                 FROM archive.subaward s
-                WHERE s.document_number IS NOT NULL
+                WHERE s.document_number IS NOT NULL {{SUBAWARD_SCOPE}}
 
                 UNION ALL
 
@@ -95,7 +95,7 @@ public class DocumentSearchRepository {
                     ipv.received_date,
                     ipv.protocol_id::text
                 FROM archive.irb_protocol_version ipv
-                WHERE ipv.document_number IS NOT NULL
+                WHERE ipv.document_number IS NOT NULL {{IRB_SCOPE}}
             )
             """;
 
@@ -108,9 +108,31 @@ public class DocumentSearchRepository {
             """;
 
     private final JdbcClient jdbc;
+    private final AwardArchiveRepository.RecordScope scope;
 
+    /** Unrestricted - for tests and tools that bypass the web request. */
     public DocumentSearchRepository(JdbcClient jdbc) {
+        this(jdbc, AwardArchiveRepository.RecordScope.UNRESTRICTED);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DocumentSearchRepository(
+            JdbcClient jdbc,
+            edu.bu.archive.application.authorization.RecordAuthorizationService authorization
+    ) {
+        this(jdbc, authorization::scopeSql);
+    }
+
+    public DocumentSearchRepository(JdbcClient jdbc, AwardArchiveRepository.RecordScope scope) {
         this.jdbc = jdbc;
+        this.scope = scope;
+    }
+
+    /** The SQL with each module branch's record-authorization predicate filled in. */
+    private JdbcClient.StatementSpec scoped(String template) {
+        DocumentRecordScope.Rendered rendered = DocumentRecordScope.render(template, scope);
+        JdbcClient.StatementSpec spec = jdbc.sql(rendered.sql());
+        return rendered.params().isEmpty() ? spec : spec.params(rendered.params());
     }
 
     public List<DocumentSearchRow> search(
@@ -126,7 +148,7 @@ public class DocumentSearchRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql(
+        return scoped(
                         DOCUMENTS_CTE
                                 + """
                                 SELECT
@@ -172,7 +194,7 @@ public class DocumentSearchRepository {
             String status,
             String statusPattern
     ) {
-        Long count = jdbc.sql(
+        Long count = scoped(
                         DOCUMENTS_CTE
                                 + "SELECT COUNT(*) FROM documents "
                                 + FILTER_WHERE
