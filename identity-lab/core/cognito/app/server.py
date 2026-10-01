@@ -214,9 +214,13 @@ def authorize():
         return lab_page("Invalid request", "<p>Authorization code with PKCE (S256) is required.</p>", 400)
     mode = db.setting("nameid_mode", "persistent")
     relay = secrets.token_urlsafe(24)
+    # prompt=login (managed login's forced re-authentication) becomes SAML ForceAuthn, so the
+    # IdP asks for the password even inside its own single sign-on session. Whether real
+    # Cognito forwards it this way is to be verified with BU IAM.
+    force = a.get("prompt") == "login"
     req_id, info = SAML.prepare_for_authenticate(
         entityid=IDP_ENTITY, relay_state=relay, binding=BINDING_HTTP_REDIRECT,
-        nameid_format=FORMATS[mode], sign=True)
+        nameid_format=FORMATS[mode], sign=True, **({"force_authn": "true"} if force else {}))
     db.cognito_exec(
         "INSERT INTO pending_auth (relay_state, saml_request_id, redirect_uri, state, code_challenge, scope, nameid_mode) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s)",

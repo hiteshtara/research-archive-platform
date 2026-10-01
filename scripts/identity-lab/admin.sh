@@ -9,6 +9,8 @@
 #   admin.sh add-account <uid> <password> <inst-id|-> <display name>
 #   admin.sh remove-account <uid>
 #   admin.sh nameid persistent|transient               (what the simulated Cognito SP requests)
+#   admin.sh age-sign-in <uid> <seconds>               (move a login's refresh-token auth_time back:
+#                                                       what Cognito keeps on refresh, simulated as elapsed time)
 #   admin.sh status                                    (links, enrollment events, profiles)
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -63,9 +65,12 @@ case "$cmd" in
     ldap ldapdelete "uid=$1,ou=people,dc=lab,dc=invalid" ;;
   nameid)
     pool -c "INSERT INTO setting VALUES ('nameid_mode', '$1') ON CONFLICT (key) DO UPDATE SET value = '$1'" ;;
+  age-sign-in)
+    pool -c "UPDATE refresh_token SET auth_time = auth_time - $2 WHERE revoked_at IS NULL AND username IN
+      (SELECT username FROM user_profile WHERE attributes->>'custom:login' = '$1')" ;;
   status)
     archive -c "SELECT cognito_subject, institutional_identifier, kuali_person_id, login_name, method, status FROM authz.identity_link WHERE cognito_issuer LIKE 'https://localhost:9443/%' ORDER BY identity_link_id"
     archive -c "SELECT occurred_at::time(0), institutional_identifier, detail->>'outcome' AS outcome FROM authz.access_audit WHERE action LIKE 'ENROLLMENT_%' ORDER BY audit_id DESC LIMIT 15"
     pool -c "SELECT username, sub, attributes->>'custom:login' AS login FROM user_profile ORDER BY created_at" ;;
-  *) sed -n '2,12p' "$0"; exit 2 ;;
+  *) sed -n '2,14p' "$0"; exit 2 ;;
 esac

@@ -306,6 +306,94 @@ def test_logout_ends_refresh_and_idp_session_but_not_issued_access_tokens():
     assert status(tokens["access_token"], "/api/v1/me/access") == 200
 
 
+# ------------------------- refreshed sessions and offboarding (separate controls)
+
+MAX_SIGN_IN_AGE = 8 * 3600     # application-identity-lab.yml: max-sign-in-age PT8H
+
+
+def refresh(refresh_token):
+    """What Amplify does when the access token expires: the refresh_token grant."""
+    return requests.post(c.COGNITO + "/oauth2/token", verify=c.CA, data={
+        "grant_type": "refresh_token", "client_id": c.CLIENT_ID, "refresh_token": refresh_token})
+
+
+def test_a_refreshed_session_keeps_auth_time_and_is_refused_after_the_maximum_age():
+    tokens, browser = login("lab-dept", PASSWORDS["lab-dept"])
+    signed_in = claims(tokens["access_token"])["auth_time"]
+    # Just inside the maximum: the refreshed token still works.
+    admin("age-sign-in", "lab-dept", str(MAX_SIGN_IN_AGE - 120))
+    inside = refresh(tokens["refresh_token"])
+    assert inside.status_code == 200
+    assert claims(inside.json()["access_token"])["auth_time"] == signed_in - (MAX_SIGN_IN_AGE - 120)
+    assert families(inside.json()["access_token"]) == {A, A_CHILD, G, I}
+    # Past it: Cognito still refreshes (auth_time unchanged), but the archive refuses with 401.
+    admin("age-sign-in", "lab-dept", "240")
+    stale = refresh(tokens["refresh_token"])
+    assert stale.status_code == 200
+    stale_token = stale.json()["access_token"]
+    assert refused(stale_token) == (401, "REAUTHENTICATION_REQUIRED", "REAUTHENTICATION_REQUIRED")
+    assert status(stale_token, "/api/v1/awards/9000102/summary") == 401
+    # The UI then signs in again with prompt=login: the IdP asks for the password even though
+    # its single sign-on session is still open, and the new auth_time is accepted.
+    fresh, _ = login("lab-dept", PASSWORDS["lab-dept"], session=browser, prompt="login")
+    assert claims(fresh["access_token"])["auth_time"] >= signed_in
+    assert families(fresh["access_token"]) == {A, A_CHILD, G, I}
+
+
+def authn_request(prompt=None):
+    """The SAML AuthnRequest the simulated Cognito sends to the IdP for /oauth2/authorize."""
+    import zlib
+    from urllib.parse import parse_qs, urlparse
+    r = requests.get(c.COGNITO + "/oauth2/authorize", verify=c.CA, allow_redirects=False, params={
+        "client_id": c.CLIENT_ID, "redirect_uri": c.REDIRECT, "response_type": "code", "state": "x",
+        "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "code_challenge_method": "S256",
+        **({"prompt": prompt} if prompt else {})})
+    assert r.status_code == 302
+    saml = parse_qs(urlparse(r.headers["Location"]).query)["SAMLRequest"][0]
+    return zlib.decompress(base64.b64decode(saml), -15).decode()
+
+
+def test_prompt_login_becomes_force_authn_and_the_password_is_required():
+    # The UI's re-login after a 401 REAUTHENTICATION_REQUIRED sends prompt=login.
+    assert 'ForceAuthn="true"' in authn_request("login")
+    assert "ForceAuthn" not in authn_request()
+    # Inside an open browser session, a forced re-login still checks the password.
+    _, browser = login("lab-io", PASSWORDS["lab-io"])
+    with pytest.raises(SignInFailed):
+        login("lab-io", "not-the-password", session=browser, prompt="login")
+
+
+def test_offboarding_disabled_bu_account_and_archive_revocation_are_separate():
+    tokens, _ = login("lab-io", PASSWORDS["lab-io"])
+    admin("rename-login", "lab-io", "lab-io-offboarded")      # stand-in for BU disabling the account
+    try:
+        # BU side: no new sign-in is possible...
+        with pytest.raises(SignInFailed):
+            login("lab-io", PASSWORDS["lab-io"])
+        # ...but an existing refresh token keeps working: disabling the BU account alone does
+        # not end the archive session (documented gap).
+        still = refresh(tokens["refresh_token"])
+        assert still.status_code == 200
+        assert families(still.json()["access_token"]) == {F, I}
+        # Archive side: revocation applies on the very next request, whatever the token says.
+        admin("revoke-link", "SYN-INST-0005")
+        try:
+            assert refused(still.json()["access_token"])[0] == 403
+            assert refused(refresh(tokens["refresh_token"]).json()["access_token"])[0] == 403
+        finally:
+            admin("restore-link", "SYN-INST-0005")
+        # If nobody revokes, the maximum sign-in age is the bound on that window.
+        admin("age-sign-in", "lab-io", str(MAX_SIGN_IN_AGE + 60))
+        late = refresh(tokens["refresh_token"])
+        assert late.status_code == 200
+        assert refused(late.json()["access_token"]) == (401, "REAUTHENTICATION_REQUIRED", "REAUTHENTICATION_REQUIRED")
+        with pytest.raises(SignInFailed):
+            login("lab-io", PASSWORDS["lab-io"], prompt="login")
+    finally:
+        admin("rename-login", "lab-io-offboarded", "lab-io")
+    assert families(sign_in("lab-io")) == {F, I}
+
+
 # --------------------------------------------------- token validation
 
 def test_api_rejects_tokens_not_from_the_lab_pool():

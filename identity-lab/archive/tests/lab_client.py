@@ -47,8 +47,11 @@ def b64url(b):
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
 
-def login(username, password, session=None):
-    """Returns (tokens, browser_session). Raises SignInFailed when no code is issued."""
+def login(username, password, session=None, prompt=None):
+    """Returns (tokens, browser_session). Raises SignInFailed when no code is issued.
+
+    prompt="login" asks for a forced re-authentication (what the UI sends after a 401
+    REAUTHENTICATION_REQUIRED)."""
     s = session or requests.Session()
     s.verify = CA
     verifier = secrets.token_urlsafe(48)
@@ -57,7 +60,7 @@ def login(username, password, session=None):
         "client_id": CLIENT_ID, "redirect_uri": REDIRECT, "response_type": "code",
         "scope": "openid email profile", "state": state,
         "code_challenge": b64url(hashlib.sha256(verifier.encode()).digest()),
-        "code_challenge_method": "S256"})
+        "code_challenge_method": "S256", **({"prompt": prompt} if prompt else {})})
     for _ in range(6):
         page = forms(r.text)
         if not page:

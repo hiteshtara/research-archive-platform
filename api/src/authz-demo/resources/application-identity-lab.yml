@@ -32,6 +32,8 @@ app:
     research-staff-roles: ${LAB_RESEARCH_STAFF_ROLES:PI,MPI,COI}
     # Approved 2026-10-01 (design section 13): contact access via the verified KIM principal.
     contact-derivation: ${LAB_CONTACT_DERIVATION:VERIFIED_PRINCIPAL}
+    # Required with enforcement: a refreshed session keeps auth_time, so this ends it.
+    max-sign-in-age: ${LAB_MAX_SIGN_IN_AGE:PT8H}
     # Real server-side enrollment (production code) against the SIMULATED Cognito's AdminGetUser.
     enrollment:
       enabled: true
