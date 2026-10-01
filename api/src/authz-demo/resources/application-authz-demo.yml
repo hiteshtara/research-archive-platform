@@ -20,10 +20,10 @@ app:
     disposable-database: true
   authorization:
     enforcement-enabled: true
-    # DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy:
-    version-scope: PER_VERSION           # proposal P3 (alternative: FAMILY_WIDE)
-    department-match: EXACT_LEAD_UNIT    # proposal P6 (alternative: LEAD_UNIT_WITH_DESCENDANTS)
-    research-staff-roles: PI,MPI,COI     # proposal P4 from the requirements' role table (KP excluded)
+    # APPROVED by Hitesh 2026-10-01 (design section 14):
+    version-scope: FAMILY_WIDE                   # P3: any version of an Award number opens all its versions (never children)
+    department-match: LEAD_UNIT_WITH_DESCENDANTS # P6: sub-units only when the grant's include-sub-units flag is set
+    research-staff-roles: PI,MPI,COI             # P4: Key Person excluded
     contact-derivation: VERIFIED_PRINCIPAL   # approved 2026-10-01 (design section 13)
   attachments:
     storage: local
