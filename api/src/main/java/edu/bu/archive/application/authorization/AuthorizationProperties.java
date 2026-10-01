@@ -1,6 +1,8 @@
 package edu.bu.archive.application.authorization;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -20,6 +22,7 @@ public class AuthorizationProperties {
     private AuthorizationPolicy.DepartmentMatch departmentMatch;
     private Set<String> researchStaffRoles = new LinkedHashSet<>();
     private AuthorizationPolicy.ContactDerivation contactDerivation;
+    private final Enrollment enrollment = new Enrollment();
 
     /** The configured policy, or empty when any strategy is missing. */
     public Optional<AuthorizationPolicy> policy() {
@@ -70,5 +73,107 @@ public class AuthorizationProperties {
 
     public void setContactDerivation(AuthorizationPolicy.ContactDerivation contactDerivation) {
         this.contactDerivation = contactDerivation;
+    }
+
+    public Enrollment getEnrollment() {
+        return enrollment;
+    }
+
+    /**
+     * {@code app.authorization.enrollment.*}: server-side enrollment (design
+     * 12.2 Option A). OFF by default. When enabled, every setting except
+     * {@code endpoint-override} is required and has NO default; the API
+     * refuses to start without them. No credentials are configured here: the
+     * AWS default credentials provider chain supplies them.
+     */
+    public static class Enrollment {
+
+        private boolean enabled;
+        private String userPoolId;
+        private String region;
+        private String endpointOverride;
+        private String samlProviderName;
+        private String identifierAttribute;
+        private String crosswalkAttributeName;
+        private long refusalRetrySeconds = 60;
+
+        /** Property keys that must be set when enrollment is enabled but are not. */
+        public List<String> missingSettings() {
+            List<String> missing = new ArrayList<>();
+            if (blank(userPoolId)) missing.add("app.authorization.enrollment.user-pool-id");
+            if (blank(region)) missing.add("app.authorization.enrollment.region");
+            if (blank(samlProviderName)) missing.add("app.authorization.enrollment.saml-provider-name");
+            if (blank(identifierAttribute)) missing.add("app.authorization.enrollment.identifier-attribute");
+            if (blank(crosswalkAttributeName)) missing.add("app.authorization.enrollment.crosswalk-attribute-name");
+            return missing;
+        }
+
+        private static boolean blank(String value) {
+            return value == null || value.isBlank();
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getUserPoolId() {
+            return userPoolId;
+        }
+
+        public void setUserPoolId(String userPoolId) {
+            this.userPoolId = userPoolId;
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region;
+        }
+
+        public String getEndpointOverride() {
+            return endpointOverride;
+        }
+
+        public void setEndpointOverride(String endpointOverride) {
+            this.endpointOverride = endpointOverride;
+        }
+
+        public String getSamlProviderName() {
+            return samlProviderName;
+        }
+
+        public void setSamlProviderName(String samlProviderName) {
+            this.samlProviderName = samlProviderName;
+        }
+
+        public String getIdentifierAttribute() {
+            return identifierAttribute;
+        }
+
+        public void setIdentifierAttribute(String identifierAttribute) {
+            this.identifierAttribute = identifierAttribute;
+        }
+
+        public String getCrosswalkAttributeName() {
+            return crosswalkAttributeName;
+        }
+
+        public void setCrosswalkAttributeName(String crosswalkAttributeName) {
+            this.crosswalkAttributeName = crosswalkAttributeName;
+        }
+
+        public long getRefusalRetrySeconds() {
+            return refusalRetrySeconds;
+        }
+
+        public void setRefusalRetrySeconds(long refusalRetrySeconds) {
+            this.refusalRetrySeconds = refusalRetrySeconds;
+        }
     }
 }
