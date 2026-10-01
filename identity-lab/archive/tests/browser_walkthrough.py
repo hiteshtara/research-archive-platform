@@ -105,7 +105,16 @@ def run():
                                      and files["otherViaOwnUrl"]["status"] == 404)
                 page.goto(f"{UI}/awards/9000102")
                 page.wait_for_timeout(3000)
+                # The UI itself must offer the files (approved policy), not just the API.
+                tab = page.get_by_text("Attachments", exact=True)
+                entry["attachments_tab_visible_without_group"] = tab.count() > 0
+                if tab.count() > 0:
+                    tab.first.click()
+                    page.wait_for_timeout(2000)
+                    entry["attachment_listed_in_ui"] = "SYNTHETIC-award-A.pdf" in page.inner_text("main")
                 page.screenshot(path=OUT / "05-lab-pat-award-A-files-no-group.png", full_page=True)
+                entry["files_ok"] = entry["files_ok"] and entry["attachments_tab_visible_without_group"] \
+                    and entry.get("attachment_listed_in_ui", False)
                 page.goto(f"{UI}/awards/search?q=SYNTHETIC")
                 page.wait_for_selector("[data-testid=identity-lab-logout]")
                 page.click("[data-testid=identity-lab-logout]")
