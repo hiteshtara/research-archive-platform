@@ -31,6 +31,8 @@ PASSWORDS = {
     "lab-central": "Lab-Central-2026", "lab-dept": "Lab-Dept-2026", "lab-pat": "Lab-Pat-2026",
     "lab-io": "Lab-Io-2026", "lab-multi": "Lab-Multi-2026", "lab-nogrants": "Lab-Nogrants-2026",
     "lab-suspended": "Lab-Suspended-2026", "lab-stranger": "Lab-Stranger-2026", "lab-noattr": "Lab-Noattr-2026",
+    "lab-kim-pi": "Lab-Kim-Pi-2026", "lab-kim-only": "Lab-Kim-Only-2026", "lab-kim-inactive": "Lab-Kim-Inactive-2026",
+    "lab-kim-ambiguous": "Lab-Kim-Ambiguous-2026", "lab-rolodex": "Lab-Rolodex-2026",
 }
 
 # Synthetic fixture facts (api/src/test/resources/authz/synthetic-seed.sql + award-acceptance-fixtures.sql).
@@ -47,6 +49,7 @@ VERSIONS = {  # award_id: (award_number, seq, unit, title fragment)
     9000801: ("990008-00001", 1, "SYN-U-200", "Award H"),
     9000901: ("990009-00001", 1, "SYN-U-200", "Award I - seq 1"),
     9000902: ("990009-00001", 2, "SYN-U-100", "Award I - seq 2"),
+    9001001: ("990010-00001", 1, "SYN-U-300", "Award J"),
 }
 ATTACHMENTS = {9000101: 9300003, 9000102: 9300001, 9000111: 9300004, 9000201: 9300002, 9000902: 9300009}
 ALL = set(VERSIONS)
@@ -57,7 +60,8 @@ DEMO_VISIBLE = {
     "lab-dept": {9000101, 9000102, 9000111, 9000902},                       # lead unit SYN-U-100, exact
     "lab-pat": {9000101, 9000102, 9000301, 9000401, 9000902},               # PI, MPI, COI; not KP; I seq 2 only
     "lab-io": {9000601, 9000902},                                           # synthetic IO SYN-IO-7001
-    "lab-multi": {9000301, 9000401, 9000501, 9000801},                      # UNIT SYN-U-300 + IO SYN-IO-7002
+    "lab-multi": {9000301, 9000401, 9000501, 9000801, 9001001},             # UNIT SYN-U-300 + IO SYN-IO-7002
+    "lab-kim-pi": {9001001},                                                # KIM principal is J's PI; NO grant rows
 }
 # Visible under the ALTERNATIVE policy (FAMILY_WIDE, LEAD_UNIT_WITH_DESCENDANTS, roles incl. KP).
 ALT_VISIBLE = {
@@ -65,12 +69,14 @@ ALT_VISIBLE = {
     "lab-dept": {9000101, 9000102, 9000111, 9000701, 9000901, 9000902},
     "lab-pat": {9000101, 9000102, 9000301, 9000401, 9000501, 9000901, 9000902},
     "lab-io": {9000601, 9000901, 9000902},
-    "lab-multi": {9000301, 9000401, 9000501, 9000801},
+    "lab-multi": {9000301, 9000401, 9000501, 9000801, 9001001},
+    "lab-kim-pi": {9001001},
 }
 ATTACHMENT_GROUP = {"lab-central", "lab-dept", "lab-io", "lab-multi"}
 GRANT_KIND = {"lab-central": "CENTRAL", "lab-dept": "DEPARTMENT", "lab-pat": "RESEARCH_STAFF",
               "lab-io": "OTHER_AUTHORIZED_VIEWER", "lab-multi": "DEPARTMENT + OTHER_AUTHORIZED_VIEWER"}
-REQ = {"lab-central": "1", "lab-dept": "2", "lab-pat": "3", "lab-io": "4", "lab-multi": "2, 4 (union)"}
+REQ = {"lab-central": "1", "lab-dept": "2", "lab-pat": "3", "lab-io": "4", "lab-multi": "2, 4 (union)",
+       "lab-kim-pi": "3"}
 NOT_SCOPED = "NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION"
 
 
@@ -457,6 +463,60 @@ def check_grant_changes(run):
         admin("restore-grant", "SYN-INST-0006", "IO")
 
 
+def sql(query):
+    out = subprocess.run(["docker", "exec", "lab-archive-db", "psql", "-U", "lab_archive", "-d", "identity_lab",
+                          "-Atc", query], check=True, capture_output=True, text=True)
+    return out.stdout.strip()
+
+
+def enrollment_outcome(inst):
+    return sql(f"SELECT outcome FROM identity_lab.enrollment_event WHERE institutional_identifier = '{inst}' "
+               "ORDER BY event_id DESC LIMIT 1")
+
+
+def check_kim_chain(run):
+    """Verified sign-in -> unique KIM principal -> contact PERSON_ID -> rule 3, with no grant rows."""
+    grants = sql("SELECT count(*) FROM authz.access_grant WHERE institutional_identifier IN ('SYN-INST-0011', 'SYN-INST-0003') "
+                 "AND revoked_at IS NULL AND grant_type = 'CONTACT_DERIVATION'")
+    pat_grants = sql("SELECT count(*) FROM authz.access_grant WHERE institutional_identifier = 'SYN-INST-0011'")
+    run.add("K1-no-grant-rows", "3", "T8/T9", "lab-kim-pi, lab-pat", "Contact access with NO access_grant rows",
+            "0 grant rows for lab-kim-pi; no CONTACT_DERIVATION rows", f"{pat_grants} / {grants}",
+            "PASS" if pat_grants == "0" and grants == "0" else "FAIL",
+            "access derives from the verified KIM mapping (contact-derivation VERIFIED_PRINCIPAL)")
+    link = sql("SELECT kuali_person_id || ' ' || method FROM authz.identity_link WHERE institutional_identifier = "
+               "'SYN-INST-0011' AND status = 'ACTIVE' AND cognito_issuer LIKE 'https://localhost:9443/%'")
+    run.add("K2-link", "3", "T8", "lab-kim-pi", "Identity link carries the KIM principal",
+            "SYNP-KIM-11 AUTO_VERIFIED", link, "PASS" if link == "SYNP-KIM-11 AUTO_VERIFIED" else "FAIL")
+    for user, inst, outcome, label in (
+            ("lab-kim-only", "SYN-INST-0012", "LINKED", "KIM account that is nobody's contact"),
+            ("lab-kim-inactive", "SYN-INST-0013", "REFUSED_INACTIVE_PRINCIPAL", "inactive KIM principal"),
+            ("lab-kim-ambiguous", "SYN-INST-0014", "REFUSED_AMBIGUOUS_MAPPING", "attribute maps to two principals"),
+            ("lab-rolodex", "SYN-INST-0016", "REFUSED_NOT_A_KIM_PRINCIPAL", "mapped to a non-employee (rolodex) id"),
+            ("lab-stranger", "SYN-INST-0099", "REFUSED_UNKNOWN_PERSON", "no crosswalk row")):
+        t = run.token(user, fresh=True)
+        got = enrollment_outcome(inst)
+        r = get(t, "/api/v1/awards/search?q=SYNTHETIC")
+        ok = got == outcome and r.status_code == 403 and code_of(r) == "ACCESS_NOT_PROVISIONED" and not leaks(r, ALL)
+        run.add(f"K3-{user}", "3, 7", "T23", user, f"{label}: no archive access",
+                f"enrollment {outcome}; 403 ACCESS_NOT_PROVISIONED", f"enrollment {got}; {r.status_code} {code_of(r)}",
+                "PASS" if ok else "FAIL")
+    # The KIM mapping is revoked (crosswalk row): the next sign-in revokes the link; access denied.
+    admin("revoke-crosswalk", "SYN-INST-0011")
+    try:
+        t = run.token("lab-kim-pi", fresh=True)
+        r = get(t, "/api/v1/awards/9001001/summary")
+        got = enrollment_outcome("SYN-INST-0011")
+        ok = got == "REVOKED_MAPPING_NO_LONGER_VALID" and r.status_code == 403 and code_of(r) == "ACCESS_DENIED"
+        run.add("K4-revoked-mapping", "6, 7", "T21", "lab-kim-pi", "Crosswalk row revoked: next sign-in",
+                "link revoked; 403 ACCESS_DENIED", f"enrollment {got}; {r.status_code} {code_of(r)}", "PASS" if ok else "FAIL")
+    finally:
+        admin("restore-crosswalk", "SYN-INST-0011")
+        admin("restore-link", "SYN-INST-0011")
+        sql("UPDATE authz.identity_link SET status = 'ACTIVE', revoked_by = NULL, revoked_at = NULL "
+            "WHERE institutional_identifier = 'SYN-INST-0011' AND revoked_by LIKE 'lab-enrollment%'")
+        run.tokens.pop("lab-kim-pi", None)
+
+
 def check_unauthenticated(run):
     import requests
     r = requests.get(c.API + "/api/v1/awards/search?q=SYNTHETIC", timeout=30)
@@ -478,13 +538,14 @@ def main():
     args = ap.parse_args()
     visible = DEMO_VISIBLE if args.policy == "default" else ALT_VISIBLE
     run = Run(args.policy)
-    for user in ("lab-central", "lab-dept", "lab-pat", "lab-io", "lab-multi"):
+    for user in ("lab-central", "lab-dept", "lab-pat", "lab-io", "lab-multi", "lab-kim-pi"):
         check_search(run, user, visible[user])
         check_records(run, user, visible[user])
         check_reports_and_attachments(run, user, visible[user])
         check_other_surfaces(run, user, visible[user])
     if args.policy == "default":
         check_denied_identities(run)
+        check_kim_chain(run)
         check_grant_changes(run)
         check_unauthenticated(run)
         mark_policy(run)

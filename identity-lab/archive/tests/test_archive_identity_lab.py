@@ -24,10 +24,10 @@ from lab_client import SignInFailed, api, login
 ROOT = Path(__file__).resolve().parents[3]
 ADMIN = str(ROOT / "scripts" / "identity-lab" / "admin.sh")
 
-A, A_CHILD, B, C, D, E, F, G, H = (
+A, A_CHILD, B, C, D, E, F, G, H, I, J = (
     "990001-00001", "990001-00002", "990002-00001", "990003-00001", "990004-00001",
-    "990005-00001", "990006-00001", "990007-00001", "990008-00001")
-ALL_FAMILIES = {A, A_CHILD, B, C, D, E, F, G, H}
+    "990005-00001", "990006-00001", "990007-00001", "990008-00001", "990009-00001", "990010-00001")
+ALL_FAMILIES = {A, A_CHILD, B, C, D, E, F, G, H, I, J}
 PASSWORDS = {
     "lab-central": "Lab-Central-2026", "lab-dept": "Lab-Dept-2026", "lab-pat": "Lab-Pat-2026",
     "lab-io": "Lab-Io-2026", "lab-multi": "Lab-Multi-2026", "lab-nogrants": "Lab-Nogrants-2026",
@@ -99,7 +99,7 @@ def latest_enrollment(inst=None):
 def test_pi_sees_only_contact_records():
     t = sign_in("lab-pat")
     assert kinds(t) == ["RESEARCH_STAFF"]
-    assert families(t) == {A, C, D}                       # PI, Co-PI (MPI), COI
+    assert families(t) == {A, C, D, I}                    # PI, Co-PI (MPI), COI; I via seq 2
     assert status(t, "/api/v1/awards/by-number/990001-00001") == 200
     assert status(t, "/api/v1/awards/by-number/990002-00001") == 404   # B: other unit, not a contact
     assert status(t, "/api/v1/awards/9000501/summary") == 404          # E: KP excluded
@@ -112,7 +112,7 @@ def test_pi_sees_only_contact_records():
 def test_department_sees_only_its_unit():
     t = sign_in("lab-dept")
     assert kinds(t) == ["DEPARTMENT"]
-    assert families(t) == {A, A_CHILD}
+    assert families(t) == {A, A_CHILD, I}
     assert status(t, "/api/v1/awards/by-number/990002-00001") == 404
     assert status(t, "/api/v1/awards/9000701/summary") == 404          # sub-unit: exact match (P6 demo setting)
     assert status(t, "/api/v1/awards/9000102/attachments") == 200      # has the attachment group
@@ -128,12 +128,12 @@ def test_central_sees_everything():
 def test_io_user_sees_only_the_granted_io():
     t = sign_in("lab-io")
     assert kinds(t) == ["OTHER_AUTHORIZED_VIEWER"]
-    assert families(t) == {F}
+    assert families(t) == {F, I}
     assert status(t, "/api/v1/awards/9000801/summary") == 404          # H carries another IO
 
 
 def test_multiple_grants_are_a_union():
-    assert families(sign_in("lab-multi")) == {C, D, E, H}
+    assert families(sign_in("lab-multi")) == {C, D, E, H, J}
 
 
 def test_unfinished_paths_stay_closed_for_non_central_users():
@@ -161,7 +161,7 @@ def test_changed_login_name_same_institutional_id_is_the_same_person():
         after = sign_in("lab-pat-renamed", PASSWORDS["lab-pat"])
         assert claims(after)["username"] == claims(before)["username"]   # NameID from institutional id
         assert claims(after)["sub"] == claims(before)["sub"]
-        assert families(after) == {A, C, D}
+        assert families(after) == {A, C, D, I}
         assert pool_sql(f"SELECT attributes->>'custom:login' FROM user_profile "
                         f"WHERE sub = '{claims(after)['sub']}'") == "lab-pat-renamed"
     finally:
@@ -194,7 +194,7 @@ def test_transient_nameid_changes_the_profile_and_fails_closed():
         assert refused(two) == (403, "ACCESS_NOT_PROVISIONED", "ACCESS_NOT_PROVISIONED")
     finally:
         admin("nameid", "persistent")
-    assert families(sign_in("lab-io")) == {F}
+    assert families(sign_in("lab-io")) == {F, I}
 
 
 # -------------------------------------------- missing / unknown / status
@@ -218,14 +218,14 @@ def test_suspended_person_is_denied():
 
 def test_live_suspension_applies_to_an_already_issued_token():
     t = sign_in("lab-dept")
-    assert families(t) == {A, A_CHILD}
+    assert families(t) == {A, A_CHILD, I}
     admin("suspend", "SYN-INST-0002")
     try:
         assert refused(t) == (403, "ACCESS_DENIED", "ACCESS_DENIED")
         assert status(t, "/api/v1/awards/9000102/summary") == 403
     finally:
         admin("unsuspend", "SYN-INST-0002")
-    assert families(t) == {A, A_CHILD}
+    assert families(t) == {A, A_CHILD, I}
 
 
 def test_live_grant_revocation_applies_to_an_already_issued_token():
@@ -237,6 +237,20 @@ def test_live_grant_revocation_applies_to_an_already_issued_token():
     finally:
         admin("restore-grant", "SYN-INST-0001", "CENTRAL")
     assert families(t) == ALL_FAMILIES
+
+
+def test_kim_principal_pi_sees_award_without_any_grant():
+    t = sign_in("lab-kim-pi", "Lab-Kim-Pi-2026")
+    assert archive_sql("SELECT count(*) FROM authz.access_grant WHERE institutional_identifier = 'SYN-INST-0011'") == "0"
+    assert kinds(t) == ["RESEARCH_STAFF"]
+    assert families(t) == {J}
+    assert status(t, "/api/v1/awards/9001001/summary") == 200
+    assert status(t, "/api/v1/awards/9000201/summary") == 404
+
+
+def test_kim_account_alone_grants_nothing():
+    t = sign_in("lab-kim-only", "Lab-Kim-Only-2026")
+    assert refused(t) == (403, "ACCESS_NOT_PROVISIONED", "ACCESS_NOT_PROVISIONED")
 
 
 def test_kuali_role_evidence_never_grants_access():

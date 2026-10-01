@@ -4,6 +4,7 @@
 #   admin.sh revoke-grant|restore-grant <institutional-id> <CENTRAL|UNIT|IO|CONTACT_DERIVATION>
 #   admin.sh add-grant <institutional-id> UNIT <unit>|IO <io>|CENTRAL   /  remove-grant <institutional-id> <type>
 #   admin.sh revoke-link|restore-link <institutional-id>  (identity mapping, lab issuer only)
+#   admin.sh revoke-crosswalk|restore-crosswalk <attribute-value>  (KIM principal mapping)
 #   admin.sh rename-login <old-uid> <new-uid>          (same person, new login name)
 #   admin.sh add-account <uid> <password> <inst-id|-> <display name>
 #   admin.sh remove-account <uid>
@@ -45,6 +46,9 @@ case "$cmd" in
   remove-grant)
     archive -c "UPDATE authz.access_grant SET revoked_by = 'lab-admin', revoked_at = now()
       WHERE institutional_identifier = '$1' AND grant_type = '$2' AND granted_by = 'lab-admin' AND revoked_at IS NULL" ;;
+  revoke-crosswalk|restore-crosswalk)   # <attribute-value>: the KIM principal mapping itself
+    v=$([ "$cmd" = revoke-crosswalk ] && echo REVOKED || echo ACTIVE)
+    archive -c "UPDATE identity_lab.principal_crosswalk SET status = '$v' WHERE attribute_value = '$1'" ;;
   rename-login)
     ldap ldapmodrdn -r "uid=$1,ou=people,dc=lab,dc=invalid" "uid=$2" ;;
   add-account)
@@ -59,5 +63,5 @@ case "$cmd" in
     archive -c "SELECT cognito_subject, institutional_identifier, kuali_person_id, login_name, method, status FROM authz.identity_link WHERE cognito_issuer LIKE 'https://localhost:9443/%' ORDER BY identity_link_id"
     archive -c "SELECT occurred_at::time(0), institutional_identifier, outcome FROM identity_lab.enrollment_event ORDER BY event_id DESC LIMIT 15"
     pool -c "SELECT username, sub, attributes->>'custom:login' AS login FROM user_profile ORDER BY created_at" ;;
-  *) sed -n '2,11p' "$0"; exit 2 ;;
+  *) sed -n '2,12p' "$0"; exit 2 ;;
 esac

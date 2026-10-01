@@ -1,5 +1,7 @@
 """ARCHIVE-SPECIFIC post-sign-in hook: the lab's simulation of the archive's
-enrollment step (authorization design section 12.2). Not implemented in the
+enrollment step (authorization design section 12.2), using the KIM-based chain:
+verified sign-in attribute -> unique ACTIVE crosswalk row -> ACTIVE KIM principal
+(PRNCPL_ID = contact PERSON_ID) -> authz.identity_link. Not implemented in the
 API. Links a simulated-Cognito profile (iss, sub) to an archive person only
 when every check passes; otherwise it records why and links nothing, so the
 API answers ACCESS_NOT_PROVISIONED (fail closed).
@@ -45,15 +47,38 @@ def enroll(issuer, provider, profile):
                 c.execute("UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = %s, revoked_at = now() "
                           "WHERE identity_link_id = %s", (VERIFIER, link["identity_link_id"]))
                 return record("REVOKED_IDENTIFIER_MISMATCH", linked=link["institutional_identifier"])
+            current = c.execute(
+                "SELECT 1 FROM identity_lab.principal_crosswalk x JOIN identity_lab.kim_principal p "
+                "ON p.prncpl_id = x.prncpl_id WHERE x.attribute_name = 'labInstitutionalId' "
+                "AND x.attribute_value = %s AND x.status = 'ACTIVE' AND p.actv_ind = 'Y' AND p.prncpl_id = %s",
+                (inst, link["kuali_person_id"])).fetchall()
+            if len(current) != 1:
+                c.execute("UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = %s, revoked_at = now() "
+                          "WHERE identity_link_id = %s", (VERIFIER, link["identity_link_id"]))
+                return record("REVOKED_MAPPING_NO_LONGER_VALID", linked=link["kuali_person_id"])
             return record("ALREADY_LINKED")
         if links:
             return record("REFUSED_PREVIOUSLY_REVOKED")
         if not inst:
             return record("REFUSED_MISSING_IDENTIFIER")
-        person = c.execute("SELECT kuali_person_id FROM identity_lab.person_registry "
-                           "WHERE institutional_identifier = %s", (inst,)).fetchone()
-        if not person:
+        # verified attribute -> exactly one ACTIVE crosswalk row -> an ACTIVE KIM principal.
+        # No email or login-name fallback, ever (login-name mapping needs confirmed
+        # lifecycle/reassignment handling first).
+        rows = c.execute("SELECT prncpl_id FROM identity_lab.principal_crosswalk "
+                         "WHERE attribute_name = 'labInstitutionalId' AND attribute_value = %s AND status = 'ACTIVE'",
+                         (inst,)).fetchall()
+        if not rows:
             return record("REFUSED_UNKNOWN_PERSON")
+        if len({r["prncpl_id"] for r in rows}) > 1:
+            return record("REFUSED_AMBIGUOUS_MAPPING", candidates=len(rows))
+        principal = c.execute("SELECT prncpl_id, actv_ind FROM identity_lab.kim_principal WHERE prncpl_id = %s",
+                              (rows[0]["prncpl_id"],)).fetchone()
+        if not principal:
+            # e.g. a rolodex (non-employee) id: never a login account
+            return record("REFUSED_NOT_A_KIM_PRINCIPAL")
+        if principal["actv_ind"] != "Y":
+            return record("REFUSED_INACTIVE_PRINCIPAL")
+        person = {"kuali_person_id": principal["prncpl_id"]}
         other = c.execute(
             "SELECT 1 FROM authz.identity_link WHERE cognito_issuer = %s AND institutional_identifier = %s "
             "AND status = 'ACTIVE'", (issuer, inst)).fetchone()
