@@ -26,6 +26,9 @@ import java.time.LocalDate;
  *   when their family has real history (see the design doc's own
  *   finding that a non-T&M amendment can mint a new "current" version
  *   with nothing but a copy-forward snapshot).
+ *   With record authorization enforced, all four are null for a caller
+ *   who cannot see every version of the family (never for Central or
+ *   with enforcement off).
  *
  * Deliberately omits anticipated/obligated "distributable" amounts
  * (ant_distributable_amount/obli_distributable_amount) and an
@@ -46,7 +49,7 @@ public record TimeAndMoneySummaryResponse(
         BigDecimal anticipatedTotalAmount,
         BigDecimal anticipatedTotalDirect,
         BigDecimal anticipatedTotalIndirect,
-        long familyTransactionCount,
+        Long familyTransactionCount,
         String lastFamilyTimeAndMoneyDocumentNumber,
         LocalDate lastFamilyNoticeDate,
         String lastFamilyTransactionTypeDescription

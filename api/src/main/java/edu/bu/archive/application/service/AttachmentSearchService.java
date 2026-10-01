@@ -8,6 +8,9 @@ import edu.bu.archive.adapter.in.web.dto.attachment.MixedAttachmentSearchRow;
 import edu.bu.archive.adapter.out.persistence.AttachmentSearchRepository;
 import edu.bu.archive.application.award.AwardArchiveService;
 
+import edu.bu.archive.application.authorization.RecordVisibility;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -44,13 +47,24 @@ public class AttachmentSearchService {
 
     private final AwardArchiveService awardArchiveService;
     private final AttachmentSearchRepository repository;
+    private final RecordVisibility visibility;
 
     public AttachmentSearchService(
             AwardArchiveService awardArchiveService,
             AttachmentSearchRepository repository
     ) {
+        this(awardArchiveService, repository, RecordVisibility.ALL);
+    }
+
+    @Autowired
+    public AttachmentSearchService(
+            AwardArchiveService awardArchiveService,
+            AttachmentSearchRepository repository,
+            RecordVisibility visibility
+    ) {
         this.awardArchiveService = awardArchiveService;
         this.repository = repository;
+        this.visibility = visibility;
     }
 
     public PageResponse<AttachmentSearchResultResponse> searchAttachments(
@@ -92,6 +106,13 @@ public class AttachmentSearchService {
             }
         }
 
+        if (!visibility.unrestricted()) {
+            return searchRestricted(
+                    safeRecordType, safeRecordNumber, safeDocumentNumber, safeRecordId,
+                    attachmentId, safeFileId, versionFilter, page, size
+            );
+        }
+
         return switch (safeRecordType) {
             case RECORD_TYPE_PROPOSAL -> searchProposal(
                     safeRecordNumber, safeDocumentNumber, safeRecordId,
@@ -108,6 +129,43 @@ public class AttachmentSearchService {
                     safeRecordNumber, safeDocumentNumber, safeRecordId,
                     attachmentId, safeFileId, versionFilter, page, size
             );
+        };
+    }
+
+    /*
+     * Record authorization (restricted callers only): Award rows only,
+     * with the record-scope predicate in the same SQL WHERE as the
+     * filters (AwardArchiveRepository.searchAwardAttachments), so the page
+     * and the count contain only versions the caller may open. Proposal
+     * and Negotiation attachment rows are not yet brought under this path
+     * and are omitted - recordType=ALL returns the caller's Award rows,
+     * PROPOSAL/NEGOTIATION return an empty page.
+     */
+    private PageResponse<AttachmentSearchResultResponse> searchRestricted(
+            String recordType,
+            String recordNumber,
+            String documentNumber,
+            String recordId,
+            String attachmentId,
+            String fileId,
+            String versionFilter,
+            int page,
+            int size
+    ) {
+        return switch (recordType) {
+            case RECORD_TYPE_ALL -> awardArchiveService.searchAttachments(
+                    recordNumber, documentNumber, null, null, null, versionFilter, page, size
+            );
+            case RECORD_TYPE_AWARD -> awardArchiveService.searchAttachments(
+                    recordNumber, documentNumber, recordId, attachmentId, fileId, versionFilter, page, size
+            );
+            default -> {
+                int safePage = PaginationSupport.clampPage(page);
+                int safeSize = PaginationSupport.clampSize(size);
+                PaginationSupport.PageMetadata empty = PaginationSupport.metadata(safePage, safeSize, 0);
+                yield new PageResponse<>(List.of(), safePage, safeSize, 0,
+                        empty.totalPages(), empty.first(), empty.last());
+            }
         };
     }
 

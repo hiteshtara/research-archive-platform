@@ -118,6 +118,92 @@ INSERT INTO archive.subaward_funding (subaward_funding_source_id, subaward_id, s
     award_id, award_number) VALUES
   (9610001, 9600001, 'SYN-SUB-01', 1, 9000102, '990001-00001');
 
+-- Section-scoping fixtures (Award section endpoints, reports, File Finder).
+-- Two extra NON-current versions nobody but Central can open (other unit, no
+-- Pat): A' (9000103, shares A's sequence 2) and C' (9000302). They make the
+-- A and C families only PARTLY visible to the restricted personas.
+INSERT INTO archive.award_version (award_id, award_number, sequence_number, award_sequence_status,
+    status_description, title, sponsor_code, sponsor_name, lead_unit_number, lead_unit_name,
+    account_number, award_effective_date, workflow_document_number, is_current_version, is_primary_current) VALUES
+  (9000103, '990001-00001', 2, 'ARCHIVED', 'Active', 'SYNTHETIC Award A - other-unit version', 'SYN-SP', 'SYNTHETIC Sponsor',
+   'SYN-U-200', 'SYNTHETIC Department of Others', NULL, DATE '2020-01-01', 'SYN-DOC-0103', FALSE, FALSE),
+  (9000302, '990003-00001', 1, 'ARCHIVED', 'Active', 'SYNTHETIC Award C - other-unit version', 'SYN-SP', 'SYNTHETIC Sponsor',
+   'SYN-U-200', 'SYNTHETIC Department of Others', NULL, DATE '2021-02-01', 'SYN-DOC-0302', FALSE, FALSE);
+INSERT INTO archive.award_person (award_person_id, award_id, award_number, sequence_number, person_id, rolodex_id,
+    full_name, contact_role_code) VALUES
+  (9100015, 9000103, '990001-00001', 2, 'SYNP-OTHER-03', NULL, 'LEE UNRELATED', 'PI'),
+  (9100016, 9000302, '990003-00001', 1, 'SYNP-OTHER-03', NULL, 'LEE UNRELATED', 'PI');
+
+-- Hierarchy: D (990004-00001) is a child of B (990002-00001).
+INSERT INTO archive.award_hierarchy (award_hierarchy_id, root_award_number, award_number, parent_award_number,
+    originating_award_number, active) VALUES
+  (9200003, '990002-00001', '990002-00001', '990002-00001', '990002-00001', 'Y'),
+  (9200004, '990002-00001', '990004-00001', '990002-00001', '990002-00001', 'Y');
+
+-- Amounts: one row per A version.
+INSERT INTO archive.award_amount_info (award_amount_info_id, award_id, award_number, sequence_number,
+    obligated_total_amount, anticipated_total_amount, tnm_document_number, transaction_id) VALUES
+  (9700101, 9000101, '990001-00001', 1, 100.00, 100.00, 'SYN-TNM-A1', 9710001),
+  (9700102, 9000102, '990001-00001', 2, 200.00, 200.00, NULL, NULL),
+  (9700103, 9000103, '990001-00001', 2, 300.00, 300.00, NULL, NULL);
+
+-- Time and Money: a document per hierarchy family (root A, root B).
+INSERT INTO archive.time_and_money_document (document_number, root_award_number, document_status, creation_date) VALUES
+  ('SYN-TNM-A1', '990001-00001', 'FINAL', TIMESTAMP '2020-02-01 00:00:00'),
+  ('SYN-TNM-B1', '990002-00001', 'FINAL', TIMESTAMP '2021-02-01 00:00:00');
+INSERT INTO archive.pending_transaction (transaction_id, document_number, source_award_number,
+    destination_award_number, obligated_amount, comments) VALUES
+  (9710001, 'SYN-TNM-A1', '990001-00001', '990001-00001', 100.00, 'SYNTHETIC A to A'),
+  (9710002, 'SYN-TNM-A1', '990001-00001', '990001-00002', 50.00, 'SYNTHETIC A to its child'),
+  (9710003, 'SYN-TNM-B1', '990002-00001', '990002-00001', 999.00, 'SYNTHETIC B only');
+INSERT INTO archive.transaction_detail (transaction_detail_id, award_number, sequence_number, transaction_id,
+    time_and_money_document_number, source_award_number, destination_award_number, obligated_amount) VALUES
+  (9720001, '990002-00001', 1, 9710003, 'SYN-TNM-B1', '990002-00001', '990002-00001', 999.00);
+INSERT INTO archive.award_amount_transaction (award_amount_transaction_id, award_number, document_number,
+    transaction_type_code, transaction_type_description, notice_date, comments) VALUES
+  (9730001, '990001-00001', 'SYN-TNM-A1', '1', 'SYNTHETIC New', DATE '2020-02-01', 'SYNTHETIC A action'),
+  (9730002, '990004-00001', 'SYN-TNM-B1', '1', 'SYNTHETIC New', DATE '2021-02-01', 'SYNTHETIC D action');
+
+-- Comments and notepad.
+INSERT INTO archive.comment_type (comment_type_code, description, award_comment_screen_flag) VALUES
+  ('SYN1', 'SYNTHETIC General Comments', 'Y');
+INSERT INTO archive.award_comment (award_comment_id, award_id, award_number, sequence_number, comment_type_code, comments) VALUES
+  (9740001, 9000101, '990001-00001', 1, 'SYN1', 'SYNTHETIC comment on A seq 1'),
+  (9740002, 9000103, '990001-00001', 2, 'SYN1', 'SYNTHETIC comment on the other-unit A version');
+INSERT INTO archive.award_notepad (award_notepad_id, award_id, award_number, entry_number, note_topic, comments,
+    restricted_view) VALUES
+  (9741001, 9000102, '990001-00001', 1, 'SYNTHETIC A note', 'SYNTHETIC family note on A', 'N'),
+  (9741002, 9000401, '990004-00001', 1, 'SYNTHETIC D note', 'SYNTHETIC open note on D', 'N'),
+  (9741003, 9000401, '990004-00001', 2, 'SYNTHETIC D restricted', 'SYNTHETIC restricted note on D', 'Y');
+
+-- Budgets: a Posted budget on A seq 1 and a newer Posted one on the other-unit A version.
+INSERT INTO archive.award_budget (budget_id, award_id, document_number, award_budget_status_code,
+    award_budget_status_description, budget_version_number, total_cost) VALUES
+  (9750001, 9000101, 'SYN-BDOC-01', '9', 'Posted', 1, 1000.00),
+  (9750003, 9000103, 'SYN-BDOC-03', '9', 'Posted', 2, 3000.00);
+
+-- Funding-proposal link made on C's other-unit version, to a Proposal Pat can open.
+INSERT INTO archive.award_funding_proposal (award_funding_proposal_id, award_id, proposal_id, active_flag) VALUES
+  (9400002, 9000302, 8000201, 'Y');
+
+-- SAP transmissions on A: one also covers the child 990001-00002, one does not.
+INSERT INTO archive.award_transmission (transmission_id, award_id, award_number, sequence_number, success_indicator,
+    transmission_date, sent_data, returned_data) VALUES
+  (9760001, 9000102, '990001-00001', 2, 'Y', DATE '2022-01-01', '<syn-sent-hierarchy/>', '<syn-returned-hierarchy/>'),
+  (9760002, 9000102, '990001-00001', 2, 'Y', DATE '2022-02-01', '<syn-sent-a-only/>', '<syn-returned-a-only/>');
+INSERT INTO archive.award_transmission_child (transmission_child_id, transmission_id, award_id, award_number,
+    sequence_number, lead_unit_number) VALUES
+  (9770001, 9760001, 9000102, '990001-00001', 2, 'SYN-U-100'),
+  (9770002, 9760001, 9000111, '990001-00002', 1, 'SYN-U-100'),
+  (9770003, 9760002, 9000102, '990001-00001', 2, 'SYN-U-100');
+
+-- An attachment on the other-unit A version (File Finder).
+INSERT INTO archive.attachment_object (file_id, file_name, content_type, upload_status) VALUES
+  (9300003, 'SYNTHETIC-award-A-other-unit.pdf', 'application/pdf', 'PENDING');
+INSERT INTO archive.award_attachment (award_attachment_id, award_id, award_number, sequence_number, file_id,
+    type_code, description) VALUES
+  (9300003, 9000103, '990001-00001', 2, 9300003, '1', 'SYNTHETIC attachment on the other-unit A version');
+
 -- Synthetic IO values (real IO field unresolved).
 INSERT INTO authz_demo.award_io (award_id, io_value) VALUES
   (9000601, 'SYN-IO-7001'),

@@ -202,6 +202,47 @@ public class RecordAuthorizationService implements RecordVisibility {
         return silently(() -> requireAward(awardId));
     }
 
+    /**
+     * Every version of the family, each decided exactly as
+     * {@link #canSeeAward} would decide it (one family load, not one per
+     * version). Under FAMILY_WIDE this is true whenever any version is in
+     * scope; under PER_VERSION only when each version is.
+     */
+    @Override
+    public boolean canSeeEveryAwardVersion(String awardNumber) {
+        if (!enforced()) {
+            return true;
+        }
+        try {
+            requireProvisioned();
+            List<RecordFacts> family = facts.awardFamily(awardNumber);
+            if (family.isEmpty()) {
+                return false;
+            }
+            AuthorizationPolicy policy = properties.policy().orElseThrow(IdentityAccessDeniedException::new);
+            RecordAccessEvaluator evaluator = new RecordAccessEvaluator(policy, unitHierarchy);
+            AccessOutcome outcome = outcome();
+            return family.stream().allMatch(version -> evaluator.decide(outcome, version, family).allowed());
+        } catch (RuntimeException denied) {
+            return false;
+        }
+    }
+
+    /**
+     * For endpoints whose response spans the whole Award family (AI): the
+     * current version must be in scope (else 404) AND every version must be
+     * visible (else 403 AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS).
+     */
+    public void requireEveryAwardVersion(String awardNumber) {
+        if (!enforced()) {
+            return;
+        }
+        requireAwardNumber(awardNumber);
+        if (!canSeeEveryAwardVersion(awardNumber)) {
+            throw new PartialFamilyAccessException();
+        }
+    }
+
     private boolean silently(Runnable check) {
         if (!enforced()) {
             return true;

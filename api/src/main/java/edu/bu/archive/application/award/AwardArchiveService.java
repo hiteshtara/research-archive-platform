@@ -173,7 +173,15 @@ public class AwardArchiveService {
         String awardNumber = requireAwardNumberForId(awardId);
         // Record authorization: a related Proposal is listed only when the
         // caller may open it; being able to see this Award is not enough.
+        // The link row itself belongs to one Award version: under
+        // PER_VERSION a link made on a version the caller cannot open is
+        // omitted too.
+        if (visibility.unrestricted()) {
+            return repository.findFundingProposalRows(awardNumber);
+        }
+        java.util.function.LongPredicate visibleAward = visibleAwardIds();
         return repository.findFundingProposalRows(awardNumber).stream()
+                .filter(row -> row.awardId() == null || visibleAward.test(row.awardId()))
                 .filter(row -> visibility.canSeeProposalNumber(row.proposalNumber()))
                 .toList();
     }
@@ -801,12 +809,71 @@ public class AwardArchiveService {
     }
 
     public AwardSummaryResponse findSummary(long awardId) {
-        return repository.findSummaryByAwardId(awardId)
+        AwardSummaryResponse summary = repository.findSummaryByAwardId(awardId)
                 .orElseThrow(() ->
                         new NoSuchElementException(
                                 "Award not found: " + awardId
                         )
                 );
+        if (visibility.unrestricted()) {
+            return summary;
+        }
+        // Record authorization: the root/parent are OTHER family members;
+        // their award numbers are shown only when the caller may open them.
+        String root = visibleAwardNumberOrNull(summary.rootAwardNumber());
+        String parent = visibleAwardNumberOrNull(summary.parentAwardNumber());
+        if (Objects.equals(root, summary.rootAwardNumber())
+                && Objects.equals(parent, summary.parentAwardNumber())) {
+            return summary;
+        }
+        return withHierarchyNumbers(summary, root, parent);
+    }
+
+    private String visibleAwardNumberOrNull(String awardNumber) {
+        return awardNumber == null || visibility.canSeeAwardNumber(awardNumber) ? awardNumber : null;
+    }
+
+    private static AwardSummaryResponse withHierarchyNumbers(
+            AwardSummaryResponse s, String rootAwardNumber, String parentAwardNumber
+    ) {
+        return new AwardSummaryResponse(
+                s.awardId(), s.awardNumber(), s.sequenceNumber(), s.title(), s.status(),
+                s.grantNumber(), s.leadUnit(), s.accountType(), s.activityType(), s.awardType(),
+                s.federalClinicalTrial(),
+                s.sponsor(), s.sponsorCode(), s.sponsorAwardNumber(), s.primeSponsor(), s.primeSponsorCode(),
+                s.primeSponsorAwardId(), s.modificationNumber(), s.fainId(), s.nsfScienceCode(),
+                s.nsfSequenceNumber(),
+                s.alnNumber(), s.alnProgramTitleName(),
+                s.awardEffectiveDate(), s.obligationStartDate(), s.awardExecutionDate(), s.beginDate(),
+                s.closeoutDate(),
+                s.obligatedTotalAmount(), s.anticipatedTotalAmount(), s.basisOfPaymentCode(),
+                s.basisOfPaymentDescription(), s.methodOfPaymentCode(), s.methodOfPaymentDescription(),
+                s.principalInvestigator(), rootAwardNumber, parentAwardNumber, s.primaryCurrent(),
+                s.documentNumber()
+        );
+    }
+
+    /**
+     * Record authorization: a per-request memo of canSeeAward, so filtering
+     * many rows of the same version costs one check per award_id.
+     */
+    private java.util.function.LongPredicate visibleAwardIds() {
+        Map<Long, Boolean> decided = new java.util.HashMap<>();
+        return id -> decided.computeIfAbsent(id, visibility::canSeeAward);
+    }
+
+    private java.util.function.Predicate<String> visibleAwardNumbers() {
+        Map<String, Boolean> decided = new java.util.HashMap<>();
+        return number -> number != null && decided.computeIfAbsent(number, visibility::canSeeAwardNumber);
+    }
+
+    /** In-memory paging AFTER record-authorization filtering (same as findVersions). */
+    private static <T> PageResponse<T> pageAfterFiltering(List<T> visible, int safePage, int safeSize) {
+        int from = Math.min(safePage * safeSize, visible.size());
+        int to = Math.min(from + safeSize, visible.size());
+        PaginationSupport.PageMetadata meta = PaginationSupport.metadata(safePage, safeSize, visible.size());
+        return new PageResponse<>(List.copyOf(visible.subList(from, to)), safePage, safeSize,
+                visible.size(), meta.totalPages(), meta.first(), meta.last());
     }
 
     public PageResponse<AwardVersionSummaryResponse> findVersions(
@@ -1224,6 +1291,15 @@ public class AwardArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
+        if (!visibility.unrestricted()) {
+            // Record authorization: only rows of versions the caller may
+            // open; count and paging computed after filtering.
+            java.util.function.LongPredicate visibleAward = visibleAwardIds();
+            return pageAfterFiltering(repository.findAmountHistory(awardNumber, Integer.MAX_VALUE, 0).stream()
+                    .filter(row -> row.awardId() != null && visibleAward.test(row.awardId()))
+                    .toList(), safePage, safeSize);
+        }
+
         long totalElements = repository.countAmountHistory(awardNumber);
 
         PaginationSupport.PageMetadata pageMetadata =
@@ -1259,10 +1335,23 @@ public class AwardArchiveService {
      */
 
     public TimeAndMoneySummaryResponse findTimeAndMoneySummary(long awardId) {
-        return repository.findTimeAndMoneySummary(awardId)
+        TimeAndMoneySummaryResponse summary = repository.findTimeAndMoneySummary(awardId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Award not found: " + awardId
                 ));
+        if (visibility.unrestricted()
+                || visibility.canSeeEveryAwardVersion(requireAwardNumberForId(awardId))) {
+            return summary;
+        }
+        // Record authorization: the family_* fields are computed across every
+        // version of the family; omitted unless the caller may see them all.
+        return new TimeAndMoneySummaryResponse(
+                summary.awardId(), summary.awardNumber(), summary.sequenceNumber(),
+                summary.obligatedTotalAmount(), summary.obligatedTotalDirect(),
+                summary.obligatedTotalIndirect(), summary.anticipatedTotalAmount(),
+                summary.anticipatedTotalDirect(), summary.anticipatedTotalIndirect(),
+                null, null, null, null
+        );
     }
 
     public PageResponse<TimeAndMoneyActionResponse> findTimeAndMoneyActions(
@@ -1274,6 +1363,13 @@ public class AwardArchiveService {
 
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
+
+        if (!visibility.unrestricted() && !visibility.canSeeEveryAwardVersion(awardNumber)) {
+            // Record authorization (policy P3): T&M action rows carry no
+            // version key, so they are shown only when every version of the
+            // family is visible.
+            return pageAfterFiltering(List.of(), safePage, safeSize);
+        }
 
         long totalElements = repository.countTimeAndMoneyActions(awardNumber);
 
@@ -1310,6 +1406,15 @@ public class AwardArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
+        if (!visibility.unrestricted()) {
+            // Record authorization: only rows of versions the caller may
+            // open; count and paging computed after filtering.
+            java.util.function.LongPredicate visibleAward = visibleAwardIds();
+            return pageAfterFiltering(repository.findTimeAndMoneyHistory(awardNumber, Integer.MAX_VALUE, 0).stream()
+                    .filter(row -> visibleAward.test(row.awardId()))
+                    .toList(), safePage, safeSize);
+        }
+
         // Same ledger findAmounts already counts (archive.award_amount_info
         // joined to archive.award_version by award_number) - reused
         // rather than duplicated.
@@ -1342,7 +1447,7 @@ public class AwardArchiveService {
             long awardId,
             long pendingTransactionId
     ) {
-        requireAwardNumberForId(awardId);
+        String awardNumber = requireAwardNumberForId(awardId);
 
         Optional<TimeAndMoneyTransactionHeaderRow> header =
                 repository.findTimeAndMoneyTransactionHeader(
@@ -1371,6 +1476,10 @@ public class AwardArchiveService {
                 .orElseGet(() -> details.isEmpty()
                         ? null
                         : details.get(0).timeAndMoneyDocumentNumber());
+
+        if (!visibility.unrestricted()) {
+            requireTransactionInScope(awardNumber, header, details, timeAndMoneyDocumentNumber);
+        }
 
         return new TimeAndMoneyTransactionResponse(
                 pendingTransactionId,
@@ -1401,17 +1510,79 @@ public class AwardArchiveService {
         );
     }
 
+    /*
+     * Record authorization: the transaction id in the URL is not tied to
+     * {awardId} by the queries above, so for a restricted caller it must
+     * belong to {awardId}'s hierarchy family (every T&M document it names
+     * has that family's root) and every award number it moves money
+     * between must itself be visible. Anything else is the same 404 as a
+     * transaction that does not exist.
+     */
+    private void requireTransactionInScope(
+            String awardNumber,
+            Optional<TimeAndMoneyTransactionHeaderRow> header,
+            List<TimeAndMoneyTransactionDetailResponse> details,
+            String headerDocumentNumber
+    ) {
+        Set<String> documentNumbers = new HashSet<>();
+        documentNumbers.add(headerDocumentNumber);
+        List<String> awardNumbers = new ArrayList<>();
+        header.ifPresent(h -> {
+            awardNumbers.add(h.sourceAwardNumber());
+            awardNumbers.add(h.destinationAwardNumber());
+        });
+        for (TimeAndMoneyTransactionDetailResponse detail : details) {
+            documentNumbers.add(detail.timeAndMoneyDocumentNumber());
+            awardNumbers.add(detail.awardNumber());
+            awardNumbers.add(detail.sourceAwardNumber());
+            awardNumbers.add(detail.destinationAwardNumber());
+        }
+        String familyRoot = hierarchyRoot(awardNumber);
+        for (String documentNumber : documentNumbers) {
+            String root = documentNumber == null ? null : repository.findTimeAndMoneyDocument(documentNumber)
+                    .map(TimeAndMoneyDocumentResponse::rootAwardNumber).orElse(null);
+            if (root == null || !root.equals(familyRoot)) {
+                throw new edu.bu.archive.application.authorization.RecordNotAccessibleException();
+            }
+        }
+        java.util.function.Predicate<String> visibleNumber = visibleAwardNumbers();
+        if (!awardNumbers.stream().allMatch(visibleNumber)) {
+            throw new edu.bu.archive.application.authorization.RecordNotAccessibleException();
+        }
+    }
+
+    /** The root of an Award's hierarchy family; a standalone Award is its own root. */
+    private String hierarchyRoot(String awardNumber) {
+        return repository.findHierarchyRoot(awardNumber).orElse(awardNumber);
+    }
+
     public TimeAndMoneyDocumentResponse findTimeAndMoneyDocument(
             long awardId,
             String timeAndMoneyDocumentNumber
     ) {
-        requireAwardNumberForId(awardId);
+        String awardNumber = requireAwardNumberForId(awardId);
 
-        return repository.findTimeAndMoneyDocument(timeAndMoneyDocumentNumber)
+        TimeAndMoneyDocumentResponse document =
+                repository.findTimeAndMoneyDocument(timeAndMoneyDocumentNumber)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Time and Money document not found: "
                                 + timeAndMoneyDocumentNumber
                 ));
+        if (visibility.unrestricted()) {
+            return document;
+        }
+        // Record authorization: the document must belong to {awardId}'s
+        // hierarchy family (404 otherwise); its root award number is shown
+        // only when the caller may open the root.
+        if (!Objects.equals(document.rootAwardNumber(), hierarchyRoot(awardNumber))) {
+            throw new edu.bu.archive.application.authorization.RecordNotAccessibleException();
+        }
+        return new TimeAndMoneyDocumentResponse(
+                document.timeAndMoneyDocumentNumber(),
+                visibleAwardNumberOrNull(document.rootAwardNumber()),
+                document.documentStatus(),
+                document.creationDate()
+        );
     }
 
     public AwardTermsResponse findTerms(long awardId) {
@@ -1488,9 +1659,38 @@ public class AwardArchiveService {
         List<AwardNotepadEntryResponse> notepadEntries =
                 repository.findNotepadEntries(awardNumber);
 
+        if (!visibility.unrestricted()) {
+            // Record authorization: a comment made on a version the caller
+            // cannot open becomes the no-comment placeholder for its type
+            // (so the category still renders, with no hint of the hidden
+            // row). The notepad has no version key: shown only when every
+            // version is visible (policy P3), and never its restricted_view
+            // entries.
+            java.util.function.LongPredicate visibleAward = visibleAwardIds();
+            rows = rows.stream()
+                    .map(row -> row.awardCommentId() == null
+                            || (row.awardId() != null && visibleAward.test(row.awardId()))
+                            ? row
+                            : new AwardCommentRow(null, null, null, null, row.commentTypeCode(),
+                                    row.commentTypeDescription(), null, null, null))
+                    .toList();
+            notepadEntries = visibility.canSeeEveryAwardVersion(awardNumber)
+                    ? notepadEntries.stream().filter(entry -> !isRestrictedView(entry.restrictedView())).toList()
+                    : List.of();
+        }
+
         return new AwardCommentsResponse(
                 groupCommentsByType(rows), notepadEntries
         );
+    }
+
+    private static boolean isRestrictedView(String restrictedView) {
+        if (restrictedView == null) {
+            return false;
+        }
+        String value = restrictedView.trim().toUpperCase();
+        return !value.isEmpty() && !value.equals("N") && !value.equals("NO") && !value.equals("FALSE")
+                && !value.equals("0");
     }
 
     /*
@@ -1617,6 +1817,24 @@ public class AwardArchiveService {
         List<AwardSapTransmissionChildRow> childRows =
                 repository.findTransmissionChildRows(transmissionIds);
 
+        // Record authorization: child rows name OTHER members of the
+        // transmitted hierarchy - each is listed only when visible, and the
+        // raw SOAP payloads (which cover the whole hierarchy and cannot be
+        // redacted per node) only when every child is visible.
+        Set<Long> payloadHidden = new HashSet<>();
+        if (!visibility.unrestricted()) {
+            java.util.function.Predicate<String> visibleNumber = visibleAwardNumbers();
+            List<AwardSapTransmissionChildRow> visibleChildren = new ArrayList<>();
+            for (AwardSapTransmissionChildRow row : childRows) {
+                if (visibleNumber.test(row.awardNumber())) {
+                    visibleChildren.add(row);
+                } else {
+                    payloadHidden.add(row.transmissionId());
+                }
+            }
+            childRows = visibleChildren;
+        }
+
         Map<Long, List<AwardSapTransmissionChildResponse>>
                 childrenByTransmissionId = new LinkedHashMap<>();
         for (AwardSapTransmissionChildRow row : childRows) {
@@ -1654,8 +1872,8 @@ public class AwardArchiveService {
                         row.sponsorCode(),
                         row.methodOfPaymentCode(),
                         row.documentNumber(),
-                        row.sentData(),
-                        row.returnedData(),
+                        payloadHidden.contains(row.transmissionId()) ? null : row.sentData(),
+                        payloadHidden.contains(row.transmissionId()) ? null : row.returnedData(),
                         childrenByTransmissionId.getOrDefault(
                                 row.transmissionId(),
                                 List.of()
@@ -1950,9 +2168,9 @@ public class AwardArchiveService {
     public AwardBudgetSummaryResponse findBudgetSummary(long awardId) {
         AwardFamilyPositionRow position = requireFamilyPosition(awardId);
 
-        List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
+        List<AwardBudgetRow> budgetsInScope = visibleBudgets(repository.findBudgetsInScope(
                 position.awardNumber(), position.sequenceNumber()
-        );
+        ));
         AwardBudgetRow selected = selectArchiveBudget(budgetsInScope);
 
         if (selected == null) {
@@ -1990,9 +2208,9 @@ public class AwardArchiveService {
     ) {
         AwardFamilyPositionRow position = requireFamilyPosition(awardId);
 
-        List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
+        List<AwardBudgetRow> budgetsInScope = visibleBudgets(repository.findBudgetsInScope(
                 position.awardNumber(), position.sequenceNumber()
-        );
+        ));
         Long selectedBudgetId = Optional.ofNullable(
                 selectArchiveBudget(budgetsInScope)
         ).map(AwardBudgetRow::budgetId).orElse(null);
@@ -2130,11 +2348,27 @@ public class AwardArchiveService {
 
     private Long requireSelectedBudgetId(long awardId) {
         AwardFamilyPositionRow position = requireFamilyPosition(awardId);
-        List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
+        List<AwardBudgetRow> budgetsInScope = visibleBudgets(repository.findBudgetsInScope(
                 position.awardNumber(), position.sequenceNumber()
-        );
+        ));
         AwardBudgetRow selected = selectArchiveBudget(budgetsInScope);
         return selected == null ? null : selected.budgetId();
+    }
+
+    /*
+     * Record authorization: budgets are resolved across the family, so a
+     * budget owned by a version the caller cannot open is dropped BEFORE
+     * the archive budget is selected (the selection may then differ from
+     * an unrestricted caller's).
+     */
+    private List<AwardBudgetRow> visibleBudgets(List<AwardBudgetRow> budgetsInScope) {
+        if (visibility.unrestricted()) {
+            return budgetsInScope;
+        }
+        java.util.function.LongPredicate visibleAward = visibleAwardIds();
+        return budgetsInScope.stream()
+                .filter(row -> row.owningAwardId() != null && visibleAward.test(row.owningAwardId()))
+                .toList();
     }
 
     private AwardFamilyPositionRow requireFamilyPosition(long awardId) {

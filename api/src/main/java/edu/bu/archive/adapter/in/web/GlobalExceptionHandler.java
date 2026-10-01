@@ -61,6 +61,14 @@ public class GlobalExceptionHandler {
                 "This part of the archive is not yet available under record-level access.", request));
     }
 
+    @ExceptionHandler(edu.bu.archive.application.authorization.PartialFamilyAccessException.class)
+    public ResponseEntity<Map<String, Object>> handlePartialFamilyAccess(HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(HttpStatus.FORBIDDEN,
+                edu.bu.archive.application.authorization.PartialFamilyAccessException.CODE,
+                "AI features use every version of this Award, and some versions are outside your access.",
+                request));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(
             NoSuchElementException exception,
