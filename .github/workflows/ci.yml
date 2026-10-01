@@ -43,6 +43,12 @@ jobs:
         run: npm run lint
       - name: Typecheck and build
         run: npm run build
+      - name: Production build contains no synthetic-identity demo code
+        run: |
+          if grep -rIl -e 'Synthetic identity demo' -e 'demo-persona:' dist/; then
+            echo "The authz-demo identity shortcut leaked into the production build" >&2
+            exit 1
+          fi
 
   api-unit:
     name: API - unit tests

@@ -1,0 +1,34 @@
+# SYNTHETIC IDENTITY DEMO - BU FEDERATION NOT CONNECTED.
+# Only in builds made with -Pauthz-demo. Disposable loopback database only.
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:${AUTHZ_DEMO_DB_PORT:55432}/authz_demo
+    username: demo
+    password: demo
+  flyway:
+    enabled: false
+
+server:
+  port: ${AUTHZ_DEMO_API_PORT:8091}
+
+app:
+  security:
+    enabled: false
+  cors:
+    allowed-origins: http://localhost:${AUTHZ_DEMO_UI_PORT:5199}
+  authz-demo:
+    disposable-database: true
+  authorization:
+    enforcement-enabled: true
+    # DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy:
+    version-scope: PER_VERSION           # proposal P3 (alternative: FAMILY_WIDE)
+    department-match: EXACT_LEAD_UNIT    # proposal P6 (alternative: LEAD_UNIT_WITH_DESCENDANTS)
+    research-staff-roles: PI,MPI,COI     # proposal P4 from the requirements' role table (KP excluded)
+  attachments:
+    storage: local
+    local-directory: ${AUTHZ_DEMO_ATTACHMENT_DIR:/tmp/authz-demo-attachments}
+  ai:
+    enabled: false
+  search:
+    semantic:
+      enabled: false
