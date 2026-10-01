@@ -86,6 +86,29 @@ class RecordAuthorizationInterceptorTest {
     }
 
     @Test
+    void proposalSubPathsAreAnExplicitAllowList() {
+        when(authorization.enforced()).thenReturn(true);
+        when(authorization.unrestricted()).thenReturn(false);
+
+        for (String sub : List.of("", "/versions", "/people", "/units", "/attachments", "/attachments/5/download",
+                "/comments", "/funded-awards", "/custom-data")) {
+            assertThat(pass("/api/v1/proposals/55" + sub)).as(sub).isTrue();
+        }
+        verify(authorization, times(9)).requireProposal(55L);
+
+        for (String sub : List.of("/", "/new-thing", "/versions/extra", "/attachments/abc/download",
+                "/attachments/5/download/x", "/comments;x=1", "/report.pdf", "/funded-awards/1")) {
+            assertThatThrownBy(() -> pass("/api/v1/proposals/56" + sub)).as(sub)
+                    .isInstanceOf(AuthorizationPathNotScopedException.class);
+        }
+        verify(authorization, never()).requireProposal(56L);
+
+        // Central users are not limited to the allow-list.
+        when(authorization.unrestricted()).thenReturn(true);
+        assertThat(pass("/api/v1/proposals/56/new-thing")).isTrue();
+    }
+
+    @Test
     void anOutOfScopeAwardIsRefusedBeforeAReportIsBuilt() {
         when(authorization.enforced()).thenReturn(true);
         when(authorization.unrestricted()).thenReturn(false);

@@ -294,3 +294,26 @@ prove it in a non-production environment.
 - **Data stays.** Links, grants, crosswalk rows and audit rows remain for the next
   attempt. The migrations are additive, and no down-migration is needed or provided.
 - **The IAM policy and SAML provider can stay.** They grant nothing to users on their own.
+
+## Required Cognito settings for trustworthy enrollment (verified against AWS documentation, 2026-10-01)
+
+These are the conditions under which a valid token can lead to a trusted link:
+
+- **No app client in the pool may grant the `aws.cognito.signin.user.admin` scope.** That
+  scope lets a user call `UpdateUserAttributes` on writable attributes. AWS requires app
+  clients to have write access to IdP-mapped attributes, which would include the
+  identifier. The API also refuses any token that carries this scope.
+- **Only federated profiles (`UserStatus = EXTERNAL_PROVIDER`) can be enrolled or keep a
+  link.** Native accounts, including native accounts linked to the SAML provider with
+  `AdminLinkProviderForUser`, are refused.
+- **Tokens must come from the configured pool**, so the issuer must end in `/<user-pool-id>`.
+  `endpoint-override` is accepted only for a loopback test endpoint.
+- **Prefer `identifier-attribute: identities.userId`, which is the SAML NameID and cannot be
+  edited by the user.** Use it if BU confirms the NameID is the stable person identifier.
+  Otherwise, map the identifier to a custom attribute and rely on the scope rule above.
+- **Each new sign-in session (`auth_time`) re-reads the profile.** A changed identifier, lost
+  provider, native status, `sub` mismatch or disabled profile revokes the link.
+
+**A limit the archive cannot close:** if BU reassigns a NameID **and** the identifier value
+to another person, nothing in the assertion changes. Only BU can guarantee this never happens.
+

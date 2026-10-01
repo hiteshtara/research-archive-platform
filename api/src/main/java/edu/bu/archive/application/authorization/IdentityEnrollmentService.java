@@ -36,6 +36,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class IdentityEnrollmentService implements IdentityEnrollment {
 
     public static final String ACTOR = "api-enrollment";
+    /** identifier-attribute value that selects the NameID recorded in the profile's identities. */
+    public static final String FEDERATED_USER_ID = "identities.userId";
     private static final int MAX_DEFERRED = 10_000;
 
     private final Settings settings;
@@ -48,12 +50,20 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
 
     /**
      * @param samlProviderName       the Cognito identity provider name the profile must be federated through
-     * @param identifierAttribute    the user-pool attribute carrying the verified value (e.g. custom:...)
+     * @param identifierAttribute    the user-pool attribute carrying the verified value (e.g. custom:...),
+     *                               or {@value #FEDERATED_USER_ID} to use the federated identity's
+     *                               userId (the SAML NameID), which users cannot edit
      * @param crosswalkAttributeName authz.principal_crosswalk.attribute_name for that value
      * @param refusalRetry           how long a refusal is remembered before the profile is re-read (0 = never)
      */
     public record Settings(String samlProviderName, String identifierAttribute, String crosswalkAttributeName,
-                           Duration refusalRetry) {
+                           Duration refusalRetry, String userPoolId) {
+
+        /** Without a pool id the token issuer is not tied to the pool (unit tests only). */
+        public Settings(String samlProviderName, String identifierAttribute, String crosswalkAttributeName,
+                        Duration refusalRetry) {
+            this(samlProviderName, identifierAttribute, crosswalkAttributeName, refusalRetry, null);
+        }
         public Settings {
             requireText(samlProviderName, "samlProviderName");
             requireText(identifierAttribute, "identifierAttribute");
@@ -99,8 +109,8 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
             outcome = EnrollmentOutcome.FAILED;
             auditQuietly(identity, outcome, null, Map.of("error", failure.getClass().getSimpleName()));
         }
-        if (outcome != EnrollmentOutcome.LINKED && outcome != EnrollmentOutcome.ALREADY_LINKED
-                && !settings.refusalRetry().isZero()) {
+        // Only definite refusals are remembered; transient failures are retried on the next request.
+        if (outcome.refused() && !settings.refusalRetry().isZero()) {
             if (deferred.size() >= MAX_DEFERRED) {
                 deferred.clear();
             }
@@ -141,9 +151,11 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
     private EnrollmentOutcome verifySession(ValidatedCognitoIdentity identity, EnrollmentStore.StoredLink link) {
         Optional<Instant> signIn = identity.signInTime();
         Optional<String> username = identity.tokenUsername();
-        if (signIn.isEmpty() || username.isEmpty()) {
+        if (signIn.isEmpty() || username.isEmpty() || identity.canEditOwnAttributes() || !fromConfiguredPool(identity)) {
             auditQuietly(identity, EnrollmentOutcome.FAILED_SESSION_VERIFICATION, link.institutionalIdentifier(),
-                    Map.of("check", signIn.isEmpty() ? "no_auth_time" : "no_username"));
+                    Map.of("check", signIn.isEmpty() ? "no_auth_time"
+                            : username.isEmpty() ? "no_username"
+                            : identity.canEditOwnAttributes() ? "self_editable_token" : "foreign_issuer"));
             return EnrollmentOutcome.FAILED_SESSION_VERIFICATION;
         }
         String key = link.id() + "|" + signIn.get().getEpochSecond();
@@ -170,10 +182,10 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
             } else if (profile.identities().stream()
                     .noneMatch(i -> settings.samlProviderName().equals(i.providerName()))) {
                 problem = "not_federated";
-            } else if (!profile.attribute(settings.identifierAttribute())
-                    .map(v -> v.equals(link.institutionalIdentifier())).orElse(false)) {
-                problem = profile.attribute(settings.identifierAttribute()).isEmpty()
-                        ? "identifier_missing" : "identifier_changed";
+            } else if (!profile.federatedOnly()) {
+                problem = "not_federated_only";
+            } else if (!identifierOf(profile).map(v -> v.equals(link.institutionalIdentifier())).orElse(false)) {
+                problem = identifierOf(profile).isEmpty() ? "identifier_missing" : "identifier_changed";
             }
         }
         if (problem != null) {
@@ -185,6 +197,24 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         }
         verifiedSessions.put(key, Boolean.TRUE);
         return EnrollmentOutcome.LINK_STILL_VALID;
+    }
+
+    /** The token must come from the user pool enrollment reads (issuer ends with "/<pool id>"). */
+    private boolean fromConfiguredPool(ValidatedCognitoIdentity identity) {
+        String pool = settings.userPoolId();
+        return pool == null || pool.isBlank() || identity.issuer().endsWith("/" + pool.trim());
+    }
+
+    /** The verified identifier from the profile: a mapped attribute, or the provider's NameID. */
+    private Optional<String> identifierOf(CognitoProfile profile) {
+        if (FEDERATED_USER_ID.equals(settings.identifierAttribute())) {
+            return profile.identities().stream()
+                    .filter(i -> settings.samlProviderName().equals(i.providerName()))
+                    .map(CognitoProfile.FederatedIdentity::userId)
+                    .filter(v -> v != null && !v.isBlank())
+                    .findFirst();
+        }
+        return profile.attribute(settings.identifierAttribute());
     }
 
     private void revokeLink(ValidatedCognitoIdentity identity, EnrollmentStore.StoredLink link,
@@ -207,6 +237,12 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         Optional<String> username = identity.tokenUsername();
         if (username.isEmpty()) {
             return refuse(identity, EnrollmentOutcome.REFUSED_NO_USERNAME, null, Map.of());
+        }
+        if (identity.canEditOwnAttributes()) {
+            return refuse(identity, EnrollmentOutcome.REFUSED_SELF_EDITABLE_TOKEN, null, Map.of());
+        }
+        if (!fromConfiguredPool(identity)) {
+            return refuse(identity, EnrollmentOutcome.REFUSED_FOREIGN_ISSUER, null, Map.of());
         }
 
         Optional<CognitoProfile> read;
@@ -232,7 +268,10 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         if (!federated) {
             return refuse(identity, EnrollmentOutcome.REFUSED_NOT_FEDERATED, null, Map.of());
         }
-        Optional<String> value = profile.attribute(settings.identifierAttribute());
+        if (!profile.federatedOnly()) {
+            return refuse(identity, EnrollmentOutcome.REFUSED_NOT_FEDERATED_ONLY, null, Map.of());
+        }
+        Optional<String> value = identifierOf(profile);
         if (value.isEmpty()) {
             return refuse(identity, EnrollmentOutcome.REFUSED_MISSING_IDENTIFIER, null, Map.of());
         }

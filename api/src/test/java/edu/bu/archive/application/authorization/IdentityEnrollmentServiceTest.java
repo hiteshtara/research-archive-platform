@@ -495,4 +495,71 @@ class IdentityEnrollmentServiceTest {
         assertThat(service.prepare(token("s-nofed"))).isEqualTo(EnrollmentOutcome.REFUSED_NOT_FEDERATED);
         assertThat(store.links).isEmpty();
     }
+
+    // --- trust boundary: self-editable tokens, and the NameID as identifier source -------------
+
+    @Test
+    void aTokenThatCouldEditItsOwnAttributesIsNeverTrustedForEnrollment() {
+        profile("s-admin-scope", PROVIDER, "SYN-V-1");
+        var selfEditable = new ValidatedCognitoIdentity(ISSUER, "s-admin-scope", PROVIDER + "_s-admin-scope", SIGN_IN,
+                java.util.Set.of("openid", ValidatedCognitoIdentity.SELF_SERVICE_SCOPE));
+        assertThat(service.prepare(selfEditable)).isEqualTo(EnrollmentOutcome.REFUSED_SELF_EDITABLE_TOKEN);
+        assertThat(store.links).isEmpty();
+        // and an existing link is not honoured for such a token either
+        linked("s-linked", "SYN-V-2");
+        var later = new ValidatedCognitoIdentity(ISSUER, "s-linked", PROVIDER + "_s-linked", SIGN_IN,
+                java.util.Set.of(ValidatedCognitoIdentity.SELF_SERVICE_SCOPE));
+        assertThat(service.prepare(later).deniesRequest()).isTrue();
+    }
+
+    @Test
+    void theFederatedNameIdCanBeTheIdentifierSource() {
+        var byNameId = new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
+                PROVIDER, IdentityEnrollmentService.FEDERATED_USER_ID, CROSSWALK, Duration.ZERO), reader, store, clock);
+        // profile(...) records the NameID as "nameid-<sub>"; the attribute is deliberately different.
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "nameid-s-nid", "SYNP-1", true));
+        profile("s-nid", PROVIDER, "SYN-V-2");
+        assertThat(byNameId.prepare(token("s-nid"))).isEqualTo(EnrollmentOutcome.LINKED);
+        assertThat(onlyLink().identifier()).isEqualTo("nameid-s-nid");
+    }
+
+    // --- native / linked accounts, foreign issuers, transient failures -------------------------
+
+    @Test
+    void aLinkedNativeAccountIsNeverTrustedEvenWithTheProviderInItsIdentities() {
+        // AdminLinkProviderForUser makes a native (CONFIRMED) profile list the SAML provider.
+        pool.put(PROVIDER + "_s-linkednative", new CognitoProfile("s-linkednative", PROVIDER + "_s-linkednative", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "n")), Map.of(ATTRIBUTE, "SYN-V-1"), "CONFIRMED"));
+        assertThat(service.prepare(token("s-linkednative"))).isEqualTo(EnrollmentOutcome.REFUSED_NOT_FEDERATED_ONLY);
+        assertThat(store.links).isEmpty();
+    }
+
+    @Test
+    void anExistingLinkIsRevokedIfTheProfileStopsBeingFederatedOnly() {
+        linked("s-turned-native", "SYN-V-1");
+        pool.put(PROVIDER + "_s-turned-native", new CognitoProfile("s-turned-native", PROVIDER + "_s-turned-native", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "n")), Map.of(ATTRIBUTE, "SYN-V-1"), "CONFIRMED"));
+        assertThat(service.prepare(token("s-turned-native", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+    }
+
+    @Test
+    void aTokenFromAnotherPoolIsRefused() {
+        var poolBound = new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
+                PROVIDER, ATTRIBUTE, CROSSWALK, Duration.ZERO, "synthetic-pool"), reader, store, clock);
+        profile("s-pool", PROVIDER, "SYN-V-1");
+        var foreign = new ValidatedCognitoIdentity("https://idp.invalid/other-pool", "s-pool", PROVIDER + "_s-pool", SIGN_IN);
+        assertThat(poolBound.prepare(foreign)).isEqualTo(EnrollmentOutcome.REFUSED_FOREIGN_ISSUER);
+        assertThat(poolBound.prepare(token("s-pool"))).isEqualTo(EnrollmentOutcome.LINKED);
+    }
+
+    @Test
+    void transientFailuresAreNotHeldBackByTheRefusalWindow() {
+        var cached = service(Duration.ofSeconds(60));
+        profile("s-transient", PROVIDER, "SYN-V-1");
+        poolFailure = new IllegalStateException("throttled");
+        assertThat(cached.prepare(token("s-transient")).failed()).isTrue();
+        poolFailure = null;
+        assertThat(cached.prepare(token("s-transient"))).isEqualTo(EnrollmentOutcome.LINKED);
+    }
 }

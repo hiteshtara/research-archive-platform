@@ -147,6 +147,11 @@ def connect():
 
 
 def audit(cur, actor, action, identifier, detail):
+    # The operator names given on the command line are ATTESTATIONS, not verified identities;
+    # the database role actually used is recorded alongside them (F5).
+    detail = dict(detail)
+    cur.execute("SELECT current_user, session_user")
+    detail["db_current_user"], detail["db_session_user"] = cur.fetchone()
     cur.execute(
         "INSERT INTO authz.access_audit (actor, action, institutional_identifier, detail) "
         "VALUES (%s, %s, %s, %s::jsonb)",
@@ -248,10 +253,20 @@ def cmd_crosswalk_revoke(cur, a):
     rows = cur.fetchall()
     if not rows:
         raise AdminError("no ACTIVE crosswalk row matched")
+    links = 0
     for crosswalk_id, value, principal in rows:
         audit(cur, by, "CROSSWALK_REVOKED", value,
               {"crosswalk_id": crosswalk_id, "kuali_person_id": principal, "reason": reason})
-    print(f"crosswalk rows revoked: {len(rows)} (linked sign-ins are revoked by the API on their next request)")
+        # Revoke the sign-in links that rest on this mapping in the SAME transaction, so the
+        # revocation does not depend on API enrollment being switched on (F6).
+        cur.execute("UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = %s, revoked_at = CURRENT_TIMESTAMP "
+                    "WHERE status = 'ACTIVE' AND institutional_identifier = %s AND kuali_person_id = %s "
+                    "RETURNING identity_link_id", (by, value, principal))
+        for (link_id,) in cur.fetchall():
+            links += 1
+            audit(cur, by, "LINK_REVOKED", value, {"identity_link_id": link_id, "cause": "crosswalk revoked",
+                                                    "crosswalk_id": crosswalk_id, "reason": reason})
+    print(f"crosswalk rows revoked: {len(rows)}; identity links revoked with them: {links}")
 
 
 def cmd_suspend(cur, a, suspended):

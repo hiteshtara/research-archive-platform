@@ -113,3 +113,16 @@ cd scripts/authz-admin && uv run --no-project --with pytest --with 'psycopg[bina
 # integration test: throwaway `docker run postgres` on a random local port, V082 + V083 only, removed afterwards
 scripts/authz-admin/test_integration.sh
 ```
+
+## Limits (review findings, 2026-10-01)
+
+- **Operator names are attestations, not verified identities.** `--granted-by`,
+  `--approved-by` and `--revoked-by` record what the operator typed. Every audit row also
+  records the database role actually used (`db_current_user`, `db_session_user`).
+- **The two-person rule for CENTRAL needs separate roles.** It is only as strong as the
+  separation of database roles. Use one role per administrator, and review the audit.
+- **`crosswalk-revoke` also revokes** the ACTIVE identity links that rest on that mapping,
+  in the same transaction. This holds whether or not API enrollment is switched on.
+- **Validation trims every field** before checking it, so a padded ID cannot slip past the
+  principal or rolodex checks.
+

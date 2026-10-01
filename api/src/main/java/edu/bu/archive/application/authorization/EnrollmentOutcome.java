@@ -19,10 +19,16 @@ public enum EnrollmentOutcome {
 
     REFUSED_PREVIOUSLY_REVOKED,
     REFUSED_NO_USERNAME,
+    /** The token carries aws.cognito.signin.user.admin: its holder could have edited the identifier. */
+    REFUSED_SELF_EDITABLE_TOKEN,
     REFUSED_PROFILE_NOT_FOUND,
     REFUSED_SUBJECT_MISMATCH,
     REFUSED_PROFILE_DISABLED,
     REFUSED_NOT_FEDERATED,
+    /** UserStatus is not EXTERNAL_PROVIDER: a native or linked account, whose attributes a user may set. */
+    REFUSED_NOT_FEDERATED_ONLY,
+    /** The token was not issued by the configured user pool. */
+    REFUSED_FOREIGN_ISSUER,
     REFUSED_MISSING_IDENTIFIER,
     REFUSED_UNKNOWN_PERSON,
     REFUSED_AMBIGUOUS_MAPPING,

@@ -89,6 +89,41 @@ public class AwardEvidenceRetrievalRepository {
                 .list();
     }
 
+    /** One archive.award_funding_proposal link: the Award version it belongs to and the linked Proposal. */
+    public record FundingProposalLink(Long awardId, String proposalNumber) {
+    }
+
+    /*
+     * Record authorization for RELATED_PROPOSAL evidence: the evidence row
+     * is keyed by award_funding_proposal_id (etl/build_evidence_embedding.py),
+     * so the linked Proposal and the owning Award version are looked up here
+     * to decide whether the caller may see the related record.
+     */
+    public java.util.Map<Long, FundingProposalLink> findFundingProposalLinks(
+            java.util.Collection<Long> awardFundingProposalIds
+    ) {
+        java.util.Map<Long, FundingProposalLink> links = new java.util.HashMap<>();
+        if (awardFundingProposalIds.isEmpty()) {
+            return links;
+        }
+        jdbcClient.sql("""
+                SELECT DISTINCT afp.award_funding_proposal_id, afp.award_id, pv.proposal_number
+                FROM archive.award_funding_proposal afp
+                JOIN archive.proposal_version pv ON pv.proposal_id = afp.proposal_id
+                WHERE afp.award_funding_proposal_id IN (:ids)
+                """)
+                .param("ids", java.util.List.copyOf(awardFundingProposalIds))
+                .query((rs, n) -> {
+                    long id = rs.getLong("award_funding_proposal_id");
+                    long awardId = rs.getLong("award_id");
+                    Long owningAward = rs.wasNull() ? null : awardId;
+                    links.put(id, new FundingProposalLink(owningAward, rs.getString("proposal_number")));
+                    return null;
+                })
+                .list();
+        return links;
+    }
+
     private static String toVectorLiteral(float[] embedding) {
         StringBuilder builder = new StringBuilder(embedding.length * 10);
         builder.append('[');

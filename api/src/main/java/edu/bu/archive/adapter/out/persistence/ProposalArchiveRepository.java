@@ -430,7 +430,33 @@ public class ProposalArchiveRepository {
     public List<ProposalAwardResponse> findAwards(
             String proposalNumber
     ) {
-        return jdbc.sql("""
+        return findAwards(proposalNumber, null);
+    }
+
+    /*
+     * Record authorization: the same one-row-per-award_id collapse, but
+     * computed only over links made on the given Proposal versions (the
+     * ones a restricted caller may open) - so a link on a hidden version
+     * can never be the row that represents an Award.
+     */
+    public List<ProposalAwardResponse> findAwardsLinkedFromVersions(
+            String proposalNumber,
+            java.util.Collection<Long> proposalIds
+    ) {
+        if (proposalIds.isEmpty()) {
+            return List.of();
+        }
+        return findAwards(proposalNumber, List.copyOf(proposalIds));
+    }
+
+    private List<ProposalAwardResponse> findAwards(
+            String proposalNumber,
+            List<Long> onlyProposalIds
+    ) {
+        String versionFilter = onlyProposalIds == null
+                ? ""
+                : "                      AND relationship.proposal_id IN (:proposalIds)\n";
+        var statement = jdbc.sql("""
                 WITH ranked_awards AS (
                     SELECT
                         relationship.proposal_id,
@@ -446,6 +472,7 @@ public class ProposalArchiveRepository {
                     INNER JOIN archive.proposal_version proposal
                         ON proposal.proposal_id = relationship.proposal_id
                     WHERE proposal.proposal_number = :proposalNumber
+                """ + versionFilter + """
                 )
                 SELECT
                     proposal_id,
@@ -458,7 +485,11 @@ public class ProposalArchiveRepository {
                     award_id NULLS LAST,
                     proposal_id
                 """)
-                .param("proposalNumber", proposalNumber)
+                .param("proposalNumber", proposalNumber);
+        if (onlyProposalIds != null) {
+            statement = statement.param("proposalIds", onlyProposalIds);
+        }
+        return statement
                 .query(ProposalAwardResponse.class)
                 .list();
     }

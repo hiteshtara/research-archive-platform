@@ -32,4 +32,12 @@ class ValidatedCognitoIdentityTest {
         var b = new ValidatedCognitoIdentity("i", "s", "u2", Instant.now());
         assertThat(a).isEqualTo(b).hasSameHashCodeAs(b);
     }
+
+    @Test
+    void theSelfServiceScopeIsRecognisedFromTheScopeClaim() {
+        assertThat(ValidatedCognitoIdentity.fromValidatedAccessToken(
+                access().claim("scope", "openid email profile").build()).canEditOwnAttributes()).isFalse();
+        assertThat(ValidatedCognitoIdentity.fromValidatedAccessToken(
+                access().claim("scope", "openid aws.cognito.signin.user.admin").build()).canEditOwnAttributes()).isTrue();
+    }
 }

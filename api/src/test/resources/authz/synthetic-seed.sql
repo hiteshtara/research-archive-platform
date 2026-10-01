@@ -251,6 +251,37 @@ INSERT INTO authz.access_grant (institutional_identifier, grant_type, unit_numbe
 UPDATE archive.award_version SET account_number = 'SYN-IO-7001' WHERE award_id = 9000601;
 UPDATE archive.award_version SET account_number = 'SYN-IO-7002' WHERE award_id = 9000801;
 
+-- Proposal section scoping: SYN-PRP-0004 has three versions. The department
+-- (SYN-U-100) can open v1 and v3 (current); v2 is in another unit and no
+-- persona but Central can open it. Nobody's grants include Pat here.
+INSERT INTO archive.proposal_version (proposal_id, proposal_number, version_number, title, proposal_sequence_status,
+    sponsor_code, sponsor_name, lead_unit_number, lead_unit_name, principal_investigator_name, document_number) VALUES
+  (8000401, 'SYN-PRP-0004', 1, 'SYNTHETIC Proposal 4 v1 - department unit', 'ARCHIVED', 'SYN-SP', 'SYNTHETIC Sponsor',
+   'SYN-U-100', 'SYNTHETIC Department of Examples', 'SAM OTHERPI', 'SYN-PDOC-41'),
+  (8000402, 'SYN-PRP-0004', 2, 'SYNTHETIC Proposal 4 v2 - other-unit version', 'ARCHIVED', 'SYN-SP', 'SYNTHETIC Sponsor',
+   'SYN-U-200', 'SYNTHETIC Department of Others', 'LEE UNRELATED', 'SYN-PDOC-42'),
+  (8000403, 'SYN-PRP-0004', 3, 'SYNTHETIC Proposal 4 v3 - department unit', 'ACTIVE', 'SYN-SP', 'SYNTHETIC Sponsor',
+   'SYN-U-100', 'SYNTHETIC Department of Examples', 'SAM OTHERPI', 'SYN-PDOC-43');
+INSERT INTO archive.proposal_person (proposal_person_id, proposal_id, proposal_number, sequence_number, person_id,
+    full_name, contact_role_code) VALUES
+  (8100004, 8000401, 'SYN-PRP-0004', 1, 'SYNP-OTHER-02', 'SAM OTHERPI', 'PI'),
+  (8100005, 8000402, 'SYN-PRP-0004', 2, 'SYNP-OTHER-03', 'LEE UNRELATED', 'PI'),
+  (8100006, 8000403, 'SYN-PRP-0004', 3, 'SYNP-OTHER-02', 'SAM OTHERPI', 'PI');
+INSERT INTO archive.comment_type (comment_type_code, description, award_comment_screen_flag) VALUES
+  ('12', 'SYNTHETIC Proposal Summary', 'N');
+INSERT INTO archive.proposal_comment (proposal_comment_id, proposal_id, proposal_number, sequence_number,
+    comment_type_code, comments) VALUES
+  (8200001, 8000401, 'SYN-PRP-0004', 1, '12', 'SYNTHETIC comment on Proposal 4 v1'),
+  (8200002, 8000402, 'SYN-PRP-0004', 2, '12', 'SYNTHETIC comment on the other-unit Proposal 4 v2');
+-- Funded-Award links: v1 -> A (both visible to the department), v2 -> A (a link on
+-- the hidden Proposal version), v3 -> B (an Award the department cannot open) and
+-- v3 -> A's other-unit version (an exact linked Award version it cannot open).
+INSERT INTO archive.proposal_award (proposal_id, award_id, award_number, award_funding_proposal_id, active) VALUES
+  (8000401, 9000102, '990001-00001', 9400011, TRUE),
+  (8000402, 9000102, '990001-00001', 9400012, TRUE),
+  (8000403, 9000201, '990002-00001', 9400013, TRUE),
+  (8000403, 9000103, '990001-00001', 9400014, TRUE);
+
 -- Stored files for the two seed attachments (written by the tests / demo start script).
 UPDATE archive.attachment_object SET upload_status = 'UPLOADED', s3_bucket = 'local-fixtures',
        s3_key = 'synthetic/' || file_name, file_size_bytes = 400 WHERE file_id IN (9300001, 9300002);

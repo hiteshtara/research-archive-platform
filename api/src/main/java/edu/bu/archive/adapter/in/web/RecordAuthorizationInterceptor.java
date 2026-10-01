@@ -26,9 +26,9 @@ import edu.bu.archive.application.authorization.RecordNotAccessibleException;
  *       SQL or checked record by record. Every other path - not yet brought
  *       under record authorization - is refused with
  *       NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION, so an unfinished path can
- *       never leak an out-of-scope record. Award sub-paths are an explicit
- *       allow-list: a NEW Award sub-endpoint is closed until it is reviewed
- *       and added here.</li>
+ *       never leak an out-of-scope record. Award and Proposal sub-paths are
+ *       explicit allow-lists: a NEW sub-endpoint is closed until it is
+ *       reviewed and added here.</li>
  * </ul>
  * See docs/architecture/RECORD_AUTHORIZATION_STATUS.md for the path list.
  */
@@ -57,6 +57,17 @@ public class RecordAuthorizationInterceptor implements HandlerInterceptor {
             + "|/report\\.pdf|/report-with-attachments\\.pdf"
             + "|/budget/summary|/budget/versions|/budget/periods|/budget/line-items|/budget/personnel"
             + "|/funding-proposals|/funding-subawards|/negotiations"
+            + ")$");
+
+    /**
+     * Proposal sub-paths (ProposalArchiveV1Service): version-scoped by
+     * proposal_id, or - versions, comments, funded-awards - filtered per
+     * version for restricted callers. Anything else under
+     * /api/v1/proposals/{id} is refused.
+     */
+    static final Pattern PROPOSAL_SCOPED_SUBPATH = Pattern.compile("^("
+            + "|/versions|/people|/units|/attachments|/attachments/\\d+/download"
+            + "|/comments|/funded-awards|/custom-data"
             + ")$");
 
     private final RecordAuthorizationService authorization;
@@ -124,6 +135,10 @@ public class RecordAuthorizationInterceptor implements HandlerInterceptor {
             return true;
         }
         if ((m = PROPOSAL_ID.matcher(path)).matches()) {
+            String sub = m.group(2) == null ? "" : m.group(2);
+            if (!PROPOSAL_SCOPED_SUBPATH.matcher(sub).matches()) {
+                throw new AuthorizationPathNotScopedException();
+            }
             authorization.requireProposal(Long.parseLong(m.group(1)));
             return true;
         }

@@ -82,7 +82,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
 @AutoConfigureMockMvc
 class IdentityEnrollmentIntegrationTest {
 
-    static final String ISSUER = "https://enroll.invalid/synthetic-pool";
+    static final String ISSUER = "https://enroll.invalid/us-east-1_SYNTHETIC";   // issuer ends with the pool id, as Cognito's does
     static final String SEED_ISSUER = "https://demo.invalid/synthetic-cognito";
     static final String PROVIDER = "SyntheticSaml";
     static final String ATTRIBUTE = "custom:synthetic_principal_attr";
@@ -377,5 +377,16 @@ class IdentityEnrollmentIntegrationTest {
         // The audit stays append-only.
         assertThatThrownBy(() -> jdbc.sql("DELETE FROM authz.access_audit").update())
                 .hasMessageContaining("append-only");
+    }
+
+    @Test
+    void aTokenFromAnotherPoolIsNeverEnrolled() throws Exception {
+        String username = federated("enr-foreign", PROVIDER, "SYN-ATTR-KIM");
+        MvcResult result = mvc.perform(get("/api/v1/awards/search").header("X-Test-Sub", "enr-foreign")
+                .header("X-Test-Username", username).header("X-Test-Issuer", "https://enroll.invalid/us-east-1_OTHER"))
+                .andReturn();
+        assertThat(result.getResponse().getStatus()).isEqualTo(403);
+        assertThat(jdbc.sql("SELECT count(*) FROM authz.identity_link WHERE cognito_subject = 'enr-foreign'")
+                .query(Long.class).single()).isZero();
     }
 }
