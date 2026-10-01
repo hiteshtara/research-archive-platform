@@ -25,6 +25,7 @@ app:
     department-match: LEAD_UNIT_WITH_DESCENDANTS # P6: sub-units only when the grant's include-sub-units flag is set
     research-staff-roles: PI,MPI,COI             # P4: Key Person excluded
     contact-derivation: VERIFIED_PRINCIPAL   # approved 2026-10-01 (design section 13)
+    max-sign-in-age: PT8H                    # required with enforcement; persona headers always count as fresh
   attachments:
     storage: local
     local-directory: ${AUTHZ_DEMO_ATTACHMENT_DIR:/tmp/authz-demo-attachments}

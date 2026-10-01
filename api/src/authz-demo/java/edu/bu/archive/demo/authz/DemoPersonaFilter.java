@@ -54,8 +54,11 @@ public class DemoPersonaFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(PREFIX)) {
             String key = header.substring(PREFIX.length()).trim();
             if (KEY.matcher(key).matches()) {
+                // The persona header has no sign-in: each request counts as signed in now, so the
+                // maximum sign-in age never applies here. The identity lab tests it with real logins.
                 request.setAttribute(IDENTITY_ATTRIBUTE,
-                        new ValidatedCognitoIdentity(AuthzDemoConfiguration.DEMO_ISSUER, "demo-" + key));
+                        new ValidatedCognitoIdentity(AuthzDemoConfiguration.DEMO_ISSUER, "demo-" + key, null,
+                                java.time.Instant.now()));
                 boolean attachmentViewer = Boolean.TRUE.equals(jdbc.sql(
                                 "SELECT attachment_viewer FROM authz_demo.persona WHERE persona_key = :key")
                         .param("key", key).query(Boolean.class).optional().orElse(false));

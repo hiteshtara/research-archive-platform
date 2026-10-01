@@ -142,6 +142,10 @@ app:
     department-match: LEAD_UNIT_WITH_DESCENDANTS
     research-staff-roles: PI,MPI,COI
     contact-derivation: VERIFIED_PRINCIPAL
+    # Longest time since the person's last BU sign-in (the token's auth_time) that an enforced
+    # request accepts. REQUIRED with enforcement on; no default (missing = every request denied).
+    # A Cognito refresh keeps the original auth_time, so this is what ends a refreshed session.
+    max-sign-in-age: PT8H                 # proposed; the value is a launch decision (section 6.2)
     enrollment:
       enabled: true
       user-pool-id: <region>_<poolId>
@@ -248,10 +252,45 @@ re-checks the identity link, suspension and grants in the database, and re-check
 | `suspend` | denied on the next request; overrides every grant |
 | `grant-revoke` | removes exactly what that grant supplied, on the next request |
 
-**Token lifetime caveat.** A revoked user still holds a valid Cognito session: the access
-token (lifetime set on the app client) and the refresh token (up to its validity). They
-can still authenticate, but every API request is refused. To stop new tokens as well,
-disable the Cognito user or sign them out globally through your normal account process.
+### 6.1 Offboarding: archive revocation is a separate control from sign-in
+
+A stable NameID and the username check prove **which person** a profile belongs to. They do
+**not** prove a fresh BU login, and they do **not** prove the person is still employed.
+Departure is handled by **two separate times**, which must not be merged into one promise:
+
+| Step | Who controls it | How long it takes |
+|---|---|---|
+| **Notification:** the archive administrators learn of the departure | BU / HR process, outside the application | Until a Huron or HR feed exists, as long as that manual process takes |
+| **Application revocation:** `link-revoke`, `crosswalk-revoke` or `suspend` | Archive administrators, audited CLI | Effective on the **next request**: no token, cache or session survives it |
+
+- A periodic grant review finds what the notification process missed. It is **not** a
+  revocation mechanism and does not shorten either time.
+- **Disabling the BU account does not end an existing archive session.** The Cognito refresh
+  token (up to its validity, 30 days by default) keeps issuing tokens without contacting BU.
+  Until the archive revokes, the bound on that window is the maximum sign-in age (6.2).
+- **A revoked user still holds a valid Cognito session**, but every API request is refused.
+  To stop new tokens as well, disable the Cognito user or sign them out globally through your
+  normal account process.
+
+### 6.2 Refreshed sessions: the maximum sign-in age
+
+- A Cognito refresh issues new tokens with the **original** `auth_time`. The per-session
+  profile re-check (section "Required Cognito settings") runs only on a new `auth_time`, so a
+  refreshed session is never re-checked against Cognito or BU.
+- **`app.authorization.max-sign-in-age` bounds it.** Once `auth_time` is older, every
+  enforced request, Central included, gets **401 `REAUTHENTICATION_REQUIRED`**, before
+  enrollment or any grant is read. A token with no `auth_time`, or one more than five minutes
+  in the future, is refused the same way. `/api/v1/me/access` reports the same problem.
+- The UI answers that 401 by starting a new login with `prompt=login`, at most once per two
+  minutes, so a sign-in the API still refuses shows an error instead of looping.
+- With enforcement on and no value (or zero or negative), every request is denied
+  (`POLICY_NOT_CONFIGURED`).
+- **What the value means:** the longest a person can keep using the archive after BU disables
+  their account, if nobody revokes them in the archive. Choosing it is a launch decision.
+- **To verify with BU IAM and real Cognito (joint test):** whether Cognito forwards
+  `prompt=login` to the SAML IdP as `ForceAuthn`, and how long BU's IdP single sign-on session
+  lasts. If BU reuses its SSO session, a "new" sign-in can happen without a password, and a
+  disabled account may still pass until that session ends.
 
 **Attribute changes caveat.** An existing link isn't re-read from Cognito on each request.
 If the identity provider starts releasing a different value for a person, revoke the old
@@ -315,7 +354,8 @@ These are the conditions under which a valid token can lead to a trusted link:
   edited by the user.** Use it if BU confirms the NameID is the stable person identifier.
   Otherwise, map the identifier to a custom attribute and rely on the scope rule above.
 - **Each new sign-in session (`auth_time`) re-reads the profile.** A changed identifier, lost
-  provider, native status, `sub` mismatch or disabled profile revokes the link.
+  provider, native status, `sub` mismatch or disabled profile revokes the link. A **refreshed**
+  session keeps its `auth_time` and is not re-read; `max-sign-in-age` (section 6.2) ends it.
 
 **A limit the archive cannot close:** if BU reassigns a NameID **and** the identifier value
 to another person, nothing in the assertion changes. Only BU can guarantee this never happens.

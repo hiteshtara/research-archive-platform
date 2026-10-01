@@ -1,5 +1,8 @@
 package edu.bu.archive.application.authorization;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,6 +34,10 @@ public class RecordAuthorizationService implements RecordVisibility {
     private final DescendantUnits descendantUnits;
     private final IoSqlStrategy ioSql;
     private final IdentityEnrollment enrollment;
+    private final Clock clock;
+
+    /** A sign-in time this far in the future is accepted as clock skew; beyond it, refused. */
+    static final Duration ALLOWED_CLOCK_SKEW = Duration.ofMinutes(5);
 
     /** Expands a unit to itself plus its descendants. */
     public interface DescendantUnits {
@@ -62,6 +69,23 @@ public class RecordAuthorizationService implements RecordVisibility {
             IoSqlStrategy ioSql,
             IdentityEnrollment enrollment
     ) {
+        this(properties, identities, identityResolver, scopeResolver, facts, unitHierarchy, descendantUnits, ioSql,
+                enrollment, Clock.systemUTC());
+    }
+
+    public RecordAuthorizationService(
+            AuthorizationProperties properties,
+            CurrentIdentityProvider identities,
+            IdentityResolver identityResolver,
+            AccessScopeResolver scopeResolver,
+            RecordFactsRepository facts,
+            UnitHierarchy unitHierarchy,
+            DescendantUnits descendantUnits,
+            IoSqlStrategy ioSql,
+            IdentityEnrollment enrollment,
+            Clock clock
+    ) {
+        this.clock = Objects.requireNonNull(clock);
         this.enrollment = Objects.requireNonNull(enrollment);
         this.properties = Objects.requireNonNull(properties);
         this.identities = Objects.requireNonNull(identities);
@@ -112,6 +136,16 @@ public class RecordAuthorizationService implements RecordVisibility {
             if (identity.isEmpty()) {
                 return new AccessOutcome.NotProvisioned(AccessOutcome.NotProvisionedReason.NO_IDENTITY_LINK);
             }
+            if (properties.isEnforcementEnabled()) {
+                // Checked before enrollment and before any grant is read: a refreshed token
+                // keeps its original auth_time, so this bounds how long one BU sign-in lasts.
+                if (!properties.hasMaxSignInAge()) {
+                    return new AccessOutcome.Denied(AccessOutcome.DenialReason.POLICY_NOT_CONFIGURED);
+                }
+                if (!signInFresh(identity.get().signInTime().orElse(null), properties.getMaxSignInAge())) {
+                    return new AccessOutcome.Denied(AccessOutcome.DenialReason.REAUTHENTICATION_REQUIRED);
+                }
+            }
             // Enrollment (link or re-check) runs once per request, before the identity is
             // resolved, and only while enforcement AND enrollment are both on.
             if (properties.isEnforcementEnabled() && properties.getEnrollment().isEnabled()) {
@@ -125,6 +159,14 @@ public class RecordAuthorizationService implements RecordVisibility {
         } catch (RuntimeException failure) {
             return new AccessOutcome.Denied(AccessOutcome.DenialReason.EVALUATION_FAILED);
         }
+    }
+
+    private boolean signInFresh(Instant signedIn, Duration maxAge) {
+        if (signedIn == null) {
+            return false;
+        }
+        Instant now = clock.instant();
+        return !signedIn.isAfter(now.plus(ALLOWED_CLOCK_SKEW)) && !signedIn.plus(maxAge).isBefore(now);
     }
 
     /** Runs work on another thread with this request's outcome (e.g. Global Search branches). */
@@ -156,7 +198,12 @@ public class RecordAuthorizationService implements RecordVisibility {
         }
         switch (outcome()) {
             case AccessOutcome.NotProvisioned ignored -> throw new AccessNotProvisionedException();
-            case AccessOutcome.Denied ignored -> throw new IdentityAccessDeniedException();
+            case AccessOutcome.Denied denied -> {
+                if (denied.reason() == AccessOutcome.DenialReason.REAUTHENTICATION_REQUIRED) {
+                    throw new ReauthenticationRequiredException();
+                }
+                throw new IdentityAccessDeniedException();
+            }
             case AccessOutcome.Scoped ignored -> { }
         }
     }
@@ -340,7 +387,10 @@ public class RecordAuthorizationService implements RecordVisibility {
             case AccessOutcome.NotProvisioned notProvisioned ->
                     new AccessStatus("ENFORCED", "record authorization enforced", AccessNotProvisionedProblem.CODE, List.of());
             case AccessOutcome.Denied denied ->
-                    new AccessStatus("ENFORCED", "record authorization enforced", "ACCESS_DENIED", List.of());
+                    new AccessStatus("ENFORCED", "record authorization enforced",
+                            denied.reason() == AccessOutcome.DenialReason.REAUTHENTICATION_REQUIRED
+                                    ? ReauthenticationRequiredException.CODE : "ACCESS_DENIED",
+                            List.of());
             case AccessOutcome.Scoped scoped -> new AccessStatus("ENFORCED", "record authorization enforced", null,
                     grantKinds(scoped.scope()));
         };
