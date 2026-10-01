@@ -73,6 +73,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
         "app.authorization.enrollment.endpoint-override=http://127.0.0.1:9",
         "app.authorization.enrollment.saml-provider-name=SyntheticSaml",
         "app.authorization.enrollment.identifier-attribute=custom:synthetic_principal_attr",
+        "app.authorization.enrollment.accept-mapped-attribute-identifier=true",
         "app.authorization.enrollment.crosswalk-attribute-name=syntheticPrincipalAttr",
         "app.authorization.enrollment.refusal-retry-seconds=0",
         "app.attachments.storage=local",

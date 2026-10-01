@@ -512,15 +512,48 @@ class IdentityEnrollmentServiceTest {
         assertThat(service.prepare(later).deniesRequest()).isTrue();
     }
 
+    private CognitoProfile nameIdProfile(String sub, String nameId, String username) {
+        var p = new CognitoProfile(sub, username, true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, nameId)), Map.of(ATTRIBUTE, "SYN-V-2"));
+        pool.put(PROVIDER + "_" + sub, p);
+        return p;
+    }
+
+    private IdentityEnrollmentService byNameId() {
+        return new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
+                PROVIDER, IdentityEnrollmentService.FEDERATED_USER_ID, CROSSWALK, Duration.ZERO), reader, store, clock);
+    }
+
     @Test
     void theFederatedNameIdCanBeTheIdentifierSource() {
-        var byNameId = new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
-                PROVIDER, IdentityEnrollmentService.FEDERATED_USER_ID, CROSSWALK, Duration.ZERO), reader, store, clock);
-        // profile(...) records the NameID as "nameid-<sub>"; the attribute is deliberately different.
-        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "nameid-s-nid", "SYNP-1", true));
-        profile("s-nid", PROVIDER, "SYN-V-2");
-        assertThat(byNameId.prepare(token("s-nid"))).isEqualTo(EnrollmentOutcome.LINKED);
-        assertThat(onlyLink().identifier()).isEqualTo("nameid-s-nid");
+        // Cognito keys a SAML profile as <provider>_<NameID>; the NameID is fresh by construction.
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "s-nid", "SYNP-1", true));
+        nameIdProfile("s-nid", "s-nid", PROVIDER + "_s-nid");
+        var service = byNameId();
+        assertThat(service.prepare(token("s-nid"))).isEqualTo(EnrollmentOutcome.LINKED);
+        assertThat(onlyLink().identifier()).isEqualTo("s-nid");
+        assertThat(service.prepare(token("s-nid", SIGN_IN.plusSeconds(60)))).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+    }
+
+    @Test
+    void inNameIdModeAProfileNotKeyedByThatNameIdIsRefused() {
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "nid-x", "SYNP-1", true));
+        nameIdProfile("s-odd", "nid-x", PROVIDER + "_s-odd");      // identities say nid-x, username says otherwise
+        assertThat(byNameId().prepare(token("s-odd"))).isEqualTo(EnrollmentOutcome.REFUSED_NAMEID_NOT_PROFILE_KEY);
+        assertThat(store.links).isEmpty();
+    }
+
+    @Test
+    void aMappedAttributeIdentifierNeedsExplicitAcceptanceOfTheFreshnessRisk() {
+        var e = new AuthorizationProperties.Enrollment();
+        e.setUserPoolId("p"); e.setRegion("r"); e.setSamlProviderName(PROVIDER); e.setCrosswalkAttributeName(CROSSWALK);
+        e.setIdentifierAttribute("custom:bu_identifier");
+        assertThat(e.missingSettings()).anyMatch(m -> m.contains("accept-mapped-attribute-identifier"));
+        e.setAcceptMappedAttributeIdentifier(true);
+        assertThat(e.missingSettings()).isEmpty();
+        e.setAcceptMappedAttributeIdentifier(false);
+        e.setIdentifierAttribute(IdentityEnrollmentService.FEDERATED_USER_ID);
+        assertThat(e.missingSettings()).isEmpty();
     }
 
     // --- native / linked accounts, foreign issuers, transient failures -------------------------

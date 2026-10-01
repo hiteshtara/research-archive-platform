@@ -184,6 +184,11 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
                 problem = "not_federated";
             } else if (!profile.federatedOnly()) {
                 problem = "not_federated_only";
+            } else if (FEDERATED_USER_ID.equals(settings.identifierAttribute())
+                    && !identifierOf(profile).map(id -> (settings.samlProviderName() + "_" + id).equals(profile.username()))
+                            .orElse(false)) {
+                // NameID mode: the profile must be the one Cognito located by that NameID.
+                problem = "nameid_not_profile_key";
             } else if (!identifierOf(profile).map(v -> v.equals(link.institutionalIdentifier())).orElse(false)) {
                 problem = identifierOf(profile).isEmpty() ? "identifier_missing" : "identifier_changed";
             }
@@ -272,6 +277,10 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
             return refuse(identity, EnrollmentOutcome.REFUSED_NOT_FEDERATED_ONLY, null, Map.of());
         }
         Optional<String> value = identifierOf(profile);
+        if (FEDERATED_USER_ID.equals(settings.identifierAttribute()) && value.isPresent()
+                && !(settings.samlProviderName() + "_" + value.get()).equals(profile.username())) {
+            return refuse(identity, EnrollmentOutcome.REFUSED_NAMEID_NOT_PROFILE_KEY, null, Map.of());
+        }
         if (value.isEmpty()) {
             return refuse(identity, EnrollmentOutcome.REFUSED_MISSING_IDENTIFIER, null, Map.of());
         }

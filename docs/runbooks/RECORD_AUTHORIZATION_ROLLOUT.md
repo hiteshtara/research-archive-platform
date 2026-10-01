@@ -320,3 +320,25 @@ These are the conditions under which a valid token can lead to a trusted link:
 **A limit the archive cannot close:** if BU reassigns a NameID **and** the identifier value
 to another person, nothing in the assertion changes. Only BU can guarantee this never happens.
 
+## Identity freshness (2026-10-01)
+
+**Use the SAML NameID as the identifier (`identifier-attribute: identities.userId`) whenever
+BU can make the NameID the stable person identifier.**
+
+- Cognito locates the profile by that exact NameID on every sign-in, so its value is fresh by
+  construction.
+- The API also checks that the profile's username is `<provider>_<NameID>`.
+
+**A mapped attribute is only as fresh as Cognito's attribute handling.**
+
+- AWS documents that mapped attributes are overwritten at sign-in, and that a mapped attribute
+  persists in the profile.
+- AWS does **not** document that an attribute **missing** from a later assertion is cleared.
+- So re-reading the profile cannot tell a retained, outdated value from a fresh BU confirmation.
+- Custom attributes cannot be made required to force a failure.
+
+**The API refuses to start with a mapped-attribute identifier unless
+`app.authorization.enrollment.accept-mapped-attribute-identifier=true` is set.** That setting
+records an explicit acceptance of this risk. The mitigation is a BU attribute-release policy that
+**always** sends the attribute to this SP.
+

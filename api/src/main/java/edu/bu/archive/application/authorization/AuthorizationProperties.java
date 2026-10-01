@@ -96,6 +96,14 @@ public class AuthorizationProperties {
         private String identifierAttribute;
         private String crosswalkAttributeName;
         private long refusalRetrySeconds = 60;
+        /**
+         * Identity freshness. The SAML NameID ("identities.userId") is the profile key Cognito
+         * matched on THIS sign-in, so it is always fresh. A mapped attribute is only as fresh as
+         * Cognito's attribute handling: AWS does not document that a mapped attribute missing from
+         * a later assertion is cleared, so a retained, outdated value cannot be told apart from a
+         * fresh one. Using one therefore requires this explicit acceptance (default false).
+         */
+        private boolean acceptMappedAttributeIdentifier;
 
         /** Property keys that must be set when enrollment is enabled but are not. */
         public List<String> missingSettings() {
@@ -105,7 +113,21 @@ public class AuthorizationProperties {
             if (blank(samlProviderName)) missing.add("app.authorization.enrollment.saml-provider-name");
             if (blank(identifierAttribute)) missing.add("app.authorization.enrollment.identifier-attribute");
             if (blank(crosswalkAttributeName)) missing.add("app.authorization.enrollment.crosswalk-attribute-name");
+            if (!blank(identifierAttribute) && !"identities.userId".equals(identifierAttribute.trim())
+                    && !acceptMappedAttributeIdentifier) {
+                missing.add("app.authorization.enrollment.accept-mapped-attribute-identifier=true (identifier-attribute '"
+                        + identifierAttribute.trim() + "' is a mapped attribute whose freshness Cognito does not "
+                        + "guarantee; use identities.userId (the NameID) or accept the risk explicitly)");
+            }
             return missing;
+        }
+
+        public boolean isAcceptMappedAttributeIdentifier() {
+            return acceptMappedAttributeIdentifier;
+        }
+
+        public void setAcceptMappedAttributeIdentifier(boolean acceptMappedAttributeIdentifier) {
+            this.acceptMappedAttributeIdentifier = acceptMappedAttributeIdentifier;
         }
 
         private static boolean blank(String value) {

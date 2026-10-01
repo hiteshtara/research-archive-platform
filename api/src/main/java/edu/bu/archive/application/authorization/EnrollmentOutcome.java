@@ -29,6 +29,8 @@ public enum EnrollmentOutcome {
     REFUSED_NOT_FEDERATED_ONLY,
     /** The token was not issued by the configured user pool. */
     REFUSED_FOREIGN_ISSUER,
+    /** NameID mode: the profile is not the one Cognito keys by that NameID (username != provider_NameID). */
+    REFUSED_NAMEID_NOT_PROFILE_KEY,
     REFUSED_MISSING_IDENTIFIER,
     REFUSED_UNKNOWN_PERSON,
     REFUSED_AMBIGUOUS_MAPPING,
