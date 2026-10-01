@@ -35,7 +35,8 @@ case "$cmd" in
         WHERE institutional_identifier = '$1' AND status = 'ACTIVE' AND cognito_issuer LIKE 'https://localhost:9443/%'"
     else
       archive -c "UPDATE authz.identity_link SET status = 'ACTIVE', revoked_by = NULL, revoked_at = NULL
-        WHERE institutional_identifier = '$1' AND revoked_by = 'lab-admin' AND cognito_issuer LIKE 'https://localhost:9443/%'"
+        WHERE institutional_identifier = '$1' AND revoked_by IN ('lab-admin', 'api-enrollment')
+          AND cognito_issuer LIKE 'https://localhost:9443/%'"
     fi ;;
   add-grant)   # add-grant <inst> UNIT <unit> | IO <io> | CENTRAL | CONTACT_DERIVATION
     case "$2" in
@@ -46,9 +47,12 @@ case "$cmd" in
   remove-grant)
     archive -c "UPDATE authz.access_grant SET revoked_by = 'lab-admin', revoked_at = now()
       WHERE institutional_identifier = '$1' AND grant_type = '$2' AND granted_by = 'lab-admin' AND revoked_at IS NULL" ;;
-  revoke-crosswalk|restore-crosswalk)   # <attribute-value>: the KIM principal mapping itself
-    v=$([ "$cmd" = revoke-crosswalk ] && echo REVOKED || echo ACTIVE)
-    archive -c "UPDATE identity_lab.principal_crosswalk SET status = '$v' WHERE attribute_value = '$1'" ;;
+  revoke-crosswalk)   # <attribute-value>: the KIM principal mapping itself (authz.principal_crosswalk)
+    archive -c "UPDATE authz.principal_crosswalk SET status = 'REVOKED', revoked_by = 'lab-admin', revoked_at = now()
+      WHERE attribute_value = '$1' AND status = 'ACTIVE'" ;;
+  restore-crosswalk)
+    archive -c "UPDATE authz.principal_crosswalk SET status = 'ACTIVE', revoked_by = NULL, revoked_at = NULL
+      WHERE attribute_value = '$1' AND revoked_by = 'lab-admin'" ;;
   rename-login)
     ldap ldapmodrdn -r "uid=$1,ou=people,dc=lab,dc=invalid" "uid=$2" ;;
   add-account)
@@ -61,7 +65,7 @@ case "$cmd" in
     pool -c "INSERT INTO setting VALUES ('nameid_mode', '$1') ON CONFLICT (key) DO UPDATE SET value = '$1'" ;;
   status)
     archive -c "SELECT cognito_subject, institutional_identifier, kuali_person_id, login_name, method, status FROM authz.identity_link WHERE cognito_issuer LIKE 'https://localhost:9443/%' ORDER BY identity_link_id"
-    archive -c "SELECT occurred_at::time(0), institutional_identifier, outcome FROM identity_lab.enrollment_event ORDER BY event_id DESC LIMIT 15"
+    archive -c "SELECT occurred_at::time(0), institutional_identifier, detail->>'outcome' AS outcome FROM authz.access_audit WHERE action LIKE 'ENROLLMENT_%' ORDER BY audit_id DESC LIMIT 15"
     pool -c "SELECT username, sub, attributes->>'custom:login' AS login FROM user_profile ORDER BY created_at" ;;
   *) sed -n '2,12p' "$0"; exit 2 ;;
 esac

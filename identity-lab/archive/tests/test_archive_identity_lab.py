@@ -90,8 +90,10 @@ def refused(token):
 
 
 def latest_enrollment(inst=None):
-    where = f"WHERE institutional_identifier = '{inst}'" if inst else ""
-    return archive_sql(f"SELECT outcome FROM identity_lab.enrollment_event {where} ORDER BY event_id DESC LIMIT 1")
+    """Latest enrollment decision audited by the API (authz.access_audit, action ENROLLMENT_*)."""
+    where = f"AND institutional_identifier = '{inst}'" if inst else ""
+    return archive_sql(f"SELECT detail->>'outcome' FROM authz.access_audit WHERE action LIKE 'ENROLLMENT_%' "
+                       f"{where} ORDER BY audit_id DESC LIMIT 1")
 
 
 # ------------------------------------------------------------- roles
@@ -157,7 +159,7 @@ def test_repeated_login_gives_same_nameid_profile_and_person():
     assert archive_sql(
         f"SELECT count(*) FROM authz.identity_link WHERE cognito_subject = '{claims(first)['sub']}' "
         "AND status = 'ACTIVE' AND institutional_identifier = 'SYN-INST-0003'") == "1"
-    assert latest_enrollment("SYN-INST-0003") == "ALREADY_LINKED"
+    assert latest_enrollment("SYN-INST-0003") == "LINKED"      # linked once; later sign-ins re-validate only
 
 
 def test_changed_login_name_same_institutional_id_is_the_same_person():
@@ -182,9 +184,9 @@ def test_reused_login_name_with_different_institutional_id_is_a_different_person
         reused = sign_in("lab-pat", "Lab-Reuse-2026")
         assert claims(reused)["username"] != claims(original)["username"]
         assert claims(reused)["sub"] != claims(original)["sub"]
-        assert latest_enrollment("SYN-INST-0010") in ("LINKED", "ALREADY_LINKED")
-        # no grants of its own, and nothing inherited from Pat
+        # no grants of its own, and nothing inherited from Pat (the first request enrolls)
         assert refused(reused) == (403, "ACCESS_NOT_PROVISIONED", "ACCESS_NOT_PROVISIONED")
+        assert latest_enrollment("SYN-INST-0010") in ("LINKED", "ALREADY_LINKED")
         assert status(reused, "/api/v1/awards/9000102/summary") == 403
     finally:
         admin("remove-account", "lab-pat")
@@ -196,8 +198,8 @@ def test_transient_nameid_changes_the_profile_and_fails_closed():
     try:
         one, two = sign_in("lab-io"), sign_in("lab-io")
         assert claims(one)["sub"] != claims(two)["sub"]
-        assert latest_enrollment("SYN-INST-0005") == "REFUSED_IDENTIFIER_LINKED_TO_ANOTHER_PROFILE"
         assert refused(two) == (403, "ACCESS_NOT_PROVISIONED", "ACCESS_NOT_PROVISIONED")
+        assert latest_enrollment("SYN-INST-0005") == "REFUSED_IDENTIFIER_LINKED_TO_ANOTHER_PROFILE"
     finally:
         admin("nameid", "persistent")
     assert families(sign_in("lab-io")) == {F, I}
@@ -214,8 +216,8 @@ def test_missing_institutional_id_attribute_cannot_sign_in():
 
 def test_person_not_in_crosswalk_is_not_provisioned():
     t = sign_in("lab-stranger")
-    assert latest_enrollment("SYN-INST-0099") == "REFUSED_UNKNOWN_PERSON"
     assert refused(t) == (403, "ACCESS_NOT_PROVISIONED", "ACCESS_NOT_PROVISIONED")
+    assert latest_enrollment() == "REFUSED_UNKNOWN_PERSON"    # an unknown value is not recorded
 
 
 def test_suspended_person_is_denied():

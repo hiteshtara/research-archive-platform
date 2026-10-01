@@ -31,6 +31,16 @@ app:
     research-staff-roles: ${LAB_RESEARCH_STAFF_ROLES:PI,MPI,COI}
     # Approved 2026-10-01 (design section 13): contact access via the verified KIM principal.
     contact-derivation: ${LAB_CONTACT_DERIVATION:VERIFIED_PRINCIPAL}
+    # Real server-side enrollment (production code) against the SIMULATED Cognito's AdminGetUser.
+    enrollment:
+      enabled: true
+      user-pool-id: us-east-1_LabSimSaml
+      region: us-east-1
+      endpoint-override: https://localhost:9443
+      saml-provider-name: LabShibboleth
+      identifier-attribute: custom:institutional_id
+      crosswalk-attribute-name: labInstitutionalId
+      refusal-retry-seconds: 0
   attachments:
     storage: local
     local-directory: ${LAB_ATTACHMENT_DIR:/tmp/identity-lab-attachments}

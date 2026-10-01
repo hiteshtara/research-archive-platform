@@ -388,6 +388,22 @@ def user_pool_api():
                         (claims["username"],))
         db.event("GLOBAL_SIGN_OUT", claims["username"], {})
         return ok({})
+    if target == "AdminGetUser":
+        # Server-side profile read used by an application's enrollment (Cognito: IAM-signed;
+        # the lab does not verify SigV4 - it is reachable only on 127.0.0.1).
+        if body.get("UserPoolId") != POOL_ID:
+            return error("ResourceNotFoundException", "User pool does not exist")
+        profile = profile_by_username(body.get("Username", ""))
+        if not profile:
+            return error("UserNotFoundException", "User does not exist.")
+        attrs = [{"Name": "sub", "Value": str(profile["sub"])},
+                 {"Name": "identities", "Value": json.dumps(profile["identities"])}]
+        attrs += [{"Name": k, "Value": v} for k, v in sorted(profile["attributes"].items())]
+        db.event("ADMIN_GET_USER", profile["username"], {})
+        return ok({"Username": profile["username"], "UserAttributes": attrs, "Enabled": bool(profile["enabled"]),
+                   "UserStatus": "EXTERNAL_PROVIDER",
+                   "UserCreateDate": profile["created_at"].timestamp(),
+                   "UserLastModifiedDate": profile["updated_at"].timestamp()})
     if target == "RevokeToken":
         db.cognito_exec("UPDATE refresh_token SET revoked_at = now() WHERE token_hash = %s",
                         (hashlib.sha256(body.get("Token", "").encode()).hexdigest(),))

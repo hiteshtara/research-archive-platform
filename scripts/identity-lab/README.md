@@ -18,7 +18,8 @@ How it works is in [`identity-lab/TRUST_FLOW.md`](../../identity-lab/TRUST_FLOW.
 ```
 scripts/identity-lab/start.sh          # first start generates TEST keys + salt into .identity-lab/
 open "http://localhost:5198/awards/search?q=SYNTHETIC"
-scripts/identity-lab/test.sh           # 19 end-to-end tests against the running lab
+scripts/identity-lab/test.sh           # 21 end-to-end tests against the running lab
+scripts/identity-lab/acceptance.sh --alternatives   # Award requirement matrix, both policy choices
 scripts/identity-lab/test.sh --browser # + Chromium walkthrough (PI, Department, Central, IO)
 scripts/identity-lab/stop.sh           # keeps keys, salt, directory and databases
 scripts/identity-lab/reset.sh          # deletes all of it: everyone gets new NameIDs
@@ -49,6 +50,17 @@ These are in `identity-lab/archive/fixtures/users.tsv`. The passwords are test-o
 | `lab-suspended` | `Lab-Suspended-2026` | SYN-INST-0009 | suspended: access denied |
 | `lab-stranger` | `Lab-Stranger-2026` | SYN-INST-0099 | not in the crosswalk: not provisioned |
 | `lab-noattr` | `Lab-Noattr-2026` | (missing) | the IdP cannot issue a NameID: sign-in fails |
+| `lab-kim-pi` | `Lab-Kim-Pi-2026` | SYN-INST-0011 | KIM principal who is PI on Award J, with **no grant rows**: sees J only |
+| `lab-kim-only` | `Lab-Kim-Only-2026` | SYN-INST-0012 | KIM principal who is nobody's contact: not provisioned |
+| `lab-kim-inactive` | `Lab-Kim-Inactive-2026` | SYN-INST-0013 | principal departed after import: refused |
+| `lab-kim-ambiguous` | `Lab-Kim-Ambiguous-2026` | SYN-INST-0014 | ambiguous mapping, rejected at import: unknown |
+| `lab-rolodex` | `Lab-Rolodex-2026` | SYN-INST-0016 | non-employee (rolodex) id, rejected at import: unknown |
+
+**Enrollment** is the archive API's production code, `IdentityEnrollmentService`.
+
+- It reads the profile through the simulated Cognito's `AdminGetUser`.
+- The crosswalk in `authz.principal_crosswalk` is imported at start with the production admin CLI, `scripts/authz-admin`.
+- Every decision is in `authz.access_audit`; `admin.sh status` shows the latest ones.
 
 ## Live administration (`scripts/identity-lab/admin.sh`)
 

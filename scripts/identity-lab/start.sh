@@ -37,6 +37,15 @@ if [ "$(docker exec lab-archive-db psql -U lab_archive -d identity_lab -Atc "sel
     < "$LAB/archive/db/archive-lab.sql"
   docker exec -i lab-archive-db psql -q -v ON_ERROR_STOP=1 -U lab_archive -d identity_lab \
     < "$LAB/archive/db/award-acceptance-fixtures.sql"
+  echo "Importing the KIM principal crosswalk with the production admin CLI (validated, audited) ..."
+  F="$LAB/archive/fixtures"
+  AUTHZ_ADMIN_DATABASE_URL="postgresql://lab_archive:$LAB_ARCHIVE_DB_PASSWORD@127.0.0.1:55433/identity_lab" \
+    uv run -q --no-project --with 'psycopg[binary]' "$ROOT/scripts/authz-admin/authz_admin.py" crosswalk-import \
+    "$F/kim_principals.tsv" "$F/principal_crosswalk.tsv" --attribute labInstitutionalId \
+    --rolodex-ids "$F/rolodex_ids.txt" --load-ref lab-fixtures --actor lab-start
+  # Simulate a later KIM refresh in which this (FICTIONAL) principal has departed.
+  docker exec lab-archive-db psql -q -U lab_archive -d identity_lab \
+    -c "UPDATE authz.kim_principal SET actv_ind = 'N' WHERE prncpl_id = 'SYNP-KIM-13'"
 fi
 python3 "$LAB/archive/fixtures/make_attachment_pdfs.py" "$STATE/attachments" >/dev/null
 
@@ -50,8 +59,9 @@ until curl -sf --cacert "$CREDS/ca.crt" https://localhost:9443/lab/health >/dev/
 
 if ! curl -sf "http://127.0.0.1:$API_PORT/actuator/health" >/dev/null 2>&1; then
   echo "Starting API (profile identity-lab, real JWT validation) on :$API_PORT ..."
-  (cd "$ROOT/api" && exec env LAB_ARCHIVE_DB_PASSWORD="$LAB_ARCHIVE_DB_PASSWORD" LAB_API_PORT="$API_PORT" LAB_UI_PORT="$UI_PORT" \
+  (cd "$ROOT/api" && exec env -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_SESSION_TOKEN LAB_ARCHIVE_DB_PASSWORD="$LAB_ARCHIVE_DB_PASSWORD" LAB_API_PORT="$API_PORT" LAB_UI_PORT="$UI_PORT" \
     LAB_ATTACHMENT_DIR="$STATE/attachments" ${LAB_POLICY_ENV:-} \
+    AWS_ACCESS_KEY_ID=lab-not-a-real-key AWS_SECRET_ACCESS_KEY=lab-not-a-real-secret \
     mvn -B -ntp -q -Pauthz-demo spring-boot:run -Dspring-boot.run.profiles=identity-lab \
     "-Dspring-boot.run.jvmArguments=-Djavax.net.ssl.trustStore=$STATE/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12") \
     < /dev/null > "$STATE/api.log" 2>&1 &

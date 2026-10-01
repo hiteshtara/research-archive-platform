@@ -491,8 +491,10 @@ def sql(query):
 
 
 def enrollment_outcome(inst):
-    return sql(f"SELECT outcome FROM identity_lab.enrollment_event WHERE institutional_identifier = '{inst}' "
-               "ORDER BY event_id DESC LIMIT 1")
+    """Latest enrollment decision audited by the API; inst=None for refusals that record no identifier."""
+    where = f"AND institutional_identifier = '{inst}'" if inst else ""
+    return sql(f"SELECT detail->>'outcome' FROM authz.access_audit WHERE action LIKE 'ENROLLMENT_%' {where} "
+               "ORDER BY audit_id DESC LIMIT 1")
 
 
 def check_kim_chain(run):
@@ -509,19 +511,29 @@ def check_kim_chain(run):
     run.add("K2-link", "3", "T8", "lab-kim-pi", "Identity link carries the KIM principal",
             "SYNP-KIM-11 AUTO_VERIFIED", link, "PASS" if link == "SYNP-KIM-11 AUTO_VERIFIED" else "FAIL")
     for user, inst, outcome, label in (
-            ("lab-kim-only", "SYN-INST-0012", "LINKED|ALREADY_LINKED", "KIM account that is nobody's contact"),
-            ("lab-kim-inactive", "SYN-INST-0013", "REFUSED_INACTIVE_PRINCIPAL", "inactive KIM principal"),
-            ("lab-kim-ambiguous", "SYN-INST-0014", "REFUSED_AMBIGUOUS_MAPPING", "attribute maps to two principals"),
-            ("lab-rolodex", "SYN-INST-0016", "REFUSED_NOT_A_KIM_PRINCIPAL", "mapped to a non-employee (rolodex) id"),
-            ("lab-stranger", "SYN-INST-0099", "REFUSED_UNKNOWN_PERSON", "no crosswalk row")):
+            ("lab-kim-only", "SYN-INST-0012", "LINKED", "KIM account that is nobody's contact"),
+            ("lab-kim-inactive", "SYN-INST-0013", "REFUSED_INACTIVE_PRINCIPAL", "principal departed after import"),
+            ("lab-kim-ambiguous", None, "REFUSED_UNKNOWN_PERSON", "ambiguous mapping (rejected at import)"),
+            ("lab-rolodex", None, "REFUSED_UNKNOWN_PERSON", "rolodex id (rejected at import)"),
+            ("lab-stranger", None, "REFUSED_UNKNOWN_PERSON", "no crosswalk row")):
         t = run.token(user, fresh=True)
+        r = get(t, "/api/v1/awards/search?q=SYNTHETIC")      # the first request enrolls
         got = enrollment_outcome(inst)
-        r = get(t, "/api/v1/awards/search?q=SYNTHETIC")
         ok = got in outcome.split("|") and r.status_code == 403 and code_of(r) == "ACCESS_NOT_PROVISIONED" and not leaks(r, ALL)
         run.add(f"K3-{user}", "3, 7", "T23", user, f"{label}: no archive access",
                 f"enrollment {outcome}; 403 ACCESS_NOT_PROVISIONED", f"enrollment {got}; {r.status_code} {code_of(r)}",
                 "PASS" if ok else "FAIL")
-    # The KIM mapping is revoked (crosswalk row): the next sign-in revokes the link; access denied.
+    # The import validator refuses the ambiguous and rolodex rows (all-or-nothing).
+    fx = ROOT / "identity-lab" / "archive" / "fixtures"
+    v = subprocess.run(["python3", str(ROOT / "scripts" / "authz-admin" / "validate_crosswalk.py"),
+                        str(fx / "kim_principals.tsv"), str(fx / "principal_crosswalk_rejected.tsv"),
+                        "--attribute", "labInstitutionalId", "--rolodex-ids", str(fx / "rolodex_ids.txt")],
+                       capture_output=True, text=True)
+    ok = (v.returncode == 1 and "maps to more than one principal" in v.stdout
+          and "never a login account" in v.stdout)
+    run.add("K5-import-validation", "3, 7", "T20", "(admin)", "Crosswalk import rejects ambiguous and rolodex rows",
+            "REJECTED (ambiguous, rolodex)", "REJECTED" if ok else v.stdout[-120:], "PASS" if ok else "FAIL")
+    # The KIM mapping is revoked (crosswalk row): the next request revokes the link; access denied.
     admin("revoke-crosswalk", "SYN-INST-0011")
     try:
         t = run.token("lab-kim-pi", fresh=True)

@@ -129,26 +129,30 @@ Every published port is bound to `127.0.0.1`.
 
 ## 4. Enrollment: how `(iss, sub)` becomes a person
 
-This is the lab's simulation of design §12.2 ("trusted provisioning"). **It is
-not implemented in the API.**
+This is the archive's **production** enrollment code (`IdentityEnrollmentService`, design §12.2
+Option A, and §13), not a lab substitute. It runs against the simulated Cognito's `AdminGetUser`.
 
-1. After a successful SAML sign-in, the lab enrollment step reads that
-   user-pool profile by `sub`.
-2. It accepts the profile only if **all** of these hold:
-   - `identities` names the lab SAML provider. A native profile is refused.
-   - The institutional-identifier attribute is present.
-   - That identifier exists in the lab crosswalk (`identity_lab.person_registry`,
-     institutional identifier → Kuali person id), which lives in the lab
-     application database, **not** in Shibboleth.
-   - No **other** active link exists for the same identifier and issuer.
-3. If every check passes, it writes `authz.identity_link (method = AUTO_VERIFIED)`.
-4. On every later sign-in, it compares the profile's identifier with the
-   linked one. A mismatch, such as a reassigned login name, revokes the link
-   and records the reason. It never moves the link to the new value.
-5. Every decision is written to `identity_lab.enrollment_event`.
+1. On a request whose identity has no active link, the API calls `AdminGetUser` with the
+   validated token's `username`. It then requires:
+   - that the profile's `sub` equals the token's `sub`;
+   - that the profile is enabled;
+   - that its `identities` name the lab SAML provider.
+2. It reads the institutional-identifier attribute. That value must have **exactly one ACTIVE**
+   row in `authz.principal_crosswalk`, pointing to an **ACTIVE** `authz.kim_principal`.
+   - The crosswalk is imported with the production admin CLI (`scripts/authz-admin`), which
+     validates it and imports it all-or-nothing.
+   - Ambiguous and rolodex rows are rejected at import.
+3. It refuses in these cases:
+   - another active link already exists for that identifier;
+   - a revoked link already exists for this `(iss, sub)`.
+4. Otherwise it writes `authz.identity_link (AUTO_VERIFIED, kuali_person_id = PRNCPL_ID)`.
+5. On later requests, an `AUTO_VERIFIED` link is re-checked against the crosswalk and the
+   principal. It is revoked if either is no longer valid.
+6. Every decision goes to `authz.access_audit` (`ENROLLMENT_*`), with the reason in
+   `detail.outcome`.
 
-A sign-in that fails enrollment still gets a valid token. The API then
-answers `ACCESS_NOT_PROVISIONED`, which is the intended fail-closed result.
+A sign-in that fails enrollment still gets a valid token. The API then answers
+`ACCESS_NOT_PROVISIONED`, which is the intended fail-closed result.
 
 ## 5. Login, token and logout sequence
 

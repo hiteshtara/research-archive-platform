@@ -1,6 +1,7 @@
 # Local SAML integration - Cognito simulated: ARCHIVE-SPECIFIC overlay on the
 # reusable core (../core/compose.yml). Adds the disposable archive database,
-# the archive's fictional accounts, groups and the enrollment hook.
+# the archive's fictional accounts and groups. Enrollment is done by the archive API's
+# production code (IdentityEnrollmentService) via the simulated Cognito's AdminGetUser.
 volumes:
   archive-db: {}
 
@@ -11,11 +12,8 @@ services:
 
   cognito:
     environment:
-      LAB_POST_SIGN_IN_HOOK: archive_enrollment:enroll
       LAB_GROUP_SEED_FILE: /lab/fixtures/groups.tsv
-      ARCHIVE_DATABASE_URL: postgresql://lab_archive:${LAB_ARCHIVE_DB_PASSWORD:?}@archive-db:5432/identity_lab
     volumes:
-      - ./archive/enrollment:/lab/hooks:ro
       - ./archive/fixtures:/lab/fixtures:ro
     depends_on:
       archive-db: {condition: service_healthy}
