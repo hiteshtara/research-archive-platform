@@ -1,6 +1,9 @@
 package edu.bu.archive.application.authorization;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -20,6 +23,15 @@ public class AuthorizationProperties {
     private AuthorizationPolicy.DepartmentMatch departmentMatch;
     private Set<String> researchStaffRoles = new LinkedHashSet<>();
     private AuthorizationPolicy.ContactDerivation contactDerivation;
+    /**
+     * The longest time since the caller's last BU sign-in ({@code auth_time})
+     * that an enforced request accepts. A Cognito refresh keeps the original
+     * {@code auth_time}, so without this a refresh token (30 days) would keep a
+     * session alive with no new BU login and no per-session re-check. Required
+     * when enforcement is on; NO default.
+     */
+    private Duration maxSignInAge;
+    private final Enrollment enrollment = new Enrollment();
 
     /** The configured policy, or empty when any strategy is missing. */
     public Optional<AuthorizationPolicy> policy() {
@@ -70,5 +82,160 @@ public class AuthorizationProperties {
 
     public void setContactDerivation(AuthorizationPolicy.ContactDerivation contactDerivation) {
         this.contactDerivation = contactDerivation;
+    }
+
+    public Duration getMaxSignInAge() {
+        return maxSignInAge;
+    }
+
+    public void setMaxSignInAge(Duration maxSignInAge) {
+        this.maxSignInAge = maxSignInAge;
+    }
+
+    /** True when a usable maximum sign-in age is configured. */
+    public boolean hasMaxSignInAge() {
+        return maxSignInAge != null && !maxSignInAge.isNegative() && !maxSignInAge.isZero();
+    }
+
+    public Enrollment getEnrollment() {
+        return enrollment;
+    }
+
+    /**
+     * {@code app.authorization.enrollment.*}: server-side enrollment (design
+     * 12.2 Option A). OFF by default. When enabled, every setting except
+     * {@code endpoint-override} is required and has NO default; the API
+     * refuses to start without them. No credentials are configured here: the
+     * AWS default credentials provider chain supplies them.
+     */
+    public static class Enrollment {
+
+        private boolean enabled;
+        private String userPoolId;
+        private String region;
+        private String endpointOverride;
+        private String samlProviderName;
+        private String identifierAttribute;
+        private String crosswalkAttributeName;
+        private long refusalRetrySeconds = 60;
+        /**
+         * Identity freshness. The SAML NameID ("identities.userId") is the profile key Cognito
+         * matched on THIS sign-in, so it is always fresh. A mapped attribute is only as fresh as
+         * Cognito's attribute handling: AWS does not document that a mapped attribute missing from
+         * a later assertion is cleared, so a retained, outdated value cannot be told apart from a
+         * fresh one. Using one therefore requires this explicit acceptance (default false).
+         */
+        private boolean acceptMappedAttributeIdentifier;
+        /**
+         * The user pool's UsernameConfiguration.CaseSensitive. Required, no default: a wrong value
+         * either refuses every federated user (case-insensitive pool treated as sensitive) or
+         * compares more loosely than the pool does.
+         */
+        private Boolean usernameCaseSensitive;
+
+        /** Property keys that must be set when enrollment is enabled but are not. */
+        public List<String> missingSettings() {
+            List<String> missing = new ArrayList<>();
+            if (blank(userPoolId)) missing.add("app.authorization.enrollment.user-pool-id");
+            if (blank(region)) missing.add("app.authorization.enrollment.region");
+            if (blank(samlProviderName)) missing.add("app.authorization.enrollment.saml-provider-name");
+            if (blank(identifierAttribute)) missing.add("app.authorization.enrollment.identifier-attribute");
+            if (blank(crosswalkAttributeName)) missing.add("app.authorization.enrollment.crosswalk-attribute-name");
+            if (usernameCaseSensitive == null) {
+                missing.add("app.authorization.enrollment.username-case-sensitive (true|false: the user pool's "
+                        + "UsernameConfiguration.CaseSensitive)");
+            }
+            if (!blank(identifierAttribute) && !"identities.userId".equals(identifierAttribute.trim())
+                    && !acceptMappedAttributeIdentifier) {
+                missing.add("app.authorization.enrollment.accept-mapped-attribute-identifier=true (identifier-attribute '"
+                        + identifierAttribute.trim() + "' is a mapped attribute whose freshness Cognito does not "
+                        + "guarantee; use identities.userId (the NameID) or accept the risk explicitly)");
+            }
+            return missing;
+        }
+
+        public Boolean getUsernameCaseSensitive() {
+            return usernameCaseSensitive;
+        }
+
+        public void setUsernameCaseSensitive(Boolean usernameCaseSensitive) {
+            this.usernameCaseSensitive = usernameCaseSensitive;
+        }
+
+        public boolean isAcceptMappedAttributeIdentifier() {
+            return acceptMappedAttributeIdentifier;
+        }
+
+        public void setAcceptMappedAttributeIdentifier(boolean acceptMappedAttributeIdentifier) {
+            this.acceptMappedAttributeIdentifier = acceptMappedAttributeIdentifier;
+        }
+
+        private static boolean blank(String value) {
+            return value == null || value.isBlank();
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getUserPoolId() {
+            return userPoolId;
+        }
+
+        public void setUserPoolId(String userPoolId) {
+            this.userPoolId = userPoolId;
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region;
+        }
+
+        public String getEndpointOverride() {
+            return endpointOverride;
+        }
+
+        public void setEndpointOverride(String endpointOverride) {
+            this.endpointOverride = endpointOverride;
+        }
+
+        public String getSamlProviderName() {
+            return samlProviderName;
+        }
+
+        public void setSamlProviderName(String samlProviderName) {
+            this.samlProviderName = samlProviderName;
+        }
+
+        public String getIdentifierAttribute() {
+            return identifierAttribute;
+        }
+
+        public void setIdentifierAttribute(String identifierAttribute) {
+            this.identifierAttribute = identifierAttribute;
+        }
+
+        public String getCrosswalkAttributeName() {
+            return crosswalkAttributeName;
+        }
+
+        public void setCrosswalkAttributeName(String crosswalkAttributeName) {
+            this.crosswalkAttributeName = crosswalkAttributeName;
+        }
+
+        public long getRefusalRetrySeconds() {
+            return refusalRetrySeconds;
+        }
+
+        public void setRefusalRetrySeconds(long refusalRetrySeconds) {
+            this.refusalRetrySeconds = refusalRetrySeconds;
+        }
     }
 }

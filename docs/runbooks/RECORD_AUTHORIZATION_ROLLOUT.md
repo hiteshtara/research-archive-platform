@@ -1,0 +1,390 @@
+# Record authorization: rollout runbook (enrollment, crosswalk, grants)
+
+This runbook turns on record-level authorization for a deployment. It is generic: every
+`<placeholder>` must be filled in from your own environment and your identity provider's
+answers. Nothing here has been applied to any environment.
+
+**What exists, all OFF by default:**
+
+- **Enforcement** (`app.authorization.enforcement-enabled`). It decides record access from
+  grants and verified contact relationships.
+- **Enrollment** (`app.authorization.enrollment.enabled`). Server-side, it links a signed-in
+  Cognito profile to an existing KIM principal through the crosswalk.
+- **Administration CLI** (`scripts/authz-admin/authz_admin.py`). It manages the crosswalk,
+  grants, links and suspensions, with an audit row for every write.
+
+Background: `docs/architecture/RECORD_AUTHORIZATION_STATUS.md`.
+
+## 0. Prerequisites (answers from your identity provider)
+
+Do not start until all four are answered in writing:
+
+1. **A stable, never-reassigned SAML NameID for the Cognito service provider.** Cognito
+   recognises a returning federated user by NameID. If the NameID changes, the same person
+   gets a new Cognito profile (new `sub`) and must enrol again.
+2. **The ONE verified attribute that resolves the existing KIM principal.** You need its
+   SAML name/OID, and a guarantee that it is never reassigned, survives a login-name
+   change, and has defined behaviour on leave and return.
+3. **An approved, read-only extract** of the principal ids, entity ids and active flags
+   for the people to be enrolled, plus the attribute-value → principal pairs (the
+   crosswalk). See `scripts/authz-admin/README.md` for the file format.
+4. **The approved policy settings** (`version-scope`, `department-match`,
+   `research-staff-roles`, `contact-derivation`). None of them has a default.
+
+## 1. Apply the migrations BEFORE deploying API code
+
+V082 (`authz` identity/grants/audit) and V083 (`authz.kim_principal`,
+`authz.principal_crosswalk`) are additive and create empty tables. As with every
+migration in this repository, **Spring does not apply them**. The ETL migration runner
+does.
+
+1. Confirm the loader image you will run contains V083: its source commit must descend
+   from the commit that added it:
+   `git merge-base --is-ancestor <v083-commit> <loader-image-commit>`.
+2. Run the loader in `--migrate-only` mode against the target database, using the same
+   execution path you use for every other migration.
+3. Verify the migrations landed:
+
+   ```sql
+   SELECT version, installed_at FROM public.schema_migration WHERE version IN (82, 83);
+   SELECT to_regclass('authz.identity_link'), to_regclass('authz.principal_crosswalk');
+   ```
+
+4. Only then deploy the API build that contains the enrollment code. With both flags
+   off, the new code reads none of these tables.
+
+## 2. Infrastructure (templates; review the plan, apply through your normal process)
+
+### 2.1 Cognito SAML identity provider, attribute mapping, app client
+
+```hcl
+# The custom attribute that will carry the ONE verified value. Adding a custom attribute
+# is in-place on an existing pool. Confirm `terraform plan` shows an update, not a
+# replacement (prevent_destroy on the pool blocks a replacement).
+resource "aws_cognito_user_pool" "this" {
+  # ... existing settings ...
+  schema {
+    name                     = "<identifier_attribute>"      # becomes custom:<identifier_attribute>
+    attribute_data_type      = "String"
+    mutable                  = true                          # required for SAML attribute mapping
+    developer_only_attribute = false
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+}
+
+resource "aws_cognito_identity_provider" "institution_saml" {
+  user_pool_id  = aws_cognito_user_pool.this.id
+  provider_name = "<SamlProviderName>"
+  provider_type = "SAML"
+
+  provider_details = {
+    MetadataURL = "<https://idp.example.edu/idp/shibboleth>"
+    IDPSignout  = "false"
+  }
+
+  attribute_mapping = {
+    "custom:<identifier_attribute>" = "<urn:oid:released.attribute.oid>"
+  }
+}
+
+resource "aws_cognito_user_pool_client" "app" {
+  # ... existing settings ...
+  supported_identity_providers = ["COGNITO", aws_cognito_identity_provider.institution_saml.provider_name]
+  allowed_oauth_scopes         = ["openid", "email", "profile"]   # never aws.cognito.signin.user.admin
+  read_attributes              = ["email", "custom:<identifier_attribute>"]
+  write_attributes             = ["email", "custom:<identifier_attribute>"]   # needed for SAML mapping
+}
+```
+
+**Attribute writability.** A mapped attribute must be writable by the app client. A token
+holding the `aws.cognito.signin.user.admin` scope could therefore change it with
+`UpdateUserAttributes`. Before go-live, test that a federated user's access token can't
+do this. Also confirm federated users have no password and so cannot use SRP sign-in.
+
+Enrollment also requires that the profile's `identities` record names
+`<SamlProviderName>`. That record is set by Cognito, and a native (password) profile
+never has it.
+
+### 2.2 IAM: the API task role may read profiles from this pool only
+
+```hcl
+data "aws_iam_policy_document" "api_enrollment" {
+  statement {
+    sid       = "ArchiveEnrollmentReadProfile"
+    actions   = ["cognito-idp:AdminGetUser"]
+    resources = [aws_cognito_user_pool.this.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "api_enrollment" {
+  name   = "<project>-<env>-api-enrollment"
+  role   = "<api-task-role-name>"
+  policy = data.aws_iam_policy_document.api_enrollment.json
+}
+```
+
+No credentials are configured in the application. The AWS SDK's default provider chain
+uses the task role.
+
+## 3. Application configuration
+
+```yaml
+app:
+  authorization:
+    enforcement-enabled: false            # turn on LAST (section 7)
+    # Approved policy (2026-10-01): family-wide within one Award number (never children or
+    # related records); sub-units only when a grant's include-sub-units flag is set;
+    # Key Person excluded. There are no code defaults - these must be set explicitly.
+    version-scope: FAMILY_WIDE
+    department-match: LEAD_UNIT_WITH_DESCENDANTS
+    research-staff-roles: PI,MPI,COI
+    contact-derivation: VERIFIED_PRINCIPAL
+    # Longest time since the person's last BU sign-in (the token's auth_time) that an enforced
+    # request accepts. REQUIRED with enforcement on; no default (missing = every request denied).
+    # A Cognito refresh keeps the original auth_time, so this is what ends a refreshed session.
+    max-sign-in-age: PT8H                 # proposed; the value is a launch decision (section 6.2)
+    enrollment:
+      enabled: true
+      user-pool-id: <region>_<poolId>
+      region: <region>
+      saml-provider-name: <SamlProviderName>
+      identifier-attribute: custom:<identifier_attribute>
+      crosswalk-attribute-name: <approvedAttributeName>   # authz.principal_crosswalk.attribute_name
+      # REQUIRED, no default: the pool's UsernameConfiguration.CaseSensitive
+      # (aws cognito-idp describe-user-pool --query 'UserPool.UsernameConfiguration').
+      # Cognito generates a federated username as <provider>_<NameID> and LOWERCASES it in a
+      # case-insensitive pool; the NameID-to-profile check then compares ignoring case. The NameID
+      # itself is never case-folded: the crosswalk and link matches stay exact.
+      username-case-sensitive: <true|false>
+      refusal-retry-seconds: 60          # a refused sign-in is re-tried after this; 0 = every request
+      # endpoint-override: only for a local lab's simulated user pool; never in a deployment
+```
+
+The same keys work as environment variables, e.g. `APP_AUTHORIZATION_ENROLLMENT_ENABLED=true`
+or `APP_AUTHORIZATION_ENROLLMENT_USER_POOL_ID=<region>_<poolId>`.
+
+If `enrollment.enabled=true` and any of `user-pool-id`, `region`, `saml-provider-name`,
+`identifier-attribute`, `crosswalk-attribute-name` or `username-case-sensitive` is missing, **the API refuses to
+start**, and the error message names the missing keys.
+
+Enrollment runs only while enforcement is on. With enforcement off, the Cognito client
+is created but never called.
+
+## 4. Enrollment procedure
+
+1. **Validate** the extract without a database:
+
+   ```bash
+   python3 scripts/authz-admin/authz_admin.py crosswalk-validate kim_principals.tsv principal_crosswalk.tsv \
+       --attribute <approvedAttributeName> --rolodex-ids <rolodex_ids.txt>
+   ```
+
+2. **Dry-run the import**, then import it:
+
+   ```bash
+   export AUTHZ_ADMIN_DATABASE_URL='<from your secret store>'
+   uv run --with 'psycopg[binary]' scripts/authz-admin/authz_admin.py crosswalk-import \
+       kim_principals.tsv principal_crosswalk.tsv --attribute <approvedAttributeName> \
+       --rolodex-ids <rolodex_ids.txt> --load-ref <batch-id> --actor <your-admin-id> --dry-run
+   # repeat without --dry-run
+   ```
+
+   The command prints counts only. Any validation failure, or any conflict with an
+   existing ACTIVE mapping, imports nothing.
+
+3. **What happens at sign-in.** On the user's first request with enforcement on, the API
+   runs these checks in order:
+   1. read the token's `username` claim;
+   2. call `AdminGetUser`;
+   3. require the profile `sub` to equal the token `sub`;
+   4. require the federation record to name `<SamlProviderName>`;
+   5. read `custom:<identifier_attribute>`;
+   6. require exactly one ACTIVE crosswalk row, pointing to an ACTIVE principal;
+   7. require that this profile has no revoked link and that no other profile holds the
+      identifier.
+
+   If every check passes, it writes an `AUTO_VERIFIED` identity link. The link's
+   `institutional_identifier` is the attribute value, and its `kuali_person_id` is the
+   principal. `login_name` stays empty.
+
+   Every refusal links nothing and is audited. The user sees "access not provisioned".
+
+## 5. Grant administration
+
+Grants are keyed on the **institutional identifier**: the crosswalk attribute value, as
+stored on the identity link. Grants can be added before a person first signs in.
+
+```bash
+authz_admin.py grant-add --type CENTRAL --grantee <identifier> --granted-by <admin-a> --approved-by <admin-b> --reason "<ticket>"
+authz_admin.py grant-add --type UNIT --grantee <identifier> --unit <unit-number> [--include-descendants] --granted-by ... --approved-by ... --reason ...
+authz_admin.py grant-add --type IO --grantee <identifier> --io <account-number> --granted-by ... --approved-by ... --reason ...
+authz_admin.py grant-revoke --grant-id <n> --revoked-by <admin> --reason "<ticket>"
+authz_admin.py list --institutional-id <identifier>
+```
+
+**Research Staff access needs no grant.** Under `VERIFIED_PRINCIPAL`, a linked principal
+sees the Awards and Proposals on which they are a qualifying contact.
+
+The CLI refuses three things:
+
+- a self-grant;
+- self-approval;
+- a `CENTRAL` grant whose approver is also its granter.
+
+## 6. Audit, revocation and suspension
+
+Every change is recorded in `authz.access_audit`, an append-only table:
+
+- **The API (actor `api-enrollment`)** writes `ENROLLMENT_LINKED`,
+  `ENROLLMENT_ALREADY_LINKED`, `ENROLLMENT_REFUSED`, `ENROLLMENT_FAILED` and
+  `ENROLLMENT_LINK_REVOKED`. The specific reason is in `detail->>'outcome'`, e.g.
+  `REFUSED_UNKNOWN_PERSON`.
+- **The CLI** writes `CROSSWALK_IMPORTED`, `GRANT_ADDED`, `GRANT_REVOKED`,
+  `LINK_REVOKED`, `CROSSWALK_REVOKED`, `PERSON_SUSPENDED` and `PERSON_UNSUSPENDED`.
+
+A refused sign-in is audited at most once per `refusal-retry-seconds` per API instance.
+
+**Revocation applies on the next request,** not when the token expires. Every request
+re-checks the identity link, suspension and grants in the database, and re-checks
+`AUTO_VERIFIED` links against the crosswalk and principal:
+
+| Action | Effect |
+|---|---|
+| `crosswalk-revoke`, or a principal re-imported as `actv_ind=N` | link revoked by the API on the next request; access denied |
+| `link-revoke` | denied on the next request; never re-linked automatically (`REFUSED_PREVIOUSLY_REVOKED`) |
+| `suspend` | denied on the next request; overrides every grant |
+| `grant-revoke` | removes exactly what that grant supplied, on the next request |
+
+### 6.1 Offboarding: archive revocation is a separate control from sign-in
+
+A stable NameID and the username check prove **which person** a profile belongs to. They do
+**not** prove a fresh BU login, and they do **not** prove the person is still employed.
+Departure is handled by **two separate times**, which must not be merged into one promise:
+
+| Step | Who controls it | How long it takes |
+|---|---|---|
+| **Notification:** the archive administrators learn of the departure | BU / HR process, outside the application | Until a Huron or HR feed exists, as long as that manual process takes |
+| **Application revocation:** `link-revoke`, `crosswalk-revoke` or `suspend` | Archive administrators, audited CLI | Effective on the **next request**: no token, cache or session survives it |
+
+- A periodic grant review finds what the notification process missed. It is **not** a
+  revocation mechanism and does not shorten either time.
+- **Disabling the BU account does not end an existing archive session.** The Cognito refresh
+  token (up to its validity, 30 days by default) keeps issuing tokens without contacting BU.
+  Until the archive revokes, the bound on that window is the maximum sign-in age (6.2).
+- **A revoked user still holds a valid Cognito session**, but every API request is refused.
+  To stop new tokens as well, disable the Cognito user or sign them out globally through your
+  normal account process.
+
+### 6.2 Refreshed sessions: the maximum sign-in age
+
+- A Cognito refresh issues new tokens with the **original** `auth_time`. The per-session
+  profile re-check (section "Required Cognito settings") runs only on a new `auth_time`, so a
+  refreshed session is never re-checked against Cognito or BU.
+- **`app.authorization.max-sign-in-age` bounds it.** Once `auth_time` is older, every
+  enforced request, Central included, gets **401 `REAUTHENTICATION_REQUIRED`**, before
+  enrollment or any grant is read. A token with no `auth_time`, or one more than five minutes
+  in the future, is refused the same way. `/api/v1/me/access` reports the same problem.
+- The UI answers that 401 by starting a new login with `prompt=login`, at most once per two
+  minutes, so a sign-in the API still refuses shows an error instead of looping.
+- With enforcement on and no value (or zero or negative), every request is denied
+  (`POLICY_NOT_CONFIGURED`).
+- **What the value means:** the longest a person can keep using the archive after BU disables
+  their account, if nobody revokes them in the archive. Choosing it is a launch decision.
+- **To verify with BU IAM and real Cognito (joint test):** whether Cognito forwards
+  `prompt=login` to the SAML IdP as `ForceAuthn`, and how long BU's IdP single sign-on session
+  lasts. If BU reuses its SSO session, a "new" sign-in can happen without a password, and a
+  disabled account may still pass until that session ends.
+
+**Attribute changes caveat.** An existing link isn't re-read from Cognito on each request.
+If the identity provider starts releasing a different value for a person, revoke the old
+link or crosswalk row. Their next sign-in then follows the normal refusal and re-link
+path, under administrator control.
+
+## 7. Acceptance and activation order
+
+**Enforcement must not be turned on in an environment until enrollment and the
+crosswalk resolve real users there.** Enrollment runs only under enforcement, so first
+prove it in a non-production environment.
+
+1. **Synthetic.** Run the automated suites:
+   - `IdentityEnrollmentIntegrationTest`
+   - `RecordAuthorizationEnforcementIntegrationTest`
+   - `scripts/authz-admin/test_integration.sh`
+2. **Non-production, real federation, enforcement on.** Import a crosswalk for a small
+   named test group. Grant `CENTRAL` to two administrators, by identifier, before they
+   sign in. Then verify:
+   - **Positive:** a test PI with no grant row sees exactly their contact Awards. An
+     administrator sees everything. `/api/v1/me/access` reports the expected grant kinds.
+   - **Negative:** a person not in the crosswalk; an inactive principal; a native
+     (password) Cognito account; a revoked crosswalk row (denied on the next request);
+     a suspended person. Each gets "access not provisioned" or "access denied", with the
+     matching audit row.
+   - **Check:** `UpdateUserAttributes` on the identifier attribute is refused for a
+     federated user's token (section 2.1).
+3. **Production.**
+   1. Apply the migrations (section 1) and deploy with enforcement **off** and
+      enrollment configured.
+   2. Import the full crosswalk and the approved grants.
+   3. Turn on enforcement in a planned window.
+   4. Repeat the positive and negative checks with real users.
+
+## 8. Rollback
+
+- **Set `app.authorization.enforcement-enabled=false` and redeploy or restart.** This
+  restores today's behaviour exactly ("record authorization not enforced"). Enrollment
+  stops at once, because it never runs while enforcement is off.
+- **Set `app.authorization.enrollment.enabled=false`** to stop new links while keeping
+  enforcement. Existing links keep working. They are no longer re-checked against the
+  crosswalk, though suspension and revocation still apply.
+- **Data stays.** Links, grants, crosswalk rows and audit rows remain for the next
+  attempt. The migrations are additive, and no down-migration is needed or provided.
+- **The IAM policy and SAML provider can stay.** They grant nothing to users on their own.
+
+## Required Cognito settings for trustworthy enrollment (verified against AWS documentation, 2026-10-01)
+
+These are the conditions under which a valid token can lead to a trusted link:
+
+- **No app client in the pool may grant the `aws.cognito.signin.user.admin` scope.** That
+  scope lets a user call `UpdateUserAttributes` on writable attributes. AWS requires app
+  clients to have write access to IdP-mapped attributes, which would include the
+  identifier. The API also refuses any token that carries this scope.
+- **Only federated profiles (`UserStatus = EXTERNAL_PROVIDER`) can be enrolled or keep a
+  link.** Native accounts, including native accounts linked to the SAML provider with
+  `AdminLinkProviderForUser`, are refused.
+- **Tokens must come from the configured pool**, so the issuer must end in `/<user-pool-id>`.
+  `endpoint-override` is accepted only for a loopback test endpoint.
+- **Prefer `identifier-attribute: identities.userId`, which is the SAML NameID and cannot be
+  edited by the user.** Use it if BU confirms the NameID is the stable person identifier.
+  Otherwise, map the identifier to a custom attribute and rely on the scope rule above.
+- **Each new sign-in session (`auth_time`) re-reads the profile.** A changed identifier, lost
+  provider, native status, `sub` mismatch or disabled profile revokes the link. A **refreshed**
+  session keeps its `auth_time` and is not re-read; `max-sign-in-age` (section 6.2) ends it.
+
+**A limit the archive cannot close:** if BU reassigns a NameID **and** the identifier value
+to another person, nothing in the assertion changes. Only BU can guarantee this never happens.
+
+## Identity freshness (2026-10-01)
+
+**Use the SAML NameID as the identifier (`identifier-attribute: identities.userId`) whenever
+BU can make the NameID the stable person identifier.**
+
+- Cognito locates the profile by that exact NameID on every sign-in, so its value is fresh by
+  construction.
+- The API also checks that the profile's username is `<provider>_<NameID>`: exactly in a case-sensitive pool, ignoring case in a case-insensitive pool (where Cognito lowercases it). The NameID itself is matched to the crosswalk exactly.
+
+**A mapped attribute is only as fresh as Cognito's attribute handling.**
+
+- AWS documents that mapped attributes are overwritten at sign-in, and that a mapped attribute
+  persists in the profile.
+- AWS does **not** document that an attribute **missing** from a later assertion is cleared.
+- So re-reading the profile cannot tell a retained, outdated value from a fresh BU confirmation.
+- Custom attributes cannot be made required to force a failure.
+
+**The API refuses to start with a mapped-attribute identifier unless
+`app.authorization.enrollment.accept-mapped-attribute-identifier=true` is set.** That setting
+records an explicit acceptance of this risk. The mitigation is a BU attribute-release policy that
+**always** sends the attribute to this SP.
+

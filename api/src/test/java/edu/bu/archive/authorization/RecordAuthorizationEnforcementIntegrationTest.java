@@ -67,6 +67,7 @@ import edu.bu.archive.application.port.out.EmbeddingProvider;
 @SpringBootTest(properties = {
         "app.security.enabled=false",
         "app.authorization.enforcement-enabled=true",
+        "app.authorization.max-sign-in-age=PT12H",
         "app.authorization.version-scope=PER_VERSION",
         "app.authorization.department-match=EXACT_LEAD_UNIT",
         "app.authorization.research-staff-roles=PI,MPI,COI",
@@ -161,8 +162,19 @@ class RecordAuthorizationEnforcementIntegrationTest {
         @Primary
         CurrentIdentityProvider testIdentity() {
             return () -> Optional.ofNullable(RequestContextHolder.getRequestAttributes())
-                    .map(a -> ((ServletRequestAttributes) a).getRequest().getHeader("X-Test-Persona"))
-                    .map(key -> new ValidatedCognitoIdentity(ISSUER, "demo-" + key));
+                    .map(a -> ((ServletRequestAttributes) a).getRequest())
+                    .filter(r -> r.getHeader("X-Test-Persona") != null)
+                    .map(r -> new ValidatedCognitoIdentity(ISSUER, "demo-" + r.getHeader("X-Test-Persona"), null,
+                            signInTime(r)));
+        }
+
+        /** auth_time: now, or X-Test-Sign-In-Age-Minutes ago; "none" means the token has no auth_time. */
+        static java.time.Instant signInTime(jakarta.servlet.http.HttpServletRequest r) {
+            String age = r.getHeader("X-Test-Sign-In-Age-Minutes");
+            if ("none".equals(age)) {
+                return null;
+            }
+            return java.time.Instant.now().minus(java.time.Duration.ofMinutes(age == null ? 1 : Long.parseLong(age)));
         }
 
         /** TEST-ONLY: no Bedrock call; the same vector as every synthetic evidence row. */

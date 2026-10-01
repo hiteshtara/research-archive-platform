@@ -1,6 +1,7 @@
 import { Amplify } from "aws-amplify";
 
 import { attachmentControlsAvailable } from "./features/common/attachmentAccessPresentation.mjs";
+import { shouldRedirectToSignIn } from "./features/common/reauthenticationPresentation.mjs";
 import {
   fetchAuthSession,
   getCurrentUser,
@@ -61,6 +62,32 @@ Amplify.configure({
 
 export async function login(): Promise<void> {
   await signInWithRedirect();
+}
+
+const REAUTHENTICATION_ATTEMPT_KEY = "archive.reauthentication.lastAttempt";
+
+// The API refused the sign-in as too old (401 REAUTHENTICATION_REQUIRED). Refreshing tokens
+// keeps the old auth_time, so send the person through BU login again (prompt=login), at most
+// once per cooldown: a sign-in the API still refuses then shows an error rather than looping.
+export async function reauthenticate(): Promise<boolean> {
+  let lastAttempt: number | null = null;
+  try {
+    const stored = window.sessionStorage.getItem(REAUTHENTICATION_ATTEMPT_KEY);
+    lastAttempt = stored === null ? null : Number(stored);
+  } catch {
+    lastAttempt = null;
+  }
+  const now = Date.now();
+  if (!shouldRedirectToSignIn(lastAttempt, now)) {
+    return false;
+  }
+  try {
+    window.sessionStorage.setItem(REAUTHENTICATION_ATTEMPT_KEY, String(now));
+  } catch {
+    // Without storage the cooldown cannot be kept; still redirect once.
+  }
+  await signInWithRedirect({ options: { prompt: "LOGIN" } });
+  return true;
 }
 
 export async function logout(): Promise<void> {

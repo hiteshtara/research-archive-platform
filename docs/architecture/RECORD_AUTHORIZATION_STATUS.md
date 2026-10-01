@@ -2,6 +2,8 @@
 
 **Status (stages 1–3): implemented, OFF by default.** With `app.authorization.enforcement-enabled=false` (the default, and every deployed environment), behaviour is unchanged: "record authorization not enforced". Any authenticated user may read any record, and attachments still need the `ArchiveAttachmentViewer` group (that gate is replaced by parent-record authorization only when enforcement is on). Turning enforcement on requires the policy strategies to be configured (no defaults) and is a separate decision. A local synthetic demonstration is in `scripts/authz-demo/README.md`.
 
+**Enrollment (design 12.2 Option A, section 13): implemented, OFF by default** (`app.authorization.enrollment.enabled=false`). It runs only while enforcement is also on. The rollout procedure, with configuration and infrastructure templates, is `docs/runbooks/RECORD_AUTHORIZATION_ROLLOUT.md`.
+
 | Label | Meaning |
 |---|---|
 | Fixture-based authorization verified | The identity and policy core is exercised against synthetic identities and records only |
@@ -34,6 +36,7 @@ validated Cognito access token (issuer + sub)
 
 - **Never used to identify anyone:** the Cognito username (for a federated user it is generated from the IdP name and NameID), email, display names, or anything the browser sends.
 - **The real BU attribute adapter** (`AwaitingIamConfirmationAttributeSource`) resolves nobody until BU IAM confirms the contract.
+- **The token `username` claim** is read for one purpose only: enrollment looks that exact profile up (`AdminGetUser`) and then requires the profile's `sub` to equal the token's `sub`. It is never parsed. `ValidatedCognitoIdentity` equality is still issuer + subject only.
 - **No access:** unmapped, ambiguous, revoked and suspended identities, and mapped people with no active grant, get no record access. The unmapped and no-grant cases are "access not provisioned".
 - **Grants** are keyed on the institutional identifier, never on a login name, so a reassigned login name can't inherit grants.
 
@@ -47,6 +50,19 @@ validated Cognito access token (issuer + sub)
 | `version-scope` | **none** | `PER_VERSION` or `FAMILY_WIDE` (proposal P3) |
 | `department-match` | **none** | `EXACT_LEAD_UNIT` or `LEAD_UNIT_WITH_DESCENDANTS` (proposal P6) |
 | `research-staff-roles` | **none** | e.g. PI, MPI, COI (proposal P4) |
+| `contact-derivation` | **none** | `VERIFIED_PRINCIPAL` (approved) or `EXPLICIT_GRANT` |
+| `max-sign-in-age` | **none** | required when enforcement is on (ISO-8601, e.g. `PT8H`); a token whose `auth_time` is older, missing or more than 5 minutes in the future gets 401 `REAUTHENTICATION_REQUIRED`. A Cognito refresh keeps `auth_time`, so this is what ends a refreshed session. Missing, zero or negative denies every request |
+| `enrollment.enabled` | `false` | server-side enrollment; runs only while enforcement is on |
+| `enrollment.user-pool-id` | **none** | required when enrollment is enabled |
+| `enrollment.region` | **none** | required when enrollment is enabled |
+| `enrollment.endpoint-override` | none | optional; only for a local lab's simulated user pool |
+| `enrollment.saml-provider-name` | **none** | the Cognito identity provider the profile must be federated through |
+| `enrollment.identifier-attribute` | **none** | the user-pool attribute carrying the ONE verified value (e.g. `custom:...`) |
+| `enrollment.crosswalk-attribute-name` | **none** | `authz.principal_crosswalk.attribute_name` for that value |
+| `enrollment.username-case-sensitive` | **none** | required when enrollment is enabled: the pool's `UsernameConfiguration.CaseSensitive`. In NameID mode the profile username must be `<provider>_<NameID>`: compared exactly in a case-sensitive pool, ignoring case in a case-insensitive pool (Cognito lowercases generated usernames there). The NameID is matched to the crosswalk and link exactly in both |
+| `enrollment.refusal-retry-seconds` | `60` | a refused sign-in is re-tried (and re-audited) after this; `0` = every request |
+
+Enrollment enabled with any required setting missing: **the API refuses to start**, and the message names the missing keys. No AWS credentials are configured. The default provider chain supplies them.
 
 With enforcement on, any missing strategy, a missing identity or any evaluation failure **denies**. It never falls back to unrestricted access.
 
@@ -69,6 +85,44 @@ With enforcement on, any missing strategy, a missing identity or any evaluation 
 | "Access not provisioned" body | `AccessNotProvisionedProblem` (**not wired**) | `AccessNotProvisionedProblemTest` |
 | Store: `authz` schema (V082) + JDBC readers + unit hierarchy | `adapter/out/persistence/authorization` | `AuthorizationStoreIntegrationTest` (Testcontainers) |
 | Production token validator (issuer, client, signature, expiry, access-only) | `SecurityConfiguration.accessTokenValidator` | `AccessTokenValidationTest` (locally generated keys) |
+
+## Enrollment, crosswalk and administration (stage 4)
+
+```
+validated access token (iss, sub, username)
+  → AdminGetUser(username) on the configured pool; profile sub must equal the token sub
+  → profile enabled, and its Cognito "identities" record names the configured SAML provider
+  → the ONE configured verified attribute (no email, no login name, ever)
+  → exactly one ACTIVE authz.principal_crosswalk row → an existing authz.kim_principal with actv_ind = 'Y'
+  → no REVOKED link for this (iss, sub); no other ACTIVE link for this identifier under this issuer
+  → authz.identity_link: AUTO_VERIFIED, institutional_identifier = the value, kuali_person_id = PRNCPL_ID,
+    login_name NULL, verified_by = 'api-enrollment'
+```
+
+| Part | Where | Verified by |
+|---|---|---|
+| Crosswalk schema (V083): `authz.kim_principal`, `authz.principal_crosswalk`; unique among ACTIVE rows both ways; FK to the principal | `database/migrations/V083__create_authz_kim_crosswalk.sql` | `IdentityEnrollmentIntegrationTest`, `scripts/authz-admin/test_integration.sh` |
+| Enrollment service (fail closed, audited) | `IdentityEnrollmentService` (ports `CognitoProfileReader`, `EnrollmentStore`) | `IdentityEnrollmentServiceTest` (every outcome, fake pool) |
+| Profile reader (`AdminGetUser`, AWS SDK v2, default credentials) | `adapter/out/cognito/AwsCognitoProfileReader` | `AwsCognitoProfileReaderTest` (mocked client) |
+| Store (link + audit in one transaction; per-identifier advisory lock; `ON CONFLICT` on the active `(iss, sub)` index) | `JdbcEnrollmentStore` | `IdentityEnrollmentIntegrationTest` (Testcontainers) |
+| Maximum sign-in age: checked before enrollment and grants; Central is not exempt; the UI re-runs BU login with `prompt=login` (2-minute loop guard) | `RecordAuthorizationService.compute()`, `GlobalExceptionHandler`, `ui/src/auth.ts` | `IdentityEnrollmentServiceTest`, `RecordAuthorizationApprovedPolicyIntegrationTest`, `reauthenticationPresentation.test.mjs` |
+| Wiring: runs once per request, before the identity is resolved, only when enforcement **and** enrollment are on | `RecordAuthorizationService.compute()` | `IdentityEnrollmentServiceTest` |
+| Administration CLI | `scripts/authz-admin/authz_admin.py` (README there) | `test_authz_admin.py`, `test_validate_crosswalk.py`, `test_integration.sh` |
+
+**Behaviour:**
+
+- **Every refusal links nothing.** The request stays `ACCESS_NOT_PROVISIONED`, or `ACCESS_DENIED` for a previously revoked profile.
+- **A Cognito or database failure fails closed.**
+- **A linked principal with no grant row** sees exactly the records where they are a qualifying contact (`VERIFIED_PRINCIPAL`). A KIM principal alone grants nothing.
+- **Re-validation.** On every request, an ACTIVE `AUTO_VERIFIED` link is re-checked with one indexed query: its crosswalk row must still be ACTIVE and its principal still active. Otherwise the link is revoked (`revoked_by = 'api-enrollment'`) and the request denied. A revoked profile is never re-linked automatically. `ADMIN_VERIFIED` links are not re-checked against the crosswalk.
+- **Refusals are remembered per API instance** for `refusal-retry-seconds`. This bounds `AdminGetUser` calls and audit rows for a user who keeps retrying.
+- **Audit** (`authz.access_audit`, actor `api-enrollment`). Actions are `ENROLLMENT_LINKED`, `ENROLLMENT_ALREADY_LINKED`, `ENROLLMENT_REFUSED`, `ENROLLMENT_FAILED` and `ENROLLMENT_LINK_REVOKED`. `detail->>'outcome'` holds the exact code: `REFUSED_UNKNOWN_PERSON`, `REFUSED_AMBIGUOUS_MAPPING`, `REFUSED_NOT_A_KIM_PRINCIPAL`, `REFUSED_INACTIVE_PRINCIPAL`, `REFUSED_PREVIOUSLY_REVOKED`, `REFUSED_IDENTIFIER_LINKED_TO_ANOTHER_PROFILE`, `REFUSED_SUBJECT_MISMATCH`, `REFUSED_NOT_FEDERATED`, `REFUSED_MISSING_IDENTIFIER`, `REFUSED_PROFILE_NOT_FOUND`, `REFUSED_PROFILE_DISABLED`, `REFUSED_NO_USERNAME`, `FAILED_PROFILE_READ`, `FAILED` or `REVOKED_MAPPING_NO_LONGER_VALID`. The detail holds identifiers that already live in authz tables (issuer, subject, principal id), never email, names or the token username. An attribute value that matches no crosswalk row is not recorded.
+- **Required IAM permission:** `cognito-idp:AdminGetUser` on the one user pool, for the API task role. **NOT applied** to any environment. The template is in the rollout runbook.
+
+**Known limits:**
+
+- An existing link is not re-read from Cognito on each request, so a changed IdP attribute is handled by revoking the link or crosswalk row.
+- With the unique crosswalk indexes, an ambiguous or non-principal crosswalk row can't be stored at all. The service still refuses both defensively.
 
 Synthetic identity fixtures live only under `src/test`. There is no mock-login endpoint, trusted identity header, magic username or access fallback in any deployable path.
 
@@ -159,10 +213,10 @@ Verified by `RecordAuthorizationEnforcementIntegrationTest`: the full applicatio
 | Document Explorer, other Explorer paths, legacy `/api/awards` | closed for non-Central users |
 | Proposal / Negotiation rows in the File Finder | omitted for non-Central users |
 | Partial-family AI and T&M actions | closed by design under P3 (see above) |
-| Grant-administration UI and workflow | not planned until approved (P2) |
-| Real enrollment from BU attributes; real IO resolution | awaiting BU IAM and decision D-A |
-| Wiring production `CurrentIdentityProvider` to a populated identity store | depends on enrollment |
+| Real federation, the real verified attribute, and a real crosswalk extract | enrollment code is ready but OFF; awaiting the identity provider's answers and an approved read-only extract |
+| Cognito SAML provider, attribute mapping, IAM `AdminGetUser` | templates only (rollout runbook); **not applied** |
+| Grant-administration UI | the CLI (`scripts/authz-admin`) is the only administration path |
 
 ## Migration numbering
 
-`V082` (this work). `V081` is reserved for the Award amount-dates work on a separate branch. If V082 lands first, the migration runner logs a harmless gap warning until V081 arrives; it applies migrations by version regardless of order.
+`V082` (identity, grants, audit) and `V083` (KIM principal crosswalk). Both are additive and create empty tables. Apply them through the ETL `--migrate-only` path and verify them **before** deploying API code that reads them (rollout runbook, section 1). `V081` is reserved for the Award amount-dates work on a separate branch. If V082 lands first, the migration runner logs a harmless gap warning until V081 arrives; it applies migrations by version regardless of order.

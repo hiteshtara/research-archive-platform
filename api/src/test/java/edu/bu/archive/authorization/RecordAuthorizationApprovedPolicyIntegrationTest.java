@@ -55,6 +55,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
 @SpringBootTest(properties = {
         "app.security.enabled=false",
         "app.authorization.enforcement-enabled=true",
+        "app.authorization.max-sign-in-age=PT12H",
         "app.authorization.version-scope=FAMILY_WIDE",
         "app.authorization.department-match=LEAD_UNIT_WITH_DESCENDANTS",
         "app.authorization.research-staff-roles=PI,MPI,COI",
@@ -108,8 +109,19 @@ class RecordAuthorizationApprovedPolicyIntegrationTest {
         @Primary
         CurrentIdentityProvider testIdentity() {
             return () -> Optional.ofNullable(RequestContextHolder.getRequestAttributes())
-                    .map(a -> ((ServletRequestAttributes) a).getRequest().getHeader("X-Test-Persona"))
-                    .map(key -> new ValidatedCognitoIdentity(ISSUER, "demo-" + key));
+                    .map(a -> ((ServletRequestAttributes) a).getRequest())
+                    .filter(r -> r.getHeader("X-Test-Persona") != null)
+                    .map(r -> new ValidatedCognitoIdentity(ISSUER, "demo-" + r.getHeader("X-Test-Persona"), null,
+                            signInTime(r)));
+        }
+
+        /** auth_time: now, or X-Test-Sign-In-Age-Minutes ago; "none" means the token has no auth_time. */
+        static java.time.Instant signInTime(jakarta.servlet.http.HttpServletRequest r) {
+            String age = r.getHeader("X-Test-Sign-In-Age-Minutes");
+            if ("none".equals(age)) {
+                return null;
+            }
+            return java.time.Instant.now().minus(java.time.Duration.ofMinutes(age == null ? 1 : Long.parseLong(age)));
         }
     }
 
@@ -215,6 +227,56 @@ class RecordAuthorizationApprovedPolicyIntegrationTest {
             revoke(g);
         }
         assertThat(status("nogrants", "/api/v1/awards/9000102/summary")).isEqualTo(403);       // nothing left
+    }
+
+    // --- sign-in freshness (a refreshed token keeps its original auth_time) ----------------------
+
+    private org.springframework.mock.web.MockHttpServletResponse signedInAgo(String persona, String age, String path)
+            throws Exception {
+        return mvc.perform(get(path).header("X-Test-Persona", persona).header("X-Test-Sign-In-Age-Minutes", age))
+                .andReturn().getResponse();
+    }
+
+    @Test
+    void aSignInOlderThanTheMaximumIsRefusedWith401EvenForCentral() throws Exception {
+        assertThat(signedInAgo("pi", "719", "/api/v1/awards/9000101/summary").getStatus()).isEqualTo(200);
+        for (String persona : List.of("pi", "department", "central")) {
+            var refused = signedInAgo(persona, "721", "/api/v1/awards/9000101/summary");
+            assertThat(refused.getStatus()).as(persona).isEqualTo(401);
+            assertThat(json.readTree(refused.getContentAsString()).path("code").asText())
+                    .isEqualTo("REAUTHENTICATION_REQUIRED");
+            assertThat(refused.getHeader("WWW-Authenticate")).contains("invalid_token");
+        }
+        // Lists, search and files are refused the same way, not silently emptied.
+        assertThat(signedInAgo("pi", "721", "/api/v1/awards/search").getStatus()).isEqualTo(401);
+        // The access status names the problem so the UI can send the person back through BU login.
+        var status = signedInAgo("pi", "721", "/api/v1/me/access");
+        assertThat(status.getStatus()).isEqualTo(200);
+        assertThat(json.readTree(status.getContentAsString()).path("problem").asText())
+                .isEqualTo("REAUTHENTICATION_REQUIRED");
+    }
+
+    @Test
+    void aTokenWithNoSignInTimeOrOneFromTheFutureIsRefused() throws Exception {
+        assertThat(signedInAgo("pi", "none", "/api/v1/awards/9000101/summary").getStatus()).isEqualTo(401);
+        assertThat(signedInAgo("central", "none", "/api/v1/awards/search").getStatus()).isEqualTo(401);
+        // More than the allowed clock skew in the future: not trusted.
+        assertThat(signedInAgo("pi", "-10", "/api/v1/awards/9000101/summary").getStatus()).isEqualTo(401);
+        assertThat(signedInAgo("pi", "-2", "/api/v1/awards/9000101/summary").getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void aFreshSignInDoesNotRestoreRevokedAccess() throws Exception {
+        // Offboarding is a separate control: revoking the archive link denies even a brand-new sign-in.
+        jdbc.sql("UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = 'offboarding-test', revoked_at = now() "
+                + "WHERE cognito_subject = 'demo-oav'").update();
+        try {
+            assertThat(signedInAgo("oav", "0", "/api/v1/awards/9000601/summary").getStatus()).isEqualTo(403);
+        } finally {
+            jdbc.sql("UPDATE authz.identity_link SET status = 'ACTIVE', revoked_by = NULL, revoked_at = NULL "
+                    + "WHERE cognito_subject = 'demo-oav'").update();
+        }
+        assertThat(signedInAgo("oav", "0", "/api/v1/awards/9000601/summary").getStatus()).isEqualTo(200);
     }
 
     // --- Document Explorer and document search: Award and Proposal documents scoped ---------
