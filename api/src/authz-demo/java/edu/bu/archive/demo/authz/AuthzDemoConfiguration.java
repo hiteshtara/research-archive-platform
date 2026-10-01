@@ -1,7 +1,6 @@
 package edu.bu.archive.demo.authz;
 
 import java.net.URI;
-import java.util.Optional;
 import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +15,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import edu.bu.archive.application.authorization.CurrentIdentityProvider;
 import edu.bu.archive.application.authorization.IoResolver;
 import edu.bu.archive.application.authorization.IoSqlStrategy;
-import edu.bu.archive.application.authorization.RecordModule;
 
 /**
  * SYNTHETIC IDENTITY DEMO - BU FEDERATION NOT CONNECTED.
@@ -92,18 +90,12 @@ public class AuthzDemoConfiguration implements org.springframework.web.servlet.c
     @Bean
     @Primary
     IoResolver demoIoResolver(JdbcClient jdbc) {
-        return (module, versionKey) -> module != RecordModule.AWARD
-                ? Set.of()
-                : Set.copyOf(jdbc.sql("SELECT io_value FROM authz_demo.award_io WHERE award_id = CAST(:id AS BIGINT)")
-                        .param("id", versionKey).query(String.class).list());
+        return SyntheticIo.resolver(jdbc);
     }
 
     @Bean
     @Primary
     IoSqlStrategy demoIoSqlStrategy() {
-        return (module, rowAlias) -> module == RecordModule.AWARD
-                ? Optional.of("EXISTS (SELECT 1 FROM authz_demo.award_io az_io WHERE az_io.award_id = "
-                        + rowAlias + ".award_id AND az_io.io_value IN (:az_ios))")
-                : Optional.empty();
+        return SyntheticIo.sqlStrategy();
     }
 }

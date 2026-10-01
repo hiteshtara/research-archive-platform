@@ -1,0 +1,38 @@
+# LOCAL SAML INTEGRATION - COGNITO SIMULATED. Only in builds made with -Pauthz-demo.
+# Production SecurityConfiguration, pointed at the lab's simulated issuer through
+# the same properties production sets from COGNITO_ISSUER_URI / COGNITO_CLIENT_ID.
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:${LAB_ARCHIVE_DB_PORT:55433}/identity_lab
+    username: lab_archive
+    password: ${LAB_ARCHIVE_DB_PASSWORD}
+  flyway:
+    enabled: false
+
+server:
+  port: ${LAB_API_PORT:8092}
+
+app:
+  security:
+    enabled: true
+    cognito:
+      issuer-uri: https://localhost:9443/us-east-1_LabSimSaml
+      client-id: labsimulatedclient
+  cors:
+    allowed-origins: http://localhost:${LAB_UI_PORT:5198}
+  identity-lab:
+    disposable-database: true
+  authorization:
+    enforcement-enabled: true
+    # DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy (same as authz-demo):
+    version-scope: PER_VERSION
+    department-match: EXACT_LEAD_UNIT
+    research-staff-roles: PI,MPI,COI
+  attachments:
+    storage: local
+    local-directory: ${LAB_ATTACHMENT_DIR:/tmp/identity-lab-attachments}
+  ai:
+    enabled: false
+  search:
+    semantic:
+      enabled: false

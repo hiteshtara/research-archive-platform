@@ -1,0 +1,44 @@
+# Local SAML integration - Cognito simulated: ARCHIVE-SPECIFIC overlay on the
+# reusable core (../core/compose.yml). Adds the disposable archive database,
+# the archive's fictional accounts, groups and the enrollment hook.
+volumes:
+  archive-db: {}
+
+services:
+  ldap:
+    volumes:
+      - ./archive/fixtures/users.tsv:/lab/users.tsv:ro
+
+  cognito:
+    environment:
+      LAB_POST_SIGN_IN_HOOK: archive_enrollment:enroll
+      LAB_GROUP_SEED_FILE: /lab/fixtures/groups.tsv
+      ARCHIVE_DATABASE_URL: postgresql://lab_archive:${LAB_ARCHIVE_DB_PASSWORD:?}@archive-db:5432/identity_lab
+    volumes:
+      - ./archive/enrollment:/lab/hooks:ro
+      - ./archive/fixtures:/lab/fixtures:ro
+    depends_on:
+      archive-db: {condition: service_healthy}
+
+  archive-db:
+    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    environment:
+      POSTGRES_USER: lab_archive
+      POSTGRES_PASSWORD: ${LAB_ARCHIVE_DB_PASSWORD:?}
+      POSTGRES_DB: identity_lab
+    volumes:
+      - archive-db:/var/lib/postgresql/data
+    networks: [lab]
+    container_name: lab-archive-db
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "lab_archive", "-d", "identity_lab"]
+      interval: 2s
+      retries: 30
+
+  edge-archive-db:
+    image: identity-lab-proxy
+    environment: {LISTEN_PORT: "55433", TARGET: "archive-db:5432"}
+    ports: ["127.0.0.1:55433:55433"]
+    networks: [lab, edge]
+    container_name: lab-edge-archive-db
+    depends_on: [edge-idp]

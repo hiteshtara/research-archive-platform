@@ -43,10 +43,10 @@ jobs:
         run: npm run lint
       - name: Typecheck and build
         run: npm run build
-      - name: Production build contains no synthetic-identity demo code
+      - name: Production build contains no synthetic-identity demo or identity-lab code
         run: |
-          if grep -rIl -e 'Synthetic identity demo' -e 'demo-persona:' dist/; then
-            echo "The authz-demo identity shortcut leaked into the production build" >&2
+          if grep -rIl -e 'Synthetic identity demo' -e 'demo-persona:' -e 'Cognito simulated' -e 'VITE_LAB_USER_POOL_ENDPOINT' -e 'identity-lab' dist/; then
+            echo "Demo or identity-lab code leaked into the production build" >&2
             exit 1
           fi
 

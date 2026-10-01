@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Local SAML integration - Cognito simulated. FICTIONAL directory (lab-ldap) only. -->
+<AttributeResolver
+        xmlns="urn:mace:shibboleth:2.0:resolver"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="urn:mace:shibboleth:2.0:resolver http://shibboleth.net/schema/idp/shibboleth-attribute-resolver.xsd">
+
+    <AttributeDefinition id="uid" xsi:type="Simple">
+        <InputDataConnector ref="labLdap" attributeNames="uid" />
+    </AttributeDefinition>
+
+    <AttributeDefinition id="eduPersonPrincipalName" xsi:type="Scoped" scope="%{idp.scope}">
+        <InputDataConnector ref="labLdap" attributeNames="uid" />
+    </AttributeDefinition>
+
+    <AttributeDefinition id="mail" xsi:type="Simple">
+        <InputDataConnector ref="labLdap" attributeNames="mail" />
+    </AttributeDefinition>
+
+    <AttributeDefinition id="displayName" xsi:type="Simple">
+        <InputDataConnector ref="labLdap" attributeNames="displayName" />
+    </AttributeDefinition>
+
+    <!-- The lab's stand-in for a stable institutional identifier. BU's real
+         attribute name/OID is an open question for BU IAM. -->
+    <AttributeDefinition id="labInstitutionalId" xsi:type="Simple">
+        <InputDataConnector ref="labLdap" attributeNames="employeeNumber" />
+    </AttributeDefinition>
+
+    <DataConnector id="labLdap" xsi:type="LDAPDirectory"
+        ldapURL="%{idp.attribute.resolver.LDAP.ldapURL}"
+        baseDN="%{idp.attribute.resolver.LDAP.baseDN}"
+        principal="%{idp.attribute.resolver.LDAP.bindDN}"
+        principalCredential="%{idp.attribute.resolver.LDAP.bindDNCredential}"
+        useStartTLS="false"
+        connectTimeout="PT3S"
+        responseTimeout="PT3S">
+        <FilterTemplate><![CDATA[ (uid=$resolutionContext.principal) ]]></FilterTemplate>
+        <ReturnAttributes>uid mail displayName employeeNumber</ReturnAttributes>
+    </DataConnector>
+</AttributeResolver>

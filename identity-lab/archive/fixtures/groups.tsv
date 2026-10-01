@@ -1,0 +1,6 @@
+# Simulated user-pool groups for FICTIONAL logins (stand-in for AdminAddUserToGroup).
+# ArchiveAttachmentViewer is the existing attachment permission; lab-pat deliberately lacks it.
+lab-central	ArchiveAttachmentViewer
+lab-dept	ArchiveAttachmentViewer
+lab-io	ArchiveAttachmentViewer
+lab-multi	ArchiveAttachmentViewer

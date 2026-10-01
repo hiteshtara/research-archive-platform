@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Local SAML integration - Cognito simulated: release only to the simulated Cognito SP. -->
+<AttributeFilterPolicyGroup id="LabPolicy"
+        xmlns="urn:mace:shibboleth:2.0:afp"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="urn:mace:shibboleth:2.0:afp http://shibboleth.net/schema/idp/shibboleth-afp.xsd">
+    <AttributeFilterPolicy id="releaseToSimulatedCognito">
+        <PolicyRequirementRule xsi:type="Requester" value="urn:lab:simulated-cognito:sp:us-east-1_LabSimSaml" />
+        <AttributeRule attributeID="uid" permitAny="true" />
+        <AttributeRule attributeID="eduPersonPrincipalName" permitAny="true" />
+        <AttributeRule attributeID="mail" permitAny="true" />
+        <AttributeRule attributeID="displayName" permitAny="true" />
+        <AttributeRule attributeID="labInstitutionalId" permitAny="true" />
+    </AttributeFilterPolicy>
+</AttributeFilterPolicyGroup>
