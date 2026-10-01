@@ -153,6 +153,12 @@ app:
       saml-provider-name: <SamlProviderName>
       identifier-attribute: custom:<identifier_attribute>
       crosswalk-attribute-name: <approvedAttributeName>   # authz.principal_crosswalk.attribute_name
+      # REQUIRED, no default: the pool's UsernameConfiguration.CaseSensitive
+      # (aws cognito-idp describe-user-pool --query 'UserPool.UsernameConfiguration').
+      # Cognito generates a federated username as <provider>_<NameID> and LOWERCASES it in a
+      # case-insensitive pool; the NameID-to-profile check then compares ignoring case. The NameID
+      # itself is never case-folded: the crosswalk and link matches stay exact.
+      username-case-sensitive: <true|false>
       refusal-retry-seconds: 60          # a refused sign-in is re-tried after this; 0 = every request
       # endpoint-override: only for a local lab's simulated user pool; never in a deployment
 ```
@@ -161,7 +167,7 @@ The same keys work as environment variables, e.g. `APP_AUTHORIZATION_ENROLLMENT_
 or `APP_AUTHORIZATION_ENROLLMENT_USER_POOL_ID=<region>_<poolId>`.
 
 If `enrollment.enabled=true` and any of `user-pool-id`, `region`, `saml-provider-name`,
-`identifier-attribute` or `crosswalk-attribute-name` is missing, **the API refuses to
+`identifier-attribute`, `crosswalk-attribute-name` or `username-case-sensitive` is missing, **the API refuses to
 start**, and the error message names the missing keys.
 
 Enrollment runs only while enforcement is on. With enforcement off, the Cognito client
@@ -367,7 +373,7 @@ BU can make the NameID the stable person identifier.**
 
 - Cognito locates the profile by that exact NameID on every sign-in, so its value is fresh by
   construction.
-- The API also checks that the profile's username is `<provider>_<NameID>`.
+- The API also checks that the profile's username is `<provider>_<NameID>`: exactly in a case-sensitive pool, ignoring case in a case-insensitive pool (where Cognito lowercases it). The NameID itself is matched to the crosswalk exactly.
 
 **A mapped attribute is only as fresh as Cognito's attribute handling.**
 

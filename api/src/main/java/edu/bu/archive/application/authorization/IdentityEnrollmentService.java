@@ -55,14 +55,19 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
      *                               userId (the SAML NameID), which users cannot edit
      * @param crosswalkAttributeName authz.principal_crosswalk.attribute_name for that value
      * @param refusalRetry           how long a refusal is remembered before the profile is re-read (0 = never)
+     * @param usernameCaseSensitive  the pool's UsernameConfiguration.CaseSensitive. Cognito generates a
+     *                               federated username as {@code <provider>_<NameID>} and LOWERCASES it in
+     *                               a case-insensitive pool, so the NameID-to-profile check compares
+     *                               ignoring case there. The NameID itself (identities.userId) is never
+     *                               case-folded: the crosswalk and link matches stay exact
      */
     public record Settings(String samlProviderName, String identifierAttribute, String crosswalkAttributeName,
-                           Duration refusalRetry, String userPoolId) {
+                           Duration refusalRetry, String userPoolId, boolean usernameCaseSensitive) {
 
         /** Without a pool id the token issuer is not tied to the pool (unit tests only). */
         public Settings(String samlProviderName, String identifierAttribute, String crosswalkAttributeName,
                         Duration refusalRetry) {
-            this(samlProviderName, identifierAttribute, crosswalkAttributeName, refusalRetry, null);
+            this(samlProviderName, identifierAttribute, crosswalkAttributeName, refusalRetry, null, true);
         }
         public Settings {
             requireText(samlProviderName, "samlProviderName");
@@ -185,8 +190,7 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
             } else if (!profile.federatedOnly()) {
                 problem = "not_federated_only";
             } else if (FEDERATED_USER_ID.equals(settings.identifierAttribute())
-                    && !identifierOf(profile).map(id -> (settings.samlProviderName() + "_" + id).equals(profile.username()))
-                            .orElse(false)) {
+                    && !identifierOf(profile).map(id -> isProfileKeyFor(profile, id)).orElse(false)) {
                 // NameID mode: the profile must be the one Cognito located by that NameID.
                 problem = "nameid_not_profile_key";
             } else if (!identifierOf(profile).map(v -> v.equals(link.institutionalIdentifier())).orElse(false)) {
@@ -208,6 +212,21 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
     private boolean fromConfiguredPool(ValidatedCognitoIdentity identity) {
         String pool = settings.userPoolId();
         return pool == null || pool.isBlank() || identity.issuer().endsWith("/" + pool.trim());
+    }
+
+    /**
+     * NameID mode: is this the profile Cognito keys by {@code <provider>_<NameID>}? Exact in a
+     * case-sensitive pool; ignoring case in a case-insensitive pool, where Cognito lowercases the
+     * generated username (and treats usernames differing only in case as the same user). Only the
+     * username comparison is case-folded, never the NameID used as the identifier.
+     */
+    private boolean isProfileKeyFor(CognitoProfile profile, String nameId) {
+        String expected = settings.samlProviderName() + "_" + nameId;
+        String actual = profile.username();
+        if (actual == null) {
+            return false;
+        }
+        return settings.usernameCaseSensitive() ? expected.equals(actual) : expected.equalsIgnoreCase(actual);
     }
 
     /** The verified identifier from the profile: a mapped attribute, or the provider's NameID. */
@@ -278,7 +297,7 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         }
         Optional<String> value = identifierOf(profile);
         if (FEDERATED_USER_ID.equals(settings.identifierAttribute()) && value.isPresent()
-                && !(settings.samlProviderName() + "_" + value.get()).equals(profile.username())) {
+                && !isProfileKeyFor(profile, value.get())) {
             return refuse(identity, EnrollmentOutcome.REFUSED_NAMEID_NOT_PROFILE_KEY, null, Map.of());
         }
         if (value.isEmpty()) {

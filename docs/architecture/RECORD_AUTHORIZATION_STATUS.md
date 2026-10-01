@@ -59,6 +59,7 @@ validated Cognito access token (issuer + sub)
 | `enrollment.saml-provider-name` | **none** | the Cognito identity provider the profile must be federated through |
 | `enrollment.identifier-attribute` | **none** | the user-pool attribute carrying the ONE verified value (e.g. `custom:...`) |
 | `enrollment.crosswalk-attribute-name` | **none** | `authz.principal_crosswalk.attribute_name` for that value |
+| `enrollment.username-case-sensitive` | **none** | required when enrollment is enabled: the pool's `UsernameConfiguration.CaseSensitive`. In NameID mode the profile username must be `<provider>_<NameID>`: compared exactly in a case-sensitive pool, ignoring case in a case-insensitive pool (Cognito lowercases generated usernames there). The NameID is matched to the crosswalk and link exactly in both |
 | `enrollment.refusal-retry-seconds` | `60` | a refused sign-in is re-tried (and re-audited) after this; `0` = every request |
 
 Enrollment enabled with any required setting missing: **the API refuses to start**, and the message names the missing keys. No AWS credentials are configured. The default provider chain supplies them.

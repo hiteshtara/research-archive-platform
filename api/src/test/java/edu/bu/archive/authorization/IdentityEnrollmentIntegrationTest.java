@@ -75,6 +75,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
         "app.authorization.enrollment.saml-provider-name=SyntheticSaml",
         "app.authorization.enrollment.identifier-attribute=custom:synthetic_principal_attr",
         "app.authorization.enrollment.accept-mapped-attribute-identifier=true",
+        "app.authorization.enrollment.username-case-sensitive=false",
         "app.authorization.enrollment.crosswalk-attribute-name=syntheticPrincipalAttr",
         "app.authorization.enrollment.refusal-retry-seconds=0",
         "app.attachments.storage=local",

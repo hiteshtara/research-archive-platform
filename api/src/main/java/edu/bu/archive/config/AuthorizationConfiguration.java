@@ -115,7 +115,7 @@ public class AuthorizationConfiguration {
                 new IdentityEnrollmentService.Settings(settings.getSamlProviderName(),
                         settings.getIdentifierAttribute(), settings.getCrosswalkAttributeName(),
                         Duration.ofSeconds(Math.max(0, settings.getRefusalRetrySeconds())),
-                        settings.getUserPoolId().trim()),
+                        settings.getUserPoolId().trim(), settings.getUsernameCaseSensitive()),
                 reader,
                 new JdbcEnrollmentStore(jdbc, new TransactionTemplate(transactionManager)),
                 Clock.systemUTC());

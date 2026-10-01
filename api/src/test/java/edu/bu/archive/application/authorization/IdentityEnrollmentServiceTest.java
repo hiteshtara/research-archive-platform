@@ -311,7 +311,9 @@ class IdentityEnrollmentServiceTest {
                 "app.authorization.enrollment.user-pool-id", "app.authorization.enrollment.region",
                 "app.authorization.enrollment.saml-provider-name",
                 "app.authorization.enrollment.identifier-attribute",
-                "app.authorization.enrollment.crosswalk-attribute-name");
+                "app.authorization.enrollment.crosswalk-attribute-name",
+                "app.authorization.enrollment.username-case-sensitive (true|false: the user pool's "
+                        + "UsernameConfiguration.CaseSensitive)");
     }
 
     @Test
@@ -621,11 +623,106 @@ class IdentityEnrollmentServiceTest {
         assertThat(store.links).isEmpty();
     }
 
+    // --- Cognito username case: the pool's CaseSensitive setting -----------------------------
+
+    private IdentityEnrollmentService byNameId(boolean usernameCaseSensitive) {
+        return new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
+                PROVIDER, IdentityEnrollmentService.FEDERATED_USER_ID, CROSSWALK, Duration.ZERO, null,
+                usernameCaseSensitive), reader, store, clock);
+    }
+
+    /** A federated profile as a pool stores it: username generated from the NameID, in the pool's case. */
+    private ValidatedCognitoIdentity federatedProfile(String sub, String nameId, boolean poolCaseSensitive) {
+        String generated = PROVIDER + "_" + nameId;
+        String username = poolCaseSensitive ? generated : generated.toLowerCase(java.util.Locale.ROOT);
+        pool.put(username, new CognitoProfile(sub, username, true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, nameId)), Map.of()));
+        return new ValidatedCognitoIdentity(ISSUER, sub, username, SIGN_IN);
+    }
+
+    @Test
+    void aCaseInsensitivePoolLowercasesTheGeneratedUsernameAndIsStillEnrolledAndReverified() {
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "AbC-Nid-7", "SYNP-1", true));
+        var token = federatedProfile("s-ci", "AbC-Nid-7", false);       // username syntheticsaml_abc-nid-7
+        // The defect: comparing exactly refuses every mixed-case NameID in a case-insensitive pool.
+        assertThat(byNameId(true).prepare(token)).isEqualTo(EnrollmentOutcome.REFUSED_NAMEID_NOT_PROFILE_KEY);
+        assertThat(store.links).isEmpty();
+        // Configured as the pool really is: linked, with the NameID recorded exactly as BU sent it.
+        var service = byNameId(false);
+        assertThat(service.prepare(token)).isEqualTo(EnrollmentOutcome.LINKED);
+        assertThat(onlyLink().identifier()).isEqualTo("AbC-Nid-7");
+        // Session verification (a new sign-in) takes the same path and keeps the link.
+        var nextSession = new ValidatedCognitoIdentity(ISSUER, "s-ci", token.username(), SIGN_IN.plusSeconds(3600));
+        assertThat(service.prepare(nextSession)).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        assertThat(onlyLink().active()).isTrue();
+    }
+
+    @Test
+    void aCaseSensitivePoolKeepsTheGeneratedUsernameAndComparesItExactly() {
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "AbC-Nid-8", "SYNP-1", true));
+        var token = federatedProfile("s-cs", "AbC-Nid-8", true);        // username SyntheticSaml_AbC-Nid-8
+        var service = byNameId(true);
+        assertThat(service.prepare(token)).isEqualTo(EnrollmentOutcome.LINKED);
+        var nextSession = new ValidatedCognitoIdentity(ISSUER, "s-cs", token.username(), SIGN_IN.plusSeconds(3600));
+        assertThat(service.prepare(nextSession)).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        // In a case-sensitive pool a lowercased username is a different profile key: refused.
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "XyZ-Nid-9", "SYNP-2", true));
+        pool.put("syntheticsaml_xyz-nid-9", new CognitoProfile("s-cs2", "syntheticsaml_xyz-nid-9", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "XyZ-Nid-9")), Map.of()));
+        assertThat(service.prepare(new ValidatedCognitoIdentity(ISSUER, "s-cs2", "syntheticsaml_xyz-nid-9", SIGN_IN)))
+                .isEqualTo(EnrollmentOutcome.REFUSED_NAMEID_NOT_PROFILE_KEY);
+    }
+
+    @Test
+    void ignoringCaseNeverAcceptsADifferentNameIdForTheProfile() {
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "nid-real", "SYNP-1", true));
+        pool.put("syntheticsaml_nid-other", new CognitoProfile("s-x", "syntheticsaml_nid-other", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "nid-real")), Map.of()));
+        assertThat(byNameId(false).prepare(new ValidatedCognitoIdentity(ISSUER, "s-x", "syntheticsaml_nid-other", SIGN_IN)))
+                .isEqualTo(EnrollmentOutcome.REFUSED_NAMEID_NOT_PROFILE_KEY);
+    }
+
+    @Test
+    void theInstitutionalIdentifierStaysAnExactMatchInBothPoolModes() {
+        // The crosswalk holds "abc-nid-10"; BU sends "AbC-Nid-10". Only the username is case-folded.
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "abc-nid-10", "SYNP-1", true));
+        assertThat(byNameId(false).prepare(federatedProfile("s-e1", "AbC-Nid-10", false)))
+                .isEqualTo(EnrollmentOutcome.REFUSED_UNKNOWN_PERSON);
+        assertThat(byNameId(true).prepare(federatedProfile("s-e2", "AbC-Nid-10", true)))
+                .isEqualTo(EnrollmentOutcome.REFUSED_UNKNOWN_PERSON);
+        assertThat(store.links).isEmpty();
+    }
+
+    @Test
+    void aNameIdThatChangesOnlyInCaseRevokesTheLinkEvenInACaseInsensitivePool() {
+        store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "AbC-Nid-11", "SYNP-1", true));
+        var token = federatedProfile("s-cc", "AbC-Nid-11", false);
+        var service = byNameId(false);
+        assertThat(service.prepare(token)).isEqualTo(EnrollmentOutcome.LINKED);
+        // Same lowercased username, but the identities now carry "abc-nid-11": a different identifier.
+        pool.put(token.username(), new CognitoProfile("s-cc", token.username(), true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "abc-nid-11")), Map.of()));
+        var nextSession = new ValidatedCognitoIdentity(ISSUER, "s-cc", token.username(), SIGN_IN.plusSeconds(3600));
+        assertThat(service.prepare(nextSession)).isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+        assertThat(onlyLink().active()).isFalse();
+    }
+
+    @Test
+    void thePoolsUsernameCaseSettingIsRequired() {
+        var e = new AuthorizationProperties.Enrollment();
+        e.setUserPoolId("p"); e.setRegion("r"); e.setSamlProviderName(PROVIDER); e.setCrosswalkAttributeName(CROSSWALK);
+        e.setIdentifierAttribute(IdentityEnrollmentService.FEDERATED_USER_ID);
+        assertThat(e.missingSettings()).singleElement().asString().contains("username-case-sensitive");
+        e.setUsernameCaseSensitive(false);
+        assertThat(e.missingSettings()).isEmpty();
+    }
+
     @Test
     void aMappedAttributeIdentifierNeedsExplicitAcceptanceOfTheFreshnessRisk() {
         var e = new AuthorizationProperties.Enrollment();
         e.setUserPoolId("p"); e.setRegion("r"); e.setSamlProviderName(PROVIDER); e.setCrosswalkAttributeName(CROSSWALK);
         e.setIdentifierAttribute("custom:bu_identifier");
+        e.setUsernameCaseSensitive(true);
         assertThat(e.missingSettings()).anyMatch(m -> m.contains("accept-mapped-attribute-identifier"));
         e.setAcceptMappedAttributeIdentifier(true);
         assertThat(e.missingSettings()).isEmpty();
@@ -657,7 +754,7 @@ class IdentityEnrollmentServiceTest {
     @Test
     void aTokenFromAnotherPoolIsRefused() {
         var poolBound = new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
-                PROVIDER, ATTRIBUTE, CROSSWALK, Duration.ZERO, "synthetic-pool"), reader, store, clock);
+                PROVIDER, ATTRIBUTE, CROSSWALK, Duration.ZERO, "synthetic-pool", true), reader, store, clock);
         profile("s-pool", PROVIDER, "SYN-V-1");
         var foreign = new ValidatedCognitoIdentity("https://idp.invalid/other-pool", "s-pool", PROVIDER + "_s-pool", SIGN_IN);
         assertThat(poolBound.prepare(foreign)).isEqualTo(EnrollmentOutcome.REFUSED_FOREIGN_ISSUER);

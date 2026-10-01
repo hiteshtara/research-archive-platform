@@ -126,6 +126,12 @@ public class AuthorizationProperties {
          * fresh one. Using one therefore requires this explicit acceptance (default false).
          */
         private boolean acceptMappedAttributeIdentifier;
+        /**
+         * The user pool's UsernameConfiguration.CaseSensitive. Required, no default: a wrong value
+         * either refuses every federated user (case-insensitive pool treated as sensitive) or
+         * compares more loosely than the pool does.
+         */
+        private Boolean usernameCaseSensitive;
 
         /** Property keys that must be set when enrollment is enabled but are not. */
         public List<String> missingSettings() {
@@ -135,6 +141,10 @@ public class AuthorizationProperties {
             if (blank(samlProviderName)) missing.add("app.authorization.enrollment.saml-provider-name");
             if (blank(identifierAttribute)) missing.add("app.authorization.enrollment.identifier-attribute");
             if (blank(crosswalkAttributeName)) missing.add("app.authorization.enrollment.crosswalk-attribute-name");
+            if (usernameCaseSensitive == null) {
+                missing.add("app.authorization.enrollment.username-case-sensitive (true|false: the user pool's "
+                        + "UsernameConfiguration.CaseSensitive)");
+            }
             if (!blank(identifierAttribute) && !"identities.userId".equals(identifierAttribute.trim())
                     && !acceptMappedAttributeIdentifier) {
                 missing.add("app.authorization.enrollment.accept-mapped-attribute-identifier=true (identifier-attribute '"
@@ -142,6 +152,14 @@ public class AuthorizationProperties {
                         + "guarantee; use identities.userId (the NameID) or accept the risk explicitly)");
             }
             return missing;
+        }
+
+        public Boolean getUsernameCaseSensitive() {
+            return usernameCaseSensitive;
+        }
+
+        public void setUsernameCaseSensitive(Boolean usernameCaseSensitive) {
+            this.usernameCaseSensitive = usernameCaseSensitive;
         }
 
         public boolean isAcceptMappedAttributeIdentifier() {
