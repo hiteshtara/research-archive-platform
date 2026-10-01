@@ -26,7 +26,14 @@ def read(path, header):
     return [dict(zip(header, r)) | {"_row": i} for i, r in enumerate(rows[1:], start=2)]
 
 
+def _normalise_rows(rows):
+    """Trim every field, so a padded id cannot slip past the principal or rolodex checks (F9)."""
+    return [{k: (v.strip() if isinstance(v, str) else v) for k, v in r.items()} for r in rows]
+
+
 def validate(principals, crosswalk, attribute, rolodex_ids=frozenset(), allow_shared_entity=False):
+    principals, crosswalk = _normalise_rows(principals), _normalise_rows(crosswalk)
+    rolodex_ids = frozenset(x.strip() for x in rolodex_ids)
     problems = defaultdict(list)          # check -> crosswalk row numbers
     by_id = {}
     for p in principals:

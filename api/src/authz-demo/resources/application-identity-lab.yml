@@ -51,6 +51,7 @@ app:
     enabled: true
     stub-enabled: true
     provider: stub
+    questions-enabled: true
   search:
     semantic:
       enabled: false
