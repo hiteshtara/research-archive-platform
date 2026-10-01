@@ -20,8 +20,8 @@ interface AccessStatus {
 const API = import.meta.env.VITE_API_BASE_URL;
 
 export const UNFINISHED_PATHS =
-  "Negotiation, Subaward, IRB, report PDFs, Archived File Finder, Explorer, Document Explorer and AI " +
-  "are closed for non-Central users; the real IO field is unresolved.";
+  "Negotiation, Subaward, IRB, Document Explorer and the legacy Award history routes are closed for " +
+  "non-Central users; AI is available only when every version of the Award is visible.";
 
 export function LabBanner() {
   const [login, setLogin] = useState<string>("…");

@@ -6,7 +6,7 @@ A local, disposable demonstration of record-level authorization (Security Requir
 - the production identity links and grants;
 - the scoped SQL;
 - the request guards;
-- the existing `ArchiveAttachmentViewer` gate.
+- record access covering the record's own files (approved 2026-10-01; `ArchiveAttachmentViewer` is no longer a separate condition under enforcement).
 
 **Replaced:** only sign-in, by a test-user selector. All data is invented.
 
@@ -46,9 +46,9 @@ Records (all `SYNTHETIC`):
 | C `990003-00001` | Pat is Co-PI (MPI) |
 | D `990004-00001` | Pat is Co-Investigator |
 | E `990005-00001` | Pat is Key Person only |
-| F `990006-00001` | Carries IO SYN-IO-7001 |
+| F `990006-00001` | Account number SYN-IO-7001 (IO grants match the account number, approved) |
 | G `990007-00001` | Unit SYN-U-110, a sub-unit of SYN-U-100 |
-| H `990008-00001` | Carries IO SYN-IO-7002 |
+| H `990008-00001` | Account number SYN-IO-7002 |
 | Proposal 1 | Funds A; Pat not listed |
 | Proposal 2 | Pat is PI |
 | Proposal 3 | Unit SYN-U-100 |
@@ -57,8 +57,8 @@ Records (all `SYNTHETIC`):
 |---|---|---|---|
 | Central | all 9 Award families and all Proposals; Negotiation and Subaward lists | — | yes |
 | Department (SYN-U-100) | A, A child; Proposal 3 | B, G (sub-unit: exact match, P6), C–F, H | yes |
-| Research Staff: Pat (PI) | A (both versions), C (Co-PI), D (COI); Proposal 2 | B, A child, E (KP excluded, P4); Proposal 1 (related to A, but no relationship grants access) | **no** (403, no attachment group) |
-| Pat + attachment group | same as Pat | same as Pat | A's attachments: yes; B's: 404 |
+| Research Staff: Pat (PI) | A (both versions), C (Co-PI), D (COI); Proposal 2 | B, A child, E (KP excluded, P4); Proposal 1 (related to A, but no relationship grants access) | yes: A's files (record access covers them); B's: 404 |
+| Pat + attachment group | same as Pat | same as Pat | same as Pat (the group no longer matters under enforcement) |
 | Other Authorized Viewer (SYN-IO-7001) | F | everything else | yes |
 | Multiple grants (SYN-U-300 + SYN-IO-7002) | C, D, E (unit) + H (IO) | A, B, F, G | yes |
 | Signed in, no grants | nothing ("access not provisioned") | everything | — |
@@ -78,10 +78,10 @@ Anything out of scope returns **404**, the same as a record that doesn't exist, 
 | Award and Proposal direct URLs, every section endpoint, `by-number` | **Checked before any query** |
 | Award versions list, hierarchy, related Proposals; Proposal → Award lists | **Filtered** (no placeholders) |
 | Related Negotiations and Subawards | **Omitted** (no non-Central rule yet, P8) |
-| Attachments | Record check **and** `ArchiveAttachmentViewer` (kept, P5) |
+| Attachments | Record check of the parent record (approved; replaces P5). Downloads also refuse another record's attachment |
 | Award reports (PDF) | **Closed** for non-Central users (`NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION`) until every report section is reviewed |
 | Negotiation, Subaward, IRB, Explorer, Document Explorer, File Finder, AI, legacy `/api/awards` | **Closed** for non-Central users (same code) |
 | Semantic search | Not run for non-Central users |
-| Real BU sign-in, enrollment, real IO field | **Not implemented**: awaiting BU IAM and decision D-A |
+| Real BU sign-in and enrollment | **Not implemented**: awaiting BU IAM. IO = Award account number (approved D-A) |
 
 **Demo-data limitation:** a Central user's Award report PDF returns 404 on synthetic records. The report needs Time & Money and budget data the seed doesn't include; this is not an authorization result.

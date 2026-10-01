@@ -24,6 +24,7 @@ app:
     version-scope: PER_VERSION           # proposal P3 (alternative: FAMILY_WIDE)
     department-match: EXACT_LEAD_UNIT    # proposal P6 (alternative: LEAD_UNIT_WITH_DESCENDANTS)
     research-staff-roles: PI,MPI,COI     # proposal P4 from the requirements' role table (KP excluded)
+    contact-derivation: VERIFIED_PRINCIPAL   # approved 2026-10-01 (design section 13)
   attachments:
     storage: local
     local-directory: ${AUTHZ_DEMO_ATTACHMENT_DIR:/tmp/authz-demo-attachments}

@@ -19,7 +19,8 @@ INSERT INTO archive.award_person (award_person_id, award_id, award_number, seque
     full_name, contact_role_code) VALUES
   (9100901, 9000901, '990009-00001', 1, 'SYNP-OTHER-08', NULL, 'VAL EARLIERPI', 'PI'),
   (9100902, 9000902, '990009-00001', 2, 'SYNP-PI-01', NULL, 'PAT EXAMPLE', 'PI');
-INSERT INTO authz_demo.award_io (award_id, io_value) VALUES (9000902, 'SYN-IO-7001');
+-- IO grants match the Award account number (approved D-A): seq 2 only carries SYN-IO-7001.
+UPDATE archive.award_version SET account_number = 'SYN-IO-7001' WHERE award_id = 9000902;
 INSERT INTO archive.award_hierarchy (award_hierarchy_id, root_award_number, award_number, parent_award_number,
     originating_award_number, active) VALUES
   (9200009, '990009-00001', '990009-00001', '990009-00001', '990009-00001', 'Y');

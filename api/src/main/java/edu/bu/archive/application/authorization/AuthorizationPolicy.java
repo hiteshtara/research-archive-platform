@@ -13,8 +13,28 @@ import java.util.Set;
 public record AuthorizationPolicy(
         VersionScope versionScope,
         DepartmentMatch departmentMatch,
-        Set<String> researchStaffRoles
+        Set<String> researchStaffRoles,
+        ContactDerivation contactDerivation
 ) {
+
+    /** Earlier three-setting form: contact access only through an explicit grant. */
+    public AuthorizationPolicy(VersionScope versionScope, DepartmentMatch departmentMatch, Set<String> researchStaffRoles) {
+        this(versionScope, departmentMatch, researchStaffRoles, ContactDerivation.EXPLICIT_GRANT);
+    }
+
+    /**
+     * Where Research Staff (ID 3) access comes from (design section 13, decided 2026-10-01).
+     */
+    public enum ContactDerivation {
+        /** Only identities holding an explicit CONTACT_DERIVATION grant. */
+        EXPLICIT_GRANT,
+        /**
+         * Any identity whose ACTIVE link carries a verified KIM principal (PERSON_ID), and only
+         * while that principal is a qualifying contact on at least one record. No grant row is
+         * needed; a KIM principal who is nobody's contact still has no access.
+         */
+        VERIFIED_PRINCIPAL
+    }
 
     /** P3 / D-D. */
     public enum VersionScope {
@@ -34,6 +54,7 @@ public record AuthorizationPolicy(
     public AuthorizationPolicy {
         Objects.requireNonNull(versionScope, "versionScope");
         Objects.requireNonNull(departmentMatch, "departmentMatch");
+        Objects.requireNonNull(contactDerivation, "contactDerivation");
         researchStaffRoles = Set.copyOf(researchStaffRoles);
         if (researchStaffRoles.isEmpty()) {
             throw new IllegalArgumentException("researchStaffRoles must be configured (P4)");

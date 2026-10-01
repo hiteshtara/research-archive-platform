@@ -18,7 +18,6 @@ class DemoClassesAbsentFromDefaultBuildTest {
                 "edu.bu.archive.demo.authz.AuthzDemoConfiguration",
                 "edu.bu.archive.demo.authz.DemoPersonaFilter",
                 "edu.bu.archive.demo.authz.DemoPersonaController",
-                "edu.bu.archive.demo.authz.SyntheticIo",
                 "edu.bu.archive.demo.identitylab.IdentityLabConfiguration"}) {
             assertThatThrownBy(() -> Class.forName(name)).isInstanceOf(ClassNotFoundException.class);
         }

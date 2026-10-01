@@ -4,17 +4,11 @@ import java.net.URI;
 import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
-import org.springframework.jdbc.core.simple.JdbcClient;
 
-import edu.bu.archive.application.authorization.IoResolver;
-import edu.bu.archive.application.authorization.IoSqlStrategy;
-import edu.bu.archive.demo.authz.SyntheticIo;
 
 /**
  * LOCAL SAML INTEGRATION - COGNITO SIMULATED (archive side of identity-lab/).
@@ -24,7 +18,7 @@ import edu.bu.archive.demo.authz.SyntheticIo;
  * authentication: the production SecurityConfiguration validates real signed
  * access tokens from the lab's simulated Cognito, and the production
  * JwtCurrentIdentityProvider maps them to identities. This class only checks
- * that the run really is the local lab, and supplies the synthetic IO values.
+ * that the run really is the local lab.
  */
 @Configuration
 @Profile("identity-lab")
@@ -70,15 +64,5 @@ public class IdentityLabConfiguration {
         return uri.getHost() == null ? "" : uri.getHost();
     }
 
-    @Bean
-    @Primary
-    IoResolver identityLabIoResolver(JdbcClient jdbc) {
-        return SyntheticIo.resolver(jdbc);
-    }
-
-    @Bean
-    @Primary
-    IoSqlStrategy identityLabIoSqlStrategy() {
-        return SyntheticIo.sqlStrategy();
-    }
+    // IO grants use the production rule (Award account number, approved decision D-A).
 }

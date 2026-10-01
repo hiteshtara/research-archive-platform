@@ -33,6 +33,12 @@ if [ "$(docker exec "$DB_CONTAINER" psql -U demo -d authz_demo -Atc "select coun
   docker exec -i "$DB_CONTAINER" psql -q -v ON_ERROR_STOP=1 -U demo -d authz_demo < "$ROOT/api/src/test/resources/authz/synthetic-seed.sql"
 fi
 
+# Stored files for the seed attachments (FICTIONAL PDFs).
+ATT="${AUTHZ_DEMO_ATTACHMENT_DIR:-/tmp/authz-demo-attachments}/synthetic"; mkdir -p "$ATT"
+for f in SYNTHETIC-award-A.pdf SYNTHETIC-award-B.pdf; do
+  printf '%%PDF-1.4\n%% %s - FICTIONAL attachment\n%%%%EOF\n' "$f" > "$ATT/$f"
+done
+
 echo "Starting API (profile authz-demo) on :$API_PORT ..."
 (cd "$ROOT/api" && exec env AUTHZ_DEMO_DB_PORT="$DB_PORT" AUTHZ_DEMO_API_PORT="$API_PORT" AUTHZ_DEMO_UI_PORT="$UI_PORT" \
   mvn -B -ntp -q -Pauthz-demo spring-boot:run -Dspring-boot.run.profiles=authz-demo) \

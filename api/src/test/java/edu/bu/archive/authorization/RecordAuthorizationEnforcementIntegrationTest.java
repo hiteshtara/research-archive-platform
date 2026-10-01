@@ -3,6 +3,7 @@ package edu.bu.archive.authorization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -67,9 +68,13 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
         "app.authorization.version-scope=PER_VERSION",
         "app.authorization.department-match=EXACT_LEAD_UNIT",
         "app.authorization.research-staff-roles=PI,MPI,COI",
+        "app.authorization.contact-derivation=EXPLICIT_GRANT",
         "app.attachments.storage=local",
         "app.attachments.local-directory=target/authz-test-attachments",
-        "app.ai.enabled=false",
+        "app.ai.enabled=true",
+        "app.ai.stub-enabled=true",
+        "app.ai.provider=stub",
+        "app.explorer.enabled=true",
         "app.search.semantic.enabled=false"
 })
 @AutoConfigureMockMvc
@@ -109,6 +114,12 @@ class RecordAuthorizationEnforcementIntegrationTest {
             }
             s.execute(Files.readString(root.resolve("api/src/test/resources/authz/synthetic-seed.sql")));
         }
+        // Real stored files for the seed attachments (app.attachments.local-directory below).
+        Path files = Path.of("target/authz-test-attachments/synthetic");
+        Files.createDirectories(files);
+        for (String name : List.of("SYNTHETIC-award-A.pdf", "SYNTHETIC-award-B.pdf")) {
+            Files.writeString(files.resolve(name), "%PDF-1.4\n% " + name + " - FICTIONAL attachment\n%%EOF\n");
+        }
     }
 
     /** TEST-ONLY sign-in replacement and synthetic IO mapping (mirrors the demo build). */
@@ -122,22 +133,7 @@ class RecordAuthorizationEnforcementIntegrationTest {
                     .map(key -> new ValidatedCognitoIdentity(ISSUER, "demo-" + key));
         }
 
-        @Bean
-        @Primary
-        IoResolver testIoResolver(JdbcClient jdbc) {
-            return (module, key) -> module != RecordModule.AWARD ? Set.of()
-                    : Set.copyOf(jdbc.sql("SELECT io_value FROM authz_demo.award_io WHERE award_id = CAST(:id AS BIGINT)")
-                            .param("id", key).query(String.class).list());
-        }
 
-        @Bean
-        @Primary
-        IoSqlStrategy testIoSql() {
-            return (module, alias) -> module == RecordModule.AWARD
-                    ? Optional.of("EXISTS (SELECT 1 FROM authz_demo.award_io az_io WHERE az_io.award_id = "
-                            + alias + ".award_id AND az_io.io_value IN (:az_ios))")
-                    : Optional.empty();
-        }
     }
 
     @Autowired MockMvc mvc;
@@ -215,11 +211,40 @@ class RecordAuthorizationEnforcementIntegrationTest {
         assertThat(status("multi", "/api/v1/awards/9000601/summary")).isEqualTo(404);
     }
 
+    // APPROVED POLICY (2026-10-01): under enforcement, authorization of the parent record covers
+    // all of its content; ArchiveAttachmentViewer is no longer a separate condition.
     @Test
-    void attachmentsStillRequireTheAttachmentGroupInAdditionToRecordAccess() throws Exception {
-        assertThat(call("pi", "/api/v1/awards/9000102/attachments", false).getResponse().getStatus()).isEqualTo(403);
-        assertThat(call("pi", "/api/v1/awards/9000102/attachments", true).getResponse().getStatus()).isEqualTo(200);
-        assertThat(call("pi", "/api/v1/awards/9000201/attachments", true).getResponse().getStatus()).isEqualTo(404);
+    void anAuthorizedUserWithoutTheAttachmentGroupGetsTheRecordsFiles() throws Exception {
+        MvcResult list = call("pi", "/api/v1/awards/9000102/attachments", false);
+        assertThat(list.getResponse().getStatus()).isEqualTo(200);
+        assertThat(json.readTree(list.getResponse().getContentAsString()).get("totalElements").asLong()).isEqualTo(1);
+        MvcResult download = mvc.perform(get("/api/v1/awards/9000102/attachments/9300001/download")
+                .header("X-Test-Persona", "pi")).andReturn();
+        if (download.getRequest().isAsyncStarted()) {
+            download.getAsyncResult();
+        }
+        assertThat(download.getResponse().getStatus()).isEqualTo(200);
+        assertThat(download.getResponse().getContentAsString()).contains("SYNTHETIC-award-A.pdf - FICTIONAL");
+    }
+
+    @Test
+    void anUnauthorizedUserCannotReachAnotherRecordsFilesEvenByDirectUrl() throws Exception {
+        for (boolean group : new boolean[] {false, true}) {
+            for (String path : List.of("/api/v1/awards/9000201/attachments",
+                    "/api/v1/awards/9000201/attachments/9300002/download",
+                    "/api/v1/awards/9000201/report-with-attachments.pdf",
+                    // B's attachment through A's URL: the download's owner check refuses it
+                    "/api/v1/awards/9000102/attachments/9300002/download")) {
+                MvcResult result = call("pi", path, group);
+                assertThat(result.getResponse().getStatus()).as(path + " group=" + group).isEqualTo(404);
+                assertThat(result.getResponse().getContentAsString()).doesNotContain("SYNTHETIC-award-B");
+            }
+        }
+        // Unprovisioned and suspended identities get nothing, group or not.
+        assertThat(call("nogrants", "/api/v1/awards/9000102/attachments/9300001/download", true)
+                .getResponse().getStatus()).isEqualTo(403);
+        assertThat(call("suspended", "/api/v1/awards/9000102/attachments/9300001/download", true)
+                .getResponse().getStatus()).isEqualTo(403);
     }
 
     @Test
@@ -237,10 +262,224 @@ class RecordAuthorizationEnforcementIntegrationTest {
     }
 
     @Test
-    void reportsAreClosedForNonCentralUsersUntilEverySectionIsScoped() throws Exception {
+    void reportsAreAvailableForAnInScopeAwardBecauseEverySectionIsScoped() throws Exception {
         MvcResult report = call("pi", "/api/v1/awards/9000102/report.pdf", false);
-        assertThat(report.getResponse().getStatus()).isEqualTo(403);
-        assertThat(report.getResponse().getContentAsString()).contains("NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION");
+        assertThat(report.getResponse().getStatus()).isEqualTo(200);
+        assertThat(report.getResponse().getContentType()).isEqualTo("application/pdf");
+        assertThat(status("pi", "/api/v1/awards/9000201/report.pdf")).isEqualTo(404);
+        assertThat(status("pi", "/api/v1/awards/9000103/report.pdf")).isEqualTo(404);
+
+        // The consolidated report with attachments needs only the record's own authorization.
+        MvcResult withAttachments = call("pi", "/api/v1/awards/9000102/report-with-attachments.pdf", false);
+        if (withAttachments.getRequest().isAsyncStarted()) {
+            withAttachments.getAsyncResult();
+        }
+        assertThat(withAttachments.getResponse().getStatus()).isEqualTo(200);
+        assertThat(withAttachments.getResponse().getContentType()).isEqualTo("application/pdf");
+        assertThat(call("pi", "/api/v1/awards/9000201/report-with-attachments.pdf", true)
+                .getResponse().getStatus()).isEqualTo(404);
+    }
+
+    // --- Award section endpoints (fixes 1-9) -----------------------------------------------
+
+    @Test
+    void timeAndMoneyTransactionsAndDocumentsAreBoundToTheRequestedAwardsFamily() throws Exception {
+        String a = "/api/v1/awards/9000102/time-and-money/";
+        // Cross-award read: Award B's transaction and document through Award A's URL.
+        assertThat(status("pi", a + "transactions/9710003")).isEqualTo(404);
+        assertThat(status("pi", a + "documents/SYN-TNM-B1")).isEqualTo(404);
+        assertThat(status("department", a + "transactions/9710003")).isEqualTo(404);
+        // Same family, both ends visible.
+        assertThat(body("pi", a + "transactions/9710001").get("sourceAwardNumber").asText()).isEqualTo("990001-00001");
+        assertThat(body("pi", a + "documents/SYN-TNM-A1").get("rootAwardNumber").asText()).isEqualTo("990001-00001");
+        // Same family, but the destination (A's child) is not visible to Pat; it is to the department.
+        assertThat(status("pi", a + "transactions/9710002")).isEqualTo(404);
+        assertThat(status("department", a + "transactions/9710002")).isEqualTo(200);
+        // D sits under B: B's document belongs to D's family, but B's number is not shown, and a
+        // transaction that only moves B's money is still refused.
+        JsonNode bDocViaD = body("pi", "/api/v1/awards/9000401/time-and-money/documents/SYN-TNM-B1");
+        assertThat(bDocViaD.get("rootAwardNumber").isNull()).isTrue();
+        assertThat(status("pi", "/api/v1/awards/9000401/time-and-money/transactions/9710003")).isEqualTo(404);
+        // Central: unchanged behaviour.
+        assertThat(status("central", a + "transactions/9710003")).isEqualTo(200);
+        assertThat(body("central", a + "documents/SYN-TNM-B1").get("rootAwardNumber").asText()).isEqualTo("990002-00001");
+    }
+
+    @Test
+    void amountAndTimeAndMoneyHistoryListOnlyVisibleVersionsAndPageAfterFiltering() throws Exception {
+        for (String section : List.of("amounts", "time-and-money/history")) {
+            JsonNode pi = body("pi", "/api/v1/awards/9000102/" + section + "?size=1");
+            assertThat(pi.get("totalElements").asLong()).as(section).isEqualTo(2);
+            assertThat(pi.get("totalPages").asLong()).as(section).isEqualTo(2);
+            Set<Long> ids = new TreeSet<>();
+            for (int page = 0; page < 2; page++) {
+                body("pi", "/api/v1/awards/9000102/" + section + "?size=1&page=" + page).get("content")
+                        .forEach(n -> ids.add(n.get("awardId").asLong()));
+            }
+            assertThat(ids).as(section).containsExactly(9000101L, 9000102L);
+            assertThat(body("central", "/api/v1/awards/9000102/" + section).get("totalElements").asLong())
+                    .as(section).isEqualTo(3);
+        }
+    }
+
+    @Test
+    void familyWideTimeAndMoneyDataNeedsEveryVersionOfTheFamily() throws Exception {
+        JsonNode pi = body("pi", "/api/v1/awards/9000102/time-and-money/summary");
+        assertThat(pi.get("obligatedTotalAmount").decimalValue()).isEqualByComparingTo("200.00");
+        assertThat(pi.get("familyTransactionCount").isNull()).isTrue();
+        assertThat(pi.get("lastFamilyTimeAndMoneyDocumentNumber").isNull()).isTrue();
+        JsonNode central = body("central", "/api/v1/awards/9000102/time-and-money/summary");
+        assertThat(central.get("familyTransactionCount").asLong()).isEqualTo(1);
+        assertThat(central.get("lastFamilyTimeAndMoneyDocumentNumber").asText()).isEqualTo("SYN-TNM-A1");
+
+        JsonNode actions = body("pi", "/api/v1/awards/9000102/time-and-money/actions");
+        assertThat(actions.get("content")).isEmpty();
+        assertThat(actions.get("totalElements").asLong()).isZero();
+        assertThat(body("central", "/api/v1/awards/9000102/time-and-money/actions").get("totalElements").asLong()).isEqualTo(1);
+        // D is a one-version family Pat can see entirely.
+        assertThat(body("pi", "/api/v1/awards/9000401/time-and-money/actions").get("totalElements").asLong()).isEqualTo(1);
+    }
+
+    @Test
+    void commentsAndNotepadFollowVersionAndFamilyVisibility() throws Exception {
+        JsonNode pi = body("pi", "/api/v1/awards/9000102/comments");
+        JsonNode piCategory = category(pi, "SYN1");
+        assertThat(piCategory.get("history")).hasSize(1);
+        assertThat(piCategory.get("history").get(0).get("awardId").asLong()).isEqualTo(9000101L);
+        assertThat(pi.get("notepadEntries")).isEmpty();       // A's family is only partly visible
+        JsonNode central = body("central", "/api/v1/awards/9000102/comments");
+        assertThat(category(central, "SYN1").get("history")).hasSize(2);
+        assertThat(central.get("notepadEntries")).hasSize(1);
+
+        JsonNode piD = body("pi", "/api/v1/awards/9000401/comments");
+        assertThat(piD.get("notepadEntries")).hasSize(1);
+        assertThat(piD.get("notepadEntries").get(0).get("restrictedView").asText()).isEqualTo("N");
+        assertThat(body("central", "/api/v1/awards/9000401/comments").get("notepadEntries")).hasSize(2);
+    }
+
+    private static JsonNode category(JsonNode comments, String typeCode) {
+        for (JsonNode category : comments.get("commentCategories")) {
+            if (typeCode.equals(category.get("commentTypeCode").asText())) {
+                return category;
+            }
+        }
+        throw new AssertionError("no comment category " + typeCode);
+    }
+
+    @Test
+    void budgetsOwnedByInvisibleVersionsAreDroppedBeforeSelection() throws Exception {
+        assertThat(body("central", "/api/v1/awards/9000102/budget/summary").get("selectedBudgetId").asLong()).isEqualTo(9750003L);
+        assertThat(body("pi", "/api/v1/awards/9000102/budget/summary").get("selectedBudgetId").asLong()).isEqualTo(9750001L);
+        JsonNode piVersions = body("pi", "/api/v1/awards/9000102/budget/versions");
+        assertThat(piVersions.get("totalElements").asLong()).isEqualTo(1);
+        assertThat(piVersions.get("content").get(0).get("owningAwardId").asLong()).isEqualTo(9000101L);
+        assertThat(body("central", "/api/v1/awards/9000102/budget/versions").get("totalElements").asLong()).isEqualTo(2);
+    }
+
+    @Test
+    void fundingProposalLinksMadeOnInvisibleVersionsAreOmitted() throws Exception {
+        assertThat(status("pi", "/api/v1/proposals/8000201")).isEqualTo(200);   // the Proposal itself is visible
+        assertThat(body("pi", "/api/v1/awards/9000301/funding-proposals")).isEmpty();
+        assertThat(body("central", "/api/v1/awards/9000301/funding-proposals")).hasSize(1);
+    }
+
+    @Test
+    void sapTransmissionsOmitInvisibleChildrenAndTheirHierarchyPayloads() throws Exception {
+        JsonNode pi = body("pi", "/api/v1/awards/9000102/sap-transmissions").get("content");
+        JsonNode piHierarchy = transmission(pi, 9760001L);
+        assertThat(piHierarchy.get("children")).hasSize(1);
+        assertThat(piHierarchy.get("children").get(0).get("awardNumber").asText()).isEqualTo("990001-00001");
+        assertThat(piHierarchy.get("sentData").isNull()).isTrue();
+        assertThat(piHierarchy.get("returnedData").isNull()).isTrue();
+        assertThat(transmission(pi, 9760002L).get("sentData").asText()).isEqualTo("<syn-sent-a-only/>");
+
+        JsonNode department = transmission(body("department", "/api/v1/awards/9000102/sap-transmissions").get("content"), 9760001L);
+        assertThat(department.get("children")).hasSize(2);
+        assertThat(department.get("sentData").asText()).isEqualTo("<syn-sent-hierarchy/>");
+    }
+
+    private static JsonNode transmission(JsonNode content, long id) {
+        for (JsonNode t : content) {
+            if (t.get("transmissionId").asLong() == id) {
+                return t;
+            }
+        }
+        throw new AssertionError("no transmission " + id);
+    }
+
+    @Test
+    void summaryShowsRootAndParentNumbersOnlyWhenVisible() throws Exception {
+        JsonNode pi = body("pi", "/api/v1/awards/9000401/summary");
+        assertThat(pi.get("rootAwardNumber").isNull()).isTrue();
+        assertThat(pi.get("parentAwardNumber").isNull()).isTrue();
+        JsonNode central = body("central", "/api/v1/awards/9000401/summary");
+        assertThat(central.get("rootAwardNumber").asText()).isEqualTo("990002-00001");
+        assertThat(central.get("parentAwardNumber").asText()).isEqualTo("990002-00001");
+        assertThat(body("department", "/api/v1/awards/9000111/summary").get("parentAwardNumber").asText())
+                .isEqualTo("990001-00001");
+    }
+
+    @Test
+    void unknownAwardSubPathsAreClosedToNonCentralUsers() throws Exception {
+        MvcResult unknown = call("pi", "/api/v1/awards/9000102/not-a-section", false);
+        assertThat(unknown.getResponse().getStatus()).isEqualTo(403);
+        assertThat(unknown.getResponse().getContentAsString()).contains("NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION");
+        assertThat(status("central", "/api/v1/awards/9000102/not-a-section")).isEqualTo(404);
+    }
+
+    // --- File Finder, Explorer, AI (fixes 11-13) ------------------------------------------
+
+    @Test
+    void archivedFileFinderReturnsOnlyVisibleAwardVersionsForRestrictedUsers() throws Exception {
+        String search = "/api/v1/attachments/search?recordNumber=990001-00001";
+        // No attachment group needed: the File Finder is scoped to the user's records.
+        JsonNode pi = json.readTree(call("pi", search, false).getResponse().getContentAsString());
+        assertThat(pi.get("totalElements").asLong()).isEqualTo(1);
+        assertThat(pi.get("content").get(0).get("parentId").asLong()).isEqualTo(9000102L);
+        JsonNode central = json.readTree(call("central", search, true).getResponse().getContentAsString());
+        assertThat(central.get("totalElements").asLong()).isEqualTo(2);
+
+        JsonNode all = json.readTree(call("pi", search + "&recordType=ALL", true).getResponse().getContentAsString());
+        assertThat(all.get("totalElements").asLong()).isEqualTo(1);
+        assertThat(all.get("content").get(0).get("recordType").asText()).isEqualTo("AWARD");
+        JsonNode other = json.readTree(call("pi", "/api/v1/attachments/search?recordNumber=990002-00001", true)
+                .getResponse().getContentAsString());
+        assertThat(other.get("totalElements").asLong()).isZero();
+        JsonNode proposals = json.readTree(call("department", "/api/v1/attachments/search?recordType=PROPOSAL&recordNumber=SYN-PRP-0003", true)
+                .getResponse().getContentAsString());
+        assertThat(proposals.get("totalElements").asLong()).isZero();
+    }
+
+    @Test
+    void explorerAwardLookupsAreRecordChecked() throws Exception {
+        assertThat(status("pi", "/api/v1/explorer/awards?awardNumber=990001-00001")).isEqualTo(200);
+        assertThat(status("pi", "/api/v1/explorer/awards?awardNumber=990002-00001")).isEqualTo(404);
+        assertThat(status("pi", "/api/v1/explorer/award-versions?awardId=9000101")).isEqualTo(200);
+        assertThat(status("pi", "/api/v1/explorer/award-versions?awardId=9000103")).isEqualTo(404);
+        assertThat(status("pi", "/api/v1/explorer/units?unitNumber=SYN-U-100")).isEqualTo(403);
+        assertThat(status("central", "/api/v1/explorer/award-versions?awardId=9000103")).isEqualTo(200);
+    }
+
+    @Test
+    void aiNeedsEveryVersionOfTheAwardFamily() throws Exception {
+        MvcResult partial = mvc.perform(post("/api/ai/awards/990001-00001/summary").header("X-Test-Persona", "pi"))
+                .andReturn();
+        assertThat(partial.getResponse().getStatus()).isEqualTo(403);
+        assertThat(partial.getResponse().getContentAsString()).contains("AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS");
+        assertThat(mvc.perform(post("/api/ai/awards/990002-00001/summary").header("X-Test-Persona", "pi"))
+                .andReturn().getResponse().getStatus()).isEqualTo(404);
+        assertThat(mvc.perform(post("/api/ai/awards/990004-00001/summary").header("X-Test-Persona", "pi"))
+                .andReturn().getResponse().getStatus()).isEqualTo(200);
+        assertThat(mvc.perform(post("/api/ai/awards/990001-00001/summary").header("X-Test-Persona", "central"))
+                .andReturn().getResponse().getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void stillClosedPathsStayClosed() throws Exception {
+        for (String path : List.of("/api/v1/documents?q=SYNTHETIC", "/api/documents/search?q=SYNTHETIC",
+                "/api/awards/990001-00001", "/api/v1/explorer/proposals")) {
+            assertThat(status("pi", path)).as(path).isEqualTo(403);
+        }
     }
 
     @Test

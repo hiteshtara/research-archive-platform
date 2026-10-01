@@ -24,11 +24,13 @@ app:
     disposable-database: true
   authorization:
     enforcement-enabled: true
-    # DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy (same as authz-demo):
+    # P3/P4/P6: DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy (same as authz-demo):
     # Overridable per run (LAB_VERSION_SCOPE etc.) so alternatives are tested separately.
     version-scope: ${LAB_VERSION_SCOPE:PER_VERSION}
     department-match: ${LAB_DEPARTMENT_MATCH:EXACT_LEAD_UNIT}
     research-staff-roles: ${LAB_RESEARCH_STAFF_ROLES:PI,MPI,COI}
+    # Approved 2026-10-01 (design section 13): contact access via the verified KIM principal.
+    contact-derivation: ${LAB_CONTACT_DERIVATION:VERIFIED_PRINCIPAL}
   attachments:
     storage: local
     local-directory: ${LAB_ATTACHMENT_DIR:/tmp/identity-lab-attachments}

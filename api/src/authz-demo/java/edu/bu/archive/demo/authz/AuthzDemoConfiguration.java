@@ -1,6 +1,7 @@
 package edu.bu.archive.demo.authz;
 
 import java.net.URI;
+import java.util.Optional;
 import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -13,8 +14,7 @@ import org.springframework.core.Ordered;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import edu.bu.archive.application.authorization.CurrentIdentityProvider;
-import edu.bu.archive.application.authorization.IoResolver;
-import edu.bu.archive.application.authorization.IoSqlStrategy;
+import edu.bu.archive.application.authorization.RecordModule;
 
 /**
  * SYNTHETIC IDENTITY DEMO - BU FEDERATION NOT CONNECTED.
@@ -86,16 +86,5 @@ public class AuthzDemoConfiguration implements org.springframework.web.servlet.c
         return registration;
     }
 
-    /** Synthetic IO values (authz_demo.award_io). The real IO field remains unresolved (D-A). */
-    @Bean
-    @Primary
-    IoResolver demoIoResolver(JdbcClient jdbc) {
-        return SyntheticIo.resolver(jdbc);
-    }
-
-    @Bean
-    @Primary
-    IoSqlStrategy demoIoSqlStrategy() {
-        return SyntheticIo.sqlStrategy();
-    }
+    // IO grants use the production rule (Award account number, decision D-A); no demo override.
 }
