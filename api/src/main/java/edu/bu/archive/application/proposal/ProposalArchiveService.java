@@ -18,10 +18,21 @@ public class ProposalArchiveService {
 
     private final ProposalArchiveRepository repository;
 
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
     public ProposalArchiveService(
             ProposalArchiveRepository repository
     ) {
+        this(repository, edu.bu.archive.application.authorization.RecordVisibility.ALL);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProposalArchiveService(
+            ProposalArchiveRepository repository,
+            edu.bu.archive.application.authorization.RecordVisibility visibility
+    ) {
         this.repository = repository;
+        this.visibility = visibility;
     }
 
     /*
@@ -135,9 +146,10 @@ public class ProposalArchiveService {
         String normalizedProposalNumber =
                 requireExistingProposal(proposalNumber);
 
+        // Record authorization: list only Awards the caller may open.
         return repository.findAwards(
                 normalizedProposalNumber
-        );
+        ).stream().filter(row -> visibility.canSeeAwardNumber(row.awardNumber())).toList();
     }
 
     private String requireExistingProposal(

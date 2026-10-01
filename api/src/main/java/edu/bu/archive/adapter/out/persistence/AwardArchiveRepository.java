@@ -65,11 +65,51 @@ import java.util.Optional;
 public class AwardArchiveRepository {
 
     private final JdbcClient jdbc;
+    private final RecordScope scope;
 
+    /**
+     * The record-authorization scope for a module's row alias - a predicate
+     * placed in the SAME WHERE as the search filters, so page and count see
+     * only in-scope rows. Empty when record authorization is not enforced.
+     */
+    @FunctionalInterface
+    public interface RecordScope {
+        edu.bu.archive.application.authorization.SqlFragment sql(
+                edu.bu.archive.application.authorization.RecordModule module, String alias);
+
+        RecordScope UNRESTRICTED = (module, alias) ->
+                edu.bu.archive.application.authorization.SqlFragment.NONE;
+    }
+
+    /** Unrestricted - for tests and tools that bypass the web request. */
     public AwardArchiveRepository(
             JdbcClient jdbc
     ) {
+        this(jdbc, RecordScope.UNRESTRICTED);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AwardArchiveRepository(
+            JdbcClient jdbc,
+            edu.bu.archive.application.authorization.RecordAuthorizationService authorization
+    ) {
+        this(jdbc, authorization::scopeSql);
+    }
+
+    public AwardArchiveRepository(JdbcClient jdbc, RecordScope scope) {
         this.jdbc = jdbc;
+        this.scope = scope;
+    }
+
+    private edu.bu.archive.application.authorization.SqlFragment awardScope() {
+        return scope.sql(edu.bu.archive.application.authorization.RecordModule.AWARD, "av");
+    }
+
+    private static JdbcClient.StatementSpec bindScope(
+            JdbcClient.StatementSpec spec,
+            edu.bu.archive.application.authorization.SqlFragment fragment
+    ) {
+        return fragment.params().isEmpty() ? spec : spec.params(fragment.params());
     }
 
     public List<AwardFamilySummaryResponse> findFamilies(
@@ -778,7 +818,8 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return bindAwardFilters(jdbc.sql("""
+        var authzScope = awardScope();
+        return bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT
                     av.award_id,
                     av.award_number,
@@ -836,10 +877,10 @@ public class AwardArchiveRepository {
                         h.award_hierarchy_id DESC
                     LIMIT 1
                 ) ah ON TRUE
-                """ + AWARD_FAMILY_SEARCH_WHERE + """
+                """ + AWARD_FAMILY_SEARCH_WHERE + authzScope.sql() + """
                 ORDER BY av.award_number, av.award_id
                 LIMIT :limit OFFSET :offset
-                """), filters)
+                """), filters), authzScope)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
                 .param("limit", limit)
@@ -857,10 +898,11 @@ public class AwardArchiveRepository {
             String rawQuery,
             AwardSearchFilters filters
     ) {
-        Long count = bindAwardFilters(jdbc.sql("""
+        var authzScope = awardScope();
+        Long count = bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_version av
-                """ + AWARD_FAMILY_SEARCH_WHERE), filters)
+                """ + AWARD_FAMILY_SEARCH_WHERE + authzScope.sql()), filters), authzScope)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
                 .query(Long.class)
@@ -1216,7 +1258,8 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return bindAwardFilters(jdbc.sql("""
+        var authzScope = awardScope();
+        return bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT
                     av.award_id,
                     av.award_number,
@@ -1245,9 +1288,9 @@ public class AwardArchiveRepository {
                         ap.award_person_id
                     LIMIT 1
                 ) pi ON TRUE
-                """ + AWARD_VERSION_SEARCH_WHERE + sortSql + """
+                """ + AWARD_VERSION_SEARCH_WHERE + authzScope.sql() + sortSql + """
                 LIMIT :limit OFFSET :offset
-                """), filters)
+                """), filters), authzScope)
                 .param("pattern", pattern)
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)
@@ -1281,10 +1324,11 @@ public class AwardArchiveRepository {
             String versionFilter,
             AwardSearchFilters filters
     ) {
-        Long count = bindAwardFilters(jdbc.sql("""
+        var authzScope = awardScope();
+        Long count = bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_version av
-                """ + AWARD_VERSION_SEARCH_WHERE), filters)
+                """ + AWARD_VERSION_SEARCH_WHERE + authzScope.sql()), filters), authzScope)
                 .param("pattern", pattern)
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)

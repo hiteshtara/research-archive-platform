@@ -14,13 +14,34 @@ import org.springframework.web.bind.annotation.RestController;
 public class DashboardController {
 
     private final JdbcClient jdbcClient;
+    private final edu.bu.archive.application.authorization.RecordAuthorizationService authorization;
 
     public DashboardController(JdbcClient jdbcClient) {
+        this(jdbcClient, (edu.bu.archive.application.authorization.RecordAuthorizationService) null);
+    }
+
+    public DashboardController(
+            JdbcClient jdbcClient,
+            edu.bu.archive.application.authorization.RecordAuthorizationService authorization
+    ) {
         this.jdbcClient = jdbcClient;
+        this.authorization = authorization;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DashboardController(
+            JdbcClient jdbcClient,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.RecordAuthorizationService> authorization
+    ) {
+        this(jdbcClient, authorization.getIfAvailable());
     }
 
     @GetMapping
     public DashboardDto dashboard() {
+        if (authorization != null && !authorization.unrestricted()) {
+            return scopedDashboard();
+        }
         return jdbcClient.sql("""
                 WITH award_counts AS (
                     SELECT
@@ -89,5 +110,37 @@ public class DashboardController {
                 """)
                 .query(DashboardDto.class)
                 .single();
+    }
+
+    /*
+     * Record authorization: counts for a restricted caller come from the SAME
+     * scope predicates as search - never archive-wide numbers. Modules with
+     * no non-Central scoping yet (IRB, Negotiation, Subaward, documents)
+     * report 0 rather than an archive-wide total.
+     */
+    private DashboardDto scopedDashboard() {
+        var award = authorization.scopeSql(edu.bu.archive.application.authorization.RecordModule.AWARD, "av");
+        var proposal = authorization.scopeSql(edu.bu.archive.application.authorization.RecordModule.PROPOSAL, "ranked");
+        var awardSpec = jdbcClient.sql("""
+                SELECT COUNT(DISTINCT av.award_number) AS families, COUNT(*) AS versions
+                FROM archive.award_version av WHERE TRUE""" + award.sql());
+        if (!award.params().isEmpty()) {
+            awardSpec = awardSpec.params(award.params());
+        }
+        var awards = awardSpec.query((rs, i) -> new long[] {rs.getLong("families"), rs.getLong("versions")}).single();
+        var proposalSpec = jdbcClient.sql("""
+                WITH ranked AS (
+                    SELECT proposal_id, proposal_number, lead_unit_number,
+                           ROW_NUMBER() OVER (PARTITION BY proposal_number ORDER BY version_number DESC,
+                               source_update_timestamp DESC NULLS LAST, proposal_id DESC) AS row_rank
+                    FROM archive.proposal_version
+                )
+                SELECT COUNT(*) FILTER (WHERE row_rank = 1) AS families, COUNT(*) AS versions
+                FROM ranked WHERE TRUE""" + proposal.sql());
+        if (!proposal.params().isEmpty()) {
+            proposalSpec = proposalSpec.params(proposal.params());
+        }
+        var proposals = proposalSpec.query((rs, i) -> new long[] {rs.getLong("families"), rs.getLong("versions")}).single();
+        return new DashboardDto(0, 0, 0, 0, awards[0], awards[1], proposals[0], proposals[1], 0, 0, 0);
     }
 }

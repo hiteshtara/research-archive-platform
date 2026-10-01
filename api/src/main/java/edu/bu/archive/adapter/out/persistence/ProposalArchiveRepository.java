@@ -15,11 +15,38 @@ import java.util.Optional;
 public class ProposalArchiveRepository {
 
     private final JdbcClient jdbc;
+    private final AwardArchiveRepository.RecordScope scope;
 
+    /** Unrestricted - for tests and tools that bypass the web request. */
     public ProposalArchiveRepository(
             JdbcClient jdbc
     ) {
+        this(jdbc, AwardArchiveRepository.RecordScope.UNRESTRICTED);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProposalArchiveRepository(
+            JdbcClient jdbc,
+            edu.bu.archive.application.authorization.RecordAuthorizationService authorization
+    ) {
+        this(jdbc, authorization::scopeSql);
+    }
+
+    public ProposalArchiveRepository(JdbcClient jdbc, AwardArchiveRepository.RecordScope scope) {
         this.jdbc = jdbc;
+        this.scope = scope;
+    }
+
+    /** Record-authorization scope over the latest-version CTE row ("ranked"). */
+    private edu.bu.archive.application.authorization.SqlFragment proposalScope() {
+        return scope.sql(edu.bu.archive.application.authorization.RecordModule.PROPOSAL, "ranked");
+    }
+
+    private static JdbcClient.StatementSpec bindScope(
+            JdbcClient.StatementSpec spec,
+            edu.bu.archive.application.authorization.SqlFragment fragment
+    ) {
+        return fragment.params().isEmpty() ? spec : spec.params(fragment.params());
     }
 
     public List<ProposalFamilySummaryResponse> findFamilies(
@@ -43,6 +70,7 @@ public class ProposalArchiveRepository {
                   )
                 """;
 
+        var authzScope = proposalScope();
         JdbcClient.StatementSpec statement = jdbc.sql("""
                 WITH ranked AS (
                     SELECT
@@ -52,6 +80,7 @@ public class ProposalArchiveRepository {
                         title,
                         proposal_sequence_status,
                         sponsor_name,
+                        lead_unit_number,
                         lead_unit_name,
                         principal_investigator_name,
                         ROW_NUMBER() OVER (
@@ -75,10 +104,11 @@ public class ProposalArchiveRepository {
                     proposal_id AS current_proposal_id
                 FROM ranked
                 WHERE row_rank = 1
-                """ + filter + """
+                """ + filter + authzScope.sql() + """
                 ORDER BY proposal_number
                 LIMIT :limit
                 """);
+        statement = bindScope(statement, authzScope);
         if (!normalizedQuery.isEmpty()) {
             statement = statement.param("query", normalizedQuery);
         }
@@ -193,7 +223,8 @@ public class ProposalArchiveRepository {
             int limit,
             int offset
     ) {
-        return bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
+        var authzScope = proposalScope();
+        return bindScope(bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
                 SELECT
                     proposal_number,
                     title,
@@ -205,10 +236,10 @@ public class ProposalArchiveRepository {
                     version_number AS latest_version_number,
                     proposal_id AS current_proposal_id
                 FROM ranked
-                """ + FAMILY_PAGE_WHERE + """
+                """ + FAMILY_PAGE_WHERE + authzScope.sql() + """
                 ORDER BY proposal_number
                 LIMIT :limit OFFSET :offset
-                """), query, filters)
+                """), query, filters), authzScope)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(ProposalFamilySummaryResponse.class)
@@ -216,10 +247,11 @@ public class ProposalArchiveRepository {
     }
 
     public long countFamilyPage(String query, ProposalSearchFilters filters) {
-        Long count = bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
+        var authzScope = proposalScope();
+        Long count = bindScope(bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
                 SELECT COUNT(*)
                 FROM ranked
-                """ + FAMILY_PAGE_WHERE), query, filters)
+                """ + FAMILY_PAGE_WHERE + authzScope.sql()), query, filters), authzScope)
                 .query(Long.class)
                 .single();
         return count == null ? 0L : count;

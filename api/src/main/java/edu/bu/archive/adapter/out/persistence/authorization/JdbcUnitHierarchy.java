@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.out.persistence.authorization;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import edu.bu.archive.application.authorization.RecordAuthorizationService;
 import edu.bu.archive.application.authorization.UnitHierarchy;
 
 /**
@@ -11,7 +12,7 @@ import edu.bu.archive.application.authorization.UnitHierarchy;
  * descendant of anything (fails closed).
  */
 @Repository
-public class JdbcUnitHierarchy implements UnitHierarchy {
+public class JdbcUnitHierarchy implements UnitHierarchy, RecordAuthorizationService.DescendantUnits {
 
     static final int MAX_DEPTH = 32;
 
@@ -46,5 +47,29 @@ public class JdbcUnitHierarchy implements UnitHierarchy {
                 .param("maxDepth", MAX_DEPTH)
                 .query(Boolean.class)
                 .single();
+    }
+
+    @Override
+    public java.util.Set<String> selfAndDescendants(String unitNumber) {
+        if (unitNumber == null) {
+            return java.util.Set.of();
+        }
+        var result = new java.util.LinkedHashSet<String>();
+        result.add(unitNumber);
+        result.addAll(jdbc.sql("""
+                        WITH RECURSIVE down(unit_number, depth) AS (
+                            SELECT unit_number, 1 FROM archive.unit WHERE parent_unit_number = :unit
+                            UNION
+                            SELECT u.unit_number, down.depth + 1
+                            FROM archive.unit u JOIN down ON u.parent_unit_number = down.unit_number
+                            WHERE down.depth < :maxDepth
+                        )
+                        SELECT DISTINCT unit_number FROM down
+                        """)
+                .param("unit", unitNumber)
+                .param("maxDepth", MAX_DEPTH)
+                .query(String.class)
+                .list());
+        return result;
     }
 }

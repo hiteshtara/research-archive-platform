@@ -46,12 +46,24 @@ public class ProposalArchiveV1Service {
     private final ProposalV1Repository repository;
     private final ProposalAttachmentStorage attachmentStorage;
 
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
     public ProposalArchiveV1Service(
             ProposalV1Repository repository,
             ProposalAttachmentStorage attachmentStorage
     ) {
+        this(repository, attachmentStorage, edu.bu.archive.application.authorization.RecordVisibility.ALL);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProposalArchiveV1Service(
+            ProposalV1Repository repository,
+            ProposalAttachmentStorage attachmentStorage,
+            edu.bu.archive.application.authorization.RecordVisibility visibility
+    ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
+        this.visibility = visibility;
     }
 
     public ProposalSummaryResponse findSummary(long proposalId) {
@@ -291,7 +303,10 @@ public class ProposalArchiveV1Service {
 
     public List<ProposalFundedAwardResponse> findFundedAwards(long proposalId) {
         String proposalNumber = requireProposalNumberForId(proposalId);
-        return repository.findFundedAwardRows(proposalNumber);
+        // Record authorization: list only Awards the caller may open.
+        return repository.findFundedAwardRows(proposalNumber).stream()
+                .filter(row -> visibility.canSeeAwardNumber(row.awardNumber()))
+                .toList();
     }
 
     public List<ProposalCustomDataResponse> findCustomData(long proposalId) {

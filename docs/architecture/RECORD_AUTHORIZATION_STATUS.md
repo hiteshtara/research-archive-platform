@@ -1,6 +1,6 @@
 # Record authorization: implementation status
 
-**Status (stage 1 of 3): record authorization not enforced.** Today's behaviour is unchanged: any authenticated user may read any record, plus the existing `ArchiveAttachmentViewer` group gate on attachments.
+**Status (stages 1–3): implemented, OFF by default.** With `app.authorization.enforcement-enabled=false` (the default, and every deployed environment), behaviour is unchanged: "record authorization not enforced". Any authenticated user may read any record, plus the existing `ArchiveAttachmentViewer` gate. Turning enforcement on requires the policy strategies to be configured (no defaults) and is a separate decision. A local synthetic demonstration is in `scripts/authz-demo/README.md`.
 
 | Label | Meaning |
 |---|---|
@@ -59,13 +59,41 @@ With enforcement on, any missing strategy, a missing identity or any evaluation 
 
 Synthetic identity fixtures live only under `src/test`. There is no mock-login endpoint, trusted identity header, magic username or access fallback in any deployable path.
 
+## Enforcement paths (stages 2–3)
+
+With enforcement on, every `/api` request passes `RecordAuthorizationInterceptor` before the controller runs. Unprovisioned or denied identities are refused, Central users may use every path, and other users may use only these:
+
+| Path | How it is enforced |
+|---|---|
+| `/api/v1/awards/search`, `/api/v1/awards/versions/search`, `/api/proposals/search` | scope predicate in the same SQL WHERE as the filters (page **and** count) |
+| `/api/global-search` | Award/Proposal branches scoped (the access outcome is propagated to worker threads); other modules and semantic search not run |
+| `/api/dashboard` | counts from the same scope predicates; other modules 0 |
+| `/api/v1/awards/{id}/**`, `/api/v1/awards/by-number/{n}` | record checked by the evaluator before any query; out of scope → 404 |
+| `/api/v1/awards/{n}/hierarchy` | requested Award checked; out-of-scope nodes omitted, re-rooted if an ancestor is hidden |
+| Award versions, related Proposals, Proposal → Award lists | filtered; related Negotiations and Subawards omitted |
+| `/api/v1/proposals/{id}/**`, `/api/proposals/{n}[/history\|/awards]` | record checked before any query |
+| attachments | record check **and** `ArchiveAttachmentViewer` |
+| `/api/v1/me/access` | access mode and grant kinds only (no identifiers) |
+
+**Every other path is closed to non-Central users** with `403 NOT_AVAILABLE_UNDER_RECORD_AUTHORIZATION`, so unfinished paths cannot leak records. This covers:
+- Award report PDFs;
+- Negotiation, Subaward and IRB;
+- Explorer, Document Explorer and File Finder;
+- AI;
+- legacy `/api/awards`.
+
+Verified by `RecordAuthorizationEnforcementIntegrationTest`: the full application on Testcontainers with the synthetic seed. Every persona, direct URLs, counts and pages, attachments, related lists, hierarchy, dashboard, Global Search, closed paths, revocation, and agreement between the SQL scope and the per-record checks.
+
 ## Not implemented yet
 
-| Stage | Scope |
+| Scope | Notes |
 |---|---|
-| 2 (query scoping) | scope predicates in the same SQL as filters, before counts, facets, ranking and pagination: Award/Historical Award/Proposal/Negotiation/Subaward search, Global Search, semantic search, Document Explorer, File Finder, dashboard counts |
-| 3 (endpoint enforcement) | direct record and version URLs, hierarchies, related records, reports, attachments (keeping `ArchiveAttachmentViewer` in addition), AI context, caches; wiring "access not provisioned" into request handling |
-| Not planned until approved | grant-administration UI and workflow; real enrollment from BU attributes; real IO resolution |
+| Non-Central rules for Negotiation, Subaward, IRB | proposal P8 / decision D-G |
+| Award report PDFs for non-Central users | closed until every section is reviewed |
+| File Finder, Explorer, Document Explorer, AI | closed for non-Central users |
+| Grant-administration UI and workflow | not planned until approved (P2) |
+| Real enrollment from BU attributes; real IO resolution | awaiting BU IAM and decision D-A |
+| Wiring production `CurrentIdentityProvider` to a populated identity store | depends on enrollment |
 
 ## Migration numbering
 

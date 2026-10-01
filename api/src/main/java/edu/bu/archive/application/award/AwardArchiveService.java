@@ -88,12 +88,24 @@ public class AwardArchiveService {
     private final AwardArchiveRepository repository;
     private final AwardAttachmentStorage attachmentStorage;
 
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
     public AwardArchiveService(
             AwardArchiveRepository repository,
             AwardAttachmentStorage attachmentStorage
     ) {
+        this(repository, attachmentStorage, edu.bu.archive.application.authorization.RecordVisibility.ALL);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AwardArchiveService(
+            AwardArchiveRepository repository,
+            AwardAttachmentStorage attachmentStorage,
+            edu.bu.archive.application.authorization.RecordVisibility visibility
+    ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
+        this.visibility = visibility;
     }
 
     public AwardWorkspaceResponse findWorkspace(
@@ -159,7 +171,11 @@ public class AwardArchiveService {
             long awardId
     ) {
         String awardNumber = requireAwardNumberForId(awardId);
-        return repository.findFundingProposalRows(awardNumber);
+        // Record authorization: a related Proposal is listed only when the
+        // caller may open it; being able to see this Award is not enough.
+        return repository.findFundingProposalRows(awardNumber).stream()
+                .filter(row -> visibility.canSeeProposalNumber(row.proposalNumber()))
+                .toList();
     }
 
     /*
@@ -173,6 +189,9 @@ public class AwardArchiveService {
             long awardId
     ) {
         String awardNumber = requireAwardNumberForId(awardId);
+        if (!visibility.unrestricted()) {
+            return List.of();   // Subawards: no non-Central rule yet (P8)
+        }
         return repository.findFundingSubawardRows(awardNumber);
     }
 
@@ -187,6 +206,9 @@ public class AwardArchiveService {
             long awardId
     ) {
         String awardNumber = requireAwardNumberForId(awardId);
+        if (!visibility.unrestricted()) {
+            return List.of();   // Negotiations: not yet scoped for non-Central users
+        }
         return repository.findAssociatedNegotiationRows(awardNumber);
     }
 
@@ -533,7 +555,7 @@ public class AwardArchiveService {
         // not subject to them, so showing it would contradict the filtered
         // result set directly beneath it.
         AwardDocumentNumberMatchResponse exactDocumentMatch =
-                safeFilters.hasStructuredFilters()
+                safeFilters.hasStructuredFilters() || !visibility.unrestricted()
                         ? null
                         : repository.findExactWorkflowDocumentMatch(rawQuery)
                                 .orElse(null);
@@ -709,12 +731,73 @@ public class AwardArchiveService {
                 edgeByAwardNumber
         );
 
-        return new AwardHierarchyResponse(
+        AwardHierarchyResponse full = new AwardHierarchyResponse(
                 rootEdge.awardNumber(),
                 normalizedAwardNumber,
                 rootNodeWithoutParent,
                 selectedAwardPath
         );
+        return visibility.unrestricted() ? full : pruneHierarchy(full, normalizedAwardNumber);
+    }
+
+    /*
+     * Record authorization: the tree shows only Awards the caller may open.
+     * An out-of-scope node is omitted together with its subtree (no
+     * placeholder, no hidden count - placeholders would disclose that a
+     * record exists). If an ancestor of the requested Award is out of
+     * scope, the tree is re-rooted at the requested Award, which the
+     * request guard has already checked. Seeing a parent never grants its
+     * children, and seeing a child never grants its parent.
+     */
+    private AwardHierarchyResponse pruneHierarchy(AwardHierarchyResponse full, String requestedAwardNumber) {
+        List<String> path = full.selectedAwardPath() == null ? List.of() : full.selectedAwardPath();
+        boolean wholePathVisible = allVisible(path);
+        AwardHierarchyNodeResponse newRoot = wholePathVisible
+                ? full.root()
+                : findNode(full.root(), requestedAwardNumber);
+        if (newRoot == null || !visibility.canSeeAwardNumber(newRoot.awardNumber())) {
+            throw new NoSuchElementException("Award not found: " + requestedAwardNumber);
+        }
+        AwardHierarchyNodeResponse pruned = prune(newRoot);
+        List<String> visiblePath = wholePathVisible ? path : List.of(requestedAwardNumber);
+        return new AwardHierarchyResponse(pruned.awardNumber(), requestedAwardNumber,
+                withParent(pruned, null), visiblePath);
+    }
+
+    private boolean allVisible(List<String> awardNumbers) {
+        return awardNumbers.stream().allMatch(visibility::canSeeAwardNumber);
+    }
+
+    private static AwardHierarchyNodeResponse findNode(AwardHierarchyNodeResponse node, String awardNumber) {
+        if (node == null) {
+            return null;
+        }
+        if (awardNumber.equals(node.awardNumber())) {
+            return node;
+        }
+        for (AwardHierarchyNodeResponse child : node.children()) {
+            AwardHierarchyNodeResponse found = findNode(child, awardNumber);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private AwardHierarchyNodeResponse prune(AwardHierarchyNodeResponse node) {
+        List<AwardHierarchyNodeResponse> children = node.children().stream()
+                .filter(child -> visibility.canSeeAwardNumber(child.awardNumber()))
+                .map(this::prune)
+                .toList();
+        return new AwardHierarchyNodeResponse(node.awardNumber(), node.awardId(), node.latestSequenceNumber(),
+                node.parentAwardNumber(), node.active(), node.title(), node.status(), node.principalInvestigator(),
+                node.sponsor(), node.leadUnit(), node.currentObligatedAmount(), children);
+    }
+
+    private static AwardHierarchyNodeResponse withParent(AwardHierarchyNodeResponse node, String parent) {
+        return new AwardHierarchyNodeResponse(node.awardNumber(), node.awardId(), node.latestSequenceNumber(),
+                parent, node.active(), node.title(), node.status(), node.principalInvestigator(),
+                node.sponsor(), node.leadUnit(), node.currentObligatedAmount(), node.children());
     }
 
     public AwardSummaryResponse findSummary(long awardId) {
@@ -740,6 +823,21 @@ public class AwardArchiveService {
 
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
+
+        if (!visibility.unrestricted()) {
+            // Record authorization: only versions the caller may open, with
+            // the count and paging computed AFTER filtering.
+            List<AwardVersionSummaryResponse> visible = repository
+                    .findVersionSummaries(awardNumber, Integer.MAX_VALUE, 0).stream()
+                    .filter(v -> v.awardId() != null && visibility.canSeeAward(v.awardId()))
+                    .toList();
+            int from = Math.min(safePage * safeSize, visible.size());
+            int to = Math.min(from + safeSize, visible.size());
+            PaginationSupport.PageMetadata visibleMeta =
+                    PaginationSupport.metadata(safePage, safeSize, visible.size());
+            return new PageResponse<>(List.copyOf(visible.subList(from, to)), safePage, safeSize,
+                    visible.size(), visibleMeta.totalPages(), visibleMeta.first(), visibleMeta.last());
+        }
 
         long totalElements = repository.countVersions(awardNumber);
 

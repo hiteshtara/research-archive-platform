@@ -105,6 +105,26 @@ public class GlobalSearchService {
             SemanticSearchProperties semanticSearchProperties,
             ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider
     ) {
+        this(irbSearchRepository, awardArchiveService, negotiationArchiveService, subawardArchiveService,
+                proposalArchiveRepository, semanticSearchRepository, semanticSearchProperties,
+                embeddingProviderObjectProvider, edu.bu.archive.application.authorization.RecordVisibility.ALL);
+    }
+
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public GlobalSearchService(
+            GlobalSearchRepository irbSearchRepository,
+            AwardArchiveService awardArchiveService,
+            NegotiationArchiveService negotiationArchiveService,
+            SubawardArchiveService subawardArchiveService,
+            ProposalArchiveRepository proposalArchiveRepository,
+            SemanticSearchRepository semanticSearchRepository,
+            SemanticSearchProperties semanticSearchProperties,
+            ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider,
+            edu.bu.archive.application.authorization.RecordVisibility visibility
+    ) {
+        this.visibility = visibility;
         this.irbSearchRepository = irbSearchRepository;
         this.awardArchiveService = awardArchiveService;
         this.negotiationArchiveService = negotiationArchiveService;
@@ -139,10 +159,14 @@ public class GlobalSearchService {
         String normalizedQuery = query == null ? "" : query.trim();
         Set<String> selected = normalizeModules(modules);
 
+        // Record authorization: modules with no non-Central scoping yet are
+        // not searched at all for restricted callers, and every branch runs
+        // with this request's access outcome (they run on other threads).
+        boolean unrestricted = visibility.unrestricted();
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
-                selected.isEmpty()
-                        ? CompletableFuture.supplyAsync(() ->
-                                timed("IRB", () -> searchIrb(normalizedQuery)))
+                selected.isEmpty() && unrestricted
+                        ? CompletableFuture.supplyAsync(visibility.propagate(() ->
+                                timed("IRB", () -> searchIrb(normalizedQuery))))
                         : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
                 startIfSelected(selected, "AWARD", () -> searchAward(normalizedQuery));
@@ -159,12 +183,12 @@ public class GlobalSearchService {
         // looks like an exact identifier, since structured search alone
         // is sufficient for those and semantic search would only add
         // latency for no benefit.
-        boolean semanticEligible = semanticSearchProperties.isEnabled()
+        boolean semanticEligible = unrestricted && semanticSearchProperties.isEnabled()
                 && !LikelyIdentifierDetector.looksLikeIdentifier(normalizedQuery);
         CompletableFuture<List<GlobalSearchItemResponse>> semanticFuture =
                 semanticEligible
-                        ? CompletableFuture.supplyAsync(() ->
-                                timed("SEMANTIC", () -> searchSemantic(normalizedQuery)))
+                        ? CompletableFuture.supplyAsync(visibility.propagate(() ->
+                                timed("SEMANTIC", () -> searchSemantic(normalizedQuery))))
                         : null;
 
         List<String> failedModules = new ArrayList<>();
@@ -242,7 +266,10 @@ public class GlobalSearchService {
         if (!selected.isEmpty() && !selected.contains(module)) {
             return CompletableFuture.completedFuture(List.of());
         }
-        return CompletableFuture.supplyAsync(() -> timed(module, search));
+        if (!visibility.unrestricted() && !("AWARD".equals(module) || "PROPOSAL".equals(module))) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        return CompletableFuture.supplyAsync(visibility.propagate(() -> timed(module, search)));
     }
 
     private List<GlobalSearchItemResponse> joinOrRecordFailure(
@@ -322,7 +349,7 @@ public class GlobalSearchService {
     private List<GlobalSearchItemResponse> searchAward(String query) {
         List<GlobalSearchItemResponse> mapped = new ArrayList<>();
 
-        if (query.matches("\\d+")) {
+        if (query.matches("\\d+") && visibility.canSeeAward(Long.parseLong(query))) {
             findAwardById(Long.parseLong(query)).ifPresent(mapped::add);
         }
 
