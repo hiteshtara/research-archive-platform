@@ -68,6 +68,21 @@ public class SecurityConfiguration {
         NimbusJwtDecoder decoder =
                 NimbusJwtDecoder.withIssuerLocation(issuerUri).build();
 
+        decoder.setJwtValidator(accessTokenValidator(issuerUri, clientId));
+
+        return decoder;
+    }
+
+    /*
+     * The complete validation applied to every API token after its
+     * signature is checked: Spring's defaults (expiry/not-before) plus
+     * issuer, token_use=access (ID tokens rejected) and this app's
+     * client_id. Static and package-visible only so tests can run this
+     * exact chain against locally signed tokens; production wiring is
+     * unchanged.
+     */
+    static org.springframework.security.oauth2.core.OAuth2TokenValidator<Jwt>
+    accessTokenValidator(String issuerUri, String clientId) {
         var issuerValidator =
                 JwtValidators.createDefaultWithIssuer(issuerUri);
 
@@ -81,16 +96,12 @@ public class SecurityConfiguration {
                 clientId::equals
         );
 
-        decoder.setJwtValidator(
-                new org.springframework.security.oauth2.core
-                        .DelegatingOAuth2TokenValidator<>(
-                                issuerValidator,
-                                tokenUseValidator,
-                                clientIdValidator
-                        )
-        );
-
-        return decoder;
+        return new org.springframework.security.oauth2.core
+                .DelegatingOAuth2TokenValidator<>(
+                        issuerValidator,
+                        tokenUseValidator,
+                        clientIdValidator
+                );
     }
 
     @Bean
