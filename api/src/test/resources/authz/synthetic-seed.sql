@@ -247,4 +247,12 @@ INSERT INTO authz.access_grant (institutional_identifier, grant_type, unit_numbe
   ('SYN-INST-0008', 'CENTRAL', NULL, FALSE, NULL, 'demo-seed', 'SYNTHETIC'),
   ('SYN-INST-0009', 'CENTRAL', NULL, FALSE, NULL, 'demo-seed', 'SYNTHETIC');
 
+-- IO grants match the Award account number (approved decision D-A, 2026-10-01).
+UPDATE archive.award_version SET account_number = 'SYN-IO-7001' WHERE award_id = 9000601;
+UPDATE archive.award_version SET account_number = 'SYN-IO-7002' WHERE award_id = 9000801;
+
+-- Stored files for the two seed attachments (written by the tests / demo start script).
+UPDATE archive.attachment_object SET upload_status = 'UPLOADED', s3_bucket = 'local-fixtures',
+       s3_key = 'synthetic/' || file_name, file_size_bytes = 400 WHERE file_id IN (9300001, 9300002);
+
 COMMIT;

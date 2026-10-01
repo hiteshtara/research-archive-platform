@@ -68,6 +68,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
         "app.authorization.version-scope=PER_VERSION",
         "app.authorization.department-match=EXACT_LEAD_UNIT",
         "app.authorization.research-staff-roles=PI,MPI,COI",
+        "app.authorization.contact-derivation=EXPLICIT_GRANT",
         "app.attachments.storage=local",
         "app.attachments.local-directory=target/authz-test-attachments",
         "app.ai.enabled=true",
@@ -113,6 +114,12 @@ class RecordAuthorizationEnforcementIntegrationTest {
             }
             s.execute(Files.readString(root.resolve("api/src/test/resources/authz/synthetic-seed.sql")));
         }
+        // Real stored files for the seed attachments (app.attachments.local-directory below).
+        Path files = Path.of("target/authz-test-attachments/synthetic");
+        Files.createDirectories(files);
+        for (String name : List.of("SYNTHETIC-award-A.pdf", "SYNTHETIC-award-B.pdf")) {
+            Files.writeString(files.resolve(name), "%PDF-1.4\n% " + name + " - FICTIONAL attachment\n%%EOF\n");
+        }
     }
 
     /** TEST-ONLY sign-in replacement and synthetic IO mapping (mirrors the demo build). */
@@ -126,22 +133,7 @@ class RecordAuthorizationEnforcementIntegrationTest {
                     .map(key -> new ValidatedCognitoIdentity(ISSUER, "demo-" + key));
         }
 
-        @Bean
-        @Primary
-        IoResolver testIoResolver(JdbcClient jdbc) {
-            return (module, key) -> module != RecordModule.AWARD ? Set.of()
-                    : Set.copyOf(jdbc.sql("SELECT io_value FROM authz_demo.award_io WHERE award_id = CAST(:id AS BIGINT)")
-                            .param("id", key).query(String.class).list());
-        }
 
-        @Bean
-        @Primary
-        IoSqlStrategy testIoSql() {
-            return (module, alias) -> module == RecordModule.AWARD
-                    ? Optional.of("EXISTS (SELECT 1 FROM authz_demo.award_io az_io WHERE az_io.award_id = "
-                            + alias + ".award_id AND az_io.io_value IN (:az_ios))")
-                    : Optional.empty();
-        }
     }
 
     @Autowired MockMvc mvc;
@@ -219,11 +211,40 @@ class RecordAuthorizationEnforcementIntegrationTest {
         assertThat(status("multi", "/api/v1/awards/9000601/summary")).isEqualTo(404);
     }
 
+    // APPROVED POLICY (2026-10-01): under enforcement, authorization of the parent record covers
+    // all of its content; ArchiveAttachmentViewer is no longer a separate condition.
     @Test
-    void attachmentsStillRequireTheAttachmentGroupInAdditionToRecordAccess() throws Exception {
-        assertThat(call("pi", "/api/v1/awards/9000102/attachments", false).getResponse().getStatus()).isEqualTo(403);
-        assertThat(call("pi", "/api/v1/awards/9000102/attachments", true).getResponse().getStatus()).isEqualTo(200);
-        assertThat(call("pi", "/api/v1/awards/9000201/attachments", true).getResponse().getStatus()).isEqualTo(404);
+    void anAuthorizedUserWithoutTheAttachmentGroupGetsTheRecordsFiles() throws Exception {
+        MvcResult list = call("pi", "/api/v1/awards/9000102/attachments", false);
+        assertThat(list.getResponse().getStatus()).isEqualTo(200);
+        assertThat(json.readTree(list.getResponse().getContentAsString()).get("totalElements").asLong()).isEqualTo(1);
+        MvcResult download = mvc.perform(get("/api/v1/awards/9000102/attachments/9300001/download")
+                .header("X-Test-Persona", "pi")).andReturn();
+        if (download.getRequest().isAsyncStarted()) {
+            download.getAsyncResult();
+        }
+        assertThat(download.getResponse().getStatus()).isEqualTo(200);
+        assertThat(download.getResponse().getContentAsString()).contains("SYNTHETIC-award-A.pdf - FICTIONAL");
+    }
+
+    @Test
+    void anUnauthorizedUserCannotReachAnotherRecordsFilesEvenByDirectUrl() throws Exception {
+        for (boolean group : new boolean[] {false, true}) {
+            for (String path : List.of("/api/v1/awards/9000201/attachments",
+                    "/api/v1/awards/9000201/attachments/9300002/download",
+                    "/api/v1/awards/9000201/report-with-attachments.pdf",
+                    // B's attachment through A's URL: the download's owner check refuses it
+                    "/api/v1/awards/9000102/attachments/9300002/download")) {
+                MvcResult result = call("pi", path, group);
+                assertThat(result.getResponse().getStatus()).as(path + " group=" + group).isEqualTo(404);
+                assertThat(result.getResponse().getContentAsString()).doesNotContain("SYNTHETIC-award-B");
+            }
+        }
+        // Unprovisioned and suspended identities get nothing, group or not.
+        assertThat(call("nogrants", "/api/v1/awards/9000102/attachments/9300001/download", true)
+                .getResponse().getStatus()).isEqualTo(403);
+        assertThat(call("suspended", "/api/v1/awards/9000102/attachments/9300001/download", true)
+                .getResponse().getStatus()).isEqualTo(403);
     }
 
     @Test
@@ -248,12 +269,13 @@ class RecordAuthorizationEnforcementIntegrationTest {
         assertThat(status("pi", "/api/v1/awards/9000201/report.pdf")).isEqualTo(404);
         assertThat(status("pi", "/api/v1/awards/9000103/report.pdf")).isEqualTo(404);
 
-        // The with-attachments variant still needs ArchiveAttachmentViewer, checked before anything is built.
-        MvcResult noGroup = call("pi", "/api/v1/awards/9000102/report-with-attachments.pdf", false);
-        assertThat(noGroup.getResponse().getStatus()).isEqualTo(403);
-        assertThat(noGroup.getResponse().getContentAsString()).contains("ATTACHMENT_ACCESS_DENIED");
-        MvcResult withGroup = call("pi", "/api/v1/awards/9000102/report-with-attachments.pdf", true);
-        assertThat(withGroup.getResponse().getStatus()).isEqualTo(200);
+        // The consolidated report with attachments needs only the record's own authorization.
+        MvcResult withAttachments = call("pi", "/api/v1/awards/9000102/report-with-attachments.pdf", false);
+        if (withAttachments.getRequest().isAsyncStarted()) {
+            withAttachments.getAsyncResult();
+        }
+        assertThat(withAttachments.getResponse().getStatus()).isEqualTo(200);
+        assertThat(withAttachments.getResponse().getContentType()).isEqualTo("application/pdf");
         assertThat(call("pi", "/api/v1/awards/9000201/report-with-attachments.pdf", true)
                 .getResponse().getStatus()).isEqualTo(404);
     }
@@ -410,8 +432,8 @@ class RecordAuthorizationEnforcementIntegrationTest {
     @Test
     void archivedFileFinderReturnsOnlyVisibleAwardVersionsForRestrictedUsers() throws Exception {
         String search = "/api/v1/attachments/search?recordNumber=990001-00001";
-        assertThat(call("pi", search, false).getResponse().getStatus()).isEqualTo(403);   // attachment group still required
-        JsonNode pi = json.readTree(call("pi", search, true).getResponse().getContentAsString());
+        // No attachment group needed: the File Finder is scoped to the user's records.
+        JsonNode pi = json.readTree(call("pi", search, false).getResponse().getContentAsString());
         assertThat(pi.get("totalElements").asLong()).isEqualTo(1);
         assertThat(pi.get("content").get(0).get("parentId").asLong()).isEqualTo(9000102L);
         JsonNode central = json.readTree(call("central", search, true).getResponse().getContentAsString());

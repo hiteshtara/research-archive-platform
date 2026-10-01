@@ -1,6 +1,6 @@
 # Record authorization: implementation status
 
-**Status (stages 1–3): implemented, OFF by default.** With `app.authorization.enforcement-enabled=false` (the default, and every deployed environment), behaviour is unchanged: "record authorization not enforced". Any authenticated user may read any record, plus the existing `ArchiveAttachmentViewer` gate. Turning enforcement on requires the policy strategies to be configured (no defaults) and is a separate decision. A local synthetic demonstration is in `scripts/authz-demo/README.md`.
+**Status (stages 1–3): implemented, OFF by default.** With `app.authorization.enforcement-enabled=false` (the default, and every deployed environment), behaviour is unchanged: "record authorization not enforced". Any authenticated user may read any record, and attachments still need the `ArchiveAttachmentViewer` group (that gate is replaced by parent-record authorization only when enforcement is on). Turning enforcement on requires the policy strategies to be configured (no defaults) and is a separate decision. A local synthetic demonstration is in `scripts/authz-demo/README.md`.
 
 | Label | Meaning |
 |---|---|
@@ -8,6 +8,16 @@
 | Real BU federation and identity mapping | **NOT VERIFIED.** Awaiting BU IAM: a stable NameID for a Cognito SP; the exact content and reassignment policy of the identity attribute; the authoritative binding to the Kuali principal id |
 
 The design and decisions are maintained privately (authorization design rev 3.6a; requirements IDs 1–7). This file records what the code does.
+
+## Approved policy decisions (Hitesh, 2026-10-01)
+
+| Decision | Effect in code |
+|---|---|
+| **Department access follows the record's lead unit** (design 4.2) | UNIT grants match `lead_unit_number`; whether sub-units count is still P6 (see below) |
+| **IO grants use the Award account number** (decision D-A) | `AwardAccountNumberIoResolver` and `AwardAccountNumberIoSql` match `TRIM(award_version.account_number)` exactly. They apply to Awards only, never through relationships |
+| **Record access includes all content of that record** (replaces P5) | Under enforcement, `AttachmentAuthorizationService` relies on the parent record's authorization. `ArchiveAttachmentViewer` is no longer a separate condition for attachments, reports with attachments or the File Finder. While enforcement is **off**, the group rule stays exactly as before |
+| **One record never authorizes another** | Child Awards, other versions, related Proposals, Negotiations and Subawards each need their own authorization (unchanged) |
+| **Research Staff via verified KIM principal** (design section 13) | `app.authorization.contact-derivation=VERIFIED_PRINCIPAL`. A verified link's PERSON_ID gives contact access with no grant row, but only while that person is a qualifying contact somewhere. `EXPLICIT_GRANT` keeps the earlier rule. The setting has no default |
 
 ## Identity is separate from permissions
 
@@ -41,7 +51,7 @@ With enforcement on, any missing strategy, a missing identity or any evaluation 
 - **Central:** every module.
 - **Department:** Award, Proposal, Negotiation by lead unit.
 - **Research Staff:** Award and Proposal employee contacts in the configured roles.
-- **IO:** only records whose IO resolver supplies values. The real resolver is `DisabledIoResolver` until the authoritative IO field is confirmed.
+- **IO:** Award versions whose account number equals a granted IO value (approved decision D-A).
 - **Subaward and IRB:** central only (proposal P8).
 - **Relationships:** a relationship to another record never authorizes it.
 
@@ -92,10 +102,10 @@ Rules that apply to every scoped path:
 | `…/budget/summary\|versions\|periods\|line-items\|personnel` | budgets owned by invisible versions dropped **before** the archive budget is selected (the selected budget can differ from Central's) |
 | `…/funding-proposals` | Proposal must be visible **and** the link's own Award version must be visible |
 | `…/funding-subawards`, `…/negotiations` | empty (no non-Central rule for those modules yet) |
-| `…/attachments`, `…/attachments/{n}/download` | record check **and** `ArchiveAttachmentViewer` |
+| `…/attachments`, `…/attachments/{n}/download` | record check. The download also refuses an attachment that belongs to another record. No separate group (approved decision) |
 | `…/report.pdf` | allowed for an in-scope Award: built from the same scoped service methods |
-| `…/report-with-attachments.pdf` | as `report.pdf`, **plus** `ArchiveAttachmentViewer` (checked first); its attachment list is this `award_id` only |
-| `/api/v1/attachments/search` (Archived File Finder) | `ArchiveAttachmentViewer` as before; **Award rows only**, with the Award scope predicate in the SQL WHERE (page and count). `recordType=ALL` returns the caller's Award rows; `PROPOSAL` and `NEGOTIATION` return an empty page |
+| `…/report-with-attachments.pdf` | as `report.pdf`; its attachment list covers this `award_id` only |
+| `/api/v1/attachments/search` (Archived File Finder) | **Award rows only**, with the Award scope predicate in the SQL WHERE (page and count). `recordType=ALL` returns the caller's Award rows; `PROPOSAL` and `NEGOTIATION` return an empty page |
 | `/api/v1/explorer/awards?awardNumber=` | `requireAwardNumber` (the response is that current version only) |
 | `/api/v1/explorer/award-versions?awardId=` | `requireAward`; exactly one well-formed parameter value, else 404 |
 | `/api/ai/awards/{n}/summary\|questions\|evidence-search` | `requireAwardNumber` (else 404), **and** every version of the family must be visible, else `403 AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` (see POLICY P3 below) |

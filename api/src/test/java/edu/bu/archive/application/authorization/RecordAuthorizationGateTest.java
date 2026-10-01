@@ -23,6 +23,7 @@ class RecordAuthorizationGateTest {
         properties.setVersionScope(AuthorizationPolicy.VersionScope.PER_VERSION);
         properties.setDepartmentMatch(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
         properties.setResearchStaffRoles(new java.util.LinkedHashSet<>(Set.of("pi", " mpi ", "COI")));
+        properties.setContactDerivation(AuthorizationPolicy.ContactDerivation.VERIFIED_PRINCIPAL);
         return properties;
     }
 
@@ -43,6 +44,10 @@ class RecordAuthorizationGateTest {
         var properties = new AuthorizationProperties();
         properties.setEnforcementEnabled(true);
         assertThat(properties.policy()).isEmpty();
+        // The contact-derivation choice has no default either.
+        var withoutContactChoice = configured(true);
+        withoutContactChoice.setContactDerivation(null);
+        assertThat(withoutContactChoice.policy()).isEmpty();
 
         var gate = gate(properties);
         assertThat(gate.status()).isEqualTo(RecordAuthorizationGate.Status.ENFORCED_POLICY_NOT_CONFIGURED);

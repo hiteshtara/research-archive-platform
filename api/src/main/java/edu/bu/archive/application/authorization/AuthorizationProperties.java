@@ -19,15 +19,17 @@ public class AuthorizationProperties {
     private AuthorizationPolicy.VersionScope versionScope;
     private AuthorizationPolicy.DepartmentMatch departmentMatch;
     private Set<String> researchStaffRoles = new LinkedHashSet<>();
+    private AuthorizationPolicy.ContactDerivation contactDerivation;
 
     /** The configured policy, or empty when any strategy is missing. */
     public Optional<AuthorizationPolicy> policy() {
-        if (versionScope == null || departmentMatch == null || researchStaffRoles.isEmpty()) {
+        if (versionScope == null || departmentMatch == null || researchStaffRoles.isEmpty()
+                || contactDerivation == null) {
             return Optional.empty();
         }
         Set<String> roles = new LinkedHashSet<>();
         researchStaffRoles.forEach(role -> roles.add(role.trim().toUpperCase()));
-        return Optional.of(new AuthorizationPolicy(versionScope, departmentMatch, roles));
+        return Optional.of(new AuthorizationPolicy(versionScope, departmentMatch, roles, contactDerivation));
     }
 
     public boolean isEnforcementEnabled() {
@@ -60,5 +62,13 @@ public class AuthorizationProperties {
 
     public void setResearchStaffRoles(Set<String> researchStaffRoles) {
         this.researchStaffRoles = researchStaffRoles == null ? new LinkedHashSet<>() : researchStaffRoles;
+    }
+
+    public AuthorizationPolicy.ContactDerivation getContactDerivation() {
+        return contactDerivation;
+    }
+
+    public void setContactDerivation(AuthorizationPolicy.ContactDerivation contactDerivation) {
+        this.contactDerivation = contactDerivation;
     }
 }
