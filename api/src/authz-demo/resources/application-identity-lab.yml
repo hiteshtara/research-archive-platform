@@ -24,10 +24,11 @@ app:
     disposable-database: true
   authorization:
     enforcement-enabled: true
-    # P3/P4/P6: DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy (same as authz-demo):
+    # APPROVED by Hitesh 2026-10-01 (design section 14); overridable per run so the previous
+    # demo settings can still be compared (acceptance.sh --alternatives).
     # Overridable per run (LAB_VERSION_SCOPE etc.) so alternatives are tested separately.
-    version-scope: ${LAB_VERSION_SCOPE:PER_VERSION}
-    department-match: ${LAB_DEPARTMENT_MATCH:EXACT_LEAD_UNIT}
+    version-scope: ${LAB_VERSION_SCOPE:FAMILY_WIDE}
+    department-match: ${LAB_DEPARTMENT_MATCH:LEAD_UNIT_WITH_DESCENDANTS}
     research-staff-roles: ${LAB_RESEARCH_STAFF_ROLES:PI,MPI,COI}
     # Approved 2026-10-01 (design section 13): contact access via the verified KIM principal.
     contact-derivation: ${LAB_CONTACT_DERIVATION:VERIFIED_PRINCIPAL}

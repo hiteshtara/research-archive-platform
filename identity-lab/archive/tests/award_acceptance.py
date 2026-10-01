@@ -57,26 +57,26 @@ ATTACHMENTS = {9000101: 9301003, 9000102: 9300001, 9000111: 9301004, 9000201: 93
                9000103: 9300003}
 ALL = set(VERSIONS)
 
-# Visible award_ids per user under the DEMO policy (PER_VERSION, EXACT_LEAD_UNIT, roles PI/MPI/COI).
+# Visible award_ids per user under the APPROVED policy (Hitesh, 2026-10-01): P3 FAMILY_WIDE within the
+# same Award number (never children or related records), P6 sub-units only when the grant's flag is set,
+# P4 PI/MPI/COI (Key Person excluded).
 DEMO_VISIBLE = {
     "lab-central": ALL,
-    "lab-dept": {9000101, 9000102, 9000111, 9000902},                       # lead unit SYN-U-100, exact
-    "lab-pat": {9000101, 9000102, 9000301, 9000401, 9000902},               # PI, MPI, COI; not KP; I seq 2 only
-    "lab-io": {9000601, 9000902},                                           # synthetic IO SYN-IO-7001
-    "lab-multi": {9000301, 9000401, 9000501, 9000801, 9001001},             # UNIT SYN-U-300 + IO SYN-IO-7002
+    "lab-dept": {9000101, 9000102, 9000103, 9000111, 9000701, 9000901, 9000902},   # A family, A child (own unit), G (sub-unit, flag set), I family
+    "lab-pat": {9000101, 9000102, 9000103, 9000301, 9000302, 9000401, 9000901, 9000902},   # A, C, D, I families; not E (KP), not A child
+    "lab-io": {9000601, 9000901, 9000902},                                  # account SYN-IO-7001: F, I family
+    "lab-multi": {9000301, 9000302, 9000401, 9000501, 9000801, 9001001},    # UNIT SYN-U-300 (no sub-unit flag) + IO SYN-IO-7002
     "lab-kim-pi": {9001001},                                                # KIM principal is J's PI; NO grant rows
 }
-# Visible under the ALTERNATIVE policy (FAMILY_WIDE, LEAD_UNIT_WITH_DESCENDANTS, roles incl. KP).
+# Visible under the PREVIOUS demo settings (PER_VERSION, EXACT_LEAD_UNIT, PI/MPI/COI), run for comparison.
 ALT_VISIBLE = {
     "lab-central": ALL,
-    "lab-dept": {9000101, 9000102, 9000103, 9000111, 9000701, 9000901, 9000902},
-    "lab-pat": {9000101, 9000102, 9000103, 9000301, 9000302, 9000401, 9000501, 9000901, 9000902},
-    "lab-io": {9000601, 9000901, 9000902},
-    "lab-multi": {9000301, 9000302, 9000401, 9000501, 9000801, 9001001},
+    "lab-dept": {9000101, 9000102, 9000111, 9000902},
+    "lab-pat": {9000101, 9000102, 9000301, 9000401, 9000902},
+    "lab-io": {9000601, 9000902},
+    "lab-multi": {9000301, 9000401, 9000501, 9000801, 9001001},
     "lab-kim-pi": {9001001},
 }
-# APPROVED 2026-10-01: record access covers the record's own files; ArchiveAttachmentViewer is no
-# longer a separate condition under enforcement. lab-pat and lab-kim-pi hold NO group on purpose.
 ATTACHMENT_GROUP = {"lab-central", "lab-dept", "lab-io", "lab-multi", "lab-pat", "lab-kim-pi"}
 WITHOUT_GROUP = {"lab-pat", "lab-kim-pi"}
 GRANT_KIND = {"lab-central": "CENTRAL", "lab-dept": "DEPARTMENT", "lab-pat": "RESEARCH_STAFF",
@@ -296,7 +296,7 @@ def check_records(run, user, visible):
             run.add(f"C1-{user}-{sub}", REQ[user] + ", 7", "T6/T8/T14", user,
                     f"I seq 2 {sub}: rows of I seq 1", "omitted" if hide else "may show (seq 1 visible)",
                     f"{r.status_code}, seq 1 rows {'shown' if shown else 'absent'}", "PASS" if ok else "FAIL",
-                    "POLICY P3 (per-version vs family-wide)" if user != "lab-central" else "")
+                    "approved P3: family-wide" if user != "lab-central" else "")
     # Time and Money lookups through a permitted Award must not reach another Award (proven leak, fixed).
     if 9000102 in visible and 9000201 not in visible:
         for sub in ("time-and-money/documents/SYN-TNM-90002-00001", "time-and-money/transactions/9700002"):
@@ -309,12 +309,12 @@ def check_records(run, user, visible):
 
 
 def _policy_note(user, aid):
-    if aid == 9000901 and user in ("lab-pat", "lab-dept", "lab-io"):
-        return "POLICY P3 (per-version vs family-wide)"
+    if aid in (9000901, 9000103, 9000302) and user in ("lab-pat", "lab-dept", "lab-io"):
+        return "approved P3: family-wide within the Award number"
     if aid == 9000701 and user == "lab-dept":
-        return "POLICY P6 (exact lead unit vs descendants)"
+        return "approved P6: sub-unit because the grant's include-sub-units flag is set"
     if aid == 9000501 and user == "lab-pat":
-        return "POLICY P4 (KP excluded)"
+        return "approved P4: Key Person excluded"
     return ""
 
 
@@ -462,10 +462,17 @@ def check_grant_changes(run):
     admin("add-grant", "SYN-INST-0007", "UNIT", "SYN-U-200")
     try:
         added = get(t, "/api/v1/awards/9000201/summary")
-        other = get(t, "/api/v1/awards/9000102/summary").status_code
+        unrelated = get(t, "/api/v1/awards/9000701/summary").status_code       # G: SYN-U-110, not granted
+        via_old_version = get(t, "/api/v1/awards/9000102/summary").status_code  # A: an OLD version (A') was in SYN-U-200
         run.add("G1-add", "5", "T19/T17", "lab-nogrants", "Administrator adds UNIT SYN-U-200; same session",
-                "B allowed, A still denied", f"B {added.status_code}, A {other} (before: {before})",
-                "PASS" if before == 403 and added.status_code == 200 and "Award B" in added.text and other in (403, 404) else "FAIL")
+                "B allowed, G denied", f"B {added.status_code}, G {unrelated} (before: {before})",
+                "PASS" if before == 403 and added.status_code == 200 and "Award B" in added.text and unrelated == 404
+                else "FAIL")
+        run.add("G1b-family-wide-unit-history", "2", "T6", "lab-nogrants",
+                "Same grant: Award A, whose OLD version A' was in SYN-U-200",
+                "allowed (approved P3 family-wide: any version opens the Award number)", f"A {via_old_version}",
+                "PASS" if via_old_version == 200 else "FAIL",
+                "approved P3 consequence: a unit that ever led any version sees the whole Award (not its children)")
     finally:
         admin("remove-grant", "SYN-INST-0007", "UNIT")
     after = get(t, "/api/v1/awards/9000201/summary")
@@ -562,6 +569,61 @@ def check_files_without_group(run):
                 "approved 2026-10-01: record access covers its files")
 
 
+def check_approved_boundaries(run):
+    """Approved policy boundaries: family-wide never reaches children or related records;
+    sub-units only by the grant's flag; revocation removes access unless another basis remains."""
+    t = run.token("lab-pat", fresh=True)
+    for label, path, ok in (
+            ("A's child Award (not inherited)", "/api/v1/awards/9000111/summary", lambda r: r.status_code == 404),
+            ("A's related Proposal SYN-PRP-0001", "/api/proposals/SYN-PRP-0001", lambda r: r.status_code == 404),
+            ("A's Negotiations list", "/api/v1/awards/9000102/negotiations", lambda r: r.status_code == 200 and r.json() == []),
+            ("A's Subawards list", "/api/v1/awards/9000102/funding-subawards", lambda r: r.status_code == 200 and r.json() == []),
+            ("A's funding Proposals list", "/api/v1/awards/9000102/funding-proposals", lambda r: r.status_code == 200 and r.json() == []),
+            ("parent Award B of D", "/api/v1/awards/9000201/summary", lambda r: r.status_code == 404),
+            ("D's hierarchy does not reveal parent B", "/api/v1/awards/990004-00001/hierarchy",
+             lambda r: r.status_code == 200 and "990002-00001" not in json.dumps({k: v for k, v in r.json().items() if k != "path"}))):
+        r = get(t, path)
+        run.add(f"B1-{label[:24].replace(' ', '-')}", "3, 7", "T11/T30", "lab-pat",
+                f"Family-wide on A/D: {label}", "denied / omitted", f"{r.status_code}", "PASS" if ok(r) else "FAIL",
+                "approved: family-wide never extends to children or related records")
+    # A grant WITHOUT the include-sub-units flag stays exact (P6).
+    t = run.token("lab-dept", fresh=True)
+    sql("UPDATE authz.access_grant SET include_descendants = FALSE WHERE institutional_identifier = 'SYN-INST-0002' AND grant_type = 'UNIT'")
+    try:
+        off = get(t, "/api/v1/awards/9000701/summary").status_code
+    finally:
+        sql("UPDATE authz.access_grant SET include_descendants = TRUE WHERE institutional_identifier = 'SYN-INST-0002' AND grant_type = 'UNIT'")
+    on = get(t, "/api/v1/awards/9000701/summary").status_code
+    run.add("B2-subunit-flag", "2", "T7", "lab-dept", "Sub-unit Award G with the grant flag off, then on",
+            "404 then 200", f"{off} then {on}", "PASS" if (off, on) == (404, 200) else "FAIL",
+            "approved P6: sub-units only by explicit grant flag")
+    # Revocation removes access unless another valid basis remains.
+    t = run.token("lab-pat", fresh=True)
+    admin("add-grant", "SYN-INST-0003", "UNIT", "SYN-U-300")
+    try:
+        added = {a: get(t, f"/api/v1/awards/{a}/summary").status_code for a in (9000501, 9001001, 9000301, 9000401)}
+    finally:
+        admin("remove-grant", "SYN-INST-0003", "UNIT")
+    after = {a: get(t, f"/api/v1/awards/{a}/summary").status_code for a in (9000501, 9001001, 9000301, 9000401)}
+    ok = (added == {9000501: 200, 9001001: 200, 9000301: 200, 9000401: 200}
+          and after == {9000501: 404, 9001001: 404, 9000301: 200, 9000401: 200})
+    run.add("G4-revoke-keeps-contact-basis", "5, 6", "T17/T18", "lab-pat",
+            "Add UNIT SYN-U-300, then revoke it (same session)",
+            "E,J,C,D open; after: E,J closed, C,D stay (contact basis)", f"{added} -> {after}", "PASS" if ok else "FAIL")
+    t = run.token("lab-dept", fresh=True)
+    admin("add-grant", "SYN-INST-0002", "IO", "SYN-IO-7001")
+    admin("revoke-grant", "SYN-INST-0002", "UNIT")
+    try:
+        result = {a: get(t, f"/api/v1/awards/{a}/summary").status_code for a in (9000102, 9000601, 9000901, 9000902)}
+    finally:
+        admin("restore-grant", "SYN-INST-0002", "UNIT")
+        admin("remove-grant", "SYN-INST-0002", "IO")
+    ok = result == {9000102: 404, 9000601: 200, 9000901: 200, 9000902: 200}
+    run.add("G5-revoke-unit-keeps-io-basis", "5, 6", "T17/T18", "lab-dept",
+            "Add IO SYN-IO-7001, revoke the UNIT grant (same session)",
+            "A closed; F and I (both versions) stay via IO", f"{result}", "PASS" if ok else "FAIL")
+
+
 def check_unauthenticated(run):
     import requests
     r = requests.get(c.API + "/api/v1/awards/search?q=SYNTHETIC", timeout=30)
@@ -592,6 +654,7 @@ def main():
         check_denied_identities(run)
         check_kim_chain(run)
         check_files_without_group(run)
+        check_approved_boundaries(run)
         check_grant_changes(run)
         check_unauthenticated(run)
         mark_policy(run)

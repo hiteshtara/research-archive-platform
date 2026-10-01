@@ -120,9 +120,8 @@ def test_pi_sees_only_contact_records():
 def test_department_sees_only_its_unit():
     t = sign_in("lab-dept")
     assert kinds(t) == ["DEPARTMENT"]
-    assert families(t) == {A, A_CHILD, I}
     assert status(t, "/api/v1/awards/by-number/990002-00001") == 404
-    assert status(t, "/api/v1/awards/9000701/summary") == 404          # sub-unit: exact match (P6 demo setting)
+    assert status(t, "/api/v1/awards/9000701/summary") == 200          # sub-unit: the grant's flag is set (approved P6)
     assert status(t, "/api/v1/awards/9000102/attachments") == 200      # has the attachment group
 
 
@@ -226,14 +225,14 @@ def test_suspended_person_is_denied():
 
 def test_live_suspension_applies_to_an_already_issued_token():
     t = sign_in("lab-dept")
-    assert families(t) == {A, A_CHILD, I}
+    assert families(t) == {A, A_CHILD, G, I}
     admin("suspend", "SYN-INST-0002")
     try:
         assert refused(t) == (403, "ACCESS_DENIED", "ACCESS_DENIED")
         assert status(t, "/api/v1/awards/9000102/summary") == 403
     finally:
         admin("unsuspend", "SYN-INST-0002")
-    assert families(t) == {A, A_CHILD, I}
+    assert families(t) == {A, A_CHILD, G, I}
 
 
 def test_live_grant_revocation_applies_to_an_already_issued_token():
