@@ -96,6 +96,17 @@
         </dependency>
 
         <!--
+          Record-authorization enrollment (Option A): AdminGetUser on the
+          configured user pool. Only instantiated when
+          app.authorization.enrollment.enabled=true (default false).
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cognitoidentityprovider</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!--
           Explicit direct dependency (was previously only an
           undeclared transitive one, not resolvable at this module's
           compile scope) so SemanticSearchConfiguration can configure

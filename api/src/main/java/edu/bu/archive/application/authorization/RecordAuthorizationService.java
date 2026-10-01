@@ -30,6 +30,7 @@ public class RecordAuthorizationService implements RecordVisibility {
     private final UnitHierarchy unitHierarchy;
     private final DescendantUnits descendantUnits;
     private final IoSqlStrategy ioSql;
+    private final IdentityEnrollment enrollment;
 
     /** Expands a unit to itself plus its descendants. */
     public interface DescendantUnits {
@@ -46,6 +47,22 @@ public class RecordAuthorizationService implements RecordVisibility {
             DescendantUnits descendantUnits,
             IoSqlStrategy ioSql
     ) {
+        this(properties, identities, identityResolver, scopeResolver, facts, unitHierarchy, descendantUnits, ioSql,
+                IdentityEnrollment.DISABLED);
+    }
+
+    public RecordAuthorizationService(
+            AuthorizationProperties properties,
+            CurrentIdentityProvider identities,
+            IdentityResolver identityResolver,
+            AccessScopeResolver scopeResolver,
+            RecordFactsRepository facts,
+            UnitHierarchy unitHierarchy,
+            DescendantUnits descendantUnits,
+            IoSqlStrategy ioSql,
+            IdentityEnrollment enrollment
+    ) {
+        this.enrollment = Objects.requireNonNull(enrollment);
         this.properties = Objects.requireNonNull(properties);
         this.identities = Objects.requireNonNull(identities);
         this.identityResolver = Objects.requireNonNull(identityResolver);
@@ -94,6 +111,11 @@ public class RecordAuthorizationService implements RecordVisibility {
             Optional<ValidatedCognitoIdentity> identity = identities.current();
             if (identity.isEmpty()) {
                 return new AccessOutcome.NotProvisioned(AccessOutcome.NotProvisionedReason.NO_IDENTITY_LINK);
+            }
+            // Enrollment (link or re-check) runs once per request, before the identity is
+            // resolved, and only while enforcement AND enrollment are both on.
+            if (properties.isEnforcementEnabled() && properties.getEnrollment().isEnabled()) {
+                enrollment.prepare(identity.get());
             }
             return scopeResolver.resolve(identityResolver.resolve(identity.get()));
         } catch (RuntimeException failure) {
