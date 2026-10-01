@@ -68,8 +68,14 @@ class IdentityEnrollmentServiceTest {
         store.crosswalk.add(new InMemoryEnrollmentStore.Crosswalk(CROSSWALK, "SYN-V-OLD", "SYNP-2", false));
     }
 
+    static final Instant SIGN_IN = Instant.parse("2026-10-01T11:00:00Z");
+
     private static ValidatedCognitoIdentity token(String sub) {
-        return new ValidatedCognitoIdentity(ISSUER, sub, PROVIDER + "_" + sub);
+        return token(sub, SIGN_IN);
+    }
+
+    private static ValidatedCognitoIdentity token(String sub, Instant signIn) {
+        return new ValidatedCognitoIdentity(ISSUER, sub, PROVIDER + "_" + sub, signIn);
     }
 
     private CognitoProfile profile(String sub, String provider, String value) {
@@ -262,11 +268,17 @@ class IdentityEnrollmentServiceTest {
     }
 
     @Test
-    void adminVerifiedLinksAreNotRecheckedAgainstTheCrosswalk() {
+    void adminVerifiedLinksAreNotRecheckedAgainstTheCrosswalkButMustMatchTheSignInEvidence() {
         store.addLink(token("admin"), "SYN-V-ADMIN", "SYNP-NOT-IN-CROSSWALK", false, true);
+        profile("admin", PROVIDER, "SYN-V-ADMIN");
         assertThat(service.prepare(token("admin"))).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
         assertThat(store.links.get(0).active()).isTrue();
         assertThat(store.audits).isEmpty();
+        // a later sign-in whose profile carries another identifier revokes even an admin-verified link
+        profile("admin", PROVIDER, "SYN-V-1");
+        assertThat(service.prepare(token("admin", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+        assertThat(store.links.get(0).active()).isFalse();
     }
 
     @Test
@@ -394,5 +406,93 @@ class IdentityEnrollmentServiceTest {
         public Instant instant() {
             return now;
         }
+    }
+
+    // --- per-session re-verification of an existing link (reassignment, stale attributes) -----
+
+    private void linked(String sub, String value) {
+        profile(sub, PROVIDER, value);
+        assertThat(service.prepare(token(sub))).isEqualTo(EnrollmentOutcome.LINKED);
+    }
+
+    @Test
+    void theSameSignInSessionIsVerifiedOnceThenCached() {
+        linked("s-cache", "SYN-V-1");
+        reads.set(0);
+        assertThat(service.prepare(token("s-cache"))).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        assertThat(service.prepare(token("s-cache"))).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        assertThat(reads.get()).isZero();   // verified when it was linked in this session
+        // a NEW sign-in session (new auth_time) is re-verified once
+        assertThat(service.prepare(token("s-cache", SIGN_IN.plusSeconds(3600))))
+                .isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        assertThat(service.prepare(token("s-cache", SIGN_IN.plusSeconds(3600))))
+                .isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        assertThat(reads.get()).isEqualTo(1);
+    }
+
+    @Test
+    void aReassignedNameIdNowCarryingAnotherIdentifierRevokesTheLink() {
+        // Same Cognito username and sub (same NameID), but the IdP now sends person 2's identifier.
+        linked("s-reassigned", "SYN-V-1");
+        profile("s-reassigned", PROVIDER, "SYN-V-2");
+        assertThat(service.prepare(token("s-reassigned", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+        assertThat(onlyLink().active()).isFalse();
+        // and the revoked profile is never re-linked automatically
+        assertThat(service.prepare(token("s-reassigned", SIGN_IN.plusSeconds(120))))
+                .isEqualTo(EnrollmentOutcome.REFUSED_PREVIOUSLY_REVOKED);
+    }
+
+    @Test
+    void aStaleSessionKeepsItsVerificationButTheNextSignInSeesTheChangedAttribute() {
+        linked("s-stale", "SYN-V-1");
+        assertThat(service.prepare(token("s-stale"))).isEqualTo(EnrollmentOutcome.LINK_STILL_VALID);
+        profile("s-stale", PROVIDER, null);   // the IdP stopped sending the identifier
+        assertThat(service.prepare(token("s-stale", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+    }
+
+    @Test
+    void aProfileThatIsNoLongerFederatedOrIsDisabledOrHasAnotherSubRevokesTheLink() {
+        linked("s-native", "SYN-V-1");
+        profile("s-native", null, "SYN-V-1");   // native account: no federated identity
+        assertThat(service.prepare(token("s-native", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+
+        store.links.clear();
+        linked("s-sub", "SYN-V-1");
+        pool.put(PROVIDER + "_s-sub", new CognitoProfile("another-sub", PROVIDER + "_s-sub", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "n")), Map.of(ATTRIBUTE, "SYN-V-1")));
+        assertThat(service.prepare(token("s-sub", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+
+        store.links.clear();
+        linked("s-disabled", "SYN-V-1");
+        pool.put(PROVIDER + "_s-disabled", new CognitoProfile("s-disabled", PROVIDER + "_s-disabled", false,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "n")), Map.of(ATTRIBUTE, "SYN-V-1")));
+        assertThat(service.prepare(token("s-disabled", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+    }
+
+    @Test
+    void aFailedProfileReadOrMissingSignInTimeDeniesTheRequestButKeepsTheLink() {
+        linked("s-fail", "SYN-V-1");
+        poolFailure = new IllegalStateException("pool unavailable");
+        var outcome = service.prepare(token("s-fail", SIGN_IN.plusSeconds(60)));
+        assertThat(outcome).isEqualTo(EnrollmentOutcome.FAILED_SESSION_VERIFICATION);
+        assertThat(outcome.deniesRequest()).isTrue();
+        assertThat(onlyLink().active()).isTrue();
+        poolFailure = null;
+        var noAuthTime = new ValidatedCognitoIdentity(ISSUER, "s-fail", PROVIDER + "_s-fail");
+        assertThat(service.prepare(noAuthTime).deniesRequest()).isTrue();
+    }
+
+    @Test
+    void aValidTokenAloneNeverEstablishesALink() {
+        // Valid token, but the pool has no matching federated profile with a crosswalked identifier.
+        assertThat(service.prepare(token("s-nothing"))).isEqualTo(EnrollmentOutcome.REFUSED_PROFILE_NOT_FOUND);
+        profile("s-nofed", null, "SYN-V-1");
+        assertThat(service.prepare(token("s-nofed"))).isEqualTo(EnrollmentOutcome.REFUSED_NOT_FEDERATED);
+        assertThat(store.links).isEmpty();
     }
 }

@@ -115,7 +115,11 @@ public class RecordAuthorizationService implements RecordVisibility {
             // Enrollment (link or re-check) runs once per request, before the identity is
             // resolved, and only while enforcement AND enrollment are both on.
             if (properties.isEnforcementEnabled() && properties.getEnrollment().isEnabled()) {
-                enrollment.prepare(identity.get());
+                EnrollmentOutcome enrolled = enrollment.prepare(identity.get());
+                if (enrolled != null && enrolled.deniesRequest()) {
+                    // The sign-in session could not be re-verified: fail closed for this request.
+                    return new AccessOutcome.Denied(AccessOutcome.DenialReason.EVALUATION_FAILED);
+                }
             }
             return scopeResolver.resolve(identityResolver.resolve(identity.get()));
         } catch (RuntimeException failure) {
