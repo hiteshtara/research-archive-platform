@@ -51,6 +51,7 @@ validated Cognito access token (issuer + sub)
 | `department-match` | **none** | `EXACT_LEAD_UNIT` or `LEAD_UNIT_WITH_DESCENDANTS` (proposal P6) |
 | `research-staff-roles` | **none** | e.g. PI, MPI, COI (proposal P4) |
 | `contact-derivation` | **none** | `VERIFIED_PRINCIPAL` (approved) or `EXPLICIT_GRANT` |
+| `max-sign-in-age` | **none** | required when enforcement is on (ISO-8601, e.g. `PT8H`); a token whose `auth_time` is older, missing or more than 5 minutes in the future gets 401 `REAUTHENTICATION_REQUIRED`. A Cognito refresh keeps `auth_time`, so this is what ends a refreshed session. Missing, zero or negative denies every request |
 | `enrollment.enabled` | `false` | server-side enrollment; runs only while enforcement is on |
 | `enrollment.user-pool-id` | **none** | required when enrollment is enabled |
 | `enrollment.region` | **none** | required when enrollment is enabled |
@@ -103,6 +104,7 @@ validated access token (iss, sub, username)
 | Enrollment service (fail closed, audited) | `IdentityEnrollmentService` (ports `CognitoProfileReader`, `EnrollmentStore`) | `IdentityEnrollmentServiceTest` (every outcome, fake pool) |
 | Profile reader (`AdminGetUser`, AWS SDK v2, default credentials) | `adapter/out/cognito/AwsCognitoProfileReader` | `AwsCognitoProfileReaderTest` (mocked client) |
 | Store (link + audit in one transaction; per-identifier advisory lock; `ON CONFLICT` on the active `(iss, sub)` index) | `JdbcEnrollmentStore` | `IdentityEnrollmentIntegrationTest` (Testcontainers) |
+| Maximum sign-in age: checked before enrollment and grants; Central is not exempt; the UI re-runs BU login with `prompt=login` (2-minute loop guard) | `RecordAuthorizationService.compute()`, `GlobalExceptionHandler`, `ui/src/auth.ts` | `IdentityEnrollmentServiceTest`, `RecordAuthorizationApprovedPolicyIntegrationTest`, `reauthenticationPresentation.test.mjs` |
 | Wiring: runs once per request, before the identity is resolved, only when enforcement **and** enrollment are on | `RecordAuthorizationService.compute()` | `IdentityEnrollmentServiceTest` |
 | Administration CLI | `scripts/authz-admin/authz_admin.py` (README there) | `test_authz_admin.py`, `test_validate_crosswalk.py`, `test_integration.sh` |
 

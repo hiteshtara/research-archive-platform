@@ -25,6 +25,7 @@ import { useState } from "react";
 import {
   downloadProposalAttachmentV1,
   getProposalAttachmentsV1,
+  stopIfReauthenticationRequired,
 } from "../../api/client";
 import { accessToken } from "../../auth";
 import {
@@ -102,6 +103,7 @@ export function ProposalAttachmentsSection({
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!response.ok) {
+        await stopIfReauthenticationRequired(response);
         throw new Error("This attachment is not available for preview.");
       }
       const blobUrl = URL.createObjectURL(await response.blob());

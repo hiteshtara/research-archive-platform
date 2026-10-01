@@ -214,6 +214,7 @@ export interface AwardAiTimelineRecord {
 export interface SafeApiErrorResponse {
   status?: number;
   error?: string;
+  code?: string;
   message?: string;
   correlationId?: string;
 }

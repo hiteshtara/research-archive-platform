@@ -337,12 +337,90 @@ class IdentityEnrollmentServiceTest {
         properties.setDepartmentMatch(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
         properties.setResearchStaffRoles(new LinkedHashSet<>(Set.of("PI")));
         properties.setContactDerivation(AuthorizationPolicy.ContactDerivation.VERIFIED_PRINCIPAL);
+        properties.setMaxSignInAge(Duration.ofHours(12));
         properties.getEnrollment().setEnabled(enroll);
+        return recordService(properties, enrollment, token("sub-1"));
+    }
+
+    private RecordAuthorizationService recordService(AuthorizationProperties properties, IdentityEnrollment enrollment,
+                                                     ValidatedCognitoIdentity identity) {
         var links = new InMemoryIdentityLinkRepository();
-        return new RecordAuthorizationService(properties, () -> Optional.of(token("sub-1")),
+        return new RecordAuthorizationService(properties, () -> Optional.of(identity),
                 new IdentityResolver(links), new AccessScopeResolver(grantee -> List.of(), clock),
                 Mockito.mock(RecordFactsRepository.class), new MapUnitHierarchy(Map.of()), unit -> Set.of(unit),
-                Mockito.mock(IoSqlStrategy.class), enrollment);
+                Mockito.mock(IoSqlStrategy.class), enrollment, clock);
+    }
+
+    private AccessOutcome freshOutcome(RecordAuthorizationService service) {
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        return service.outcome();
+    }
+
+    // --- maximum sign-in age: refreshed sessions, separately from offboarding -----------------
+
+    @Test
+    void aRefreshedTokenKeepsItsSignInTimeAndIsRefusedOnceTheMaximumAgePasses() {
+        AtomicInteger calls = new AtomicInteger();
+        IdentityEnrollment counting = identity -> {
+            calls.incrementAndGet();
+            return EnrollmentOutcome.LINK_STILL_VALID;
+        };
+        var service = recordService(true, true, counting);
+        // Signed in at 11:00; the clock is 12:00. A refresh at any later time carries the same auth_time.
+        assertThat(freshOutcome(service)).isNotInstanceOf(AccessOutcome.Denied.class);
+        clock.advance(Duration.ofHours(11));            // 23:00: 12h after sign-in, still allowed
+        assertThat(freshOutcome(service)).isNotInstanceOf(AccessOutcome.Denied.class);
+        clock.advance(Duration.ofSeconds(1));
+        int before = calls.get();
+        assertThat(freshOutcome(service))
+                .isEqualTo(new AccessOutcome.Denied(AccessOutcome.DenialReason.REAUTHENTICATION_REQUIRED));
+        // Refused before enrollment or any grant is read.
+        assertThat(calls.get()).isEqualTo(before);
+        assertThatThrownBy(service::requireProvisioned).isInstanceOf(ReauthenticationRequiredException.class);
+        assertThat(service.status().problem()).isEqualTo("REAUTHENTICATION_REQUIRED");
+    }
+
+    @Test
+    void aMissingOrFutureSignInTimeIsRefused() {
+        var properties = new AuthorizationProperties();
+        properties.setEnforcementEnabled(true);
+        properties.setVersionScope(AuthorizationPolicy.VersionScope.FAMILY_WIDE);
+        properties.setDepartmentMatch(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
+        properties.setResearchStaffRoles(new LinkedHashSet<>(Set.of("PI")));
+        properties.setContactDerivation(AuthorizationPolicy.ContactDerivation.VERIFIED_PRINCIPAL);
+        properties.setMaxSignInAge(Duration.ofHours(12));
+        var reauth = new AccessOutcome.Denied(AccessOutcome.DenialReason.REAUTHENTICATION_REQUIRED);
+        assertThat(freshOutcome(recordService(properties, IdentityEnrollment.DISABLED,
+                new ValidatedCognitoIdentity(ISSUER, "sub-1", PROVIDER + "_sub-1")))).isEqualTo(reauth);
+        assertThat(freshOutcome(recordService(properties, IdentityEnrollment.DISABLED,
+                token("sub-1", clock.instant().plus(Duration.ofMinutes(6)))))).isEqualTo(reauth);
+        assertThat(freshOutcome(recordService(properties, IdentityEnrollment.DISABLED,
+                token("sub-1", clock.instant().plus(Duration.ofMinutes(4)))))).isNotEqualTo(reauth);
+    }
+
+    @Test
+    void anEnforcedDeploymentWithoutAMaximumSignInAgeDeniesEveryRequest() {
+        for (Duration missing : new Duration[] {null, Duration.ZERO, Duration.ofHours(-1)}) {
+            var properties = new AuthorizationProperties();
+            properties.setEnforcementEnabled(true);
+            properties.setVersionScope(AuthorizationPolicy.VersionScope.FAMILY_WIDE);
+            properties.setDepartmentMatch(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
+            properties.setResearchStaffRoles(new LinkedHashSet<>(Set.of("PI")));
+            properties.setContactDerivation(AuthorizationPolicy.ContactDerivation.VERIFIED_PRINCIPAL);
+            properties.setMaxSignInAge(missing);
+            assertThat(freshOutcome(recordService(properties, IdentityEnrollment.DISABLED, token("sub-1"))))
+                    .isEqualTo(new AccessOutcome.Denied(AccessOutcome.DenialReason.POLICY_NOT_CONFIGURED));
+        }
+    }
+
+    @Test
+    void withEnforcementOffTheSignInAgeIsNotChecked() {
+        var properties = new AuthorizationProperties();
+        var service = recordService(properties, IdentityEnrollment.DISABLED,
+                new ValidatedCognitoIdentity(ISSUER, "sub-1", PROVIDER + "_sub-1"));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        service.requireProvisioned();
+        assertThat(service.status().mode()).isEqualTo("NOT_ENFORCED");
     }
 
     @Test

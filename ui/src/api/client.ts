@@ -5,7 +5,11 @@ import {
   buildAwardReportPath,
   reportDownloadErrorMessage,
 } from "../features/award/awardReportDownloadPresentation.mjs";
-import { accessToken } from "../auth";
+import { accessToken, reauthenticate } from "../auth";
+import {
+  REAUTHENTICATION_MESSAGE,
+  isReauthenticationRequired,
+} from "../features/common/reauthenticationPresentation.mjs";
 import {
   isProposalWorkspacePayload,
   isReservedProposalIdentifier,
@@ -63,6 +67,7 @@ async function readSafeError(
       status:
         typeof candidate.status === "number" ? candidate.status : undefined,
       error: typeof candidate.error === "string" ? candidate.error : undefined,
+      code: typeof candidate.code === "string" ? candidate.code : undefined,
       message:
         typeof candidate.message === "string" ? candidate.message : undefined,
       correlationId:
@@ -72,6 +77,19 @@ async function readSafeError(
     };
   } catch {
     return undefined;
+  }
+}
+
+// A 401 REAUTHENTICATION_REQUIRED means the BU sign-in is too old: start a new BU login and
+// stop here. Every other failure is left to the caller's own handling.
+export async function stopIfReauthenticationRequired(response: Response): Promise<void> {
+  if (response.status !== 401) {
+    return;
+  }
+  const safeError = await readSafeError(response.clone());
+  if (isReauthenticationRequired(response.status, safeError?.code)) {
+    await reauthenticate();
+    throw new Error(REAUTHENTICATION_MESSAGE);
   }
 }
 
@@ -101,6 +119,7 @@ async function request<T>(
   });
 
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     const safeError = await readSafeError(response);
     throw new ApiRequestError(
       response.status,
@@ -785,6 +804,7 @@ export async function downloadAwardAttachmentV1(
     },
   });
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     if (response.status === 404) {
       throw new Error("This attachment is not available for download.");
     }
@@ -825,6 +845,7 @@ export async function downloadAwardReportV1(
     },
   });
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     if (response.status === 404) {
       throw new Error("This Award's report could not be generated.");
     }
@@ -1038,6 +1059,7 @@ export async function downloadProposalAttachmentV1(
     },
   });
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     if (response.status === 404) {
       throw new Error("This attachment is not available for download.");
     }
@@ -1206,6 +1228,7 @@ async function fetchNegotiationAttachment(
     },
   });
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     if (response.status === 404) {
       throw new Error("This attachment is not available for download.");
     }
@@ -1360,6 +1383,7 @@ export async function downloadSubawardAttachment(
     },
   });
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     if (response.status === 404) {
       throw new Error("This attachment has not been archived for download.");
     }
@@ -1595,6 +1619,7 @@ export async function downloadAwardReportWithAttachmentsV1(
     },
   });
   if (!response.ok) {
+    await stopIfReauthenticationRequired(response);
     // Never silently fall back to the report-only endpoint: the user
     // asked for attachments and must be told they did not get them.
     throw new Error(
