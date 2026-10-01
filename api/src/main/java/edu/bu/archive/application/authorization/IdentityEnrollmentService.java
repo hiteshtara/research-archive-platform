@@ -43,6 +43,8 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
     private final EnrollmentStore store;
     private final Clock clock;
     private final Map<ValidatedCognitoIdentity, Instant> deferred = new ConcurrentHashMap<>();
+    /** Links already re-verified for a sign-in session: key = link id + "|" + auth_time. */
+    private final Map<String, Boolean> verifiedSessions = new ConcurrentHashMap<>();
 
     /**
      * @param samlProviderName       the Cognito identity provider name the profile must be federated through
@@ -111,24 +113,90 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
                                          List<EnrollmentStore.StoredLink> active) {
         EnrollmentOutcome result = EnrollmentOutcome.LINK_STILL_VALID;
         for (EnrollmentStore.StoredLink link : active) {
-            if (!link.autoVerified()) {
-                continue;
-            }
-            boolean valid = link.principalId() != null && store.mappingStillValid(
-                    settings.crosswalkAttributeName(), link.institutionalIdentifier(), link.principalId());
-            if (!valid) {
-                Map<String, Object> detail = detail(identity, EnrollmentOutcome.REVOKED_MAPPING_NO_LONGER_VALID);
-                detail.put("identity_link_id", link.id());
-                if (link.principalId() != null) {
-                    detail.put("kuali_person_id", link.principalId());
+            if (link.autoVerified()) {
+                boolean valid = link.principalId() != null && store.mappingStillValid(
+                        settings.crosswalkAttributeName(), link.institutionalIdentifier(), link.principalId());
+                if (!valid) {
+                    revokeLink(identity, link, EnrollmentOutcome.REVOKED_MAPPING_NO_LONGER_VALID, "crosswalk");
+                    result = EnrollmentOutcome.REVOKED_MAPPING_NO_LONGER_VALID;
+                    continue;
                 }
-                store.revoke(link.id(), ACTOR, new EnrollmentStore.Audit(ACTOR,
-                        EnrollmentOutcome.REVOKED_MAPPING_NO_LONGER_VALID.auditAction(),
-                        link.institutionalIdentifier(), detail));
-                result = EnrollmentOutcome.REVOKED_MAPPING_NO_LONGER_VALID;
+            }
+            EnrollmentOutcome session = verifySession(identity, link);
+            if (session != EnrollmentOutcome.LINK_STILL_VALID) {
+                result = session;
             }
         }
         return result;
+    }
+
+    /**
+     * Once per link and sign-in session (token auth_time), re-read the Cognito profile - which
+     * Cognito overwrites from the SAML assertion at every federated sign-in - and require that it
+     * still supports the link. This is what stops a reassigned NameID (same Cognito username and
+     * sub) from inheriting the previous person's link when the IdP now sends a different
+     * identifier. It cannot detect a reassignment in which BU also reuses the identifier value;
+     * that guarantee has to come from BU IAM.
+     */
+    private EnrollmentOutcome verifySession(ValidatedCognitoIdentity identity, EnrollmentStore.StoredLink link) {
+        Optional<Instant> signIn = identity.signInTime();
+        Optional<String> username = identity.tokenUsername();
+        if (signIn.isEmpty() || username.isEmpty()) {
+            auditQuietly(identity, EnrollmentOutcome.FAILED_SESSION_VERIFICATION, link.institutionalIdentifier(),
+                    Map.of("check", signIn.isEmpty() ? "no_auth_time" : "no_username"));
+            return EnrollmentOutcome.FAILED_SESSION_VERIFICATION;
+        }
+        String key = link.id() + "|" + signIn.get().getEpochSecond();
+        if (verifiedSessions.containsKey(key)) {
+            return EnrollmentOutcome.LINK_STILL_VALID;
+        }
+        Optional<CognitoProfile> read;
+        try {
+            read = profiles.read(username.get());
+        } catch (RuntimeException failure) {
+            auditQuietly(identity, EnrollmentOutcome.FAILED_SESSION_VERIFICATION, link.institutionalIdentifier(),
+                    Map.of("check", "profile_read", "error", failure.getClass().getSimpleName()));
+            return EnrollmentOutcome.FAILED_SESSION_VERIFICATION;
+        }
+        String problem = null;
+        if (read.isEmpty()) {
+            problem = "profile_missing";
+        } else {
+            CognitoProfile profile = read.get();
+            if (!identity.subject().equals(profile.sub())) {
+                problem = "sub_mismatch";
+            } else if (!profile.enabled()) {
+                problem = "profile_disabled";
+            } else if (profile.identities().stream()
+                    .noneMatch(i -> settings.samlProviderName().equals(i.providerName()))) {
+                problem = "not_federated";
+            } else if (!profile.attribute(settings.identifierAttribute())
+                    .map(v -> v.equals(link.institutionalIdentifier())).orElse(false)) {
+                problem = profile.attribute(settings.identifierAttribute()).isEmpty()
+                        ? "identifier_missing" : "identifier_changed";
+            }
+        }
+        if (problem != null) {
+            revokeLink(identity, link, EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED, problem);
+            return EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED;
+        }
+        if (verifiedSessions.size() >= MAX_DEFERRED) {
+            verifiedSessions.clear();
+        }
+        verifiedSessions.put(key, Boolean.TRUE);
+        return EnrollmentOutcome.LINK_STILL_VALID;
+    }
+
+    private void revokeLink(ValidatedCognitoIdentity identity, EnrollmentStore.StoredLink link,
+                            EnrollmentOutcome outcome, String check) {
+        Map<String, Object> detail = detail(identity, outcome);
+        detail.put("identity_link_id", link.id());
+        detail.put("check", check);
+        if (link.principalId() != null) {
+            detail.put("kuali_person_id", link.principalId());
+        }
+        store.revoke(link.id(), ACTOR, new EnrollmentStore.Audit(ACTOR, outcome.auditAction(),
+                link.institutionalIdentifier(), detail));
     }
 
     private EnrollmentOutcome enroll(ValidatedCognitoIdentity identity, List<EnrollmentStore.StoredLink> links) {
@@ -194,7 +262,13 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         EnrollmentStore.LinkResult result = store.link(identity, identifier, principal, ACTOR,
                 new EnrollmentStore.Audit(ACTOR, EnrollmentOutcome.LINKED.auditAction(), identifier, linkedDetail));
         return switch (result) {
-            case LINKED -> EnrollmentOutcome.LINKED;
+            case LINKED -> {
+                // The profile was just read for this sign-in session: no second read on the next request.
+                identity.signInTime().ifPresent(signIn -> store.links(identity).stream()
+                        .filter(EnrollmentStore.StoredLink::active)
+                        .forEach(l -> verifiedSessions.put(l.id() + "|" + signIn.getEpochSecond(), Boolean.TRUE)));
+                yield EnrollmentOutcome.LINKED;
+            }
             case ALREADY_LINKED -> {
                 auditQuietly(identity, EnrollmentOutcome.ALREADY_LINKED, identifier, Map.of());
                 yield EnrollmentOutcome.ALREADY_LINKED;

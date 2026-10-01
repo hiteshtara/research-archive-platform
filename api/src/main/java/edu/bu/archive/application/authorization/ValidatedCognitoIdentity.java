@@ -21,7 +21,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * from the IdP name and the SAML NameID). Email, display names and anything
  * the browser sends are not identity.
  */
-public record ValidatedCognitoIdentity(String issuer, String subject, String username) {
+public record ValidatedCognitoIdentity(String issuer, String subject, String username, java.time.Instant authTime) {
 
     public ValidatedCognitoIdentity {
         if (issuer == null || issuer.isBlank()) {
@@ -37,7 +37,17 @@ public record ValidatedCognitoIdentity(String issuer, String subject, String use
 
     /** An identity whose token username is unknown (enrollment will refuse it). */
     public ValidatedCognitoIdentity(String issuer, String subject) {
-        this(issuer, subject, null);
+        this(issuer, subject, null, null);
+    }
+
+    /** An identity without a sign-in time (enrollment's per-session re-check will deny it). */
+    public ValidatedCognitoIdentity(String issuer, String subject, String username) {
+        this(issuer, subject, username, null);
+    }
+
+    /** The token's auth_time: when the user last signed in at the IdP (one value per sign-in session). */
+    public Optional<java.time.Instant> signInTime() {
+        return Optional.ofNullable(authTime);
     }
 
     /** The token's username claim, for the enrollment profile lookup only. */
@@ -52,7 +62,14 @@ public record ValidatedCognitoIdentity(String issuer, String subject, String use
             throw new IllegalArgumentException("not an access token");
         }
         String issuer = jwt.getIssuer() == null ? null : jwt.getIssuer().toString();
-        return new ValidatedCognitoIdentity(issuer, jwt.getSubject(), jwt.getClaimAsString("username"));
+        java.time.Instant authTime = null;
+        Object claim = jwt.getClaims().get("auth_time");
+        if (claim instanceof java.time.Instant instant) {
+            authTime = instant;
+        } else if (claim instanceof Number seconds) {
+            authTime = java.time.Instant.ofEpochSecond(seconds.longValue());
+        }
+        return new ValidatedCognitoIdentity(issuer, jwt.getSubject(), jwt.getClaimAsString("username"), authTime);
     }
 
     @Override

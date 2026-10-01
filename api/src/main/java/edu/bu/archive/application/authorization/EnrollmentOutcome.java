@@ -36,7 +36,18 @@ public enum EnrollmentOutcome {
     FAILED,
 
     /** An ACTIVE AUTO_VERIFIED link whose crosswalk row or principal is no longer valid was revoked. */
-    REVOKED_MAPPING_NO_LONGER_VALID;
+    REVOKED_MAPPING_NO_LONGER_VALID,
+    /**
+     * On a new sign-in session the Cognito profile no longer supports the link (identifier changed,
+     * e.g. a reassigned NameID now carrying another person's identifier; provider gone; sub
+     * mismatch; disabled or missing profile). The link was revoked.
+     */
+    REVOKED_IDENTITY_EVIDENCE_CHANGED,
+    /**
+     * The current sign-in session could not be verified (no auth_time or username in the token,
+     * or the profile read failed). The link is kept, but this request is denied.
+     */
+    FAILED_SESSION_VERIFICATION;
 
     public boolean refused() {
         return name().startsWith("REFUSED_");
@@ -44,6 +55,11 @@ public enum EnrollmentOutcome {
 
     public boolean failed() {
         return name().startsWith("FAILED");
+    }
+
+    /** The request must be denied even though an ACTIVE link may still exist. */
+    public boolean deniesRequest() {
+        return this == FAILED_SESSION_VERIFICATION;
     }
 
     /** The authz.access_audit action (at most 40 characters). */
@@ -57,7 +73,7 @@ public enum EnrollmentOutcome {
         return switch (this) {
             case LINKED -> "ENROLLMENT_LINKED";
             case ALREADY_LINKED -> "ENROLLMENT_ALREADY_LINKED";
-            case REVOKED_MAPPING_NO_LONGER_VALID -> "ENROLLMENT_LINK_REVOKED";
+            case REVOKED_MAPPING_NO_LONGER_VALID, REVOKED_IDENTITY_EVIDENCE_CHANGED -> "ENROLLMENT_LINK_REVOKED";
             default -> throw new IllegalStateException(this + " is not audited");
         };
     }
