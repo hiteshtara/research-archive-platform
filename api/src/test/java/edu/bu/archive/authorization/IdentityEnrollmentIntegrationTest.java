@@ -62,6 +62,7 @@ import edu.bu.archive.application.authorization.ValidatedCognitoIdentity;
 @SpringBootTest(properties = {
         "app.security.enabled=false",
         "app.authorization.enforcement-enabled=true",
+        "app.authorization.max-sign-in-age=PT12H",
         "app.authorization.version-scope=PER_VERSION",
         "app.authorization.department-match=EXACT_LEAD_UNIT",
         "app.authorization.research-staff-roles=PI,MPI,COI",
@@ -156,7 +157,7 @@ class IdentityEnrollmentIntegrationTest {
                             r.getHeader("X-Test-Sub"), r.getHeader("X-Test-Username"),
                             // the token's auth_time: one value per sign-in session
                             java.time.Instant.ofEpochSecond(Long.parseLong(
-                                    Optional.ofNullable(r.getHeader("X-Test-Auth-Time")).orElse("1790000000")))));
+                                    Optional.ofNullable(r.getHeader("X-Test-Auth-Time")).orElse(String.valueOf(SESSION_1))))));
         }
 
         @Bean
@@ -342,17 +343,21 @@ class IdentityEnrollmentIntegrationTest {
                 + "verified_by) VALUES ('syntheticPrincipalAttr', 'SYN-ATTR-REASSIGN', 'SYNP-OTHER-07', 'x', 'x')").update();
         // Linked and working in sign-in session 1 (SYNP-OTHER-07 is PI on Award H).
         String username = federated("enr-reassign", PROVIDER, "SYN-ATTR-REASSIGN");
-        assertThat(callAt("enr-reassign", username, 1_790_000_000L, "/api/v1/awards/search").getResponse().getStatus())
+        assertThat(callAt("enr-reassign", username, SESSION_1, "/api/v1/awards/search").getResponse().getStatus())
                 .isEqualTo(200);
         // BU reassigns the NameID: same Cognito username and sub, but the assertion (and so the
         // profile) now carries a different person's identifier. Session 2 must not inherit access.
         federated("enr-reassign", PROVIDER, "SYN-ATTR-NOBODY");
-        MvcResult next = callAt("enr-reassign", username, 1_790_003_600L, "/api/v1/awards/search");
+        MvcResult next = callAt("enr-reassign", username, SESSION_2, "/api/v1/awards/search");
         assertThat(next.getResponse().getStatus()).isEqualTo(403);
         assertThat(jdbc.sql("SELECT status FROM authz.identity_link WHERE cognito_subject = 'enr-reassign'")
                 .query(String.class).single()).isEqualTo("REVOKED");
         assertThat(auditOutcomes("enr-reassign")).contains("REVOKED_IDENTITY_EVIDENCE_CHANGED");
     }
+
+    /** Two sign-in sessions, both within the 12-hour maximum sign-in age. */
+    static final long SESSION_1 = java.time.Instant.now().minusSeconds(7200).getEpochSecond();
+    static final long SESSION_2 = SESSION_1 + 3600;
 
     private MvcResult callAt(String sub, String username, long authTime, String path) throws Exception {
         return mvc.perform(get(path).header("X-Test-Sub", sub).header("X-Test-Username", username)

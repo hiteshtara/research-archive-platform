@@ -1,5 +1,6 @@
 package edu.bu.archive.application.authorization;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -22,6 +23,14 @@ public class AuthorizationProperties {
     private AuthorizationPolicy.DepartmentMatch departmentMatch;
     private Set<String> researchStaffRoles = new LinkedHashSet<>();
     private AuthorizationPolicy.ContactDerivation contactDerivation;
+    /**
+     * The longest time since the caller's last BU sign-in ({@code auth_time})
+     * that an enforced request accepts. A Cognito refresh keeps the original
+     * {@code auth_time}, so without this a refresh token (30 days) would keep a
+     * session alive with no new BU login and no per-session re-check. Required
+     * when enforcement is on; NO default.
+     */
+    private Duration maxSignInAge;
     private final Enrollment enrollment = new Enrollment();
 
     /** The configured policy, or empty when any strategy is missing. */
@@ -73,6 +82,19 @@ public class AuthorizationProperties {
 
     public void setContactDerivation(AuthorizationPolicy.ContactDerivation contactDerivation) {
         this.contactDerivation = contactDerivation;
+    }
+
+    public Duration getMaxSignInAge() {
+        return maxSignInAge;
+    }
+
+    public void setMaxSignInAge(Duration maxSignInAge) {
+        this.maxSignInAge = maxSignInAge;
+    }
+
+    /** True when a usable maximum sign-in age is configured. */
+    public boolean hasMaxSignInAge() {
+        return maxSignInAge != null && !maxSignInAge.isNegative() && !maxSignInAge.isZero();
     }
 
     public Enrollment getEnrollment() {

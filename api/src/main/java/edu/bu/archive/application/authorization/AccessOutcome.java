@@ -22,6 +22,8 @@ public sealed interface AccessOutcome {
         REVOKED_IDENTITY,
         SUSPENDED_IDENTITY,
         POLICY_NOT_CONFIGURED,
-        EVALUATION_FAILED
+        EVALUATION_FAILED,
+        /** The BU sign-in is missing or older than the configured maximum: sign in again. */
+        REAUTHENTICATION_REQUIRED
     }
 }

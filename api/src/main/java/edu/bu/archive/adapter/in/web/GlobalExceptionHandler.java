@@ -54,6 +54,16 @@ public class GlobalExceptionHandler {
                 "Your access to the Research Archive is not available.", request));
     }
 
+    @ExceptionHandler(edu.bu.archive.application.authorization.ReauthenticationRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleReauthenticationRequired(HttpServletRequest request) {
+        // 401, not 403: the person may be entitled, but their BU sign-in must be renewed first.
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .header("WWW-Authenticate", "Bearer error=\"invalid_token\", error_description=\"sign-in too old\"")
+                .body(body(HttpStatus.UNAUTHORIZED,
+                        edu.bu.archive.application.authorization.ReauthenticationRequiredException.CODE,
+                        "Please sign in again to continue.", request));
+    }
+
     @ExceptionHandler(edu.bu.archive.application.authorization.AuthorizationPathNotScopedException.class)
     public ResponseEntity<Map<String, Object>> handlePathNotScoped(HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(HttpStatus.FORBIDDEN,
