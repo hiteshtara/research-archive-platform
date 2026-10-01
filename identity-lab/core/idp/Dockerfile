@@ -1,5 +1,7 @@
 # Local SAML integration - Cognito simulated.
-# Real Shibboleth IdP 5.2.3 (InCommon TAP image, pinned). Sessions are kept
+# Real Shibboleth IdP 5.2.3 (InCommon TAP image, pinned). The base image's bundled
+# keys, sealer and TLS key are deleted at build time; lab-entrypoint.sh installs
+# per-lab TEST keys at start, so a published image carries no key material. Sessions are kept
 # server-side in memory (single node), which SAML single logout needs to find
 # a session by NameID. The lab replaces every
 # key the image ships with per-run test keys at start-up (lab-entrypoint.sh).
@@ -35,6 +37,11 @@ RUN set -e; cd /opt/shibboleth-idp/conf; \
     sed -i -e 's|^#idp.persistentId.sourceAttribute = .*|idp.persistentId.sourceAttribute = labInstitutionalId|' saml-nameid.properties; \
     sed -i '/Uncommenting this bean requires/{n;N;N;s|<!--\n\(.*SAML2PersistentGenerator.*\)\n *-->|\1|}' saml-nameid.xml; \
     ! grep -B1 'shibboleth.SAML2PersistentGenerator" />' saml-nameid.xml | grep -q '<!--$'; \
-    chmod +x /usr/bin/lab-entrypoint.sh
+    chmod +x /usr/bin/lab-entrypoint.sh; \
+    rm -f /opt/shibboleth-idp/credentials/idp-signing.key /opt/shibboleth-idp/credentials/idp-signing.crt \
+          /opt/shibboleth-idp/credentials/idp-encryption.key /opt/shibboleth-idp/credentials/idp-encryption.crt \
+          /opt/shibboleth-idp/credentials/idp-backchannel.p12 /opt/shibboleth-idp/credentials/idp-backchannel.crt \
+          /opt/shibboleth-idp/credentials/sealer.jks /opt/shibboleth-idp/credentials/sealer.kver \
+          /opt/shibboleth-idp/credentials/secrets.properties /opt/certs/idp-default.key /opt/certs/idp-default.crt
 
 CMD ["/usr/bin/lab-entrypoint.sh"]
