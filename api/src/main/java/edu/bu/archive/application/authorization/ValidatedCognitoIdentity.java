@@ -1,6 +1,7 @@
 package edu.bu.archive.application.authorization;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import org.springframework.security.oauth2.jwt.Jwt;
 
@@ -9,12 +10,18 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * access token that SecurityConfiguration has ALREADY validated (signature,
  * issuer, client_id, token_use=access, expiry).
  *
- * <p>Deliberately nothing else. The Cognito username is not read: for a
- * federated user it is generated from the IdP name and the SAML NameID and
- * must never be split or parsed to recover an institutional identifier.
- * Email, display names and anything the browser sends are not identity.
+ * <p>Identity is issuer + subject, and nothing else: {@link #equals} and
+ * {@link #hashCode} use only those two.
+ *
+ * <p>The token's {@code username} claim is carried for ONE purpose: the
+ * server-side enrollment step looks that exact profile up in the user pool
+ * (AdminGetUser) and then requires the profile's {@code sub} to equal this
+ * token's subject. It is never split, parsed or compared to anything to
+ * recover an institutional identifier (for a federated user it is generated
+ * from the IdP name and the SAML NameID). Email, display names and anything
+ * the browser sends are not identity.
  */
-public record ValidatedCognitoIdentity(String issuer, String subject) {
+public record ValidatedCognitoIdentity(String issuer, String subject, String username) {
 
     public ValidatedCognitoIdentity {
         if (issuer == null || issuer.isBlank()) {
@@ -23,6 +30,19 @@ public record ValidatedCognitoIdentity(String issuer, String subject) {
         if (subject == null || subject.isBlank()) {
             throw new IllegalArgumentException("subject is required");
         }
+        if (username != null && username.isBlank()) {
+            username = null;
+        }
+    }
+
+    /** An identity whose token username is unknown (enrollment will refuse it). */
+    public ValidatedCognitoIdentity(String issuer, String subject) {
+        this(issuer, subject, null);
+    }
+
+    /** The token's username claim, for the enrollment profile lookup only. */
+    public Optional<String> tokenUsername() {
+        return Optional.ofNullable(username);
     }
 
     /** From a token the resource server has already validated. */
@@ -32,6 +52,22 @@ public record ValidatedCognitoIdentity(String issuer, String subject) {
             throw new IllegalArgumentException("not an access token");
         }
         String issuer = jwt.getIssuer() == null ? null : jwt.getIssuer().toString();
-        return new ValidatedCognitoIdentity(issuer, jwt.getSubject());
+        return new ValidatedCognitoIdentity(issuer, jwt.getSubject(), jwt.getClaimAsString("username"));
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof ValidatedCognitoIdentity that
+                && issuer.equals(that.issuer) && subject.equals(that.subject);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(issuer, subject);
+    }
+
+    @Override
+    public String toString() {
+        return "ValidatedCognitoIdentity[issuer=" + issuer + ", subject=" + subject + "]";
     }
 }
