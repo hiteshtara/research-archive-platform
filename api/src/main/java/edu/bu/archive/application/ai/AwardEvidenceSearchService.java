@@ -4,13 +4,16 @@ import edu.bu.archive.adapter.in.web.dto.ai.AwardEvidenceResultResponse;
 import edu.bu.archive.adapter.in.web.dto.ai.AwardEvidenceSearchResponse;
 import edu.bu.archive.adapter.out.persistence.AwardEvidenceRetrievalRepository;
 import edu.bu.archive.adapter.out.persistence.AwardEvidenceRow;
+import edu.bu.archive.application.authorization.RecordVisibility;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.port.out.EmbeddingProvider;
 import edu.bu.archive.config.SemanticSearchProperties;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -83,11 +86,21 @@ public class AwardEvidenceSearchService {
             Map.entry("RELATED_SUBAWARD", "Related Subaward")
     );
 
+    /*
+     * Record authorization: evidence types that describe ANOTHER record.
+     * Negotiations and Subawards have no non-Central rule yet, so their
+     * excerpts are never returned to a restricted caller (the workspace's
+     * /negotiations and /funding-subawards sections return [] for them too).
+     */
+    static final Set<String> CENTRAL_ONLY_TYPES = Set.of("RELATED_NEGOTIATION", "RELATED_SUBAWARD");
+    static final String RELATED_PROPOSAL_SOURCE_TABLE = "archive.award_funding_proposal";
+
     private final AwardArchiveService awardArchiveService;
     private final AwardEvidenceRetrievalRepository repository;
     private final EmbeddingProvider embeddingProvider;
     private final SensitiveFieldRedactor redactor;
     private final SemanticSearchProperties properties;
+    private final RecordVisibility visibility;
 
     public AwardEvidenceSearchService(
             AwardArchiveService awardArchiveService,
@@ -96,11 +109,24 @@ public class AwardEvidenceSearchService {
             SensitiveFieldRedactor redactor,
             SemanticSearchProperties properties
     ) {
+        this(awardArchiveService, repository, embeddingProvider, redactor, properties, RecordVisibility.ALL);
+    }
+
+    @Autowired
+    public AwardEvidenceSearchService(
+            AwardArchiveService awardArchiveService,
+            AwardEvidenceRetrievalRepository repository,
+            EmbeddingProvider embeddingProvider,
+            SensitiveFieldRedactor redactor,
+            SemanticSearchProperties properties,
+            RecordVisibility visibility
+    ) {
         this.awardArchiveService = awardArchiveService;
         this.repository = repository;
         this.embeddingProvider = embeddingProvider;
         this.redactor = redactor;
         this.properties = properties;
+        this.visibility = visibility;
     }
 
     public AwardEvidenceSearchResponse search(
@@ -115,6 +141,13 @@ public class AwardEvidenceSearchService {
             List<String> documentTypes =
                     resolveDocumentTypes(requestedDocumentTypes);
             int topK = resolveTopK(requestedTopK);
+            boolean restricted = !visibility.unrestricted();
+            if (restricted) {
+                // Dropped before the query so they never use up topK.
+                documentTypes = documentTypes.stream()
+                        .filter(type -> !CENTRAL_ONLY_TYPES.contains(type))
+                        .toList();
+            }
 
             // Resolves and normalizes the Award, throwing
             // NoSuchElementException on a missing Award - the same
@@ -124,18 +157,34 @@ public class AwardEvidenceSearchService {
                     awardArchiveService.findFamily(awardNumber)
                             .awardNumber();
 
+            if (documentTypes.isEmpty()) {
+                // Only types this caller may not see were requested.
+                return new AwardEvidenceSearchResponse(
+                        query, normalizedAwardNumber, List.of(), true,
+                        correlationId.toString()
+                );
+            }
+
             // Never logs the raw query text or the embedding vector -
             // mirrors BedrockEmbeddingProvider's own logging
             // convention.
             float[] queryEmbedding = embeddingProvider.embed(query);
 
+            // Restricted callers: every candidate within the distance cut,
+            // filtered record by record, THEN cut to topK - so hidden rows
+            // never shrink the result below what the caller may see.
             List<AwardEvidenceRow> rows = repository.findNearestEvidence(
                     normalizedAwardNumber,
                     documentTypes,
                     queryEmbedding,
                     properties.getEvidenceMaxDistance(),
-                    topK
+                    restricted ? Integer.MAX_VALUE : topK
             );
+            if (restricted) {
+                rows = visibleRows(rows, normalizedAwardNumber).stream()
+                        .limit(topK)
+                        .toList();
+            }
 
             List<AwardEvidenceResultResponse> results = rows.stream()
                     .map(this::toResult)
@@ -153,6 +202,46 @@ public class AwardEvidenceSearchService {
                     correlationId, exception
             );
         }
+    }
+
+    /*
+     * Record authorization (restricted callers only): the request guard has
+     * already required EVERY version of this Award family, which covers the
+     * Award's own evidence types. A related record is returned only when the
+     * caller may open it on its own - one record never authorizes another:
+     * RELATED_PROPOSAL needs the linked Proposal AND the Award version the
+     * link was made on (as /funding-proposals does); anything else describing
+     * another record is omitted, with no stub or count.
+     */
+    private List<AwardEvidenceRow> visibleRows(List<AwardEvidenceRow> rows, String awardNumber) {
+        List<Long> linkIds = rows.stream()
+                .filter(row -> "RELATED_PROPOSAL".equals(row.documentType()))
+                .map(AwardEvidenceRow::sourcePrimaryKey)
+                .distinct()
+                .toList();
+        Map<Long, AwardEvidenceRetrievalRepository.FundingProposalLink> links =
+                linkIds.isEmpty() ? Map.of() : repository.findFundingProposalLinks(linkIds);
+        Map<String, Boolean> proposalVisible = new HashMap<>();
+        Map<Long, Boolean> awardVisible = new HashMap<>();
+        return rows.stream().filter(row -> {
+            if (!awardNumber.equals(row.awardNumber())) {
+                return false;
+            }
+            String type = row.documentType();
+            if (type != null && type.startsWith("AWARD_")) {
+                return true;
+            }
+            if ("RELATED_PROPOSAL".equals(type)
+                    && RELATED_PROPOSAL_SOURCE_TABLE.equals(row.sourceTable())) {
+                AwardEvidenceRetrievalRepository.FundingProposalLink link = links.get(row.sourcePrimaryKey());
+                return link != null
+                        && link.proposalNumber() != null
+                        && link.awardId() != null
+                        && awardVisible.computeIfAbsent(link.awardId(), visibility::canSeeAward)
+                        && proposalVisible.computeIfAbsent(link.proposalNumber(), visibility::canSeeProposalNumber);
+            }
+            return false;   // fail closed: no rule for this type
+        }).toList();
     }
 
     private List<String> resolveDocumentTypes(

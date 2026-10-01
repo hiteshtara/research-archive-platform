@@ -18,10 +18,21 @@ public class ProposalArchiveService {
 
     private final ProposalArchiveRepository repository;
 
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
     public ProposalArchiveService(
             ProposalArchiveRepository repository
     ) {
+        this(repository, edu.bu.archive.application.authorization.RecordVisibility.ALL);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProposalArchiveService(
+            ProposalArchiveRepository repository,
+            edu.bu.archive.application.authorization.RecordVisibility visibility
+    ) {
         this.repository = repository;
+        this.visibility = visibility;
     }
 
     /*
@@ -98,6 +109,17 @@ public class ProposalArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
+        if (!visibility.unrestricted()) {
+            // Record authorization: only the versions the caller may open,
+            // each decided on its own, with the count and paging computed
+            // AFTER filtering.
+            List<ProposalRowResponse> visible = repository
+                    .findVersionRows(normalizedProposalNumber, Integer.MAX_VALUE, 0).stream()
+                    .filter(row -> row.proposalId() != null && visibility.canSeeProposal(row.proposalId()))
+                    .toList();
+            return PaginationSupport.pageOf(visible, safePage, safeSize);
+        }
+
         long totalElements = repository.countVersions(
                 normalizedProposalNumber
         );
@@ -135,9 +157,23 @@ public class ProposalArchiveService {
         String normalizedProposalNumber =
                 requireExistingProposal(proposalNumber);
 
-        return repository.findAwards(
-                normalizedProposalNumber
-        );
+        if (visibility.unrestricted()) {
+            return repository.findAwards(normalizedProposalNumber).stream()
+                    .filter(row -> visibility.canSeeAwardNumber(row.awardNumber()))
+                    .toList();
+        }
+        // Record authorization: only links made on a Proposal version the
+        // caller may open, and only Awards the caller may open (the exact
+        // linked version and the family's current version).
+        List<Long> visibleVersions = repository
+                .findVersionRows(normalizedProposalNumber, Integer.MAX_VALUE, 0).stream()
+                .map(ProposalRowResponse::proposalId)
+                .filter(id -> id != null && visibility.canSeeProposal(id))
+                .toList();
+        return repository.findAwardsLinkedFromVersions(normalizedProposalNumber, visibleVersions).stream()
+                .filter(row -> row.awardId() == null || visibility.canSeeAward(row.awardId()))
+                .filter(row -> row.awardNumber() != null && visibility.canSeeAwardNumber(row.awardNumber()))
+                .toList();
     }
 
     private String requireExistingProposal(

@@ -37,13 +37,49 @@ import org.springframework.stereotype.Service;
  * download endpoints must call it too, independently, on every request
  * (never cached/short-circuited from an earlier list call).
  */
+/*
+ * APPROVED POLICY (Hitesh, 2026-10-01; design rev 3.9): when record-level
+ * authorization is ENFORCED, a user authorized to view a record may view and
+ * download all content belonging to that record - attachments and consolidated
+ * reports - on every path, including the Archived File Finder. The parent
+ * record's authorization (RecordAuthorizationInterceptor, the scoped SQL, and
+ * each download's owner check) is the gate, and the separate
+ * ArchiveAttachmentViewer group requirement does not apply. It never extends
+ * to other records, child Awards or related Proposals.
+ *
+ * While enforcement is OFF there is no record-level gate at all, so the group
+ * requirement stays exactly as before - turning this policy on can never
+ * loosen an unenforced deployment.
+ */
 @Service
 public class AttachmentAuthorizationService {
 
     public static final String ATTACHMENT_VIEWER_AUTHORITY =
             "ROLE_ArchiveAttachmentViewer";
 
+    private final org.springframework.beans.factory.ObjectProvider<
+            edu.bu.archive.application.authorization.RecordAuthorizationService> recordAuthorization;
+
+    /** No record authorization available (partial test contexts): the group rule applies. */
+    public AttachmentAuthorizationService() {
+        this.recordAuthorization = null;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AttachmentAuthorizationService(
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.RecordAuthorizationService> recordAuthorization) {
+        this.recordAuthorization = recordAuthorization;
+    }
+
     public void requireAttachmentAccess(Authentication authentication) {
+        var records = recordAuthorization == null ? null : recordAuthorization.getIfAvailable();
+        if (records != null && records.enforced()) {
+            // The parent record was already authorized (or refused) before this
+            // controller ran; an unprovisioned or denied identity never gets here.
+            records.requireProvisioned();
+            return;
+        }
         boolean authorized = authentication != null
                 && authentication.getAuthorities().stream()
                         .anyMatch(authority ->

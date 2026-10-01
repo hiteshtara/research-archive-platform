@@ -1,4 +1,6 @@
 import { Amplify } from "aws-amplify";
+
+import { attachmentControlsAvailable } from "./features/common/attachmentAccessPresentation.mjs";
 import {
   fetchAuthSession,
   getCurrentUser,
@@ -85,22 +87,25 @@ export async function accessToken(): Promise<string | null> {
   }
 }
 
-// Frontend-side convenience only, mirroring what
-// AttachmentAuthorizationService actually enforces server-side
-// (ArchiveAttachmentViewer -> ROLE_ArchiveAttachmentViewer). This is
-// used to hide navigation/UI affordances a user can't use anyway, never
-// as the real access-control boundary - every attachment endpoint
-// re-checks the real Cognito group on every request regardless of what
-// this returns. A missing/malformed cognito:groups claim, or any
-// failure resolving the session, is treated as "no access" (fails
-// closed, never open).
-const ATTACHMENT_VIEWER_GROUP = "ArchiveAttachmentViewer";
-
+// Frontend-side convenience only, mirroring what AttachmentAuthorizationService
+// enforces server-side; never the access-control boundary (every attachment and
+// report endpoint re-checks on every request). With record authorization enforced
+// (approved 2026-10-01) a record's own files follow the record, so the controls are
+// offered without ArchiveAttachmentViewer; with enforcement off the group is still
+// required. Any failure resolving either input is treated as "no access".
 export async function hasAttachmentAccess(): Promise<boolean> {
   try {
     const session = await fetchAuthSession();
     const groups = session.tokens?.accessToken?.payload?.["cognito:groups"];
-    return Array.isArray(groups) && groups.includes(ATTACHMENT_VIEWER_GROUP);
+    const token = session.tokens?.accessToken?.toString();
+    let status: { mode?: string; problem?: string | null } | null = null;
+    if (token) {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/me/access`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      status = response.ok ? await response.json() : null;
+    }
+    return attachmentControlsAvailable(status, groups);
   } catch {
     return false;
   }

@@ -35,7 +35,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import({
         SecurityConfiguration.class,
         GlobalExceptionHandler.class,
-        AttachmentAuthorizationService.class
+        AttachmentAuthorizationService.class,
+        SynchronousStreamingTestConfiguration.class
 })
 @TestPropertySource(properties = {
         "app.security.enabled=true",

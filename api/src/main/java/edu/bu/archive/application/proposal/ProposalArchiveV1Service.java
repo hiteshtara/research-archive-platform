@@ -46,12 +46,24 @@ public class ProposalArchiveV1Service {
     private final ProposalV1Repository repository;
     private final ProposalAttachmentStorage attachmentStorage;
 
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
     public ProposalArchiveV1Service(
             ProposalV1Repository repository,
             ProposalAttachmentStorage attachmentStorage
     ) {
+        this(repository, attachmentStorage, edu.bu.archive.application.authorization.RecordVisibility.ALL);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProposalArchiveV1Service(
+            ProposalV1Repository repository,
+            ProposalAttachmentStorage attachmentStorage,
+            edu.bu.archive.application.authorization.RecordVisibility visibility
+    ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
+        this.visibility = visibility;
     }
 
     public ProposalSummaryResponse findSummary(long proposalId) {
@@ -68,6 +80,17 @@ public class ProposalArchiveV1Service {
 
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
+
+        if (!visibility.unrestricted()) {
+            // Record authorization: only the versions the caller may open,
+            // each decided on its own (one version never authorizes
+            // another), with the count and paging computed AFTER filtering.
+            List<ProposalVersionSummaryResponse> visible = repository
+                    .findVersionRows(proposalNumber, Integer.MAX_VALUE, 0).stream()
+                    .filter(v -> v.proposalId() != null && visibility.canSeeProposal(v.proposalId()))
+                    .toList();
+            return PaginationSupport.pageOf(visible, safePage, safeSize);
+        }
 
         long totalElements = repository.countVersions(proposalNumber);
 
@@ -206,6 +229,23 @@ public class ProposalArchiveV1Service {
         List<ProposalCommentRow> rows =
                 repository.findCommentRows(proposalNumber);
 
+        if (!visibility.unrestricted()) {
+            // Record authorization: a comment made on a version the caller
+            // cannot open becomes the no-comment placeholder for its type
+            // (the category still renders, with no hint of the hidden row).
+            // A comment with no version key is family-level content: shown
+            // only when every version of the family is visible.
+            boolean everyVersion = visibility.canSeeEveryProposalVersion(proposalNumber);
+            java.util.function.LongPredicate visibleProposal = visibleProposalIds();
+            rows = rows.stream()
+                    .map(row -> row.proposalCommentId() == null
+                            || (row.proposalId() == null ? everyVersion : visibleProposal.test(row.proposalId()))
+                            ? row
+                            : new ProposalCommentRow(null, null, null, row.commentTypeCode(),
+                                    row.commentTypeDescription(), null, null, null))
+                    .toList();
+        }
+
         return new ProposalCommentsResponse(groupCommentsByType(rows));
     }
 
@@ -291,7 +331,37 @@ public class ProposalArchiveV1Service {
 
     public List<ProposalFundedAwardResponse> findFundedAwards(long proposalId) {
         String proposalNumber = requireProposalNumberForId(proposalId);
-        return repository.findFundedAwardRows(proposalNumber);
+        List<ProposalFundedAwardResponse> rows = repository.findFundedAwardRows(proposalNumber);
+        if (visibility.unrestricted()) {
+            return rows.stream().filter(row -> visibility.canSeeAwardNumber(row.awardNumber())).toList();
+        }
+        // Record authorization: a funded-Award row is listed only when the
+        // caller may open the Award (its current version, which the row
+        // navigates to, and the exact linked version it names), and only
+        // when the relationship belongs to a Proposal version the caller
+        // may open - the family spans every version.
+        Map<Long, Long> owningProposal = repository.findFundedAwardRowProposalIds(proposalNumber);
+        java.util.function.LongPredicate visibleProposal = visibleProposalIds();
+        Map<Long, Boolean> visibleAward = new java.util.HashMap<>();
+        java.util.function.LongPredicate canSeeAward =
+                id -> visibleAward.computeIfAbsent(id, visibility::canSeeAward);
+        return rows.stream()
+                .filter(row -> {
+                    Long owner = row.sourceRelationshipId() == null
+                            ? null : owningProposal.get(row.sourceRelationshipId());
+                    return owner != null && visibleProposal.test(owner);
+                })
+                .filter(row -> row.navigableCurrentAwardId() != null
+                        && canSeeAward.test(row.navigableCurrentAwardId()))
+                .filter(row -> row.exactLinkedAwardId() == null || canSeeAward.test(row.exactLinkedAwardId()))
+                .filter(row -> visibility.canSeeAwardNumber(row.awardNumber()))
+                .toList();
+    }
+
+    /** Record authorization: a per-request memo of canSeeProposal. */
+    private java.util.function.LongPredicate visibleProposalIds() {
+        Map<Long, Boolean> decided = new java.util.HashMap<>();
+        return id -> decided.computeIfAbsent(id, visibility::canSeeProposal);
     }
 
     public List<ProposalCustomDataResponse> findCustomData(long proposalId) {

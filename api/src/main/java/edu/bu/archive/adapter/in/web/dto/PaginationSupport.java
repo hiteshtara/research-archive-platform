@@ -31,6 +31,19 @@ public final class PaginationSupport {
         );
     }
 
+    /**
+     * One page of an already-filtered, fully materialized list (record
+     * authorization filters rows in memory, then pages - so the page and
+     * totalElements describe only what the caller may see).
+     */
+    public static <T> PageResponse<T> pageOf(java.util.List<T> rows, int page, int size) {
+        int from = (int) Math.min((long) page * size, rows.size());
+        int to = Math.min(from + size, rows.size());
+        PageMetadata meta = metadata(page, size, rows.size());
+        return new PageResponse<>(java.util.List.copyOf(rows.subList(from, to)), page, size,
+                rows.size(), meta.totalPages(), meta.first(), meta.last());
+    }
+
     public record PageMetadata(
             int totalPages,
             boolean first,

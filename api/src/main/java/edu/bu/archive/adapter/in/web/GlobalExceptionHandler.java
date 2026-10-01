@@ -42,6 +42,33 @@ public class GlobalExceptionHandler {
                 );
     }
 
+    @ExceptionHandler(edu.bu.archive.application.authorization.AccessNotProvisionedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessNotProvisioned(HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                edu.bu.archive.application.authorization.AccessNotProvisionedProblem.body(request.getRequestURI()));
+    }
+
+    @ExceptionHandler(edu.bu.archive.application.authorization.IdentityAccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleIdentityAccessDenied(HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(HttpStatus.FORBIDDEN, "ACCESS_DENIED",
+                "Your access to the Research Archive is not available.", request));
+    }
+
+    @ExceptionHandler(edu.bu.archive.application.authorization.AuthorizationPathNotScopedException.class)
+    public ResponseEntity<Map<String, Object>> handlePathNotScoped(HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(HttpStatus.FORBIDDEN,
+                edu.bu.archive.application.authorization.AuthorizationPathNotScopedException.CODE,
+                "This part of the archive is not yet available under record-level access.", request));
+    }
+
+    @ExceptionHandler(edu.bu.archive.application.authorization.PartialFamilyAccessException.class)
+    public ResponseEntity<Map<String, Object>> handlePartialFamilyAccess(HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(HttpStatus.FORBIDDEN,
+                edu.bu.archive.application.authorization.PartialFamilyAccessException.CODE,
+                "AI features use every version of this Award, and some versions are outside your access.",
+                request));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(
             NoSuchElementException exception,
