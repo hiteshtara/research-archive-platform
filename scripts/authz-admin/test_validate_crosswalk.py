@@ -39,3 +39,11 @@ def test_unknown_and_rolodex_ids_are_rejected():
 def test_wrong_attribute_and_shared_entity_are_rejected():
     assert "attribute_name is not exactly the approved attribute" in checks([row("A1", "P1", 2, name="mail")])
     assert "several principals share one KIM entity" in checks([row("A1", "P1", 2), row("A4", "P4", 3)])
+
+
+def test_padded_ids_cannot_bypass_the_rolodex_or_principal_checks():
+    principals = [{"prncpl_id": "P1", "entity_id": "E1", "actv_ind": "Y", "_row": 2}]
+    crosswalk = [{"attribute_name": "attr", "attribute_value": "A1", "prncpl_id": " 990001 ",
+                  "evidence_ref": "T", "verified_by": "lab", "_row": 2}]
+    problems, _ = validate(principals, crosswalk, "attr", rolodex_ids=frozenset({"990001"}))
+    assert "non-employee (rolodex) id is never a login account" in problems

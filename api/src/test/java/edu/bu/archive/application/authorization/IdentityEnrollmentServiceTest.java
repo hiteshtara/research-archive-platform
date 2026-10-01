@@ -522,4 +522,44 @@ class IdentityEnrollmentServiceTest {
         assertThat(byNameId.prepare(token("s-nid"))).isEqualTo(EnrollmentOutcome.LINKED);
         assertThat(onlyLink().identifier()).isEqualTo("nameid-s-nid");
     }
+
+    // --- native / linked accounts, foreign issuers, transient failures -------------------------
+
+    @Test
+    void aLinkedNativeAccountIsNeverTrustedEvenWithTheProviderInItsIdentities() {
+        // AdminLinkProviderForUser makes a native (CONFIRMED) profile list the SAML provider.
+        pool.put(PROVIDER + "_s-linkednative", new CognitoProfile("s-linkednative", PROVIDER + "_s-linkednative", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "n")), Map.of(ATTRIBUTE, "SYN-V-1"), "CONFIRMED"));
+        assertThat(service.prepare(token("s-linkednative"))).isEqualTo(EnrollmentOutcome.REFUSED_NOT_FEDERATED_ONLY);
+        assertThat(store.links).isEmpty();
+    }
+
+    @Test
+    void anExistingLinkIsRevokedIfTheProfileStopsBeingFederatedOnly() {
+        linked("s-turned-native", "SYN-V-1");
+        pool.put(PROVIDER + "_s-turned-native", new CognitoProfile("s-turned-native", PROVIDER + "_s-turned-native", true,
+                List.of(new CognitoProfile.FederatedIdentity(PROVIDER, "n")), Map.of(ATTRIBUTE, "SYN-V-1"), "CONFIRMED"));
+        assertThat(service.prepare(token("s-turned-native", SIGN_IN.plusSeconds(60))))
+                .isEqualTo(EnrollmentOutcome.REVOKED_IDENTITY_EVIDENCE_CHANGED);
+    }
+
+    @Test
+    void aTokenFromAnotherPoolIsRefused() {
+        var poolBound = new IdentityEnrollmentService(new IdentityEnrollmentService.Settings(
+                PROVIDER, ATTRIBUTE, CROSSWALK, Duration.ZERO, "synthetic-pool"), reader, store, clock);
+        profile("s-pool", PROVIDER, "SYN-V-1");
+        var foreign = new ValidatedCognitoIdentity("https://idp.invalid/other-pool", "s-pool", PROVIDER + "_s-pool", SIGN_IN);
+        assertThat(poolBound.prepare(foreign)).isEqualTo(EnrollmentOutcome.REFUSED_FOREIGN_ISSUER);
+        assertThat(poolBound.prepare(token("s-pool"))).isEqualTo(EnrollmentOutcome.LINKED);
+    }
+
+    @Test
+    void transientFailuresAreNotHeldBackByTheRefusalWindow() {
+        var cached = service(Duration.ofSeconds(60));
+        profile("s-transient", PROVIDER, "SYN-V-1");
+        poolFailure = new IllegalStateException("throttled");
+        assertThat(cached.prepare(token("s-transient")).failed()).isTrue();
+        poolFailure = null;
+        assertThat(cached.prepare(token("s-transient"))).isEqualTo(EnrollmentOutcome.LINKED);
+    }
 }

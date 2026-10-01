@@ -57,7 +57,13 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
      * @param refusalRetry           how long a refusal is remembered before the profile is re-read (0 = never)
      */
     public record Settings(String samlProviderName, String identifierAttribute, String crosswalkAttributeName,
-                           Duration refusalRetry) {
+                           Duration refusalRetry, String userPoolId) {
+
+        /** Without a pool id the token issuer is not tied to the pool (unit tests only). */
+        public Settings(String samlProviderName, String identifierAttribute, String crosswalkAttributeName,
+                        Duration refusalRetry) {
+            this(samlProviderName, identifierAttribute, crosswalkAttributeName, refusalRetry, null);
+        }
         public Settings {
             requireText(samlProviderName, "samlProviderName");
             requireText(identifierAttribute, "identifierAttribute");
@@ -103,8 +109,8 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
             outcome = EnrollmentOutcome.FAILED;
             auditQuietly(identity, outcome, null, Map.of("error", failure.getClass().getSimpleName()));
         }
-        if (outcome != EnrollmentOutcome.LINKED && outcome != EnrollmentOutcome.ALREADY_LINKED
-                && !settings.refusalRetry().isZero()) {
+        // Only definite refusals are remembered; transient failures are retried on the next request.
+        if (outcome.refused() && !settings.refusalRetry().isZero()) {
             if (deferred.size() >= MAX_DEFERRED) {
                 deferred.clear();
             }
@@ -145,10 +151,11 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
     private EnrollmentOutcome verifySession(ValidatedCognitoIdentity identity, EnrollmentStore.StoredLink link) {
         Optional<Instant> signIn = identity.signInTime();
         Optional<String> username = identity.tokenUsername();
-        if (signIn.isEmpty() || username.isEmpty() || identity.canEditOwnAttributes()) {
+        if (signIn.isEmpty() || username.isEmpty() || identity.canEditOwnAttributes() || !fromConfiguredPool(identity)) {
             auditQuietly(identity, EnrollmentOutcome.FAILED_SESSION_VERIFICATION, link.institutionalIdentifier(),
                     Map.of("check", signIn.isEmpty() ? "no_auth_time"
-                            : username.isEmpty() ? "no_username" : "self_editable_token"));
+                            : username.isEmpty() ? "no_username"
+                            : identity.canEditOwnAttributes() ? "self_editable_token" : "foreign_issuer"));
             return EnrollmentOutcome.FAILED_SESSION_VERIFICATION;
         }
         String key = link.id() + "|" + signIn.get().getEpochSecond();
@@ -175,6 +182,8 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
             } else if (profile.identities().stream()
                     .noneMatch(i -> settings.samlProviderName().equals(i.providerName()))) {
                 problem = "not_federated";
+            } else if (!profile.federatedOnly()) {
+                problem = "not_federated_only";
             } else if (!identifierOf(profile).map(v -> v.equals(link.institutionalIdentifier())).orElse(false)) {
                 problem = identifierOf(profile).isEmpty() ? "identifier_missing" : "identifier_changed";
             }
@@ -188,6 +197,12 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         }
         verifiedSessions.put(key, Boolean.TRUE);
         return EnrollmentOutcome.LINK_STILL_VALID;
+    }
+
+    /** The token must come from the user pool enrollment reads (issuer ends with "/<pool id>"). */
+    private boolean fromConfiguredPool(ValidatedCognitoIdentity identity) {
+        String pool = settings.userPoolId();
+        return pool == null || pool.isBlank() || identity.issuer().endsWith("/" + pool.trim());
     }
 
     /** The verified identifier from the profile: a mapped attribute, or the provider's NameID. */
@@ -226,6 +241,9 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
         if (identity.canEditOwnAttributes()) {
             return refuse(identity, EnrollmentOutcome.REFUSED_SELF_EDITABLE_TOKEN, null, Map.of());
         }
+        if (!fromConfiguredPool(identity)) {
+            return refuse(identity, EnrollmentOutcome.REFUSED_FOREIGN_ISSUER, null, Map.of());
+        }
 
         Optional<CognitoProfile> read;
         try {
@@ -249,6 +267,9 @@ public class IdentityEnrollmentService implements IdentityEnrollment {
                 .anyMatch(i -> settings.samlProviderName().equals(i.providerName()));
         if (!federated) {
             return refuse(identity, EnrollmentOutcome.REFUSED_NOT_FEDERATED, null, Map.of());
+        }
+        if (!profile.federatedOnly()) {
+            return refuse(identity, EnrollmentOutcome.REFUSED_NOT_FEDERATED_ONLY, null, Map.of());
         }
         Optional<String> value = identifierOf(profile);
         if (value.isEmpty()) {

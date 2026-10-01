@@ -58,7 +58,8 @@ public class AwsCognitoProfileReader implements CognitoProfileReader, AutoClosea
                 response.username(),
                 !Boolean.FALSE.equals(response.enabled()),
                 identities(attributes.get(IDENTITIES_ATTRIBUTE)),
-                attributes));
+                attributes,
+                response.userStatusAsString()));
     }
 
     /**

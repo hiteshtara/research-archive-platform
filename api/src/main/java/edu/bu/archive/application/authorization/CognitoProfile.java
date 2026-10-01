@@ -15,8 +15,23 @@ public record CognitoProfile(
         String username,
         boolean enabled,
         List<FederatedIdentity> identities,
-        Map<String, String> attributes
+        Map<String, String> attributes,
+        String userStatus
 ) {
+
+    /** Cognito's UserStatus for a profile created by federated sign-in (not a native or linked account). */
+    public static final String EXTERNAL_PROVIDER = "EXTERNAL_PROVIDER";
+
+    /** Test convenience: a profile with identities is EXTERNAL_PROVIDER, one without is a native account. */
+    public CognitoProfile(String sub, String username, boolean enabled, List<FederatedIdentity> identities,
+                          Map<String, String> attributes) {
+        this(sub, username, enabled, identities, attributes,
+                identities == null || identities.isEmpty() ? "CONFIRMED" : EXTERNAL_PROVIDER);
+    }
+
+    public boolean federatedOnly() {
+        return EXTERNAL_PROVIDER.equals(userStatus);
+    }
 
     public CognitoProfile {
         identities = identities == null ? List.of() : List.copyOf(identities);
