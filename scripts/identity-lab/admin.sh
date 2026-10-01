@@ -2,6 +2,8 @@
 # Lab administration for the FICTIONAL identity lab (local containers only).
 #   admin.sh suspend|unsuspend <institutional-id>
 #   admin.sh revoke-grant|restore-grant <institutional-id> <CENTRAL|UNIT|IO|CONTACT_DERIVATION>
+#   admin.sh add-grant <institutional-id> UNIT <unit>|IO <io>|CENTRAL   /  remove-grant <institutional-id> <type>
+#   admin.sh revoke-link|restore-link <institutional-id>  (identity mapping, lab issuer only)
 #   admin.sh rename-login <old-uid> <new-uid>          (same person, new login name)
 #   admin.sh add-account <uid> <password> <inst-id|-> <display name>
 #   admin.sh remove-account <uid>
@@ -26,6 +28,23 @@ case "$cmd" in
   restore-grant)
     archive -c "UPDATE authz.access_grant SET revoked_by = NULL, revoked_at = NULL
       WHERE institutional_identifier = '$1' AND grant_type = '$2' AND revoked_by = 'lab-admin'" ;;
+  revoke-link|restore-link)
+    if [ "$cmd" = revoke-link ]; then
+      archive -c "UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = 'lab-admin', revoked_at = now()
+        WHERE institutional_identifier = '$1' AND status = 'ACTIVE' AND cognito_issuer LIKE 'https://localhost:9443/%'"
+    else
+      archive -c "UPDATE authz.identity_link SET status = 'ACTIVE', revoked_by = NULL, revoked_at = NULL
+        WHERE institutional_identifier = '$1' AND revoked_by = 'lab-admin' AND cognito_issuer LIKE 'https://localhost:9443/%'"
+    fi ;;
+  add-grant)   # add-grant <inst> UNIT <unit> | IO <io> | CENTRAL | CONTACT_DERIVATION
+    case "$2" in
+      UNIT) cols="'$3', NULL" ;; IO) cols="NULL, '$3'" ;; *) cols="NULL, NULL" ;;
+    esac
+    archive -c "INSERT INTO authz.access_grant (institutional_identifier, grant_type, unit_number, io_value, granted_by, reason)
+      VALUES ('$1', '$2', $cols, 'lab-admin', 'lab add-grant')" ;;
+  remove-grant)
+    archive -c "UPDATE authz.access_grant SET revoked_by = 'lab-admin', revoked_at = now()
+      WHERE institutional_identifier = '$1' AND grant_type = '$2' AND granted_by = 'lab-admin' AND revoked_at IS NULL" ;;
   rename-login)
     ldap ldapmodrdn -r "uid=$1,ou=people,dc=lab,dc=invalid" "uid=$2" ;;
   add-account)
@@ -40,5 +59,5 @@ case "$cmd" in
     archive -c "SELECT cognito_subject, institutional_identifier, kuali_person_id, login_name, method, status FROM authz.identity_link WHERE cognito_issuer LIKE 'https://localhost:9443/%' ORDER BY identity_link_id"
     archive -c "SELECT occurred_at::time(0), institutional_identifier, outcome FROM identity_lab.enrollment_event ORDER BY event_id DESC LIMIT 15"
     pool -c "SELECT username, sub, attributes->>'custom:login' AS login FROM user_profile ORDER BY created_at" ;;
-  *) sed -n '2,9p' "$0"; exit 2 ;;
+  *) sed -n '2,11p' "$0"; exit 2 ;;
 esac

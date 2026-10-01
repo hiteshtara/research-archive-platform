@@ -25,14 +25,20 @@ app:
   authorization:
     enforcement-enabled: true
     # DEMO CONFIGURATION OF UNAPPROVED POLICY CHOICES - not approved policy (same as authz-demo):
-    version-scope: PER_VERSION
-    department-match: EXACT_LEAD_UNIT
-    research-staff-roles: PI,MPI,COI
+    # Overridable per run (LAB_VERSION_SCOPE etc.) so alternatives are tested separately.
+    version-scope: ${LAB_VERSION_SCOPE:PER_VERSION}
+    department-match: ${LAB_DEPARTMENT_MATCH:EXACT_LEAD_UNIT}
+    research-staff-roles: ${LAB_RESEARCH_STAFF_ROLES:PI,MPI,COI}
   attachments:
     storage: local
     local-directory: ${LAB_ATTACHMENT_DIR:/tmp/identity-lab-attachments}
+  explorer:
+    enabled: true
   ai:
-    enabled: false
+    # Deterministic stub provider only (no network), so AI paths can be exercised.
+    enabled: true
+    stub-enabled: true
+    provider: stub
   search:
     semantic:
       enabled: false

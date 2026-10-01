@@ -35,7 +35,10 @@ if [ "$(docker exec lab-archive-db psql -U lab_archive -d identity_lab -Atc "sel
     < "$ROOT/api/src/test/resources/authz/synthetic-seed.sql"
   docker exec -i lab-archive-db psql -q -v ON_ERROR_STOP=1 -U lab_archive -d identity_lab \
     < "$LAB/archive/db/archive-lab.sql"
+  docker exec -i lab-archive-db psql -q -v ON_ERROR_STOP=1 -U lab_archive -d identity_lab \
+    < "$LAB/archive/db/award-acceptance-fixtures.sql"
 fi
+python3 "$LAB/archive/fixtures/make_attachment_pdfs.py" "$STATE/attachments" >/dev/null
 
 echo "Waiting for the Shibboleth IdP (first start can take a minute) ..."
 for i in $(seq 1 180); do
@@ -48,6 +51,7 @@ until curl -sf --cacert "$CREDS/ca.crt" https://localhost:9443/lab/health >/dev/
 if ! curl -sf "http://127.0.0.1:$API_PORT/actuator/health" >/dev/null 2>&1; then
   echo "Starting API (profile identity-lab, real JWT validation) on :$API_PORT ..."
   (cd "$ROOT/api" && exec env LAB_ARCHIVE_DB_PASSWORD="$LAB_ARCHIVE_DB_PASSWORD" LAB_API_PORT="$API_PORT" LAB_UI_PORT="$UI_PORT" \
+    LAB_ATTACHMENT_DIR="$STATE/attachments" ${LAB_POLICY_ENV:-} \
     mvn -B -ntp -q -Pauthz-demo spring-boot:run -Dspring-boot.run.profiles=identity-lab \
     "-Dspring-boot.run.jvmArguments=-Djavax.net.ssl.trustStore=$STATE/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12") \
     < /dev/null > "$STATE/api.log" 2>&1 &
