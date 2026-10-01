@@ -14,8 +14,6 @@ import org.springframework.core.Ordered;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import edu.bu.archive.application.authorization.CurrentIdentityProvider;
-import edu.bu.archive.application.authorization.IoResolver;
-import edu.bu.archive.application.authorization.IoSqlStrategy;
 import edu.bu.archive.application.authorization.RecordModule;
 
 /**
@@ -88,22 +86,5 @@ public class AuthzDemoConfiguration implements org.springframework.web.servlet.c
         return registration;
     }
 
-    /** Synthetic IO values (authz_demo.award_io). The real IO field remains unresolved (D-A). */
-    @Bean
-    @Primary
-    IoResolver demoIoResolver(JdbcClient jdbc) {
-        return (module, versionKey) -> module != RecordModule.AWARD
-                ? Set.of()
-                : Set.copyOf(jdbc.sql("SELECT io_value FROM authz_demo.award_io WHERE award_id = CAST(:id AS BIGINT)")
-                        .param("id", versionKey).query(String.class).list());
-    }
-
-    @Bean
-    @Primary
-    IoSqlStrategy demoIoSqlStrategy() {
-        return (module, rowAlias) -> module == RecordModule.AWARD
-                ? Optional.of("EXISTS (SELECT 1 FROM authz_demo.award_io az_io WHERE az_io.award_id = "
-                        + rowAlias + ".award_id AND az_io.io_value IN (:az_ios))")
-                : Optional.empty();
-    }
+    // IO grants use the production rule (Award account number, decision D-A); no demo override.
 }
