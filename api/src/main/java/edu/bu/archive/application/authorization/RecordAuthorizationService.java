@@ -224,6 +224,25 @@ public class RecordAuthorizationService implements RecordVisibility {
     }
 
     @Override
+    public boolean canSeeProposal(long proposalId) {
+        return silently(() -> requireProposal(proposalId));
+    }
+
+    /** Every version of the Proposal family, each decided exactly as {@link #canSeeProposal} would. */
+    @Override
+    public boolean canSeeEveryProposalVersion(String proposalNumber) {
+        if (!enforced()) {
+            return true;
+        }
+        try {
+            requireProvisioned();
+            return everyVersionAllowed(facts.proposalFamily(proposalNumber));
+        } catch (RuntimeException denied) {
+            return false;
+        }
+    }
+
+    @Override
     public boolean canSeeAward(long awardId) {
         return silently(() -> requireAward(awardId));
     }
@@ -241,17 +260,20 @@ public class RecordAuthorizationService implements RecordVisibility {
         }
         try {
             requireProvisioned();
-            List<RecordFacts> family = facts.awardFamily(awardNumber);
-            if (family.isEmpty()) {
-                return false;
-            }
-            AuthorizationPolicy policy = properties.policy().orElseThrow(IdentityAccessDeniedException::new);
-            RecordAccessEvaluator evaluator = new RecordAccessEvaluator(policy, unitHierarchy);
-            AccessOutcome outcome = outcome();
-            return family.stream().allMatch(version -> evaluator.decide(outcome, version, family).allowed());
+            return everyVersionAllowed(facts.awardFamily(awardNumber));
         } catch (RuntimeException denied) {
             return false;
         }
+    }
+
+    private boolean everyVersionAllowed(List<RecordFacts> family) {
+        if (family.isEmpty()) {
+            return false;
+        }
+        AuthorizationPolicy policy = properties.policy().orElseThrow(IdentityAccessDeniedException::new);
+        RecordAccessEvaluator evaluator = new RecordAccessEvaluator(policy, unitHierarchy);
+        AccessOutcome outcome = outcome();
+        return family.stream().allMatch(version -> evaluator.decide(outcome, version, family).allowed());
     }
 
     /**
