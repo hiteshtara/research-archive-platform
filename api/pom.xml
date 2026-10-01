@@ -162,4 +162,47 @@
             </plugin>
         </plugins>
     </build>
+    <!--
+        authz-demo: the local "Synthetic identity demo - BU federation not
+        connected". Adds src/authz-demo (a test-user selector and synthetic
+        IO mapping) ONLY when this profile is explicitly activated with
+        -Pauthz-demo. The default build, CI and the deployable Docker image
+        never compile it, so the identity shortcut cannot exist in a
+        deployable artifact (DemoClassesAbsentFromDefaultBuildTest checks this).
+    -->
+    <profiles>
+        <profile>
+            <id>authz-demo</id>
+            <build>
+                <!-- Separate output so a demo build can never leave demo
+                     classes or config in target/ for a later default build. -->
+                <directory>${project.basedir}/target-authz-demo</directory>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-authz-demo-sources</id>
+                                <phase>generate-sources</phase>
+                                <goals><goal>add-source</goal></goals>
+                                <configuration>
+                                    <sources><source>src/authz-demo/java</source></sources>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>add-authz-demo-resources</id>
+                                <phase>generate-resources</phase>
+                                <goals><goal>add-resource</goal></goals>
+                                <configuration>
+                                    <resources><resource><directory>src/authz-demo/resources</directory></resource></resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

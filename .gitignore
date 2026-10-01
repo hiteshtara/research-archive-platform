@@ -3,6 +3,8 @@
 
 # Java
 target/
+target-authz-demo/
+.authz-demo/
 api/target/
 *.class
 *.jar

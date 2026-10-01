@@ -35,6 +35,18 @@ const queryClient = new QueryClient({
   },
 });
 
+// Synthetic identity demo: only in Vite mode "authz-demo". The condition is
+// a build-time constant, so every other build drops this branch and never
+// emits the demo chunk.
+if (import.meta.env.MODE === "authz-demo") {
+  void import("./demo/authz-demo/DemoIdentityBar").then(({ DemoIdentityBar }) => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    document.body.style.paddingBottom = "56px";
+    ReactDOM.createRoot(host).render(<DemoIdentityBar />);
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

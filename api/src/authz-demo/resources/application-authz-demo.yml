@@ -1,0 +1,36 @@
+# SYNTHETIC IDENTITY DEMO - BU FEDERATION NOT CONNECTED.
+# Only in builds made with -Pauthz-demo. Disposable loopback database only.
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:${AUTHZ_DEMO_DB_PORT:55432}/authz_demo
+    username: demo
+    password: demo
+  flyway:
+    enabled: false
+
+server:
+  port: ${AUTHZ_DEMO_API_PORT:8091}
+
+app:
+  security:
+    enabled: false
+  cors:
+    allowed-origins: http://localhost:${AUTHZ_DEMO_UI_PORT:5199}
+  authz-demo:
+    disposable-database: true
+  authorization:
+    enforcement-enabled: true
+    # APPROVED by Hitesh 2026-10-01 (design section 14):
+    version-scope: FAMILY_WIDE                   # P3: any version of an Award number opens all its versions (never children)
+    department-match: LEAD_UNIT_WITH_DESCENDANTS # P6: sub-units only when the grant's include-sub-units flag is set
+    research-staff-roles: PI,MPI,COI             # P4: Key Person excluded
+    contact-derivation: VERIFIED_PRINCIPAL   # approved 2026-10-01 (design section 13)
+    max-sign-in-age: PT8H                    # required with enforcement; persona headers always count as fresh
+  attachments:
+    storage: local
+    local-directory: ${AUTHZ_DEMO_ATTACHMENT_DIR:/tmp/authz-demo-attachments}
+  ai:
+    enabled: false
+  search:
+    semantic:
+      enabled: false
