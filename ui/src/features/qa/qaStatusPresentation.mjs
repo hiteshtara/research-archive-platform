@@ -217,32 +217,113 @@ export function isKnownProgressStage(key) {
 }
 
 /*
- * The guard behind "mark PASS only after verification": a case being
- * actively tracked cannot read as passed until its fix is verified in
- * the required environment. Returns the offending cases, so the test
- * suite can refuse a snapshot that claims a pass too early.
+ * Evidence that is really an empty box. A field filled in with "TBD" or
+ * "Not deployed" is not weaker evidence than a blank one - it is the
+ * same absence wearing a word, and both must fail the same way.
  */
+const PLACEHOLDER_EVIDENCE = new Set([
+  "",
+  "-",
+  "--",
+  "n/a",
+  "na",
+  "none",
+  "tbd",
+  "tba",
+  "todo",
+  "pending",
+  "unknown",
+  "not recorded",
+  "not deployed",
+  "not released",
+  "not yet",
+  "not yet verified",
+  "not verified",
+  "awaiting",
+  "awaiting deployment",
+  "?",
+]);
+
+export function isPlaceholderEvidence(value) {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  return PLACEHOLDER_EVIDENCE.has(String(value).trim().toLowerCase());
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/*
+ * The environment a case must be proven in before it counts. Recorded
+ * per case because it is a property of the case, not of whoever happens
+ * to be testing: a fix to a deployed search has to be re-run on the
+ * deployed site, and a local run cannot stand in for it however green.
+ */
+export function requiredEnvironment(item) {
+  return item.progress?.requiredEnvironment ?? "Development website";
+}
+
+/*
+ * Everything "verified" has to be able to show. Returns the reasons a
+ * claim fails, so a test can say which part is missing rather than only
+ * that something is.
+ */
+export function verificationShortfalls(item) {
+  const progress = item.progress;
+  if (!progress || progress.stage !== "verified") {
+    return [];
+  }
+
+  const reasons = [];
+  if (isPlaceholderEvidence(progress.deployedBuild)) {
+    reasons.push("no released build recorded");
+  }
+  if (isPlaceholderEvidence(progress.verifiedOn)) {
+    reasons.push("no verification date recorded");
+  } else if (!ISO_DATE.test(String(progress.verifiedOn).trim())) {
+    reasons.push("verification date is not a real date");
+  }
+  if (isPlaceholderEvidence(progress.verifiedIn)) {
+    reasons.push("no verification environment recorded");
+  } else if (
+    String(progress.verifiedIn).trim().toLowerCase() !==
+    String(requiredEnvironment(item)).trim().toLowerCase()
+  ) {
+    reasons.push(
+      `verified in "${progress.verifiedIn}" but this case requires "${requiredEnvironment(item)}"`,
+    );
+  }
+  if (isPlaceholderEvidence(progress.results)) {
+    reasons.push("no result recorded");
+  }
+  return reasons;
+}
+
+/*
+ * The guard behind "mark PASS only after verification". Applies to a
+ * qualified pass as well as an outright one: "passed, more checks
+ * needed" is still a pass to a reader, so a tracked fix may not claim
+ * it before it is verified either.
+ */
+const PASS_LIKE_STATUSES = ["passed", "evidence"];
+
 export function casesClaimingAnUnverifiedPass(cases) {
   return cases.filter(
     (item) =>
       item.progress &&
-      item.status === "passed" &&
+      PASS_LIKE_STATUSES.includes(item.status) &&
       item.progress.stage !== "verified",
   );
 }
 
 /*
- * A verified stage has to carry its evidence, or "verified" is just a
- * word. Returns the cases whose claim is not backed by a date, an
- * environment and a result.
+ * A verified stage that cannot show its evidence. Covers a blank field,
+ * a placeholder standing in for one, and - the case that matters most
+ * here - evidence from somewhere other than the environment the case
+ * requires.
  */
 export function casesWithUnevidencedVerification(cases) {
-  return cases.filter(
-    (item) =>
-      item.progress &&
-      item.progress.stage === "verified" &&
-      !(item.progress.verifiedOn && item.progress.verifiedIn && item.progress.results),
-  );
+  return cases.filter((item) => verificationShortfalls(item).length > 0);
 }
 
 export function trackedCases(cases) {

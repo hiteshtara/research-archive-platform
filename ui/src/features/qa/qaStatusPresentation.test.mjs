@@ -17,11 +17,13 @@ import {
   scopesPresent,
   securitySummary,
   isKnownProgressStage,
+  isPlaceholderEvidence,
   progressStage,
   PROGRESS_STAGES,
   statusMeta,
   STATUS_META,
   trackedCases,
+  verificationShortfalls,
 } from "./qaStatusPresentation.mjs";
 
 function readJson(relativePath) {
@@ -414,33 +416,144 @@ test("a verified claim must carry its date, environment and result", () => {
   );
 });
 
-test("the guards actually catch a premature pass and an unevidenced one", () => {
-  const prematurePass = {
+test("a qualified pass counts as a pass: neither may precede verification", () => {
+  // "Passed, more checks needed" still reads as passed to a tester, so
+  // a tracked fix may not claim it before being verified either.
+  for (const status of ["passed", "evidence"]) {
+    const premature = {
+      id: `X-${status}`,
+      status,
+      progress: { stage: "fixedInCode" },
+    };
+    assert.deepEqual(
+      casesClaimingAnUnverifiedPass([premature]).map((item) => item.id),
+      [`X-${status}`],
+      `${status} must not be claimable before verification`,
+    );
+  }
+});
+
+test("a released build must be recorded before verification is accepted", () => {
+  // The exact value TC-017 carries today while it waits for release.
+  const notDeployed = {
     id: "X-1",
-    status: "passed",
-    progress: { stage: "fixedInCode", verifiedOn: "", verifiedIn: "", results: "" },
-  };
-  assert.deepEqual(casesClaimingAnUnverifiedPass([prematurePass]).map((i) => i.id), ["X-1"]);
-
-  const unevidenced = {
-    id: "X-2",
-    status: "passed",
-    progress: { stage: "verified", verifiedOn: "", verifiedIn: "", results: "" },
-  };
-  assert.deepEqual(casesWithUnevidencedVerification([unevidenced]).map((i) => i.id), ["X-2"]);
-
-  const proper = {
-    id: "X-3",
     status: "passed",
     progress: {
       stage: "verified",
+      deployedBuild: "Not deployed",
       verifiedOn: "2026-10-05",
       verifiedIn: "Development website",
       results: "Behaved as the case requires.",
     },
   };
+  assert.deepEqual(verificationShortfalls(notDeployed), ["no released build recorded"]);
+  assert.deepEqual(casesWithUnevidencedVerification([notDeployed]).map((i) => i.id), ["X-1"]);
+});
+
+test("local-only evidence cannot satisfy a case that requires the development website", () => {
+  const localOnly = {
+    id: "X-2",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      requiredEnvironment: "Development website",
+      deployedBuild: "api rev 73",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Local test environment",
+      results: "All five searches returned 400 VALIDATION_ERROR.",
+    },
+  };
+  const reasons = verificationShortfalls(localOnly);
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /Local test environment/);
+  assert.match(reasons[0], /requires "Development website"/);
+  assert.deepEqual(casesWithUnevidencedVerification([localOnly]).map((i) => i.id), ["X-2"]);
+});
+
+test("a candidate build is not the development website either", () => {
+  const candidate = {
+    id: "X-3",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "api rev 73",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Candidate build",
+      results: "Looked right.",
+    },
+  };
+  assert.equal(verificationShortfalls(candidate).length, 1);
+});
+
+test("placeholder text is rejected exactly like a blank field", () => {
+  for (const value of ["", "  ", "N/A", "TBD", "pending", "Not deployed", "unknown", "-", "?"]) {
+    assert.ok(isPlaceholderEvidence(value), `"${value}" must count as no evidence`);
+  }
+  assert.ok(isPlaceholderEvidence(null));
+  assert.ok(isPlaceholderEvidence(undefined));
+  assert.ok(!isPlaceholderEvidence("api rev 73"));
+  assert.ok(!isPlaceholderEvidence("Development website"));
+
+  for (const field of ["deployedBuild", "verifiedOn", "verifiedIn", "results"]) {
+    const item = {
+      id: `X-${field}`,
+      status: "passed",
+      progress: {
+        stage: "verified",
+        deployedBuild: "api rev 73",
+        verifiedOn: "2026-10-05",
+        verifiedIn: "Development website",
+        results: "Behaved as the case requires.",
+      },
+    };
+    item.progress[field] = "TBD";
+    assert.ok(
+      verificationShortfalls(item).length > 0,
+      `a placeholder in ${field} must fail verification`,
+    );
+  }
+});
+
+test("a verification date has to be a real date", () => {
+  const vague = {
+    id: "X-4",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "api rev 73",
+      verifiedOn: "last week",
+      verifiedIn: "Development website",
+      results: "Fine.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(vague), ["verification date is not a real date"]);
+});
+
+test("a complete, correctly-sited claim passes every guard", () => {
+  const proper = {
+    id: "X-5",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      requiredEnvironment: "Development website",
+      deployedBuild: "api rev 73 (source 884142d)",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Development website",
+      results: "All five searches returned 400 VALIDATION_ERROR; ordinary queries unaffected.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(proper), []);
   assert.deepEqual(casesClaimingAnUnverifiedPass([proper]), []);
   assert.deepEqual(casesWithUnevidencedVerification([proper]), []);
+});
+
+test("several missing pieces are all reported, not just the first", () => {
+  const empty = {
+    id: "X-6",
+    status: "passed",
+    progress: { stage: "verified", deployedBuild: "", verifiedOn: "", verifiedIn: "", results: "" },
+  };
+  assert.equal(verificationShortfalls(empty).length, 4);
 });
 
 test("every progress stage has a label and a plain-language description", () => {

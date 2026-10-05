@@ -27,6 +27,7 @@ export interface ProgressStageMeta {
 
 export interface CaseProgress {
   stage: ProgressStageKey;
+  requiredEnvironment?: string;
   change: string;
   deployedBuild: string;
   verifiedOn: string;
@@ -108,3 +109,6 @@ export function isKnownProgressStage(key: string): boolean;
 export function casesClaimingAnUnverifiedPass(cases: QaCase[]): QaCase[];
 export function casesWithUnevidencedVerification(cases: QaCase[]): QaCase[];
 export function trackedCases(cases: QaCase[]): QaCase[];
+export function isPlaceholderEvidence(value: unknown): boolean;
+export function requiredEnvironment(item: QaCase): string;
+export function verificationShortfalls(item: QaCase): string[];

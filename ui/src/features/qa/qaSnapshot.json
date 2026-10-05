@@ -215,7 +215,8 @@
         "verifiedOn": "",
         "verifiedIn": "",
         "results": "",
-        "limitations": "Becomes a pass only once released and the five affected searches are re-checked on dev."
+        "limitations": "Becomes a pass only once released and the five affected searches are re-checked on dev.",
+        "requiredEnvironment": "Development website"
       },
       "history": [
         {
