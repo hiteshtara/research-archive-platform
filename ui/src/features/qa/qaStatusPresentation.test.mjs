@@ -214,6 +214,22 @@ test("the two cases with evidence gaps are not presented as unqualified passes",
   }
 });
 
+test("TC-018 is tracked as in progress and claims nothing released", () => {
+  // Status stays a known issue: the limit is not on dev yet, so the
+  // behaviour described is still what the site does.
+  const item = cases.find((candidate) => candidate.id === "TC-018");
+  assert.ok(item);
+  assert.equal(item.status, "issue");
+  assert.equal(item.progress.stage, "inProgress");
+  assert.equal(item.progress.deployedBuild, "Not deployed");
+  assert.equal(item.progress.verifiedOn, "");
+  assert.match(item.progress.change, /PR #23/);
+  assert.ok(item.progress.limitations, "what is still true must be stated");
+  assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
+  // Its original finding is kept.
+  assert.ok(item.history.some((entry) => /6,000/.test(entry.summary)));
+});
+
 test("blocked cases stay blocked and say what is needed", () => {
   const blocked = cases.filter((item) => item.status === "blocked");
   assert.equal(blocked.length, 2);

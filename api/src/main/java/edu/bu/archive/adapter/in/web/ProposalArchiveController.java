@@ -1,5 +1,8 @@
 package edu.bu.archive.adapter.in.web;
 
+import jakarta.validation.constraints.Size;
+import org.springframework.validation.annotation.Validated;
+
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
@@ -20,6 +23,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/proposals")
+@Validated
 public class ProposalArchiveController {
 
     private final ProposalArchiveService service;
@@ -35,6 +39,7 @@ public class ProposalArchiveController {
 
     @GetMapping("/families")
     public List<ProposalFamilySummaryResponse> families(
+            @Size(max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH)
             @RequestParam(required = false)
             String query,
 
@@ -61,6 +66,7 @@ public class ProposalArchiveController {
      */
     @GetMapping("/search")
     public PageResponse<ProposalFamilySummaryResponse> search(
+            @Size(max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH)
             @RequestParam(required = false)
             String query,
 

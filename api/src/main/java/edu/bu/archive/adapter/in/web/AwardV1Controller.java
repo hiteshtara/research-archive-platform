@@ -48,6 +48,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
@@ -139,6 +140,7 @@ public class AwardV1Controller {
             @Parameter(description = "Free-text query. Supports "
                     + "*wildcard* syntax. Omit or leave blank to list "
                     + "all current Awards, paginated.")
+            @Size(max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH)
             @RequestParam(name = "q", required = false)
             String q,
 
@@ -208,6 +210,7 @@ public class AwardV1Controller {
             @Parameter(description = "Free-text query across title, "
                     + "sponsor, lead unit, and PI/person name. "
                     + "Supports *wildcard* syntax.")
+            @Size(max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH)
             @RequestParam(name = "q", required = false)
             String q,
 

@@ -219,3 +219,72 @@ export function searchErrorMessage(error, genericMessage) {
     ? SEARCH_INPUT_REJECTED_MESSAGE
     : genericMessage;
 }
+
+/*
+ * How long a free-text search may be (QA TC-018).
+ *
+ * This number is the API's, not the UI's: SearchTextLimits.java is the
+ * source, and a test reads that file and asserts the two agree, so the
+ * browser can never allow a search the server will refuse - or refuse
+ * one it would have accepted.
+ *
+ * COUNTING: JavaScript's String.length counts UTF-16 code units, and so
+ * does Java's String.length(), so both sides measure every string the
+ * same way, including emoji and other astral characters, which count as
+ * 2 in both.
+ *
+ * Deliberately NOT applied as a maxLength on the input. maxLength
+ * truncates a paste silently: someone pastes a long reference and the
+ * box quietly keeps the first 200 characters, so the search runs on
+ * something they did not ask for and the result looks like a real
+ * answer. Over-long text is kept, shown, counted, and refused with an
+ * explanation instead.
+ */
+export const SEARCH_TEXT_MAX_LENGTH = 200;
+
+/*
+ * Where the counter starts appearing. Showing it from the first
+ * character is noise on a two-word search; showing it only once the
+ * text is already refused is too late to help.
+ */
+const COUNTER_VISIBLE_FROM = Math.floor(SEARCH_TEXT_MAX_LENGTH * 0.75);
+
+export function searchTextLength(value) {
+  return String(value ?? "").length;
+}
+
+export function isSearchTextTooLong(value) {
+  return searchTextLength(value) > SEARCH_TEXT_MAX_LENGTH;
+}
+
+export function shouldShowSearchLengthCounter(value) {
+  return searchTextLength(value) >= COUNTER_VISIBLE_FROM;
+}
+
+/*
+ * The counter, and - once over - what to do about it. Says how many
+ * characters to remove rather than only that there are too many, so the
+ * reader does not have to do the arithmetic.
+ */
+export function searchLengthHelperText(value) {
+  const length = searchTextLength(value);
+  if (!shouldShowSearchLengthCounter(value)) {
+    return null;
+  }
+  if (length <= SEARCH_TEXT_MAX_LENGTH) {
+    return `${length} of ${SEARCH_TEXT_MAX_LENGTH} characters`;
+  }
+  const over = length - SEARCH_TEXT_MAX_LENGTH;
+  return (
+    `${length} characters. Searches are limited to ${SEARCH_TEXT_MAX_LENGTH}; ` +
+    `remove ${over} character${over === 1 ? "" : "s"} to search.`
+  );
+}
+
+/*
+ * Whether a search may be run. Separate from the helper text so a page
+ * can refuse the submit without having to parse a sentence.
+ */
+export function canSubmitSearchText(value) {
+  return !isSearchTextTooLong(value);
+}

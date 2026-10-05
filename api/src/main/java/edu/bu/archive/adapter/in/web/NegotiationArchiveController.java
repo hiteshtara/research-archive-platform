@@ -1,5 +1,8 @@
 package edu.bu.archive.adapter.in.web;
 
+import jakarta.validation.constraints.Size;
+import org.springframework.validation.annotation.Validated;
+
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationActivityResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAssociatedRecordResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
@@ -33,6 +36,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/negotiations")
+@Validated
 public class NegotiationArchiveController {
 
     private final NegotiationArchiveService service;
@@ -61,6 +65,7 @@ public class NegotiationArchiveController {
      */
     @GetMapping
     public ResponseEntity<PageResponse<NegotiationSummaryResponse>> search(
+            @Size(max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH)
             @RequestParam(required = false)
             String query,
 
