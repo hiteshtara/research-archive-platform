@@ -1,6 +1,7 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
+import edu.bu.archive.exception.InvalidRequestParameterException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -28,6 +29,29 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Map<String, Object>> handleConstraintViolation(
             ConstraintViolationException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        body(
+                                HttpStatus.BAD_REQUEST,
+                                "VALIDATION_ERROR",
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * Thrown by RequestParameterValidationInterceptor before any
+     * controller runs. Shares the VALIDATION_ERROR code with the
+     * constraint-violation handler above so a caller cannot tell - and
+     * does not need to tell - which of the two refused the parameter.
+     */
+    @ExceptionHandler(InvalidRequestParameterException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidRequestParameter(
+            InvalidRequestParameterException exception,
             HttpServletRequest request
     ) {
         return ResponseEntity
