@@ -252,6 +252,40 @@ test("TC-018 keeps its local-only findings in history rather than losing them", 
   assert.ok(item.history.length >= 3);
 });
 
+test("TC-041 is in progress and separates merged code from deployed behaviour", () => {
+  // The distinction the case turns on right now: the rejected lexical
+  // gate is merged but has never run on dev, so the site behaves as it
+  // did when the case was raised.
+  const item = cases.find((candidate) => candidate.id === "TC-041");
+  assert.ok(item);
+  assert.equal(item.status, "issue");
+  assert.equal(item.progress.stage, "inProgress");
+  assert.equal(item.progress.deployedBuild, "Not deployed");
+  assert.equal(item.progress.verifiedOn, "");
+  assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
+
+  // Merged, unmerged and undeployed are each stated, not blurred.
+  assert.match(item.progress.change, /PR #27/);
+  assert.match(item.progress.change, /never deployed/);
+  assert.match(item.progress.change, /PR #28/);
+  assert.match(item.progress.change, /open/);
+  assert.match(item.progress.limitations, /rev 74/);
+  assert.match(item.progress.limitations, /77773ee/);
+
+  // And no improvement is claimed that has not happened.
+  assert.match(item.progress.limitations, /No improvement to semantic relevance is claimed/);
+  assert.doesNotMatch(item.note, /fixed|improved|resolved/i);
+  // Its original finding survives.
+  assert.ok(item.history.some((entry) => /document number/i.test(entry.summary)));
+});
+
+test("TC-018 stays closed and verified while TC-041 is worked on", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-018");
+  assert.equal(item.status, "passed");
+  assert.equal(item.progress.stage, "verified");
+  assert.deepEqual(verificationShortfalls(item), []);
+});
+
 test("blocked cases stay blocked and say what is needed", () => {
   const blocked = cases.filter((item) => item.status === "blocked");
   assert.equal(blocked.length, 2);
