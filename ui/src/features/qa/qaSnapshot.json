@@ -252,10 +252,10 @@
       "steps": "Paste a very long string (500+ characters) into the search box and submit",
       "expected": "App handles gracefully without crashing, freezing, or throwing unhandled errors",
       "priority": "Low",
-      "status": "issue",
-      "note": "API limit deployed and verified; remaining UI submission paths being corrected. The server now applies one 200-character limit to every search, checked on dev. In the page, Apply Filters and the dashboard's own search box can still submit a longer search than the box accepts; a fix is in review.",
-      "scope": "Local test environment",
-      "environment": "dev: API ECS rev 74 (image 20261005T181208Z-77773ee, source 77773ee); UI Amplify job #106 @ 77773ee; signed-in session, 2026-10-05",
+      "status": "passed",
+      "note": "Verified on the development website. One 200-character limit now applies to every search, in the page and on the server. A longer search is kept exactly as pasted, counted, and refused with the number of characters to remove - by the search box, by Apply Filters and by the dashboard's Search button alike. Shortening it searches normally again.",
+      "scope": "Development website",
+      "environment": "dev: API ECS rev 74 (image 20261005T181208Z-77773ee, source 77773ee); UI Amplify job #108 @ a455349 (bundle index-CeKYDsP8.js); signed-in session, 2026-10-05",
       "history": [
         {
           "on": "2026-09-29",
@@ -268,17 +268,23 @@
           "stage": "inProgress",
           "summary": "Limit agreed at 200 characters and implemented across the API and the search box (PR #23); not yet released.",
           "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic."
+        },
+        {
+          "on": "2026-10-05",
+          "stage": "inProgress",
+          "summary": "Evidence to this point was local only: 500- to 6,000-character searches returned no results without crashing, Awards and Historical Awards slowed linearly (2,000 characters 2.2s, 6,000 characters 6.4s) and Global Search past 200 characters showed a generic failure. The API limit was then released as rev 74 and verified on dev, while the page's remaining submission paths were still being corrected.",
+          "environment": "local disposable stack and dev API rev 74; see earlier entries"
         }
       ],
       "progress": {
-        "stage": "inProgress",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "API limit: PR #23 (merged 77773ee), released. UI submission paths: PR #24, in review.",
-        "deployedBuild": "API ECS rev 74 (image 20261005T181208Z-77773ee); UI Amplify job #106 @ 77773ee",
-        "verifiedOn": "",
-        "verifiedIn": "",
-        "results": "API verified on dev, 2026-10-05: all seven search endpoints accept exactly 200 characters and refuse 201 with 400 VALIDATION_ERROR. Global Search keeps its two-character minimum and a module search still accepts an empty query. Ordinary, wildcard and literal-percent searches are unaffected, TC-017's control-character handling still applies, and 100 emoji (200 UTF-16 units) are accepted while 101 are refused - the same count the browser makes.",
-        "limitations": "Not a pass: the API half only. Apply Filters and the dashboard search can still submit an over-long query from the page, so the case stays open until the UI follow-up is released and every acceptance check passes."
+        "change": "API limit: PR #23 (merged 77773ee). UI submission paths: PR #24 (merged 9a215f9).",
+        "deployedBuild": "API ECS rev 74 (image 20261005T181208Z-77773ee); UI Amplify job #108 @ a455349",
+        "verifiedOn": "2026-10-05",
+        "verifiedIn": "Development website",
+        "results": "Checked in the browser and against the API. In the page: a 250-character paste stayed 250 characters, showed “250 characters. Searches are limited to 200; remove 50 characters to search.” and was refused by Enter, by a disabled Apply Filters and by the dashboard's disabled Search button; exactly 200 showed “200 of 200 characters” and submitted; 149 showed no counter at all; shortening to 105698 returned 2 awards found, and *105698* did too. On the API: all seven search endpoints accept 200 and refuse 201 with 400 VALIDATION_ERROR, Global Search keeps its two-character minimum, a module search still accepts an empty query, ordinary and wildcard searches are unaffected, and TC-017's control-character handling still applies to both a query and a filter.",
+        "limitations": "The limit counts UTF-16 code units, so an emoji counts as two characters in the page and on the server alike - consistent, but worth knowing when pasting text that is not plain Latin script."
       }
     },
     {
