@@ -772,13 +772,18 @@ class GlobalSearchServiceTest {
     }
 
     @Test
-    void aQueryThatMatchesNothingLexicallyReturnsNothingRatherThanLooseSuggestions() {
-        // QA TC-041. Semantic search has no similarity cutoff, so for a
-        // query that matches nothing it still returns its nearest few
-        // rows - "nearest" there meaning only "least unrelated".
-        // "zzzznotfound123" filled the page with five Negotiations and
-        // "qzxwvnonsense987" with five Awards, neither having any
-        // visible connection to what was typed.
+    void aQueryWithNoLexicalMatchStillReturnsItsSemanticSuggestions() {
+        /*
+         * QA TC-041, after review. An earlier attempt discarded semantic
+         * results whenever nothing matched lexically; that was rejected,
+         * because it threw away the one kind of result that helps a
+         * searcher who used a different word than the archive does.
+         *
+         * The service keeps them and labels them RELATED. Which of them
+         * a reader is shown, and how prominently, is the page's job -
+         * see GlobalSearchPage, where related results sit in their own
+         * section and, with nothing direct, behind an explicit action.
+         */
         semanticSearchProperties.setEnabled(true);
         when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
         when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
@@ -788,11 +793,12 @@ class GlobalSearchServiceTest {
                         semanticRow("PROPOSAL", 222L, 222L, "222-01")
                 ));
 
-        GlobalSearchResponse response = service.search("zzzznotfound123");
+        GlobalSearchResponse response =
+                service.search("childhood diabetes prevention");
 
-        assertThat(response.results()).isEmpty();
-        assertThat(response.totalResults()).isZero();
-        // Nothing failed - the archive simply holds nothing matching.
+        assertThat(response.results()).hasSize(2);
+        assertThat(response.results())
+                .allSatisfy(item -> assertThat(item.matchType()).isEqualTo("RELATED"));
         assertThat(response.failedModules()).isEmpty();
     }
 
