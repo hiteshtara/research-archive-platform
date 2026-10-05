@@ -204,19 +204,19 @@
       "steps": "Search using special characters and SQL-like strings",
       "expected": "App handles input safely, shows no results or validation error, and does not expose errors or execute unintended queries",
       "priority": "High",
-      "status": "issue",
-      "note": "Half fixed. The server no longer errors on a search containing a hidden control character - it refuses it properly, released and verified on dev. But the page still shows “Unable to search right now. Try again in a moment.”, which tells you to wait and retry text that will be refused every time. A fix for the message is in review.",
+      "status": "passed",
+      "note": "Verified end to end on the development website. A search the archive cannot accept - whether from the search box or a filter - is now refused by the server and explained on the page, instead of failing with a server error or telling you to wait and try again. Correcting the search returns results as normal.",
       "scope": "Development website",
-      "environment": "dev: API ECS rev 73 (image 20261005T155241Z-70251b7, source 70251b7); UI Amplify job #100 @ 71d777d; signed-in session, 2026-10-05",
+      "environment": "dev: API ECS rev 73 (image 20261005T155241Z-70251b7, source 70251b7); UI Amplify job #104 @ 4c3afc1 (bundle index-BA3SCjrQ.js); signed-in session, 2026-10-05",
       "progress": {
-        "stage": "inProgress",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "API: PR #18 (merged 70251b7), released. UI message: PR #20, in review.",
-        "deployedBuild": "API ECS rev 73 (image 20261005T155241Z-70251b7) - API part only",
-        "verifiedOn": "",
-        "verifiedIn": "",
-        "results": "",
-        "limitations": "The API half is released and verified on dev. The case stays open because its expected result is about what the page does, and the page still misreports refused input as a temporary search failure."
+        "change": "API: PR #18 (merged 70251b7). UI message: PR #20 (merged 4c3afc1).",
+        "deployedBuild": "API ECS rev 73 (image 20261005T155241Z-70251b7); UI Amplify job #104 @ 4c3afc1",
+        "verifiedOn": "2026-10-05",
+        "verifiedIn": "Development website",
+        "results": "Checked in the browser, not only against the API. All six search pages - Awards, Historical Awards, Proposals, Negotiations, Subawards and Global Search - showed the validation guidance for a query carrying a hidden control character, and a structured sponsor filter carrying one showed the same. An ordinary 250-character Global Search, which the API refuses with the same code for a different reason, showed that guidance too and claimed no invisible-character cause. None of the eight showed the old “try again in a moment” wording. Correcting the search restored results: 105698 and *105698* each returned 2 awards found, 105698-00001 and 105698-00002.",
+        "limitations": "The guidance is deliberately general because the API returns one shared code for several different causes, so it says where to look rather than naming one. The Global Search length limit itself is unchanged and remains TC-018."
       },
       "history": [
         {
@@ -235,6 +235,12 @@
           "on": "2026-10-05",
           "stage": "verified",
           "summary": "Recorded as passed after the API fix was released as rev 73 and verified on dev: all five module searches and Global Search answered 400 VALIDATION_ERROR, a structured sponsor filter was refused the same way, and ordinary, wildcard and literal-percent searches still returned results. Reversed the same day: the API evidence stands, but the case covers what the user sees, and the page still presented refused input as a temporary failure.",
+          "environment": "dev: API ECS rev 73 (image 20261005T155241Z-70251b7, source 70251b7); UI Amplify job #100 @ 71d777d; signed-in session, 2026-10-05"
+        },
+        {
+          "on": "2026-10-05",
+          "stage": "inProgress",
+          "summary": "Reopened after the API fix: the server refused the input correctly but the page still showed “Unable to search right now. Try again in a moment.”, so the case's own expected result was not met.",
           "environment": "dev: API ECS rev 73 (image 20261005T155241Z-70251b7, source 70251b7); UI Amplify job #100 @ 71d777d; signed-in session, 2026-10-05"
         }
       ]
