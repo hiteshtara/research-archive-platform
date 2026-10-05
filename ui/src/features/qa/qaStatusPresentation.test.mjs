@@ -214,35 +214,42 @@ test("the two cases with evidence gaps are not presented as unqualified passes",
   }
 });
 
-test("TC-018 records the API half as released and verified, and still is not a pass", () => {
-  // Deliberately split: the API limit is on dev and checked, while the
-  // page can still submit an over-long search through Apply Filters or
-  // the dashboard box. Half a fix must not read as a pass.
+test("TC-018 passes only with both halves released and verified on dev", () => {
   const item = cases.find((candidate) => candidate.id === "TC-018");
   assert.ok(item);
-  assert.equal(item.status, "issue");
-  assert.equal(item.progress.stage, "inProgress");
-  assert.equal(item.progress.verifiedOn, "", "nothing may claim verification yet");
-  assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
+  assert.equal(item.status, "passed");
+  assert.equal(item.progress.stage, "verified");
+  // The scope moves with the evidence: it was local-only until the API
+  // and UI were both released and re-checked on the deployed site.
+  assert.equal(item.scope, "Development website");
+  assert.equal(item.progress.verifiedIn, "Development website");
+  assert.equal(item.progress.verifiedOn, "2026-10-05");
+  assert.deepEqual(verificationShortfalls(item), []);
 
-  // Both builds recorded, and recorded separately.
+  // Both builds recorded, separately, so neither reads as the whole fix.
   assert.match(item.progress.deployedBuild, /rev 74/);
-  assert.match(item.progress.deployedBuild, /#106/);
+  assert.match(item.progress.deployedBuild, /#108/);
   assert.match(item.progress.change, /PR #23/);
   assert.match(item.progress.change, /PR #24/);
 
-  // The API evidence is kept even though the case is open.
+  // Evidence covers the interactions, not only the API.
+  assert.match(item.progress.results, /Apply Filters/);
+  assert.match(item.progress.results, /dashboard/i);
+  assert.match(item.progress.results, /200 of 200 characters/);
   assert.match(item.progress.results, /seven search endpoints/);
-  assert.match(item.progress.results, /VALIDATION_ERROR/);
   assert.match(item.progress.results, /two-character minimum/);
 
-  // And the note says exactly what is and is not done.
-  assert.match(item.note, /API limit deployed and verified/);
-  assert.match(item.note, /remaining UI submission paths being corrected/);
-  assert.match(item.progress.limitations, /Apply Filters/);
+  // Nothing pending may survive on the current note.
+  assert.doesNotMatch(item.note, /being corrected|in review|Not deployed/i);
+});
 
-  // Its original finding survives.
+test("TC-018 keeps its local-only findings in history rather than losing them", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-018");
+  // The original timings and the local-only evidence both survive the
+  // move to a development-website scope.
   assert.ok(item.history.some((entry) => /6,000/.test(entry.summary)));
+  assert.ok(item.history.some((entry) => /local only/i.test(entry.summary)));
+  assert.ok(item.history.length >= 3);
 });
 
 test("blocked cases stay blocked and say what is needed", () => {
