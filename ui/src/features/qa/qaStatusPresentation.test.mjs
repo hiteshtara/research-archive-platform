@@ -190,19 +190,20 @@ test("evidence scope is carried per case, and local work is not counted as deplo
   assert.ok(deployedEvidenceCount(cases) < cases.length, "some cases are not dev-verified");
 });
 
-test("TC-017 is open again: the API half is fixed, the page is not", () => {
-  // Marked passed on 2026-10-05 after the API fix was verified on dev,
-  // then reversed the same day. The case's expected result is about what
-  // the page does, and the page still presents refused input as a
-  // temporary failure. Both earlier states stay in history.
+test("TC-017 passes only because both halves were verified on the development website", () => {
+  // Two releases: the API fix (rev 73) and the UI message (Amplify #104).
+  // Checked in the browser across all six search pages before this
+  // status was set.
   const item = cases.find((candidate) => candidate.id === "TC-017");
   assert.ok(item);
-  assert.equal(item.status, "issue");
-  assert.notEqual(item.progress.stage, "verified");
-  // A case that is not verified must not claim verification evidence.
-  assert.equal(item.progress.verifiedOn, "");
-  assert.equal(item.progress.verifiedIn, "");
-  assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
+  assert.equal(item.status, "passed");
+  assert.equal(item.scope, "Development website");
+  assert.equal(item.progress.stage, "verified");
+  assert.deepEqual(verificationShortfalls(item), []);
+  assert.equal(item.progress.verifiedIn, "Development website");
+  assert.equal(item.progress.verifiedOn, "2026-10-05");
+  // Nothing may read as pending any more.
+  assert.doesNotMatch(item.note, /Half fixed|in review|awaiting deployment/i);
 });
 
 test("the two cases with evidence gaps are not presented as unqualified passes", () => {
@@ -616,26 +617,32 @@ test("every progress stage has a label and a plain-language description", () => 
   assert.equal(progressStage("nonsense"), null);
 });
 
-test("the API evidence and the reversed pass are both preserved", () => {
+test("both releases are recorded, and the whole path is preserved in history", () => {
   const item = cases.find((candidate) => candidate.id === "TC-017");
-  // The released API build is still recorded - that work is done.
-  assert.match(item.progress.deployedBuild, /rev 73/);
+  // Both halves named, so neither release can be mistaken for the whole.
   assert.match(item.progress.change, /PR #18/);
-  assert.match(item.progress.change, /PR #20/, "the UI fix in review must be named");
-  // The pass that was granted and withdrawn is kept, with its evidence.
-  const verified = item.history.find((entry) => entry.stage === "verified");
-  assert.ok(verified, "the earlier PASS decision must be preserved");
-  assert.match(verified.summary, /VALIDATION_ERROR/);
-  assert.match(verified.summary, /Reversed/);
-  // And the note says plainly which half is done.
-  assert.match(item.note, /Half fixed/i);
-  assert.match(item.progress.limitations, /still misreports|still misreport|page/i);
+  assert.match(item.progress.change, /PR #20/);
+  assert.match(item.progress.deployedBuild, /rev 73/);
+  assert.match(item.progress.deployedBuild, /#104/);
+  // Verified in the browser, not only against the API.
+  assert.match(item.progress.results, /search pages/);
+  assert.match(item.progress.results, /sponsor filter/);
+  assert.match(item.progress.results, /250-character/);
+  assert.match(item.progress.results, /105698-00001/);
+  // The honest caveat survives the pass.
+  assert.match(item.progress.limitations, /TC-018/);
+  // Every earlier state is kept, including the pass that was withdrawn.
+  const stages = item.history.map((entry) => entry.stage);
+  for (const stage of ["knownIssue", "fixedInCode", "verified", "inProgress"]) {
+    assert.ok(stages.includes(stage), `history must keep the ${stage} state`);
+  }
+  assert.ok(item.history.some((entry) => /Reversed/.test(entry.summary)));
 });
 
 test("earlier findings are preserved rather than overwritten", () => {
   const item = cases.find((candidate) => candidate.id === "TC-017");
-  assert.ok(Array.isArray(item.history) && item.history.length >= 3,
-    "the original finding, the fixed-in-code state and the reversed pass must all be kept");
+  assert.ok(Array.isArray(item.history) && item.history.length >= 4,
+    "every earlier state must be kept, including the pass that was withdrawn");
   for (const entry of item.history) {
     assert.match(entry.on, /^\d{4}-\d{2}-\d{2}$/);
     assert.ok(entry.summary, "a history entry must say what was found");
