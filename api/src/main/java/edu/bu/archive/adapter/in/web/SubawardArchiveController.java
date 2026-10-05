@@ -21,6 +21,7 @@ import edu.bu.archive.application.subaward.SubawardSearchFilters;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
@@ -63,6 +64,7 @@ public class SubawardArchiveController {
      */
     @GetMapping
     public ResponseEntity<SubawardPageResponse> search(
+            @Size(max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH)
             @RequestParam(required = false)
             String query,
 

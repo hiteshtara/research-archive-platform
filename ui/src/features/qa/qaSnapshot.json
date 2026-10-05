@@ -255,7 +255,25 @@
       "status": "issue",
       "note": "Very long searches can be slow or show a generic error. Agree on an input limit and a clear validation message.",
       "scope": "Local test environment",
-      "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic."
+      "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic.",
+      "history": [
+        {
+          "on": "2026-09-29",
+          "stage": "knownIssue",
+          "summary": "Global Search rejected anything past 200 characters with a generic failure, while Awards and Historical Awards accepted any length and slowed down linearly - 2,000 characters took about 2.2 seconds and 6,000 about 6.4.",
+          "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic."
+        }
+      ],
+      "progress": {
+        "stage": "inProgress",
+        "requiredEnvironment": "Development website",
+        "change": "PR #23, in review",
+        "deployedBuild": "Not deployed",
+        "verifiedOn": "",
+        "verifiedIn": "",
+        "results": "",
+        "limitations": "Not released. Until it is, module searches still accept any length and only Global Search enforces a limit."
+      }
     },
     {
       "id": "TC-019",

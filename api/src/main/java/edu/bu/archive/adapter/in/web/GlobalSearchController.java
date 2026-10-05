@@ -42,7 +42,10 @@ public class GlobalSearchController {
     public GlobalSearchResponse search(
             @RequestParam
             @NotBlank
-            @Size(min = 2, max = 200)
+            @Size(
+                    min = SearchTextLimits.MIN_GLOBAL_SEARCH_TEXT_LENGTH,
+                    max = SearchTextLimits.MAX_SEARCH_TEXT_LENGTH
+            )
             String query,
 
             @RequestParam(required = false)

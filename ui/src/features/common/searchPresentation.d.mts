@@ -58,3 +58,10 @@ export function searchErrorMessage(
   error: unknown,
   genericMessage: string,
 ): string;
+
+export const SEARCH_TEXT_MAX_LENGTH: number;
+export function searchTextLength(value: unknown): number;
+export function isSearchTextTooLong(value: unknown): boolean;
+export function shouldShowSearchLengthCounter(value: unknown): boolean;
+export function searchLengthHelperText(value: unknown): string | null;
+export function canSubmitSearchText(value: unknown): boolean;

@@ -5,14 +5,20 @@ import test from "node:test";
 
 import {
   SEARCH_INPUT_REJECTED_MESSAGE,
+  SEARCH_TEXT_MAX_LENGTH,
   buildSearchParams,
+  canSubmitSearchText,
   describeResultCount,
   formatNamedIdentifier,
   isSearchInputRejection,
+  isSearchTextTooLong,
   joinMetadata,
   readSearchParams,
   resolveSearchState,
   searchErrorMessage,
+  searchLengthHelperText,
+  searchTextLength,
+  shouldShowSearchLengthCounter,
   splitStatusCode,
 } from "./searchPresentation.mjs";
 
@@ -339,4 +345,118 @@ test("every search page routes its error through the resolver", () => {
       `${page} must not pass a fixed message straight through`,
     );
   }
+});
+
+// --- Free-text search length (QA TC-018) ---------------------------------
+
+const AT_LIMIT = "a".repeat(SEARCH_TEXT_MAX_LENGTH);
+const OVER_LIMIT = "a".repeat(SEARCH_TEXT_MAX_LENGTH + 1);
+
+test("the UI limit is the API's own constant, not a second opinion", () => {
+  // Read SearchTextLimits.java directly: if either side is edited alone
+  // the browser would allow a search the server refuses, or refuse one
+  // it would accept.
+  const java = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../../api/src/main/java/edu/bu/archive/adapter/in/web/SearchTextLimits.java",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const max = java.match(/MAX_SEARCH_TEXT_LENGTH\s*=\s*(\d+)/);
+  assert.ok(max, "could not read MAX_SEARCH_TEXT_LENGTH from the API");
+  assert.equal(Number(max[1]), SEARCH_TEXT_MAX_LENGTH);
+  // Global Search's existing minimum must survive untouched.
+  const min = java.match(/MIN_GLOBAL_SEARCH_TEXT_LENGTH\s*=\s*(\d+)/);
+  assert.ok(min);
+  assert.equal(Number(min[1]), 2);
+});
+
+test("the boundary is inclusive: exactly the limit is allowed, one more is not", () => {
+  assert.equal(searchTextLength(AT_LIMIT), SEARCH_TEXT_MAX_LENGTH);
+  assert.equal(isSearchTextTooLong(AT_LIMIT), false);
+  assert.equal(canSubmitSearchText(AT_LIMIT), true);
+
+  assert.equal(searchTextLength(OVER_LIMIT), SEARCH_TEXT_MAX_LENGTH + 1);
+  assert.equal(isSearchTextTooLong(OVER_LIMIT), true);
+  assert.equal(canSubmitSearchText(OVER_LIMIT), false);
+});
+
+test("ordinary and wildcard searches are unaffected by the limit", () => {
+  for (const value of ["", "105698", "*105698*", "smith", "50%", "A_B", "autism"]) {
+    assert.equal(isSearchTextTooLong(value), false, `${value} must still be searchable`);
+    assert.equal(canSubmitSearchText(value), true);
+    assert.equal(searchLengthHelperText(value), null, "no counter on an ordinary search");
+  }
+});
+
+test("the counter appears before the limit is reached, not after", () => {
+  assert.equal(shouldShowSearchLengthCounter("a".repeat(149)), false);
+  assert.equal(shouldShowSearchLengthCounter("a".repeat(150)), true);
+  assert.equal(searchLengthHelperText("a".repeat(150)), "150 of 200 characters");
+  assert.equal(searchLengthHelperText(AT_LIMIT), "200 of 200 characters");
+});
+
+test("over the limit, the message says how many characters to remove", () => {
+  assert.equal(
+    searchLengthHelperText(OVER_LIMIT),
+    "201 characters. Searches are limited to 200; remove 1 character to search.",
+  );
+  assert.equal(
+    searchLengthHelperText("a".repeat(250)),
+    "250 characters. Searches are limited to 200; remove 50 characters to search.",
+  );
+});
+
+test("pasted input is never silently truncated", () => {
+  // The helpers only measure and describe - nothing here shortens a
+  // value, and the box deliberately carries no maxLength.
+  const pasted = "x".repeat(900);
+  assert.equal(searchTextLength(pasted), 900);
+  assert.match(searchLengthHelperText(pasted), /remove 700 characters/);
+
+  const box = readFileSync(
+    fileURLToPath(new URL("../../components/common/search/SearchBox.tsx", import.meta.url)),
+    "utf8",
+  );
+  // Match an actual prop assignment, not the comment explaining why it
+  // is absent: maxLength={...} or maxLength: ... would truncate a paste.
+  assert.doesNotMatch(
+    box,
+    /maxLength\s*[:=]/,
+    "a maxLength prop would truncate a paste silently",
+  );
+  assert.match(box, /canSubmitSearchText\(/, "the box must refuse an over-long submit");
+});
+
+test("the UI and the API count the same units, including astral characters", () => {
+  // An emoji is two UTF-16 code units in both JavaScript and Java, so
+  // the two sides agree on the length of this string.
+  const emoji = "\u{1F600}";
+  assert.equal(searchTextLength(emoji), 2);
+  const hundredEmoji = emoji.repeat(100);
+  assert.equal(searchTextLength(hundredEmoji), SEARCH_TEXT_MAX_LENGTH);
+  assert.equal(isSearchTextTooLong(hundredEmoji), false);
+  assert.equal(isSearchTextTooLong(hundredEmoji + emoji), true);
+});
+
+test("an empty or missing search is not treated as over-long", () => {
+  for (const value of ["", null, undefined]) {
+    assert.equal(isSearchTextTooLong(value), false);
+    assert.equal(canSubmitSearchText(value), true);
+  }
+});
+
+test("an over-long search submitted through the URL is still handled by TC-017's path", () => {
+  // The box can only guard what is typed into it. A URL-borne query
+  // reaches the API, which refuses it with the shared code, and that
+  // keeps producing the general guidance rather than a server error.
+  const apiRefusal = { status: 400, code: "VALIDATION_ERROR" };
+  assert.equal(isSearchInputRejection(apiRefusal), true);
+  assert.equal(
+    searchErrorMessage(apiRefusal, "Unable to search Awards right now. Try again in a moment."),
+    SEARCH_INPUT_REJECTED_MESSAGE,
+  );
 });
