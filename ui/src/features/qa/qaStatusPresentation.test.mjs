@@ -214,19 +214,34 @@ test("the two cases with evidence gaps are not presented as unqualified passes",
   }
 });
 
-test("TC-018 is tracked as in progress and claims nothing released", () => {
-  // Status stays a known issue: the limit is not on dev yet, so the
-  // behaviour described is still what the site does.
+test("TC-018 records the API half as released and verified, and still is not a pass", () => {
+  // Deliberately split: the API limit is on dev and checked, while the
+  // page can still submit an over-long search through Apply Filters or
+  // the dashboard box. Half a fix must not read as a pass.
   const item = cases.find((candidate) => candidate.id === "TC-018");
   assert.ok(item);
   assert.equal(item.status, "issue");
   assert.equal(item.progress.stage, "inProgress");
-  assert.equal(item.progress.deployedBuild, "Not deployed");
-  assert.equal(item.progress.verifiedOn, "");
-  assert.match(item.progress.change, /PR #23/);
-  assert.ok(item.progress.limitations, "what is still true must be stated");
+  assert.equal(item.progress.verifiedOn, "", "nothing may claim verification yet");
   assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
-  // Its original finding is kept.
+
+  // Both builds recorded, and recorded separately.
+  assert.match(item.progress.deployedBuild, /rev 74/);
+  assert.match(item.progress.deployedBuild, /#106/);
+  assert.match(item.progress.change, /PR #23/);
+  assert.match(item.progress.change, /PR #24/);
+
+  // The API evidence is kept even though the case is open.
+  assert.match(item.progress.results, /seven search endpoints/);
+  assert.match(item.progress.results, /VALIDATION_ERROR/);
+  assert.match(item.progress.results, /two-character minimum/);
+
+  // And the note says exactly what is and is not done.
+  assert.match(item.note, /API limit deployed and verified/);
+  assert.match(item.note, /remaining UI submission paths being corrected/);
+  assert.match(item.progress.limitations, /Apply Filters/);
+
+  // Its original finding survives.
   assert.ok(item.history.some((entry) => /6,000/.test(entry.summary)));
 });
 
