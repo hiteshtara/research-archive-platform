@@ -4,8 +4,13 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  describeGlobalSearchOutcome,
   describeResultCard,
   filterOutIrbResults,
+  incompleteSearchMessage,
+  isRelatedResult,
+  noDirectMatchesMessage,
+  splitDirectAndRelated,
 } from "./globalSearchPresentation.mjs";
 
 function readGlobalSearchPageSource() {
@@ -311,4 +316,105 @@ test("describeResultCard exposes the subtitle separately from the identifier lin
   const withoutSubtitle = describeResultCard({ identifier: "100013-00001" });
   assert.equal(withoutSubtitle.identifierLine, "100013-00001");
   assert.equal(withoutSubtitle.subtitleLine, null);
+});
+
+// --- Direct vs related results (QA TC-041) -------------------------------
+
+const direct = (id) => ({ module: "AWARD", identifier: id, matchType: null });
+const related = (id, module = "NEGOTIATION") => ({ module, identifier: id, matchType: "RELATED" });
+
+test("a semantic result is recognised by its match type", () => {
+  assert.equal(isRelatedResult(related("x")), true);
+  assert.equal(isRelatedResult(direct("x")), false);
+  assert.equal(isRelatedResult(undefined), false);
+});
+
+test("results split into direct and related, each keeping its order", () => {
+  const { direct: d, related: r } = splitDirectAndRelated([
+    direct("a"), related("b"), direct("c"), related("d"),
+  ]);
+  assert.deepEqual(d.map((i) => i.identifier), ["a", "c"]);
+  assert.deepEqual(r.map((i) => i.identifier), ["b", "d"]);
+});
+
+test("semantic-only results are kept, not discarded", () => {
+  // The rejected approach returned nothing here. A searcher who used a
+  // synonym must still be offered something.
+  const outcome = describeGlobalSearchOutcome({ results: [related("1"), related("2")] });
+  assert.equal(outcome.relatedCount, 2);
+  assert.equal(outcome.directCount, 0);
+});
+
+test("with no direct matches, related results are offered rather than shown", () => {
+  const outcome = describeGlobalSearchOutcome({ results: [related("1"), related("2")] });
+  assert.equal(outcome.showNoDirectMatches, true);
+  assert.equal(outcome.offerRelatedToggle, true);
+  assert.equal(outcome.showRelatedSection, false, "hidden until asked for");
+  assert.equal(outcome.showRelatedActionLabel, "Show 2 related results");
+});
+
+test("once revealed, the related section is shown", () => {
+  const outcome = describeGlobalSearchOutcome({
+    results: [related("1")], relatedRevealed: true,
+  });
+  assert.equal(outcome.showRelatedSection, true);
+  assert.equal(outcome.showRelatedActionLabel, "Show 1 related result", "singular");
+});
+
+test("a mixed result shows direct matches and the related section together", () => {
+  const outcome = describeGlobalSearchOutcome({ results: [direct("a"), related("b")] });
+  assert.equal(outcome.directCount, 1);
+  assert.equal(outcome.relatedCount, 1);
+  assert.equal(outcome.showNoDirectMatches, false);
+  assert.equal(outcome.showRelatedSection, true, "no action needed when something matched directly");
+  assert.equal(outcome.offerRelatedToggle, false);
+});
+
+test("a failed module is never reported as nothing found", () => {
+  // The distinction that matters: the search did not run, so claiming
+  // "no matches" would be a confident wrong answer.
+  const outcome = describeGlobalSearchOutcome({ results: [], failedModules: ["AWARD", "PROPOSAL"] });
+  assert.equal(outcome.searchIncomplete, true);
+  assert.equal(outcome.showNoDirectMatches, false);
+  assert.match(incompleteSearchMessage(["AWARD", "PROPOSAL"]), /AWARD, PROPOSAL/);
+  assert.match(incompleteSearchMessage(["AWARD"]), /not the whole archive/);
+  assert.equal(incompleteSearchMessage([]), null);
+});
+
+test("a partial failure still reports the failure alongside what was found", () => {
+  const outcome = describeGlobalSearchOutcome({
+    results: [direct("a"), related("b")], failedModules: ["NEGOTIATION"],
+  });
+  assert.equal(outcome.searchIncomplete, true);
+  assert.equal(outcome.directCount, 1);
+  assert.equal(outcome.showRelatedSection, true);
+});
+
+test("a genuinely empty search says no direct matches, naming the query", () => {
+  const outcome = describeGlobalSearchOutcome({ results: [] });
+  assert.equal(outcome.showNoDirectMatches, true);
+  assert.equal(outcome.offerRelatedToggle, false, "nothing to offer");
+  assert.match(noDirectMatchesMessage("zzzznotfound123"), /zzzznotfound123/);
+  assert.match(noDirectMatchesMessage("  "), /^No direct matches\.$/);
+});
+
+test("the related section explains what it is without overclaiming", () => {
+  const outcome = describeGlobalSearchOutcome({ results: [related("1")], relatedRevealed: true });
+  assert.equal(outcome.relatedHeading, "Related results");
+  assert.match(outcome.relatedExplanation, /may not be what you meant/);
+  // It must not promise relevance it cannot establish.
+  assert.doesNotMatch(outcome.relatedExplanation, /relevant|best|closest|accurate/i);
+});
+
+test("the page renders direct and related separately and gates the reveal", () => {
+  const page = readFileSync(
+    fileURLToPath(new URL("../../pages/GlobalSearchPage.tsx", import.meta.url)),
+    "utf8",
+  );
+  assert.match(page, /describeGlobalSearchOutcome\(/);
+  assert.match(page, /outcome\.direct\.map/);
+  assert.match(page, /outcome\.related\.map/);
+  assert.match(page, /setRelatedRevealed\(true\)/);
+  assert.match(page, /incompleteSearchMessage\(/);
+  assert.match(page, /noDirectMatchesMessage\(/);
 });
