@@ -13,6 +13,7 @@ import { SearchStates } from "../components/common/search/SearchStates";
 import {
   joinMetadata,
   resolveSearchState,
+  searchErrorMessage,
 } from "../features/common/searchPresentation.mjs";
 import {
   NEGOTIATION_DATE_RANGES,
@@ -101,7 +102,10 @@ export function NegotiationFamiliesPage() {
     >
       <SearchStates
         state={state}
-        errorMessage="Unable to load Negotiations right now. Try again in a moment."
+        errorMessage={searchErrorMessage(
+          query.error,
+          "Unable to load Negotiations right now. Try again in a moment.",
+        )}
       >
         {results && (
           <>

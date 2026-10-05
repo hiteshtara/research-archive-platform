@@ -46,3 +46,15 @@ export function resolveSearchState(options?: {
   isError?: boolean;
   resultCount?: number;
 }): SearchState;
+
+export interface SearchRequestError {
+  code?: string;
+  status?: number;
+}
+
+export const SEARCH_INPUT_REJECTED_MESSAGE: string;
+export function isSearchInputRejection(error: unknown): boolean;
+export function searchErrorMessage(
+  error: unknown,
+  genericMessage: string,
+): string;

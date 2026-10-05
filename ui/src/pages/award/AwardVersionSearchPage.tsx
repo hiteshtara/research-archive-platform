@@ -13,7 +13,10 @@ import { SearchPageLayout } from "../../components/common/search/SearchPageLayou
 import { SearchStates } from "../../components/common/search/SearchStates";
 import { emptyResultsMessage } from "../../features/common/filterPresentation.mjs";
 import type { FilterErrors } from "../../features/common/filterPresentation.mjs";
-import { resolveSearchState } from "../../features/common/searchPresentation.mjs";
+import {
+  resolveSearchState,
+  searchErrorMessage,
+} from "../../features/common/searchPresentation.mjs";
 import {
   describeVersionSearchResults,
   isValidAwardIdInput,
@@ -140,7 +143,10 @@ export function AwardVersionSearchPage() {
           isError: searchQuery.isError,
           resultCount: content.length,
         })}
-        errorMessage="Unable to search Historical Award Records right now. Try again in a moment."
+        errorMessage={searchErrorMessage(
+          searchQuery.error,
+          "Unable to search Historical Award Records right now. Try again in a moment.",
+        )}
       >
         {searchQuery.data && (
           <>

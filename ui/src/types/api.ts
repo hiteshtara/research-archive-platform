@@ -214,6 +214,12 @@ export interface AwardAiTimelineRecord {
 export interface SafeApiErrorResponse {
   status?: number;
   error?: string;
+  /**
+   * The API's machine-readable error code (e.g. "VALIDATION_ERROR").
+   * Clients switch on this rather than parsing the human-readable text -
+   * see GlobalExceptionHandler on the API side.
+   */
+  code?: string;
   message?: string;
   correlationId?: string;
 }

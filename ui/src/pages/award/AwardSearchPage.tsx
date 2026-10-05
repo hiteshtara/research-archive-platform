@@ -13,7 +13,10 @@ import { ResultCount } from "../../components/common/search/ResultCount";
 import { SearchPageLayout } from "../../components/common/search/SearchPageLayout";
 import { SearchStates } from "../../components/common/search/SearchStates";
 import { emptyResultsMessage } from "../../features/common/filterPresentation.mjs";
-import { resolveSearchState } from "../../features/common/searchPresentation.mjs";
+import {
+  resolveSearchState,
+  searchErrorMessage,
+} from "../../features/common/searchPresentation.mjs";
 import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
 import { describeSearchResults } from "../../features/award/awardSearchPresentation.mjs";
 import {
@@ -107,7 +110,10 @@ export function AwardSearchPage() {
     >
       <SearchStates
         state={state}
-        errorMessage="Unable to search Awards right now. Try again in a moment."
+        errorMessage={searchErrorMessage(
+          searchQuery.error,
+          "Unable to search Awards right now. Try again in a moment.",
+        )}
       >
         {results && (
           <>

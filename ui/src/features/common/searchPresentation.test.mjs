@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  SEARCH_INPUT_REJECTED_MESSAGE,
   buildSearchParams,
   describeResultCount,
   formatNamedIdentifier,
+  isSearchInputRejection,
   joinMetadata,
   readSearchParams,
   resolveSearchState,
+  searchErrorMessage,
   splitStatusCode,
 } from "./searchPresentation.mjs";
 
@@ -194,4 +199,144 @@ test("loading, empty and results are distinguished", () => {
     resolveSearchState({ hasSearched: true, resultCount: 7 }),
     "results",
   );
+});
+
+// --- Rejected input vs. a broken search (QA TC-017) ----------------------
+
+const GENERIC = "Unable to search Awards right now. Try again in a moment.";
+
+/*
+ * The three VALIDATION_ERROR responses measured against dev on
+ * 2026-10-05. They share one code and have three different causes,
+ * which is exactly why the guidance may not name one.
+ */
+const NUL_IN_QUERY = {
+  status: 400,
+  code: "VALIDATION_ERROR",
+  message: "Parameter 'q' contains a character that is not allowed: U+0000. Remove it and search again.",
+};
+const NUL_IN_FILTER = {
+  status: 400,
+  code: "VALIDATION_ERROR",
+  message: "Parameter 'sponsor' contains a character that is not allowed: U+0000. Remove it and search again.",
+};
+const GLOBAL_SEARCH_TOO_LONG = {
+  status: 400,
+  code: "VALIDATION_ERROR",
+  message: "search.query: size must be between 2 and 200",
+};
+
+test("a NUL byte in the search text is treated as refused input", () => {
+  assert.equal(isSearchInputRejection(NUL_IN_QUERY), true);
+  assert.equal(searchErrorMessage(NUL_IN_QUERY, GENERIC), SEARCH_INPUT_REJECTED_MESSAGE);
+});
+
+test("a NUL byte in a structured filter is treated the same way", () => {
+  assert.equal(isSearchInputRejection(NUL_IN_FILTER), true);
+  assert.equal(searchErrorMessage(NUL_IN_FILTER, GENERIC), SEARCH_INPUT_REJECTED_MESSAGE);
+});
+
+test("an ordinary Global Search query past its length limit gets the same guidance", () => {
+  // Nothing invisible about it - 250 plain characters. The shared code
+  // means the page cannot tell this apart from the two above, so the
+  // wording has to be true of all three.
+  assert.equal(isSearchInputRejection(GLOBAL_SEARCH_TOO_LONG), true);
+  assert.equal(
+    searchErrorMessage(GLOBAL_SEARCH_TOO_LONG, GENERIC),
+    SEARCH_INPUT_REJECTED_MESSAGE,
+  );
+});
+
+test("the guidance names no cause it has not established", () => {
+  const message = SEARCH_INPUT_REJECTED_MESSAGE.toLowerCase();
+  for (const claim of [
+    "invisible",
+    "control character",
+    "character the archive",
+    "pasted",
+    "too long",
+    "length",
+    "limit",
+  ]) {
+    assert.ok(!message.includes(claim), `must not assert "${claim}"`);
+  }
+});
+
+test("the guidance covers the filters as well as the search box", () => {
+  const message = SEARCH_INPUT_REJECTED_MESSAGE.toLowerCase();
+  assert.ok(message.includes("search box"));
+  assert.ok(message.includes("filter"));
+});
+
+test("the guidance never tells the reader to retry the same input", () => {
+  const message = SEARCH_INPUT_REJECTED_MESSAGE.toLowerCase();
+  assert.ok(!message.includes("try again in a moment"));
+  assert.ok(!message.includes("right now"));
+  assert.ok(!/\bwait\b/.test(message));
+  assert.ok(/adjust|change/.test(message), "it must name an action");
+  assert.ok(message.includes("search again"));
+});
+
+test("both the status and the code are required, not either alone", () => {
+  // The code on its own does not establish that the input was refused.
+  assert.equal(isSearchInputRejection({ code: "VALIDATION_ERROR" }), false);
+  assert.equal(isSearchInputRejection({ status: 500, code: "VALIDATION_ERROR" }), false);
+  // And a 400 on its own can still be a genuine fault.
+  assert.equal(isSearchInputRejection({ status: 400 }), false);
+  assert.equal(isSearchInputRejection({ status: 400, code: "BAD_REQUEST" }), false);
+});
+
+test("a server or network failure is never mistaken for bad input", () => {
+  for (const error of [
+    { status: 500 },
+    { status: 503, code: "SERVICE_UNAVAILABLE" },
+    { status: 504 },
+    new TypeError("Failed to fetch"),
+    undefined,
+    null,
+  ]) {
+    assert.equal(isSearchInputRejection(error), false);
+    assert.equal(searchErrorMessage(error, GENERIC), GENERIC);
+  }
+});
+
+test("no submitted value or internal detail reaches the message", () => {
+  // The API's own sentences carry parameter names, code points and
+  // constraint internals. None of that belongs under a search box.
+  for (const error of [NUL_IN_QUERY, NUL_IN_FILTER, GLOBAL_SEARCH_TOO_LONG]) {
+    const message = searchErrorMessage(error, GENERIC);
+    assert.ok(!message.includes("U+"));
+    assert.ok(!/parameter/i.test(message));
+    assert.ok(!message.includes("search.query"));
+    assert.ok(!message.includes("'q'"));
+    assert.ok(!message.includes("sponsor"));
+  }
+  // Nothing interpolates the query, so a hostile value cannot be echoed.
+  const withValue = searchErrorMessage(
+    { status: 400, code: "VALIDATION_ERROR", message: "Parameter 'q' ... smithPAYLOAD" },
+    GENERIC,
+  );
+  assert.ok(!withValue.includes("smithPAYLOAD"));
+});
+
+test("every search page routes its error through the resolver", () => {
+  // Each page keeps its own generic sentence for real failures, but no
+  // page may hand that sentence straight to SearchStates any more.
+  const pages = [
+    "../../pages/award/AwardSearchPage.tsx",
+    "../../pages/award/AwardVersionSearchPage.tsx",
+    "../../pages/ProposalFamiliesPage.tsx",
+    "../../pages/NegotiationFamiliesPage.tsx",
+    "../../pages/SubawardFamiliesPage.tsx",
+    "../../pages/GlobalSearchPage.tsx",
+  ];
+  for (const page of pages) {
+    const source = readFileSync(fileURLToPath(new URL(page, import.meta.url)), "utf8");
+    assert.match(source, /searchErrorMessage\(/, `${page} must use the resolver`);
+    assert.doesNotMatch(
+      source,
+      /errorMessage="/,
+      `${page} must not pass a fixed message straight through`,
+    );
+  }
 });
