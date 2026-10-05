@@ -2,6 +2,7 @@ import { Box, Stack } from "@mui/material";
 import type { ReactNode } from "react";
 
 import { buildFilterChips } from "../../../features/common/filterPresentation.mjs";
+import { canSubmitSearchText } from "../../../features/common/searchPresentation.mjs";
 import type { FilterFieldDefinition } from "../../../features/common/filterPresentation.mjs";
 import type { FilteredSearchState } from "../../../hooks/useFilteredSearch";
 import { FilterChips } from "../FilterChips";
@@ -48,7 +49,25 @@ export function FilteredSearchBar<Key extends string>({
    */
   chipFields?: readonly FilterFieldDefinition<Key>[];
 }) {
-  const submit = onSubmit ?? (() => void search.apply());
+  /*
+   * Length is enforced here rather than inside the search box, because
+   * this one handler is what both ways of running a search call: Enter
+   * in the box, and Apply Filters in the panel below it (QA TC-018).
+   * Guarding only the box left Apply Filters able to submit a query the
+   * box itself was refusing - the same search, allowed or refused
+   * depending on which control you happened to use.
+   *
+   * A page's own onSubmit is wrapped too, so a page cannot opt out of
+   * the limit by supplying one.
+   */
+  const runSearch = onSubmit ?? (() => void search.apply());
+  const queryTooLong = !canSubmitSearchText(search.draftQuery);
+  const submit = () => {
+    if (queryTooLong) {
+      return;
+    }
+    runSearch();
+  };
   const chips = chipFields
     ? buildFilterChips(search.appliedFilters, chipFields)
     : search.chips;
@@ -90,7 +109,7 @@ export function FilteredSearchBar<Key extends string>({
         onApply={submit}
         onClearAll={search.clearAll}
         errors={search.errors}
-        applyDisabled={!search.canApply}
+        applyDisabled={!search.canApply || queryTooLong}
         hasUnappliedChanges={search.hasUnappliedChanges}
         panelId={panelId}
       />

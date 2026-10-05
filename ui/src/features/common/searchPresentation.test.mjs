@@ -460,3 +460,103 @@ test("an over-long search submitted through the URL is still handled by TC-017's
     SEARCH_INPUT_REJECTED_MESSAGE,
   );
 });
+
+// --- Every submission path, not just the search box (QA TC-018) ----------
+
+/*
+ * There is no component-render harness in this project, so these drive
+ * the same decision function the components call, and pin the wiring by
+ * reading the sources - the way the navigation and Archived File Finder
+ * suites do.
+ */
+
+function simulateSharedSubmit(draftQuery) {
+  // What FilteredSearchBar's shared `submit` does: both Enter in the
+  // box and Apply Filters in the panel go through this.
+  let ran = false;
+  const runSearch = () => { ran = true; };
+  const queryTooLong = !canSubmitSearchText(draftQuery);
+  const submit = () => { if (queryTooLong) return; runSearch(); };
+  submit();
+  return { ran, applyDisabled: queryTooLong };
+}
+
+test("Enter and Apply Filters are both refused once the query is too long", () => {
+  const over = "a".repeat(SEARCH_TEXT_MAX_LENGTH + 1);
+  const result = simulateSharedSubmit(over);
+  assert.equal(result.ran, false, "the search must not run");
+  assert.equal(result.applyDisabled, true, "Apply Filters must be disabled");
+});
+
+test("at exactly the limit both paths still run the search", () => {
+  const atLimit = "a".repeat(SEARCH_TEXT_MAX_LENGTH);
+  const result = simulateSharedSubmit(atLimit);
+  assert.equal(result.ran, true);
+  assert.equal(result.applyDisabled, false);
+});
+
+test("an ordinary search is unaffected by the guard", () => {
+  for (const value of ["", "105698", "*105698*", "smith"]) {
+    assert.equal(simulateSharedSubmit(value).ran, true, `${value} must still search`);
+  }
+});
+
+test("the guard lives in the shared handler, so Apply Filters cannot bypass it", () => {
+  const bar = readFileSync(
+    fileURLToPath(new URL("../../components/common/search/FilteredSearchBar.tsx", import.meta.url)),
+    "utf8",
+  );
+  // One `submit` is handed to the search box AND to the panel's onApply.
+  assert.match(bar, /canSubmitSearchText\(/, "the shared handler must check the length");
+  assert.match(bar, /onSubmit=\{submit\}/, "the box must use the guarded handler");
+  assert.match(bar, /onApply=\{submit\}/, "Apply Filters must use the guarded handler");
+  assert.match(bar, /applyDisabled=\{![^}]*queryTooLong\}/, "Apply must be disabled when too long");
+  // A page supplying its own onSubmit is wrapped, not trusted.
+  assert.match(bar, /const runSearch = onSubmit \?\?/);
+});
+
+function simulateDashboardSubmit(searchText) {
+  // What DashboardPage.submitSearch does.
+  const normalized = searchText.trim();
+  const navigated = normalized.length >= 2 && canSubmitSearchText(searchText);
+  const buttonDisabled = normalized.length < 2 || isSearchTextTooLong(searchText);
+  return { navigated, buttonDisabled };
+}
+
+test("the dashboard search applies the same limit and keeps its own minimum", () => {
+  const over = "a".repeat(SEARCH_TEXT_MAX_LENGTH + 1);
+  assert.deepEqual(simulateDashboardSubmit(over), { navigated: false, buttonDisabled: true });
+
+  const atLimit = "a".repeat(SEARCH_TEXT_MAX_LENGTH);
+  assert.deepEqual(simulateDashboardSubmit(atLimit), { navigated: true, buttonDisabled: false });
+
+  // The existing two-character minimum is unchanged.
+  assert.deepEqual(simulateDashboardSubmit("a"), { navigated: false, buttonDisabled: true });
+  assert.deepEqual(simulateDashboardSubmit("ab"), { navigated: true, buttonDisabled: false });
+});
+
+test("the dashboard search is wired to the shared helpers and shows guidance", () => {
+  const page = readFileSync(
+    fileURLToPath(new URL("../../pages/DashboardPage.tsx", import.meta.url)),
+    "utf8",
+  );
+  assert.match(page, /canSubmitSearchText\(/, "its submit must check the length");
+  assert.match(page, /searchLengthHelperText\(/, "it must show the counter and guidance");
+  assert.match(page, /error=\{searchTooLong\}/);
+  assert.match(page, /searchTooLong\}/, "its Search button must be disabled when too long");
+  assert.doesNotMatch(page, /maxLength\s*[:=]/, "it must not truncate a paste either");
+});
+
+test("no search input anywhere truncates a paste", () => {
+  for (const file of [
+    "../../components/common/search/SearchBox.tsx",
+    "../../components/common/search/FilteredSearchBar.tsx",
+    "../../pages/DashboardPage.tsx",
+  ]) {
+    const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+    assert.doesNotMatch(source, /maxLength\s*[:=]/, `${file} must not set maxLength`);
+  }
+  // And the value is carried intact however long it is.
+  const pasted = "x".repeat(1200);
+  assert.equal(searchTextLength(pasted), 1200);
+});

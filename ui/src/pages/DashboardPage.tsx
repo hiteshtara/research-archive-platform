@@ -27,6 +27,11 @@ import { useNavigate } from "react-router-dom";
 import { getDashboard } from "../api/client";
 import { LoadingState } from "../components/common/LoadingState";
 import {
+  canSubmitSearchText,
+  isSearchTextTooLong,
+  searchLengthHelperText,
+} from "../features/common/searchPresentation.mjs";
+import {
   futureModuleCards,
   historicalActivityCards,
   primaryBusinessCards,
@@ -49,10 +54,18 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [searchText, setSearchText] = useState("");
 
+  // The dashboard has its own search box rather than the shared one, so
+  // it needs the same length rule applied explicitly (QA TC-018) - it
+  // sends people to Global Search, which would otherwise refuse the
+  // query only after the navigation. The existing two-character minimum
+  // is unchanged.
+  const searchTooLong = isSearchTextTooLong(searchText);
+  const searchHelperText = searchLengthHelperText(searchText);
+
   function submitSearch() {
     const normalized = searchText.trim();
 
-    if (normalized.length >= 2) {
+    if (normalized.length >= 2 && canSubmitSearchText(searchText)) {
       navigate(`/search?query=${encodeURIComponent(normalized)}`);
     }
   }
@@ -110,9 +123,12 @@ export function DashboardPage() {
           fullWidth
           value={searchText}
           onChange={(event) => setSearchText(event.target.value)}
+          error={searchTooLong}
+          helperText={searchHelperText ?? undefined}
           placeholder="Search document number, PI, sponsor, award, title..."
           slotProps={{
             input: {
+              "aria-invalid": searchTooLong,
               startAdornment: (
                 <InputAdornment position="start">
                   <SearchOutlined />
@@ -132,7 +148,7 @@ export function DashboardPage() {
           type="submit"
           variant="contained"
           size="large"
-          disabled={searchText.trim().length < 2}
+          disabled={searchText.trim().length < 2 || searchTooLong}
           sx={{
             minWidth: 140,
             minHeight: 58,
