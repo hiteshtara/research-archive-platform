@@ -251,7 +251,30 @@ export function isPlaceholderEvidence(value) {
   return PLACEHOLDER_EVIDENCE.has(String(value).trim().toLowerCase());
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/*
+ * A real calendar date, not merely digits in the right shape. A regex
+ * alone accepts 2026-02-30 and 2026-99-99, which would let a verified
+ * claim carry a date nobody could have tested on - the sort of value a
+ * find-and-replace or a careless paste leaves behind.
+ */
+export function isRealIsoDate(value) {
+  const text = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return false;
+  }
+  const [year, month, day] = text.split("-").map(Number);
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  // Round-tripping through UTC catches a day that overflowed into the
+  // next month, including 29 February outside a leap year.
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
 
 /*
  * The environment a case must be proven in before it counts. Recorded
@@ -280,7 +303,7 @@ export function verificationShortfalls(item) {
   }
   if (isPlaceholderEvidence(progress.verifiedOn)) {
     reasons.push("no verification date recorded");
-  } else if (!ISO_DATE.test(String(progress.verifiedOn).trim())) {
+  } else if (!isRealIsoDate(progress.verifiedOn)) {
     reasons.push("verification date is not a real date");
   }
   if (isPlaceholderEvidence(progress.verifiedIn)) {

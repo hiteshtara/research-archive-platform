@@ -18,6 +18,7 @@ import {
   securitySummary,
   isKnownProgressStage,
   isPlaceholderEvidence,
+  isRealIsoDate,
   progressStage,
   PROGRESS_STAGES,
   statusMeta,
@@ -189,13 +190,21 @@ test("evidence scope is carried per case, and local work is not counted as deplo
   assert.ok(deployedEvidenceCount(cases) < cases.length, "some cases are not dev-verified");
 });
 
-test("TC-017 is still a known issue, scoped to local evidence, not a pass", () => {
-  // A fix for this exists on a branch and is not released. The page must
-  // keep showing the behaviour the deployed website has.
+test("TC-017 is a pass only because it was verified on the development website", () => {
+  // Released as API rev 73 and re-run there on 2026-10-05. Before that
+  // it was a known issue scoped to local evidence; both earlier states
+  // are kept in its history.
   const item = cases.find((candidate) => candidate.id === "TC-017");
   assert.ok(item);
-  assert.equal(item.status, "issue");
-  assert.notEqual(item.scope, "Development website");
+  assert.equal(item.status, "passed");
+  assert.equal(item.scope, "Development website");
+  assert.equal(item.progress.stage, "verified");
+  assert.deepEqual(verificationShortfalls(item), []);
+  assert.match(item.environment, /rev 73/);
+  // The stale "awaiting deployment" wording must not survive on the
+  // current note - it lives in history instead.
+  assert.doesNotMatch(item.note, /awaiting deployment|not released|Fixed in code/i);
+  assert.ok(item.history.some((entry) => /not released/i.test(entry.summary)));
 });
 
 test("the two cases with evidence gaps are not presented as unqualified passes", () => {
@@ -529,6 +538,50 @@ test("a verification date has to be a real date", () => {
   assert.deepEqual(verificationShortfalls(vague), ["verification date is not a real date"]);
 });
 
+test("an impossible calendar date is rejected, not just a malformed one", () => {
+  // Right shape, no such day. A regex alone would accept all of these.
+  for (const value of [
+    "2026-02-30",
+    "2026-99-99",
+    "2026-13-01",
+    "2026-00-10",
+    "2026-04-31",
+    "2026-02-29",
+    "2026-01-32",
+    "2026-01-00",
+  ]) {
+    assert.ok(!isRealIsoDate(value), `"${value}" is not a real date`);
+  }
+});
+
+test("real dates, including a leap day in a leap year, are accepted", () => {
+  for (const value of ["2026-10-05", "2026-01-01", "2026-12-31", "2024-02-29", "2026-02-28"]) {
+    assert.ok(isRealIsoDate(value), `"${value}" is a real date`);
+  }
+});
+
+test("a malformed date is still rejected", () => {
+  for (const value of ["", "last week", "05-10-2026", "2026-1-5", "20261005", null, undefined]) {
+    assert.ok(!isRealIsoDate(value), `"${value}" must be rejected`);
+  }
+});
+
+test("an impossible date fails verification through the real guard", () => {
+  const impossible = {
+    id: "X-7",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "api rev 73",
+      verifiedOn: "2026-02-30",
+      verifiedIn: "Development website",
+      results: "Looked right.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(impossible), ["verification date is not a real date"]);
+  assert.deepEqual(casesWithUnevidencedVerification([impossible]).map((i) => i.id), ["X-7"]);
+});
+
 test("a complete, correctly-sited claim passes every guard", () => {
   const proper = {
     id: "X-5",
@@ -565,19 +618,22 @@ test("every progress stage has a label and a plain-language description", () => 
   assert.equal(progressStage("nonsense"), null);
 });
 
-test("TC-017 is tracked as fixed in code, not released, and not a pass", () => {
+test("TC-017 records the build it was verified against, and what still is not fixed", () => {
   const item = cases.find((candidate) => candidate.id === "TC-017");
-  assert.equal(item.status, "issue");
-  assert.equal(item.progress.stage, "fixedInCode");
   assert.match(item.progress.change, /PR #18/);
-  assert.equal(item.progress.deployedBuild, "Not deployed");
-  assert.equal(item.progress.verifiedOn, "");
-  assert.ok(item.progress.limitations, "the remaining limitation must be stated");
+  assert.match(item.progress.deployedBuild, /rev 73/);
+  assert.equal(item.progress.verifiedOn, "2026-10-05");
+  assert.equal(item.progress.verifiedIn, "Development website");
+  assert.match(item.progress.results, /VALIDATION_ERROR/);
+  assert.match(item.progress.results, /105698/, "the positive checks must be recorded too");
+  // A pass with a known remaining gap must still say so.
+  assert.match(item.progress.limitations, /Unable to search/);
 });
 
 test("earlier findings are preserved rather than overwritten", () => {
   const item = cases.find((candidate) => candidate.id === "TC-017");
-  assert.ok(Array.isArray(item.history) && item.history.length > 0);
+  assert.ok(Array.isArray(item.history) && item.history.length >= 2,
+    "both the original finding and the fixed-in-code state must be kept");
   for (const entry of item.history) {
     assert.match(entry.on, /^\d{4}-\d{2}-\d{2}$/);
     assert.ok(entry.summary, "a history entry must say what was found");

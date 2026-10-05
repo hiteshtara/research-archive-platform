@@ -112,3 +112,4 @@ export function trackedCases(cases: QaCase[]): QaCase[];
 export function isPlaceholderEvidence(value: unknown): boolean;
 export function requiredEnvironment(item: QaCase): string;
 export function verificationShortfalls(item: QaCase): string[];
+export function isRealIsoDate(value: unknown): boolean;
