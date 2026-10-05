@@ -9,6 +9,7 @@ import { AwardVersionSearchPage } from "./pages/award/AwardVersionSearchPage";
 
 import { ArchivedFileFinderPage } from "./pages/ArchivedFileFinderPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { QaStatusPage } from "./pages/QaStatusPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
@@ -27,6 +28,7 @@ export default function App() {
       <Route element={<AppLayout />}>
 
         <Route index element={<DashboardPage />} />
+        <Route path="qa-status" element={<QaStatusPage />} />
 
         {/* Retired: the legacy Award Families/History pages predated
             the current Award Search/Dashboard experience and bypassed
