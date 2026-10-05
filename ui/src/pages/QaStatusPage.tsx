@@ -30,6 +30,7 @@ import {
   deployedEvidenceCount,
   filterCases,
   openCaseCount,
+  progressStage,
   requirementsWithConflicts,
   resultsLabel,
   securitySummary,
@@ -264,6 +265,39 @@ export function QaStatusPage() {
               <AccordionDetails id={`${item.id}-details`}>
                 <Stack spacing={2} sx={{ overflowWrap: "anywhere" }}>
                   <Field label="Where it stands" value={item.note} />
+                  {item.progress && (
+                    <Alert severity="info" icon={false}>
+                      <AlertTitle>
+                        {progressStage(item.progress.stage)?.label ?? item.progress.stage}
+                      </AlertTitle>
+                      {progressStage(item.progress.stage)?.description}
+                      <Stack spacing={0.5} sx={{ mt: 1.5 }}>
+                        <Typography variant="body2">
+                          <strong>Change:</strong> {item.progress.change || "Not recorded"}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Released build:</strong>{" "}
+                          {item.progress.deployedBuild || "Not recorded"}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Verified:</strong>{" "}
+                          {item.progress.verifiedOn
+                            ? `${item.progress.verifiedOn} on ${item.progress.verifiedIn}`
+                            : "Not yet verified"}
+                        </Typography>
+                        {item.progress.results && (
+                          <Typography variant="body2">
+                            <strong>Result:</strong> {item.progress.results}
+                          </Typography>
+                        )}
+                        {item.progress.limitations && (
+                          <Typography variant="body2">
+                            <strong>Remaining limitations:</strong> {item.progress.limitations}
+                          </Typography>
+                        )}
+                      </Stack>
+                    </Alert>
+                  )}
                   <Field label="Steps" value={item.steps} />
                   <Field label="Expected result in the checklist" value={item.expected} />
                   {item.status === "decision" && (
@@ -280,6 +314,20 @@ export function QaStatusPage() {
                     </Alert>
                   )}
                   <Field label="Tested version and evidence" value={item.environment} muted />
+                  {item.history && item.history.length > 0 && (
+                    <Box>
+                      <Typography component="h4" variant="subtitle2">
+                        Earlier findings
+                      </Typography>
+                      <Stack spacing={1} sx={{ mt: 0.5 }}>
+                        {item.history.map((entry) => (
+                          <Typography key={entry.on} variant="body2" color="text.secondary">
+                            {entry.on}: {entry.summary}
+                          </Typography>
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
                 </Stack>
               </AccordionDetails>
             </Accordion>

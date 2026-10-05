@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  casesClaimingAnUnverifiedPass,
+  casesWithUnevidencedVerification,
   caseAreas,
   countByStatus,
   deployedEvidenceCount,
@@ -14,8 +16,15 @@ import {
   resultsLabel,
   scopesPresent,
   securitySummary,
+  isKnownProgressStage,
+  isPlaceholderEvidence,
+  isRealIsoDate,
+  progressStage,
+  PROGRESS_STAGES,
   statusMeta,
   STATUS_META,
+  trackedCases,
+  verificationShortfalls,
 } from "./qaStatusPresentation.mjs";
 
 function readJson(relativePath) {
@@ -181,13 +190,21 @@ test("evidence scope is carried per case, and local work is not counted as deplo
   assert.ok(deployedEvidenceCount(cases) < cases.length, "some cases are not dev-verified");
 });
 
-test("TC-017 is still a known issue, scoped to local evidence, not a pass", () => {
-  // A fix for this exists on a branch and is not released. The page must
-  // keep showing the behaviour the deployed website has.
+test("TC-017 is a pass only because it was verified on the development website", () => {
+  // Released as API rev 73 and re-run there on 2026-10-05. Before that
+  // it was a known issue scoped to local evidence; both earlier states
+  // are kept in its history.
   const item = cases.find((candidate) => candidate.id === "TC-017");
   assert.ok(item);
-  assert.equal(item.status, "issue");
-  assert.notEqual(item.scope, "Development website");
+  assert.equal(item.status, "passed");
+  assert.equal(item.scope, "Development website");
+  assert.equal(item.progress.stage, "verified");
+  assert.deepEqual(verificationShortfalls(item), []);
+  assert.match(item.environment, /rev 73/);
+  // The stale "awaiting deployment" wording must not survive on the
+  // current note - it lives in history instead.
+  assert.doesNotMatch(item.note, /awaiting deployment|not released|Fixed in code/i);
+  assert.ok(item.history.some((entry) => /not released/i.test(entry.summary)));
 });
 
 test("the two cases with evidence gaps are not presented as unqualified passes", () => {
@@ -378,4 +395,254 @@ test("the QA status link is declared in the shared navigation config, not inline
     !/to="\/qa-status"/.test(layout),
     "AppLayout must not hard-code the QA status link",
   );
+});
+
+
+// --- Progress tracking: a fix is not done until it is verified -----------
+
+test("every tracked case uses a known progress stage", () => {
+  for (const item of trackedCases(cases)) {
+    assert.ok(
+      isKnownProgressStage(item.progress.stage),
+      `${item.id}: unknown progress stage "${item.progress.stage}"`,
+    );
+  }
+});
+
+test("no tracked case is marked passed before it has been verified", () => {
+  // The rule this page exists to keep: PASS only after the case's
+  // acceptance criteria are verified in the required environment.
+  assert.deepEqual(
+    casesClaimingAnUnverifiedPass(cases).map((item) => item.id),
+    [],
+  );
+});
+
+test("a verified claim must carry its date, environment and result", () => {
+  assert.deepEqual(
+    casesWithUnevidencedVerification(cases).map((item) => item.id),
+    [],
+  );
+});
+
+test("a qualified pass counts as a pass: neither may precede verification", () => {
+  // "Passed, more checks needed" still reads as passed to a tester, so
+  // a tracked fix may not claim it before being verified either.
+  for (const status of ["passed", "evidence"]) {
+    const premature = {
+      id: `X-${status}`,
+      status,
+      progress: { stage: "fixedInCode" },
+    };
+    assert.deepEqual(
+      casesClaimingAnUnverifiedPass([premature]).map((item) => item.id),
+      [`X-${status}`],
+      `${status} must not be claimable before verification`,
+    );
+  }
+});
+
+test("a released build must be recorded before verification is accepted", () => {
+  // The exact value TC-017 carries today while it waits for release.
+  const notDeployed = {
+    id: "X-1",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "Not deployed",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Development website",
+      results: "Behaved as the case requires.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(notDeployed), ["no released build recorded"]);
+  assert.deepEqual(casesWithUnevidencedVerification([notDeployed]).map((i) => i.id), ["X-1"]);
+});
+
+test("local-only evidence cannot satisfy a case that requires the development website", () => {
+  const localOnly = {
+    id: "X-2",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      requiredEnvironment: "Development website",
+      deployedBuild: "api rev 73",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Local test environment",
+      results: "All five searches returned 400 VALIDATION_ERROR.",
+    },
+  };
+  const reasons = verificationShortfalls(localOnly);
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /Local test environment/);
+  assert.match(reasons[0], /requires "Development website"/);
+  assert.deepEqual(casesWithUnevidencedVerification([localOnly]).map((i) => i.id), ["X-2"]);
+});
+
+test("a candidate build is not the development website either", () => {
+  const candidate = {
+    id: "X-3",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "api rev 73",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Candidate build",
+      results: "Looked right.",
+    },
+  };
+  assert.equal(verificationShortfalls(candidate).length, 1);
+});
+
+test("placeholder text is rejected exactly like a blank field", () => {
+  for (const value of ["", "  ", "N/A", "TBD", "pending", "Not deployed", "unknown", "-", "?"]) {
+    assert.ok(isPlaceholderEvidence(value), `"${value}" must count as no evidence`);
+  }
+  assert.ok(isPlaceholderEvidence(null));
+  assert.ok(isPlaceholderEvidence(undefined));
+  assert.ok(!isPlaceholderEvidence("api rev 73"));
+  assert.ok(!isPlaceholderEvidence("Development website"));
+
+  for (const field of ["deployedBuild", "verifiedOn", "verifiedIn", "results"]) {
+    const item = {
+      id: `X-${field}`,
+      status: "passed",
+      progress: {
+        stage: "verified",
+        deployedBuild: "api rev 73",
+        verifiedOn: "2026-10-05",
+        verifiedIn: "Development website",
+        results: "Behaved as the case requires.",
+      },
+    };
+    item.progress[field] = "TBD";
+    assert.ok(
+      verificationShortfalls(item).length > 0,
+      `a placeholder in ${field} must fail verification`,
+    );
+  }
+});
+
+test("a verification date has to be a real date", () => {
+  const vague = {
+    id: "X-4",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "api rev 73",
+      verifiedOn: "last week",
+      verifiedIn: "Development website",
+      results: "Fine.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(vague), ["verification date is not a real date"]);
+});
+
+test("an impossible calendar date is rejected, not just a malformed one", () => {
+  // Right shape, no such day. A regex alone would accept all of these.
+  for (const value of [
+    "2026-02-30",
+    "2026-99-99",
+    "2026-13-01",
+    "2026-00-10",
+    "2026-04-31",
+    "2026-02-29",
+    "2026-01-32",
+    "2026-01-00",
+  ]) {
+    assert.ok(!isRealIsoDate(value), `"${value}" is not a real date`);
+  }
+});
+
+test("real dates, including a leap day in a leap year, are accepted", () => {
+  for (const value of ["2026-10-05", "2026-01-01", "2026-12-31", "2024-02-29", "2026-02-28"]) {
+    assert.ok(isRealIsoDate(value), `"${value}" is a real date`);
+  }
+});
+
+test("a malformed date is still rejected", () => {
+  for (const value of ["", "last week", "05-10-2026", "2026-1-5", "20261005", null, undefined]) {
+    assert.ok(!isRealIsoDate(value), `"${value}" must be rejected`);
+  }
+});
+
+test("an impossible date fails verification through the real guard", () => {
+  const impossible = {
+    id: "X-7",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      deployedBuild: "api rev 73",
+      verifiedOn: "2026-02-30",
+      verifiedIn: "Development website",
+      results: "Looked right.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(impossible), ["verification date is not a real date"]);
+  assert.deepEqual(casesWithUnevidencedVerification([impossible]).map((i) => i.id), ["X-7"]);
+});
+
+test("a complete, correctly-sited claim passes every guard", () => {
+  const proper = {
+    id: "X-5",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      requiredEnvironment: "Development website",
+      deployedBuild: "api rev 73 (source 884142d)",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Development website",
+      results: "All five searches returned 400 VALIDATION_ERROR; ordinary queries unaffected.",
+    },
+  };
+  assert.deepEqual(verificationShortfalls(proper), []);
+  assert.deepEqual(casesClaimingAnUnverifiedPass([proper]), []);
+  assert.deepEqual(casesWithUnevidencedVerification([proper]), []);
+});
+
+test("several missing pieces are all reported, not just the first", () => {
+  const empty = {
+    id: "X-6",
+    status: "passed",
+    progress: { stage: "verified", deployedBuild: "", verifiedOn: "", verifiedIn: "", results: "" },
+  };
+  assert.equal(verificationShortfalls(empty).length, 4);
+});
+
+test("every progress stage has a label and a plain-language description", () => {
+  for (const stage of PROGRESS_STAGES) {
+    assert.ok(stage.label, `${stage.key}: label must be set`);
+    assert.ok(stage.description, `${stage.key}: description must be set`);
+    assert.ok(progressStage(stage.key));
+  }
+  assert.equal(progressStage("nonsense"), null);
+});
+
+test("TC-017 records the build it was verified against, and what still is not fixed", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-017");
+  assert.match(item.progress.change, /PR #18/);
+  assert.match(item.progress.deployedBuild, /rev 73/);
+  assert.equal(item.progress.verifiedOn, "2026-10-05");
+  assert.equal(item.progress.verifiedIn, "Development website");
+  assert.match(item.progress.results, /VALIDATION_ERROR/);
+  assert.match(item.progress.results, /105698/, "the positive checks must be recorded too");
+  // A pass with a known remaining gap must still say so.
+  assert.match(item.progress.limitations, /Unable to search/);
+});
+
+test("earlier findings are preserved rather than overwritten", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-017");
+  assert.ok(Array.isArray(item.history) && item.history.length >= 2,
+    "both the original finding and the fixed-in-code state must be kept");
+  for (const entry of item.history) {
+    assert.match(entry.on, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(entry.summary, "a history entry must say what was found");
+  }
+});
+
+test("the page renders the progress block and earlier findings", () => {
+  const source = readSource("../../pages/QaStatusPage.tsx");
+  assert.match(source, /item\.progress/);
+  assert.match(source, /Earlier findings/);
+  assert.match(source, /Remaining limitations/);
 });
