@@ -530,4 +530,57 @@ public class NegotiationArchiveRepository {
                 .orElse(null);
         return id != null;
     }
+
+    /*
+     * Display fields for a set of Negotiations, looked up by document
+     * number - the value a semantic row carries as its business number
+     * (QA TC-041). One query for the whole set, never one per result.
+     *
+     * The LEFT JOIN cannot fan out: V080's rebuild guarantees exactly
+     * one negotiation_search_attribute row per negotiation_id. The
+     * ranking is belt-and-braces for the other direction - it keeps the
+     * result one row per document_number even if two Negotiations ever
+     * shared one.
+     *
+     * A Negotiation with no attribute row yields a null title, and the
+     * caller falls back to the document number rather than rendering an
+     * empty heading.
+     */
+    public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
+            List<String> documentNumbers
+    ) {
+        if (documentNumbers.isEmpty()) {
+            return List.of();
+        }
+
+        return jdbc.sql("""
+                WITH ranked AS (
+                    SELECT
+                        n.document_number,
+                        a.title,
+                        n.negotiation_status_description AS status,
+                        n.negotiator_full_name AS negotiator,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY n.document_number
+                            ORDER BY n.negotiation_id DESC
+                        ) AS row_rank
+                    FROM archive.negotiation n
+                    LEFT JOIN archive.negotiation_search_attribute a
+                           ON a.negotiation_id = n.negotiation_id
+                    WHERE n.document_number IN (:documentNumbers)
+                )
+                SELECT document_number, title, status, negotiator
+                FROM ranked
+                WHERE row_rank = 1
+                """)
+                .param("documentNumbers", documentNumbers)
+                .query((resultSet, rowNumber) -> new NegotiationSemanticSummaryRow(
+                        resultSet.getString("document_number"),
+                        resultSet.getString("title"),
+                        resultSet.getString("status"),
+                        resultSet.getString("negotiator")
+                ))
+                .list();
+    }
+
 }

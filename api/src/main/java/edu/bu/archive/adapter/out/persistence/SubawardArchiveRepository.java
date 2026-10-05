@@ -862,4 +862,51 @@ public class SubawardArchiveRepository {
     private String normalizeQuery(String query) {
         return query == null ? "" : query.trim();
     }
+
+    /*
+     * Display fields for a set of Subawards, looked up by subaward_code
+     * - the value a semantic row carries as its business number (QA
+     * TC-041). One query for the whole set, never one per result.
+     *
+     * Scoped to the ACTIVE sequence, matching what
+     * build_search_embedding.py embedded, so the title shown is the
+     * title that was indexed. A code with no ACTIVE row yields nothing
+     * and the caller falls back to the code itself.
+     */
+    public List<SubawardSemanticSummaryRow> findActiveSummariesForCodes(
+            List<String> subawardCodes
+    ) {
+        if (subawardCodes.isEmpty()) {
+            return List.of();
+        }
+
+        return jdbc.sql("""
+                WITH ranked AS (
+                    SELECT
+                        s.subaward_code,
+                        s.title,
+                        s.status_description AS status,
+                        s.award_sponsor_name AS sponsor,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY s.subaward_code
+                            ORDER BY s.subaward_id DESC
+                        ) AS row_rank
+                    FROM archive.subaward s
+                    WHERE s.subaward_code IN (:subawardCodes)
+                      AND s.subaward_sequence_status = 'ACTIVE'
+                )
+                SELECT subaward_code, title, status, sponsor
+                FROM ranked
+                WHERE row_rank = 1
+                """)
+                .param("subawardCodes", subawardCodes)
+                .query((resultSet, rowNumber) -> new SubawardSemanticSummaryRow(
+                        resultSet.getString("subaward_code"),
+                        resultSet.getString("title"),
+                        resultSet.getString("status"),
+                        resultSet.getString("sponsor")
+                ))
+                .list();
+    }
+
 }

@@ -1,5 +1,7 @@
 package edu.bu.archive.application.subaward;
 
+import edu.bu.archive.adapter.out.persistence.SubawardSemanticSummaryRow;
+
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardAmountResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.subaward.SubawardCloseoutResponse;
@@ -274,4 +276,16 @@ public class SubawardArchiveService {
                         )
                 );
     }
+
+    /*
+     * Display fields for a set of Subawards, keyed by subaward code -
+     * the identifier a semantic result carries (QA TC-041). One query
+     * for the whole set; see the repository for why.
+     */
+    public List<SubawardSemanticSummaryRow> findActiveSummariesForCodes(
+            List<String> subawardCodes
+    ) {
+        return repository.findActiveSummariesForCodes(subawardCodes);
+    }
+
 }
