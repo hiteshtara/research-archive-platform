@@ -16,6 +16,8 @@ import edu.bu.archive.adapter.out.persistence.GlobalSearchRepository;
 import edu.bu.archive.adapter.out.persistence.IrbGlobalSearchRow;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.ProposalSemanticSummaryRow;
+import edu.bu.archive.adapter.out.persistence.SubawardSemanticSummaryRow;
+import edu.bu.archive.adapter.out.persistence.NegotiationSemanticSummaryRow;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRepository;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRow;
 import edu.bu.archive.application.award.AwardArchiveService;
@@ -33,6 +35,12 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import java.util.stream.Collectors;
+import java.util.Map;
+import static org.mockito.Mockito.ignoreStubs;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.times;
+import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -1159,6 +1167,172 @@ class GlobalSearchServiceTest {
                 .filter(item -> "RELATED".equals(item.matchType()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no semantic result in response"));
+    }
+
+
+    @Test
+    void enrichesANegotiationSemanticMatchWithItsRealTitle() {
+        // The reported symptom: the card showed "713214" - the document
+        // number - where the Negotiation's title belongs. The title
+        // lives in negotiation_search_attribute, not on the Negotiation
+        // itself, which is why it was never resolved before.
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(semanticRow("NEGOTIATION", 12788L, 12788L, "713214")));
+        when(negotiationArchiveService.findSummariesForDocumentNumbers(List.of("713214")))
+                .thenReturn(List.of(new NegotiationSemanticSummaryRow(
+                        "713214", "Materials Transfer Agreement with Kotton Lab",
+                        "Under Review", "Dana Negotiator"
+                )));
+
+        // Anchored lexically so this exercises enrichment on both
+        // sides of the merge-policy change in PR #28.
+        stubOneLexicalAwardMatch("materials transfer agreement");
+
+        GlobalSearchResponse response = service.search("materials transfer agreement");
+
+        GlobalSearchItemResponse item = firstRelated(response);
+        assertThat(item.module()).isEqualTo("NEGOTIATION");
+        assertThat(item.title()).isEqualTo("Materials Transfer Agreement with Kotton Lab");
+        assertThat(item.status()).isEqualTo("Under Review");
+        assertThat(item.principalInvestigator()).isEqualTo("Dana Negotiator");
+        // The identifier is still carried - it moved out of the title,
+        // it did not disappear.
+        assertThat(item.identifier()).isEqualTo("713214");
+    }
+
+    @Test
+    void enrichesASubawardSemanticMatchByItsCode() {
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(semanticRow("SUBAWARD", 90097L, 90097L, "1970")));
+        when(subawardArchiveService.findActiveSummariesForCodes(List.of("1970")))
+                .thenReturn(List.of(new SubawardSemanticSummaryRow(
+                        "1970", "Community Health Worker Training", "Active", "NIH"
+                )));
+
+        // Anchored lexically so this exercises enrichment on both
+        // sides of the merge-policy change in PR #28.
+        stubOneLexicalAwardMatch("community health training");
+
+        GlobalSearchResponse response = service.search("community health training");
+
+        GlobalSearchItemResponse item = firstRelated(response);
+        assertThat(item.module()).isEqualTo("SUBAWARD");
+        assertThat(item.title()).isEqualTo("Community Health Worker Training");
+        assertThat(item.subtitle()).isEqualTo("NIH");
+        assertThat(item.status()).isEqualTo("Active");
+        assertThat(item.identifier()).isEqualTo("1970");
+    }
+
+    @Test
+    void fallsBackToTheIdentifierWhenNoRecordResolvesOrTheTitleIsBlank() {
+        // Two ways a title can fail to arrive, and both must degrade to
+        // the identifier rather than to an empty heading.
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("NEGOTIATION", 1L, 1L, "no-such-doc"),
+                        semanticRow("SUBAWARD", 2L, 2L, "blank-title-code")
+                ));
+        // Nothing resolves for the Negotiation at all.
+        when(negotiationArchiveService.findSummariesForDocumentNumbers(List.of("no-such-doc")))
+                .thenReturn(List.of());
+        // The Subaward resolves, but with a blank title.
+        when(subawardArchiveService.findActiveSummariesForCodes(List.of("blank-title-code")))
+                .thenReturn(List.of(new SubawardSemanticSummaryRow(
+                        "blank-title-code", "   ", "Active", "NSF"
+                )));
+
+        // Anchored lexically so this exercises enrichment on both
+        // sides of the merge-policy change in PR #28.
+        stubOneLexicalAwardMatch("something unmatched");
+
+        GlobalSearchResponse response = service.search("something unmatched");
+
+        Map<String, String> titleByIdentifier = response.results().stream()
+                .filter(item -> "RELATED".equals(item.matchType()))
+                .collect(Collectors.toMap(
+                        GlobalSearchItemResponse::identifier,
+                        GlobalSearchItemResponse::title
+                ));
+        assertThat(titleByIdentifier.get("no-such-doc")).isEqualTo("no-such-doc");
+        assertThat(titleByIdentifier.get("blank-title-code")).isEqualTo("blank-title-code");
+    }
+
+    @Test
+    void severalResultsEachKeepTheirOwnTitleAndAreLookedUpInOneQueryPerModule() {
+        /*
+         * The failure this guards against is a title landing on the
+         * wrong card - every row enriched from the same map entry, or
+         * from whichever row happened to be resolved last. Three
+         * Negotiations and two Subawards, each with a distinct title,
+         * all asserted by identifier.
+         *
+         * It also pins the set-based contract: exactly ONE call per
+         * module, carrying every identifier - never one query per
+         * result, which is what makes this affordable on a page of
+         * suggestions.
+         */
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("NEGOTIATION", 11L, 11L, "doc-1"),
+                        semanticRow("NEGOTIATION", 12L, 12L, "doc-2"),
+                        semanticRow("NEGOTIATION", 13L, 13L, "doc-3"),
+                        semanticRow("SUBAWARD", 21L, 21L, "code-1"),
+                        semanticRow("SUBAWARD", 22L, 22L, "code-2")
+                ));
+        when(negotiationArchiveService.findSummariesForDocumentNumbers(
+                List.of("doc-1", "doc-2", "doc-3")))
+                .thenReturn(List.of(
+                        // Deliberately returned out of order: association
+                        // must be by key, not by position.
+                        new NegotiationSemanticSummaryRow("doc-3", "Third Negotiation", "Closed", "C"),
+                        new NegotiationSemanticSummaryRow("doc-1", "First Negotiation", "Open", "A"),
+                        new NegotiationSemanticSummaryRow("doc-2", "Second Negotiation", "Open", "B")
+                ));
+        when(subawardArchiveService.findActiveSummariesForCodes(List.of("code-1", "code-2")))
+                .thenReturn(List.of(
+                        new SubawardSemanticSummaryRow("code-2", "Second Subaward", "Active", "NIH"),
+                        new SubawardSemanticSummaryRow("code-1", "First Subaward", "Active", "NSF")
+                ));
+
+        // Anchored lexically so this exercises enrichment on both
+        // sides of the merge-policy change in PR #28.
+        stubOneLexicalAwardMatch("collaboration agreements");
+
+        GlobalSearchResponse response = service.search("collaboration agreements");
+
+        Map<String, String> titleByIdentifier = response.results().stream()
+                .filter(item -> "RELATED".equals(item.matchType()))
+                .collect(Collectors.toMap(
+                        GlobalSearchItemResponse::identifier,
+                        GlobalSearchItemResponse::title
+                ));
+        assertThat(titleByIdentifier).containsOnly(
+                entry("doc-1", "First Negotiation"),
+                entry("doc-2", "Second Negotiation"),
+                entry("doc-3", "Third Negotiation"),
+                entry("code-1", "First Subaward"),
+                entry("code-2", "Second Subaward")
+        );
+
+        // One query per module for the whole page.
+        verify(negotiationArchiveService, times(1))
+                .findSummariesForDocumentNumbers(List.of("doc-1", "doc-2", "doc-3"));
+        verify(subawardArchiveService, times(1))
+                .findActiveSummariesForCodes(List.of("code-1", "code-2"));
+        verifyNoMoreInteractions(ignoreStubs(negotiationArchiveService));
+        verifyNoMoreInteractions(ignoreStubs(subawardArchiveService));
     }
 
 }
