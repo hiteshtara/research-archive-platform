@@ -772,7 +772,13 @@ class GlobalSearchServiceTest {
     }
 
     @Test
-    void aNaturalLanguageQueryWithNoStructuredMatchesReturnsLabeledSemanticResults() {
+    void aQueryThatMatchesNothingLexicallyReturnsNothingRatherThanLooseSuggestions() {
+        // QA TC-041. Semantic search has no similarity cutoff, so for a
+        // query that matches nothing it still returns its nearest few
+        // rows - "nearest" there meaning only "least unrelated".
+        // "zzzznotfound123" filled the page with five Negotiations and
+        // "qzxwvnonsense987" with five Awards, neither having any
+        // visible connection to what was typed.
         semanticSearchProperties.setEnabled(true);
         when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
         when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
@@ -782,12 +788,36 @@ class GlobalSearchServiceTest {
                         semanticRow("PROPOSAL", 222L, 222L, "222-01")
                 ));
 
-        GlobalSearchResponse response =
-                service.search("diabetes research involving children");
+        GlobalSearchResponse response = service.search("zzzznotfound123");
+
+        assertThat(response.results()).isEmpty();
+        assertThat(response.totalResults()).isZero();
+        // Nothing failed - the archive simply holds nothing matching.
+        assertThat(response.failedModules()).isEmpty();
+    }
+
+    @Test
+    void semanticResultsAreKeptWheneverTheQueryMatchedSomethingLexically() {
+        // The other half of the rule, and the reason it is relative
+        // rather than a threshold: a query that found something real
+        // keeps every suggestion it had. Measured on dev, this is the
+        // common case - "pediatric asthma" returned 7 lexical and 3
+        // semantic, "quantum" 87 and 4.
+        semanticSearchProperties.setEnabled(true);
+        when(embeddingProviderObjectProvider.getIfAvailable()).thenReturn(embeddingProvider);
+        when(embeddingProvider.embed(anyString())).thenReturn(new float[]{0.1f});
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        semanticRow("PROPOSAL", 222L, 222L, "222-01")
+                ));
+        stubOneLexicalAwardMatch("pediatric asthma");
+
+        GlobalSearchResponse response = service.search("pediatric asthma");
 
         assertThat(response.results()).hasSize(2);
-        assertThat(response.results())
-                .allSatisfy(item -> assertThat(item.matchType()).isEqualTo("RELATED"));
+        // The lexical match leads; the suggestion follows it, labelled.
+        assertThat(response.results().get(0).matchType()).isNotEqualTo("RELATED");
+        assertThat(firstRelated(response).module()).isEqualTo("PROPOSAL");
     }
 
     @Test
@@ -916,10 +946,12 @@ class GlobalSearchServiceTest {
                         "National Cancer Institute", "Ulrike Boehmer"
                 )));
 
+        stubOneLexicalAwardMatch("rural mortality disparities cancer");
+
         GlobalSearchResponse response =
                 service.search("rural mortality disparities cancer");
 
-        GlobalSearchItemResponse item = response.results().get(0);
+        GlobalSearchItemResponse item = firstRelated(response);
         assertThat(item.module()).isEqualTo("AWARD");
         assertThat(item.identifier()).isEqualTo("104628-00002");
         assertThat(item.title()).isEqualTo("Cancer Disparities in California");
@@ -949,10 +981,12 @@ class GlobalSearchServiceTest {
                         "NIH", "Dr. Jerse"
                 )));
 
+        stubOneLexicalAwardMatch("gonorrhea prevention vaccine research");
+
         GlobalSearchResponse response =
                 service.search("gonorrhea prevention vaccine research");
 
-        GlobalSearchItemResponse item = response.results().get(0);
+        GlobalSearchItemResponse item = firstRelated(response);
         assertThat(item.module()).isEqualTo("PROPOSAL");
         assertThat(item.identifier()).isEqualTo("01117952");
         assertThat(item.title()).isEqualTo("Gonorrhea Vaccine Development");
@@ -976,10 +1010,12 @@ class GlobalSearchServiceTest {
                         "104615-00002", "Untitled Pending Award", "Pending", null, null
                 )));
 
+        stubOneLexicalAwardMatch("rural mortality disparities cancer");
+
         GlobalSearchResponse response =
                 service.search("rural mortality disparities cancer");
 
-        GlobalSearchItemResponse item = response.results().get(0);
+        GlobalSearchItemResponse item = firstRelated(response);
         assertThat(item.title()).isEqualTo("Untitled Pending Award");
         assertThat(item.status()).isEqualTo("Pending");
         assertThat(item.subtitle()).isNull();
@@ -1008,11 +1044,13 @@ class GlobalSearchServiceTest {
                         "CARB-X", "Dr. Outterson"
                 )));
 
+        stubOneLexicalAwardMatch("antibacterial resistance accelerator");
+
         GlobalSearchResponse response =
                 service.search("antibacterial resistance accelerator");
 
         List<GlobalSearchItemResponse> awardResults = response.results().stream()
-                .filter(r -> "AWARD".equals(r.module()))
+                .filter(r -> "AWARD".equals(r.module()) && "RELATED".equals(r.matchType()))
                 .toList();
         assertThat(awardResults).hasSize(1);
         assertThat(awardResults.get(0).recordId()).isEqualTo(100L);
@@ -1033,10 +1071,12 @@ class GlobalSearchServiceTest {
                         "CDC", "Dr. Workowski"
                 )));
 
+        stubOneLexicalAwardMatch("gonorrhea prevention vaccine research");
+
         GlobalSearchResponse response =
                 service.search("gonorrhea prevention vaccine research");
 
-        GlobalSearchItemResponse item = response.results().get(0);
+        GlobalSearchItemResponse item = firstRelated(response);
         assertThat(item.identifier()).isEqualTo("01099385");
         assertThat(item.identifier()).startsWith("0");
     }
@@ -1072,4 +1112,47 @@ class GlobalSearchServiceTest {
                 .hasMessageContaining("Unknown record type");
         verifyNoInteractions(awardArchiveService);
     }
+
+    /*
+     * A single lexical hit, so a semantic-focused test still has
+     * semantic results to assert on under the relevance policy added
+     * for QA TC-041: semantic results are kept only when the query
+     * matched something lexically. These tests are about how a semantic
+     * row is enriched, deduplicated and identified - not about the
+     * merge rule - so they get a lexical match and then look for the
+     * related item, rather than assuming it is first.
+     */
+    private void stubOneLexicalAwardMatch(String query) {
+        when(awardArchiveService.search(query, 0, 25)).thenReturn(
+                new AwardSearchResponse(
+                        null,
+                        new PageResponse<>(
+                                List.of(new AwardSearchResultResponse(
+                                        999000L,
+                                        "lexical-anchor-00001",
+                                        1,
+                                        "Lexical anchor",
+                                        "Active",
+                                        "Dr. Anchor",
+                                        "NSF",
+                                        "Biology",
+                                        null,
+                                        BigDecimal.ONE,
+                                        null,
+                                        null
+                                )),
+                                0, 25, 1, 1, true, true
+                        )
+                )
+        );
+    }
+
+    /** The first semantically-matched item, whatever it ranks behind. */
+    private GlobalSearchItemResponse firstRelated(GlobalSearchResponse response) {
+        return response.results().stream()
+                .filter(item -> "RELATED".equals(item.matchType()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no semantic result in response"));
+    }
+
 }

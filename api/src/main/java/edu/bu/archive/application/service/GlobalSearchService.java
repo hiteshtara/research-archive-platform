@@ -188,6 +188,40 @@ public class GlobalSearchService {
                     .toList();
         }
 
+        /*
+         * Relevance policy (QA TC-041): a semantic result is a
+         * suggestion alongside real matches, never an answer on its own.
+         *
+         * Semantic search has no similarity cutoff - see
+         * SemanticSearchRepository, which explains why no single global
+         * threshold works - so it always returns its nearest few rows,
+         * however far away they are. For a query that matches nothing,
+         * "nearest" is simply "least unrelated", and the page filled up
+         * with records having no visible connection to what was typed:
+         * "zzzznotfound123" returned five Negotiations and
+         * "qzxwvnonsense987" five Awards, measured on dev 2026-10-05.
+         *
+         * So the rule is relative, not absolute: keep semantic results
+         * only when something was actually found by name, number or
+         * field. That needs no threshold and invents no score - it asks
+         * whether the query matched anything at all.
+         *
+         * Measured against dev, this removes exactly the nonsense cases
+         * and touches nothing useful: "pediatric asthma" (7 lexical + 3
+         * semantic), "quantum" (87 + 4), "climate" (86 + 2),
+         * "neurodegeneration" (88 + 1) and "opioid" (86 + 1) all keep
+         * every semantic result they had, because each already matched
+         * lexically.
+         */
+        boolean anyLexicalMatch = !irbResults.isEmpty()
+                || !awardResults.isEmpty()
+                || !negotiationResults.isEmpty()
+                || !subawardResults.isEmpty()
+                || !proposalResults.isEmpty();
+        if (!anyLexicalMatch) {
+            semanticResults = List.of();
+        }
+
         List<GlobalSearchItemResponse> merged = new ArrayList<>(
                 irbResults.size() + awardResults.size()
                         + negotiationResults.size() + subawardResults.size()
