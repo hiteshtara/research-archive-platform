@@ -159,35 +159,54 @@ export function resolveSearchState({
  *
  * QA TC-017: a search carrying an invisible control character used to
  * return a server error, and the page said "Unable to search right now.
- * Try again in a moment." The API now refuses that input properly
- * (400 VALIDATION_ERROR), but the same sentence was still shown - so
- * the page told the user to wait and retry something that will fail
- * identically every time, and never mentioned the only thing that would
- * help: changing what they typed.
+ * Try again in a moment." The API now refuses that input properly, but
+ * the same sentence was still shown - so the page told the reader to
+ * wait and retry something that will be refused identically every time,
+ * and never mentioned the only thing that would help, which is changing
+ * what they entered.
  *
- * The distinction is the API's own machine-readable code, not the
- * status: a 400 can still be a genuine fault, and only VALIDATION_ERROR
- * means "the input was refused".
+ * VALIDATION_ERROR is a SHARED code, not a specific diagnosis. Measured
+ * against dev, the same code comes back for at least:
+ *
+ *   - a control character in the query or in a structured filter
+ *     ("Parameter 'q' contains a character that is not allowed: U+0000")
+ *   - a Global Search query past its length limit
+ *     ("search.query: size must be between 2 and 200")
+ *   - an out-of-range paging parameter
+ *     ("search.page: must be greater than or equal to 0")
+ *
+ * So the guidance must not name a cause. Saying "invisible character"
+ * would be wrong for two of those three, and a confidently wrong
+ * explanation sends someone hunting for a problem they do not have.
+ *
+ * Both the status and the code are required. The code alone is not
+ * enough to conclude the input was refused: a future endpoint could
+ * return it alongside a different status, and a 400 on its own can
+ * still be a genuine fault.
  */
 const INPUT_REJECTED_CODE = "VALIDATION_ERROR";
+const INPUT_REJECTED_STATUS = 400;
 
 export function isSearchInputRejection(error) {
-  return Boolean(error) && error.code === INPUT_REJECTED_CODE;
+  return (
+    Boolean(error) &&
+    error.status === INPUT_REJECTED_STATUS &&
+    error.code === INPUT_REJECTED_CODE
+  );
 }
 
 /*
  * Deliberately our own wording rather than the API's sentence: the
- * server names the parameter and the code point, which is right for a
- * developer reading a response and wrong for someone looking at a
- * search box. Neither version repeats what was typed - echoing the
- * value back is how unprintable or hostile input ends up rendered in
- * the page.
+ * server's text names parameters, code points and constraint internals
+ * ("search.query: size must be between 2 and 200"), which is right in a
+ * response body and unreadable under a search box. Neither version
+ * repeats what was typed - echoing the value back is how unprintable or
+ * hostile input ends up rendered in the page - and this one names no
+ * cause it has not established, only where to look.
  */
 export const SEARCH_INPUT_REJECTED_MESSAGE =
-  "This search can't be run as typed: it contains a character the archive " +
-  "can't search for, which usually means an invisible one picked up when " +
-  "text is pasted from another system. Retype the words you want, or delete " +
-  "and re-enter the search box, then search again.";
+  "This search wasn't accepted as entered. Check the search box and any " +
+  "filters you have set, adjust what you entered, then search again.";
 
 /*
  * The message for a failed search. A refused input gets guidance the
