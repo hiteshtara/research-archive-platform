@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  SEARCH_INPUT_REJECTED_MESSAGE,
   buildSearchParams,
   describeResultCount,
   formatNamedIdentifier,
+  isSearchInputRejection,
   joinMetadata,
   readSearchParams,
   resolveSearchState,
+  searchErrorMessage,
   splitStatusCode,
 } from "./searchPresentation.mjs";
 
@@ -194,4 +199,88 @@ test("loading, empty and results are distinguished", () => {
     resolveSearchState({ hasSearched: true, resultCount: 7 }),
     "results",
   );
+});
+
+// --- Rejected input vs. a broken search (QA TC-017) ----------------------
+
+const GENERIC = "Unable to search Awards right now. Try again in a moment.";
+const rejection = { status: 400, code: "VALIDATION_ERROR" };
+
+test("a refused input is recognised by the API's code, not by the status", () => {
+  assert.equal(isSearchInputRejection(rejection), true);
+  // A 400 that is not a validation error is still a fault, not bad input.
+  assert.equal(isSearchInputRejection({ status: 400, code: "BAD_REQUEST" }), false);
+  assert.equal(isSearchInputRejection({ status: 400 }), false);
+});
+
+test("a server or network failure is never mistaken for bad input", () => {
+  for (const error of [
+    { status: 500 },
+    { status: 503, code: "SERVICE_UNAVAILABLE" },
+    { status: 504 },
+    new TypeError("Failed to fetch"),
+    undefined,
+    null,
+  ]) {
+    assert.equal(isSearchInputRejection(error), false);
+    assert.equal(searchErrorMessage(error, GENERIC), GENERIC);
+  }
+});
+
+test("a refused input gets guidance instead of the generic message", () => {
+  const message = searchErrorMessage(rejection, GENERIC);
+  assert.equal(message, SEARCH_INPUT_REJECTED_MESSAGE);
+  assert.notEqual(message, GENERIC);
+});
+
+test("the guidance never tells the reader to retry the same input", () => {
+  const message = SEARCH_INPUT_REJECTED_MESSAGE.toLowerCase();
+  // The old sentence's advice, which is wrong here: the same text fails
+  // identically every time.
+  assert.ok(!message.includes("try again in a moment"));
+  assert.ok(!message.includes("right now"));
+  assert.ok(!/\bwait\b/.test(message));
+});
+
+test("the guidance says what to change", () => {
+  const message = SEARCH_INPUT_REJECTED_MESSAGE.toLowerCase();
+  assert.ok(/retype|delete|re-enter/.test(message), "it must name an action");
+  assert.ok(message.includes("search again"), "and end with searching again");
+  assert.ok(/character/.test(message), "and say what is wrong");
+});
+
+test("no submitted value or internal detail reaches the message", () => {
+  // The API's own sentence names the parameter and the code point, which
+  // is right for a response body and wrong on a search page.
+  assert.ok(!SEARCH_INPUT_REJECTED_MESSAGE.includes("U+"));
+  assert.ok(!/parameter/i.test(SEARCH_INPUT_REJECTED_MESSAGE));
+  // Nothing interpolates the query, so a hostile value cannot be echoed.
+  const withValue = searchErrorMessage(
+    { status: 400, code: "VALIDATION_ERROR", message: "Parameter 'q' ... smith" },
+    GENERIC,
+  );
+  assert.ok(!withValue.includes("smith"));
+  assert.ok(!withValue.includes("'q'"));
+});
+
+test("every search page routes its error through the resolver", () => {
+  // Each page keeps its own generic sentence for real failures, but no
+  // page may hand that sentence straight to SearchStates any more.
+  const pages = [
+    "../../pages/award/AwardSearchPage.tsx",
+    "../../pages/award/AwardVersionSearchPage.tsx",
+    "../../pages/ProposalFamiliesPage.tsx",
+    "../../pages/NegotiationFamiliesPage.tsx",
+    "../../pages/SubawardFamiliesPage.tsx",
+    "../../pages/GlobalSearchPage.tsx",
+  ];
+  for (const page of pages) {
+    const source = readFileSync(fileURLToPath(new URL(page, import.meta.url)), "utf8");
+    assert.match(source, /searchErrorMessage\(/, `${page} must use the resolver`);
+    assert.doesNotMatch(
+      source,
+      /errorMessage="/,
+      `${page} must not pass a fixed message straight through`,
+    );
+  }
 });

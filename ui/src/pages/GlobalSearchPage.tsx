@@ -16,6 +16,7 @@ import { SearchStates } from "../components/common/search/SearchStates";
 import {
   joinMetadata,
   resolveSearchState,
+  searchErrorMessage,
 } from "../features/common/searchPresentation.mjs";
 import {
   describeResultCard,
@@ -125,7 +126,10 @@ export function GlobalSearchPage() {
     >
       <SearchStates
         state={state}
-        errorMessage="Search results could not be loaded."
+        errorMessage={searchErrorMessage(
+          searchQuery.error,
+          "Search results could not be loaded.",
+        )}
       >
         {results && (
           <>

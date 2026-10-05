@@ -15,6 +15,7 @@ import { emptyResultsMessage } from "../features/common/filterPresentation.mjs";
 import {
   joinMetadata,
   resolveSearchState,
+  searchErrorMessage,
 } from "../features/common/searchPresentation.mjs";
 import { PROPOSAL_FILTER_FIELDS } from "../features/search/searchFilterFields.mjs";
 import type { ProposalFilterKey } from "../features/search/searchFilterFields.d.mts";
@@ -78,7 +79,10 @@ export function ProposalFamiliesPage() {
     >
       <SearchStates
         state={state}
-        errorMessage="Unable to search Proposals right now. Try again in a moment."
+        errorMessage={searchErrorMessage(
+          searchQuery.error,
+          "Unable to search Proposals right now. Try again in a moment.",
+        )}
       >
         {results && (
           <>

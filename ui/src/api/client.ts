@@ -36,16 +36,25 @@ if (!API_BASE_URL) {
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly correlationId?: string;
+  /**
+   * The API's own error code, when it sent one. Carried so the UI can
+   * tell a rejected input apart from a server or network failure - the
+   * two need different wording, and the status alone does not say which
+   * kind of 400 this was.
+   */
+  readonly code?: string;
 
   constructor(
     status: number,
     path: string,
     correlationId?: string,
+    code?: string,
   ) {
     super(`Request failed with status ${status}: ${path}`);
     this.name = "ApiRequestError";
     this.status = status;
     this.correlationId = correlationId;
+    this.code = code;
   }
 }
 
@@ -65,6 +74,7 @@ async function readSafeError(
       error: typeof candidate.error === "string" ? candidate.error : undefined,
       message:
         typeof candidate.message === "string" ? candidate.message : undefined,
+      code: typeof candidate.code === "string" ? candidate.code : undefined,
       correlationId:
         typeof candidate.correlationId === "string"
           ? candidate.correlationId
@@ -106,6 +116,7 @@ async function request<T>(
       response.status,
       path,
       safeError?.correlationId,
+      safeError?.code,
     );
   }
 

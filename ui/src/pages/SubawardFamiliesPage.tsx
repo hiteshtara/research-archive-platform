@@ -15,6 +15,7 @@ import { emptyResultsMessage } from "../features/common/filterPresentation.mjs";
 import {
   joinMetadata,
   resolveSearchState,
+  searchErrorMessage,
 } from "../features/common/searchPresentation.mjs";
 import {
   SUBAWARD_DATE_RANGES,
@@ -91,7 +92,10 @@ export function SubawardFamiliesPage() {
     >
       <SearchStates
         state={state}
-        errorMessage="Unable to search Subawards right now. Try again in a moment."
+        errorMessage={searchErrorMessage(
+          searchQuery.error,
+          "Unable to search Subawards right now. Try again in a moment.",
+        )}
       >
         {results && (
           <>
