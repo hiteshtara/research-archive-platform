@@ -13,6 +13,35 @@ export interface QaStatusMeta {
   description: string;
 }
 
+export type ProgressStageKey =
+  | "inProgress"
+  | "fixedInCode"
+  | "deployedAwaitingVerification"
+  | "verified";
+
+export interface ProgressStageMeta {
+  key: ProgressStageKey;
+  label: string;
+  description: string;
+}
+
+export interface CaseProgress {
+  stage: ProgressStageKey;
+  change: string;
+  deployedBuild: string;
+  verifiedOn: string;
+  verifiedIn: string;
+  results: string;
+  limitations: string;
+}
+
+export interface CaseHistoryEntry {
+  on: string;
+  stage: string;
+  summary: string;
+  environment: string;
+}
+
 export interface QaCase {
   id: string;
   category: string;
@@ -24,6 +53,8 @@ export interface QaCase {
   note: string;
   scope: string;
   environment: string;
+  progress?: CaseProgress;
+  history?: CaseHistoryEntry[];
 }
 
 export interface SecurityRequirement {
@@ -70,3 +101,10 @@ export function securitySummary(requirements: SecurityRequirement[]): SecuritySu
 export function requirementsWithConflicts(
   requirements: SecurityRequirement[],
 ): SecurityRequirement[];
+
+export const PROGRESS_STAGES: ProgressStageMeta[];
+export function progressStage(key: string): ProgressStageMeta | null;
+export function isKnownProgressStage(key: string): boolean;
+export function casesClaimingAnUnverifiedPass(cases: QaCase[]): QaCase[];
+export function casesWithUnevidencedVerification(cases: QaCase[]): QaCase[];
+export function trackedCases(cases: QaCase[]): QaCase[];

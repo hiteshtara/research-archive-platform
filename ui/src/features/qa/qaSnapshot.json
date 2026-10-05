@@ -207,7 +207,24 @@
       "status": "issue",
       "note": "Fixed in code; awaiting deployment and dev verification. A search containing a hidden control character returned a server error. The fix is written and tested locally but is not released, so the website still behaves this way. Retest here once it is released.",
       "scope": "Local test environment",
-      "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic."
+      "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic.",
+      "progress": {
+        "stage": "fixedInCode",
+        "change": "PR #18, commit 884142d",
+        "deployedBuild": "Not deployed",
+        "verifiedOn": "",
+        "verifiedIn": "",
+        "results": "",
+        "limitations": "Becomes a pass only once released and the five affected searches are re-checked on dev."
+      },
+      "history": [
+        {
+          "on": "2026-09-29",
+          "stage": "knownIssue",
+          "summary": "A search containing a hidden control character returned a server error on Award, Historical Award, Proposal, Negotiation and Subaward search.",
+          "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic."
+        }
+      ]
     },
     {
       "id": "TC-018",

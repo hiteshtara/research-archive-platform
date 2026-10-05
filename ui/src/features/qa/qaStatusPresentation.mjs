@@ -169,3 +169,82 @@ export function securitySummary(requirements) {
 export function requirementsWithConflicts(requirements) {
   return requirements.filter((requirement) => requirement.conflict);
 }
+
+/*
+ * How far a fix has travelled, for a case somebody is actively working.
+ * Deliberately four distinct stages: code existing, code being
+ * released, and behaviour being proven on the target environment are
+ * three different facts, and collapsing them is how a local fix starts
+ * reading as a pass.
+ *
+ * A case only reaches "verified" - and may only then be marked passed -
+ * once its acceptance criteria have been checked in the environment the
+ * case requires, with the date, environment and result recorded.
+ */
+export const PROGRESS_STAGES = [
+  {
+    key: "inProgress",
+    label: "In progress",
+    description: "Being worked on. The behaviour below is still what the site does.",
+  },
+  {
+    key: "fixedInCode",
+    label: "Fixed in code, not released",
+    description:
+      "A fix exists and its tests pass, but it is not on this website yet, so the behaviour below is still what you will see.",
+  },
+  {
+    key: "deployedAwaitingVerification",
+    label: "Released, awaiting verification",
+    description:
+      "The fix is on this website but nobody has re-run the case yet. Treat it as unproven until it has been.",
+  },
+  {
+    key: "verified",
+    label: "Verified",
+    description: "Re-run after release and behaved as the case requires.",
+  },
+];
+
+const PROGRESS_KEYS = PROGRESS_STAGES.map((stage) => stage.key);
+
+export function progressStage(key) {
+  return PROGRESS_STAGES.find((stage) => stage.key === key) ?? null;
+}
+
+export function isKnownProgressStage(key) {
+  return PROGRESS_KEYS.includes(key);
+}
+
+/*
+ * The guard behind "mark PASS only after verification": a case being
+ * actively tracked cannot read as passed until its fix is verified in
+ * the required environment. Returns the offending cases, so the test
+ * suite can refuse a snapshot that claims a pass too early.
+ */
+export function casesClaimingAnUnverifiedPass(cases) {
+  return cases.filter(
+    (item) =>
+      item.progress &&
+      item.status === "passed" &&
+      item.progress.stage !== "verified",
+  );
+}
+
+/*
+ * A verified stage has to carry its evidence, or "verified" is just a
+ * word. Returns the cases whose claim is not backed by a date, an
+ * environment and a result.
+ */
+export function casesWithUnevidencedVerification(cases) {
+  return cases.filter(
+    (item) =>
+      item.progress &&
+      item.progress.stage === "verified" &&
+      !(item.progress.verifiedOn && item.progress.verifiedIn && item.progress.results),
+  );
+}
+
+export function trackedCases(cases) {
+  return cases.filter((item) => item.progress);
+}

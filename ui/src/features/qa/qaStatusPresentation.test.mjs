@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  casesClaimingAnUnverifiedPass,
+  casesWithUnevidencedVerification,
   caseAreas,
   countByStatus,
   deployedEvidenceCount,
@@ -14,8 +16,12 @@ import {
   resultsLabel,
   scopesPresent,
   securitySummary,
+  isKnownProgressStage,
+  progressStage,
+  PROGRESS_STAGES,
   statusMeta,
   STATUS_META,
+  trackedCases,
 } from "./qaStatusPresentation.mjs";
 
 function readJson(relativePath) {
@@ -378,4 +384,96 @@ test("the QA status link is declared in the shared navigation config, not inline
     !/to="\/qa-status"/.test(layout),
     "AppLayout must not hard-code the QA status link",
   );
+});
+
+
+// --- Progress tracking: a fix is not done until it is verified -----------
+
+test("every tracked case uses a known progress stage", () => {
+  for (const item of trackedCases(cases)) {
+    assert.ok(
+      isKnownProgressStage(item.progress.stage),
+      `${item.id}: unknown progress stage "${item.progress.stage}"`,
+    );
+  }
+});
+
+test("no tracked case is marked passed before it has been verified", () => {
+  // The rule this page exists to keep: PASS only after the case's
+  // acceptance criteria are verified in the required environment.
+  assert.deepEqual(
+    casesClaimingAnUnverifiedPass(cases).map((item) => item.id),
+    [],
+  );
+});
+
+test("a verified claim must carry its date, environment and result", () => {
+  assert.deepEqual(
+    casesWithUnevidencedVerification(cases).map((item) => item.id),
+    [],
+  );
+});
+
+test("the guards actually catch a premature pass and an unevidenced one", () => {
+  const prematurePass = {
+    id: "X-1",
+    status: "passed",
+    progress: { stage: "fixedInCode", verifiedOn: "", verifiedIn: "", results: "" },
+  };
+  assert.deepEqual(casesClaimingAnUnverifiedPass([prematurePass]).map((i) => i.id), ["X-1"]);
+
+  const unevidenced = {
+    id: "X-2",
+    status: "passed",
+    progress: { stage: "verified", verifiedOn: "", verifiedIn: "", results: "" },
+  };
+  assert.deepEqual(casesWithUnevidencedVerification([unevidenced]).map((i) => i.id), ["X-2"]);
+
+  const proper = {
+    id: "X-3",
+    status: "passed",
+    progress: {
+      stage: "verified",
+      verifiedOn: "2026-10-05",
+      verifiedIn: "Development website",
+      results: "Behaved as the case requires.",
+    },
+  };
+  assert.deepEqual(casesClaimingAnUnverifiedPass([proper]), []);
+  assert.deepEqual(casesWithUnevidencedVerification([proper]), []);
+});
+
+test("every progress stage has a label and a plain-language description", () => {
+  for (const stage of PROGRESS_STAGES) {
+    assert.ok(stage.label, `${stage.key}: label must be set`);
+    assert.ok(stage.description, `${stage.key}: description must be set`);
+    assert.ok(progressStage(stage.key));
+  }
+  assert.equal(progressStage("nonsense"), null);
+});
+
+test("TC-017 is tracked as fixed in code, not released, and not a pass", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-017");
+  assert.equal(item.status, "issue");
+  assert.equal(item.progress.stage, "fixedInCode");
+  assert.match(item.progress.change, /PR #18/);
+  assert.equal(item.progress.deployedBuild, "Not deployed");
+  assert.equal(item.progress.verifiedOn, "");
+  assert.ok(item.progress.limitations, "the remaining limitation must be stated");
+});
+
+test("earlier findings are preserved rather than overwritten", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-017");
+  assert.ok(Array.isArray(item.history) && item.history.length > 0);
+  for (const entry of item.history) {
+    assert.match(entry.on, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(entry.summary, "a history entry must say what was found");
+  }
+});
+
+test("the page renders the progress block and earlier findings", () => {
+  const source = readSource("../../pages/QaStatusPage.tsx");
+  assert.match(source, /item\.progress/);
+  assert.match(source, /Earlier findings/);
+  assert.match(source, /Remaining limitations/);
 });
