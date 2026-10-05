@@ -204,19 +204,19 @@
       "steps": "Search using special characters and SQL-like strings",
       "expected": "App handles input safely, shows no results or validation error, and does not expose errors or execute unintended queries",
       "priority": "High",
-      "status": "passed",
-      "note": "Verified on the development website after release. A search containing a hidden control character is now refused with a clear validation response instead of a server error, on all five module searches and Global Search. Ordinary and wildcard searches are unaffected.",
+      "status": "issue",
+      "note": "Half fixed. The server no longer errors on a search containing a hidden control character - it refuses it properly, released and verified on dev. But the page still shows “Unable to search right now. Try again in a moment.”, which tells you to wait and retry text that will be refused every time. A fix for the message is in review.",
       "scope": "Development website",
       "environment": "dev: API ECS rev 73 (image 20261005T155241Z-70251b7, source 70251b7); UI Amplify job #100 @ 71d777d; signed-in session, 2026-10-05",
       "progress": {
-        "stage": "verified",
+        "stage": "inProgress",
         "requiredEnvironment": "Development website",
-        "change": "PR #18, commit 884142d (merged as 70251b7)",
-        "deployedBuild": "API ECS rev 73 (image 20261005T155241Z-70251b7)",
-        "verifiedOn": "2026-10-05",
-        "verifiedIn": "Development website",
-        "results": "All five module searches and Global Search answered 400 VALIDATION_ERROR, naming the parameter and the character (U+0000) without repeating what was typed. A structured sponsor filter carrying the same character was refused the same way. Ordinary (105698), wildcard (*105698*) and literal-percent searches still returned results.",
-        "limitations": "The page still shows its general “Unable to search Awards right now” message rather than wording specific to the rejected character. The server-side defect is fixed; improving that message is a separate piece of work."
+        "change": "API: PR #18 (merged 70251b7), released. UI message: PR #20, in review.",
+        "deployedBuild": "API ECS rev 73 (image 20261005T155241Z-70251b7) - API part only",
+        "verifiedOn": "",
+        "verifiedIn": "",
+        "results": "",
+        "limitations": "The API half is released and verified on dev. The case stays open because its expected result is about what the page does, and the page still misreports refused input as a temporary search failure."
       },
       "history": [
         {
@@ -230,6 +230,12 @@
           "stage": "fixedInCode",
           "summary": "Fix written and tested locally (PR #18); not released at that point, so the website still returned a server error.",
           "environment": "local disposable stack: qa-api = the rev 71 image itself (digest 57ef662b, source 1e5f1e1), local profile; qa-pg pgvector pg17 with all migrations from a61a456 + synthetic data (20,000 Award families / 24,000 versions); UI a61a456 on localhost:5173; 2026-09-29. No shared dev traffic."
+        },
+        {
+          "on": "2026-10-05",
+          "stage": "verified",
+          "summary": "Recorded as passed after the API fix was released as rev 73 and verified on dev: all five module searches and Global Search answered 400 VALIDATION_ERROR, a structured sponsor filter was refused the same way, and ordinary, wildcard and literal-percent searches still returned results. Reversed the same day: the API evidence stands, but the case covers what the user sees, and the page still presented refused input as a temporary failure.",
+          "environment": "dev: API ECS rev 73 (image 20261005T155241Z-70251b7, source 70251b7); UI Amplify job #100 @ 71d777d; signed-in session, 2026-10-05"
         }
       ]
     },
