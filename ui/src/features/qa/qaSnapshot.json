@@ -561,7 +561,7 @@
       "progress": {
         "stage": "inProgress",
         "requiredEnvironment": "Development website",
-        "change": "PR #27 (lexical gating) was merged as 637502e but never deployed and is reversed by PR #28, which is open. Title enrichment is a separate PR, not yet raised.",
+        "change": "As at 5 Oct 2026: PR #27 (lexical gating) was merged as 637502e but never deployed, and is reversed by PR #28, which is open. Title enrichment is PR #30, also open. Re-check each of these states before publishing this entry - they are time-sensitive.",
         "deployedBuild": "Not deployed",
         "verifiedOn": "",
         "verifiedIn": "",
