@@ -252,30 +252,39 @@ test("TC-018 keeps its local-only findings in history rather than losing them", 
   assert.ok(item.history.length >= 3);
 });
 
-test("TC-041 is in progress and separates merged code from deployed behaviour", () => {
-  // The distinction the case turns on right now: the rejected lexical
-  // gate is merged but has never run on dev, so the site behaves as it
-  // did when the case was raised.
+test("TC-041's current status describes deployed behaviour, not branch state", () => {
+  // The entry has to stay true through the interval where the fixes are
+  // merged but not released. So the note describes only what the site
+  // does, and carries no pull-request state at all - merge states go
+  // stale the moment anything merges.
   const item = cases.find((candidate) => candidate.id === "TC-041");
   assert.ok(item);
   assert.equal(item.status, "issue");
   assert.equal(item.progress.stage, "inProgress");
+  for (const stale of ["#27", "#28", "#30", "is open", "merged"]) {
+    assert.ok(
+      !item.note.includes(stale),
+      `the current status must not depend on "${stale}"`,
+    );
+  }
+  assert.match(item.note, /deployed site|this website today/i);
+
+  // Branch and merge history is kept, but explicitly dated and labelled
+  // as a record rather than a status.
+  assert.match(item.progress.change, /^Historical, as at/);
+  assert.match(item.progress.change, /PR #27/);
+  assert.match(item.progress.change, /PR #28/);
+  assert.match(item.progress.change, /PR #30/);
+  assert.match(item.progress.change, /not a\s+current status/);
+
+  // The authoritative current status is evidence, not merge state.
   assert.equal(item.progress.deployedBuild, "Not deployed");
   assert.equal(item.progress.verifiedOn, "");
+  assert.match(item.progress.limitations, /Merging is not releasing/);
   assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
-
-  // Merged, unmerged and undeployed are each stated, not blurred.
-  assert.match(item.progress.change, /PR #27/);
-  assert.match(item.progress.change, /never deployed/);
-  assert.match(item.progress.change, /PR #28/);
-  assert.match(item.progress.change, /open/);
-  assert.match(item.progress.limitations, /rev 74/);
-  assert.match(item.progress.limitations, /77773ee/);
 
   // And no improvement is claimed that has not happened.
   assert.match(item.progress.limitations, /No improvement to semantic relevance is claimed/);
-  assert.doesNotMatch(item.note, /fixed|improved|resolved/i);
-  // Its original finding survives.
   assert.ok(item.history.some((entry) => /document number/i.test(entry.summary)));
 });
 

@@ -547,7 +547,7 @@
       "expected": "Verify whether irrelevant Semantic match results are returned; flag as a possible relevance/precision defect if unrelated records appear (observed during exploration)",
       "priority": "High",
       "status": "issue",
-      "note": "Being worked on; nothing is released. Global Search can still answer a query it found nothing for with loosely-related suggestions, and Negotiation and Subaward suggestions still show a document number or code where the title should be.",
+      "note": "Being worked on. On this website today, Global Search can still answer a query it found nothing for with loosely-related suggestions, and Negotiation and Subaward suggestions still show a document number or code where the title should be. This describes the deployed site, not work in progress: it changes only when a release has been made and checked here.",
       "scope": "Development website",
       "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29",
       "history": [
@@ -561,12 +561,12 @@
       "progress": {
         "stage": "inProgress",
         "requiredEnvironment": "Development website",
-        "change": "As at 5 Oct 2026: PR #27 (lexical gating) was merged as 637502e but never deployed, and is reversed by PR #28, which is open. Title enrichment is PR #30, also open. Re-check each of these states before publishing this entry - they are time-sensitive.",
+        "change": "Historical, as at 5 October 2026: PR #27 (lexical gating) merged as 637502e but never deployed; PR #28 reverses it; PR #30 adds the missing titles. Branch and merge states move; this line is a record of that date, not a current status. What is live is given by the released build below.",
         "deployedBuild": "Not deployed",
         "verifiedOn": "",
         "verifiedIn": "",
         "results": "",
-        "limitations": "Merged code is not deployed behaviour here. The running API is rev 74, built from 77773ee, which predates PR #27 - so the rejected rule has never run on this website, and Global Search behaves exactly as it did when the case was raised. No improvement to semantic relevance is claimed: the ranking is unchanged, and the work in review changes how results are presented, not how they are scored."
+        "limitations": "Merging is not releasing, and this entry does not change when a pull request merges - only when a build reaches this website and is checked. The released build and verification fields below are the authoritative current status; until they name a build, nothing described above has reached anyone. No improvement to semantic relevance is claimed: the ranking is unchanged, and the work in review changes how results are presented, not how they are scored."
       }
     },
     {
