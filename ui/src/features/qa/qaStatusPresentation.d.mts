@@ -25,8 +25,17 @@ export interface ProgressStageMeta {
   description: string;
 }
 
+export interface CaseObservation {
+  on: string;
+  uiBuild: string;
+  apiBuild: string;
+  behaviour: string;
+}
+
 export interface CaseProgress {
   stage: ProgressStageKey;
+  verificationStatus?: string;
+  lastObservation?: CaseObservation;
   requiredEnvironment?: string;
   change: string;
   deployedBuild: string;

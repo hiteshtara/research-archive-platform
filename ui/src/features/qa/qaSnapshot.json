@@ -547,7 +547,7 @@
       "expected": "Verify whether irrelevant Semantic match results are returned; flag as a possible relevance/precision defect if unrelated records appear (observed during exploration)",
       "priority": "High",
       "status": "issue",
-      "note": "Being worked on. On this website today, Global Search can still answer a query it found nothing for with loosely-related suggestions, and Negotiation and Subaward suggestions still show a document number or code where the title should be. This describes the deployed site, not work in progress: it changes only when a release has been made and checked here.",
+      "note": "TC-041 remains open until the released UI and API pass acceptance checks. What was last seen, and on which builds, is recorded below - the site may have changed since.",
       "scope": "Development website",
       "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29",
       "history": [
@@ -566,7 +566,14 @@
         "verifiedOn": "",
         "verifiedIn": "",
         "results": "",
-        "limitations": "Merging is not releasing, and this entry does not change when a pull request merges - only when a build reaches this website and is checked. The released build and verification fields below are the authoritative current status; until they name a build, nothing described above has reached anyone. No improvement to semantic relevance is claimed: the ranking is unchanged, and the work in review changes how results are presented, not how they are scored."
+        "limitations": "Merging is not releasing, and the UI and API do not release together: the UI rebuilds automatically when main changes, while the API is deployed by hand, so the site can carry a new UI against an older API for a time. Read the observation above as a dated record on named builds, not as a description of the site right now. No improvement to semantic relevance is claimed: the ranking is unchanged, and the work in review changes how results are presented, not how they are scored.",
+        "verificationStatus": "Open. Closes only when the released UI and API together pass the acceptance checks on this website.",
+        "lastObservation": {
+          "on": "2026-10-05",
+          "uiBuild": "Amplify job #110 @ 637502e",
+          "apiBuild": "API ECS rev 74 (image 20261005T181208Z-77773ee)",
+          "behaviour": "Global Search answered a query it had found nothing for with five loosely-related Negotiation suggestions, and those suggestions showed a document number where the title should be."
+        }
       }
     },
     {
