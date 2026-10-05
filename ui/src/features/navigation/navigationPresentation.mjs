@@ -30,6 +30,12 @@ export const sidebarNavigationItems = [
   // links to /archived-files, so it is currently reachable by direct URL
   // alone; that is deliberate pending a decision on its future.
   { key: "globalSearch", label: "Global Search", path: "/search" },
+  // Last, below every domain: this page is about the archive's own
+  // testing rather than a way into the records, so it never competes
+  // with them. It is QA scaffolding for the current testing round and
+  // is expected to be removed afterwards - see docs/QA_STATUS_PAGE.md
+  // for everything to delete.
+  { key: "qaStatus", label: "QA status", path: "/qa-status" },
 ];
 
 // Mirrors react-router NavLink's own default (non-"end") active-match

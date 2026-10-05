@@ -1,0 +1,381 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+import {
+  caseAreas,
+  countByStatus,
+  deployedEvidenceCount,
+  filterCases,
+  isKnownStatus,
+  openCaseCount,
+  requirementsWithConflicts,
+  resultsLabel,
+  scopesPresent,
+  securitySummary,
+  statusMeta,
+  STATUS_META,
+} from "./qaStatusPresentation.mjs";
+
+function readJson(relativePath) {
+  return JSON.parse(
+    readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8"),
+  );
+}
+
+function readSource(relativePath) {
+  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+}
+
+const snapshot = readJson("./qaSnapshot.json");
+const security = readJson("./securityRequirements.json");
+const cases = snapshot.cases;
+const requirements = security.requirements;
+
+// --- The snapshot itself ---------------------------------------------------
+
+test("the snapshot holds 47 of the original 48 cases, and TC-022 is not one of them", () => {
+  // TC-022 is excluded by owner direction. Its historical finding stays
+  // in the source workbook; it must never appear here, and must never be
+  // counted as passed.
+  assert.equal(cases.length, 47);
+  assert.equal(snapshot.originalCaseCount, 48);
+  assert.equal(snapshot.excludedCaseCount, 1);
+  assert.equal(cases.length + snapshot.excludedCaseCount, snapshot.originalCaseCount);
+  assert.ok(!cases.some((item) => item.id === "TC-022"));
+});
+
+test("every case carries the fields a tester needs to act on it", () => {
+  for (const item of cases) {
+    for (const field of [
+      "id",
+      "category",
+      "title",
+      "steps",
+      "expected",
+      "status",
+      "note",
+      "scope",
+      "environment",
+    ]) {
+      assert.ok(item[field], `${item.id}: ${field} must be set`);
+    }
+    assert.ok(isKnownStatus(item.status), `${item.id}: unknown status "${item.status}"`);
+  }
+});
+
+test("case ids are unique", () => {
+  const ids = cases.map((item) => item.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+// --- Counts are derived, never maintained ---------------------------------
+
+test("status counts add up to the number of cases", () => {
+  const counts = countByStatus(cases);
+  const summed = Object.values(counts).reduce((total, count) => total + count, 0);
+  assert.equal(summed, cases.length);
+});
+
+test("countByStatus reports a real zero for a status with no cases", () => {
+  const counts = countByStatus([
+    { id: "X-1", category: "A", title: "t", note: "n", status: "passed", scope: "Development website" },
+  ]);
+  assert.equal(counts.passed, 1);
+  assert.equal(counts.blocked, 0);
+  assert.equal(counts.notTested, 0);
+});
+
+test("countByStatus refuses a status the page has no label for", () => {
+  assert.throws(
+    () => countByStatus([{ id: "X-1", status: "looksFine" }]),
+    /unknown case status "looksFine" on X-1/,
+  );
+});
+
+test("open cases are the ones still needing somebody to act", () => {
+  const counts = countByStatus(cases);
+  assert.equal(
+    openCaseCount(cases),
+    counts.issue + counts.decision + counts.blocked + counts.notTested,
+  );
+  // Passing cases, with or without evidence gaps, are not "open".
+  assert.equal(openCaseCount(cases) + counts.passed + counts.evidence, cases.length);
+});
+
+test("every status has a label and a plain-language description", () => {
+  for (const status of STATUS_META) {
+    assert.ok(status.label, `${status.key}: label must be set`);
+    assert.ok(status.description, `${status.key}: description must be set`);
+    assert.ok(statusMeta(status.key));
+  }
+  assert.equal(statusMeta("nonsense"), null);
+});
+
+// --- Filtering ------------------------------------------------------------
+
+test("no filters shows every case", () => {
+  assert.equal(filterCases(cases).length, cases.length);
+  assert.equal(filterCases(cases, {}).length, cases.length);
+});
+
+test("a status filter returns only that status", () => {
+  for (const status of STATUS_META) {
+    const filtered = filterCases(cases, { status: status.key });
+    assert.equal(filtered.length, countByStatus(cases)[status.key]);
+    assert.ok(filtered.every((item) => item.status === status.key));
+  }
+});
+
+test("an area filter returns only that area", () => {
+  const area = caseAreas(cases)[0];
+  const filtered = filterCases(cases, { area });
+  assert.ok(filtered.length > 0);
+  assert.ok(filtered.every((item) => item.category === area));
+});
+
+test("search finds a case by its id, case-insensitively and with surrounding space", () => {
+  assert.deepEqual(
+    filterCases(cases, { search: "  tc-041  " }).map((item) => item.id),
+    ["TC-041"],
+  );
+});
+
+test("search finds cases by words in the title", () => {
+  const filtered = filterCases(cases, { search: "wildcard" });
+  assert.ok(filtered.length > 0);
+  assert.ok(filtered.every((item) => `${item.title} ${item.note}`.toLowerCase().includes("wildcard")));
+});
+
+test("search ignores the environment string, so a build name does not match everything", () => {
+  // "Playwright" appears in environment text but in no title or note.
+  assert.equal(filterCases(cases, { search: "playwright" }).length, 0);
+});
+
+test("filters narrow together rather than replacing one another", () => {
+  const area = "Awards Search";
+  const both = filterCases(cases, { area, status: "issue" });
+  assert.ok(both.every((item) => item.category === area && item.status === "issue"));
+  assert.ok(both.length <= filterCases(cases, { area }).length);
+  assert.ok(both.length <= filterCases(cases, { status: "issue" }).length);
+});
+
+test("a search matching nothing returns an empty list rather than everything", () => {
+  assert.equal(filterCases(cases, { search: "zzzznotacase" }).length, 0);
+});
+
+test("the results label states the real numbers and says so when nothing is filtered", () => {
+  assert.equal(resultsLabel(47, 47), "Showing all 47 cases");
+  assert.equal(resultsLabel(3, 47), "Showing 3 of 47 cases");
+});
+
+// --- Keeping evidence honest ----------------------------------------------
+
+test("evidence scope is carried per case, and local work is not counted as deployed", () => {
+  assert.ok(scopesPresent(cases).includes("Development website"));
+  assert.equal(
+    deployedEvidenceCount(cases),
+    cases.filter((item) => item.scope === "Development website").length,
+  );
+  assert.ok(deployedEvidenceCount(cases) < cases.length, "some cases are not dev-verified");
+});
+
+test("TC-017 is still a known issue, scoped to local evidence, not a pass", () => {
+  // A fix for this exists on a branch and is not released. The page must
+  // keep showing the behaviour the deployed website has.
+  const item = cases.find((candidate) => candidate.id === "TC-017");
+  assert.ok(item);
+  assert.equal(item.status, "issue");
+  assert.notEqual(item.scope, "Development website");
+});
+
+test("the two cases with evidence gaps are not presented as unqualified passes", () => {
+  const gapped = cases.filter((item) => item.status === "evidence");
+  assert.equal(gapped.length, 2);
+  for (const item of gapped) {
+    assert.match(item.note, /outstanding|remain|not tested/i);
+  }
+});
+
+test("blocked cases stay blocked and say what is needed", () => {
+  const blocked = cases.filter((item) => item.status === "blocked");
+  assert.equal(blocked.length, 2);
+  for (const item of blocked) {
+    assert.match(item.note, /account|permission|tester/i);
+  }
+});
+
+// --- Security requirements ------------------------------------------------
+
+test("all seven requirements are present with stable SEC ids", () => {
+  assert.deepEqual(
+    requirements.map((requirement) => requirement.id),
+    ["SEC-001", "SEC-002", "SEC-003", "SEC-004", "SEC-005", "SEC-006", "SEC-007"],
+  );
+  assert.deepEqual(
+    requirements.map((requirement) => requirement.csvId),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
+});
+
+test("each requirement preserves the source document's own wording", () => {
+  // Spot-checked against the Security Requirements tab verbatim - the
+  // page may add explanation around these, never paraphrase them.
+  const byId = Object.fromEntries(requirements.map((item) => [item.id, item]));
+  assert.equal(
+    byId["SEC-001"].requirement,
+    "Central users shall have unrestricted access to all system objects and functionality provided by the system.",
+  );
+  assert.equal(
+    byId["SEC-003"].requirement,
+    "Research staff shall have access only to system objects on which they are directly listed as a contact.",
+  );
+  assert.equal(
+    byId["SEC-007"].requirement,
+    "The system shall enforce access restrictions when a user attempts to access a system object for which they are not authorized.",
+  );
+  for (const requirement of requirements) {
+    assert.ok(requirement.requirement.length > 40, `${requirement.id}: wording looks truncated`);
+    assert.ok(requirement.acceptance, `${requirement.id}: acceptance criteria must be set`);
+    assert.ok(requirement.accessScope, `${requirement.id}: access scope must be set`);
+  }
+});
+
+test("no requirement claims to be verified while enforcement is off", () => {
+  const summary = securitySummary(requirements);
+  assert.equal(summary.verified, 0);
+  assert.equal(summary.total, 7);
+  assert.equal(summary.headline, "0 of 7 requirements verified");
+  for (const requirement of requirements) {
+    assert.equal(requirement.deployment, "Not deployed");
+    assert.equal(requirement.verification, "Not verified");
+  }
+});
+
+test("draft pull requests are never described as implemented and deployed", () => {
+  for (const requirement of requirements) {
+    assert.match(
+      requirement.implementation,
+      /^(In draft, not merged|Not started)$/,
+      `${requirement.id}: implementation status overstates the work`,
+    );
+  }
+});
+
+test("the known conflicts are recorded rather than quietly resolved", () => {
+  const conflicted = requirementsWithConflicts(requirements);
+  const ids = conflicted.map((requirement) => requirement.id);
+  // The department fixture ambiguity and the "all system objects" scope
+  // limit must both be surfaced.
+  assert.ok(ids.includes("SEC-002"), "the PAFO Administrator group ambiguity must be flagged");
+  assert.ok(ids.includes("SEC-001"), "the scope of “all system objects” must be flagged");
+  assert.match(
+    conflicted.find((requirement) => requirement.id === "SEC-002").conflict,
+    /PAFO/,
+  );
+});
+
+test("recommendations are recorded but never presented as approved policy", () => {
+  // Recorded for review on 2026-10-05. They must stay visibly
+  // unapproved: nothing here has been accepted as policy, and none of
+  // it changes how the archive behaves.
+  assert.match(security.recommendationStatus, /not approved/i);
+  const byId = Object.fromEntries(requirements.map((item) => [item.id, item]));
+  for (const id of ["SEC-001", "SEC-002", "SEC-006"]) {
+    assert.ok(byId[id].recommendation, `${id}: recommendation must be recorded`);
+  }
+  assert.match(byId["SEC-001"].recommendation, /explicit, auditable grant/);
+  assert.match(byId["SEC-002"].recommendation, /department-only test identity/);
+  assert.match(byId["SEC-006"].recommendation, /not the same as revoking/);
+  // Still pending, not assumed.
+  assert.match(byId["SEC-006"].recommendation, /pending/);
+  // A recommendation must never read as a decision already taken.
+  for (const requirement of requirements) {
+    assert.doesNotMatch(requirement.recommendation, /\bapproved\b(?! policy)/i);
+  }
+});
+
+test("the page shows a recommendation under an explicitly unapproved heading", () => {
+  const source = readSource("../../pages/QaStatusPage.tsx");
+  assert.match(source, /Recommended, not approved/);
+  assert.match(source, /requirement\.recommendation/);
+});
+
+test("the enforcement state is stated so no one reads these as live controls", () => {
+  assert.match(security.enforcementState, /OFF|off/);
+  assert.match(security.enforcementState, /cannot be verified|whole archive/);
+});
+
+// --- What must not reach a browser-delivered asset ------------------------
+
+test("no named test identities or record fixtures are shipped to the browser", () => {
+  // These live in restricted test documentation. The page describes the
+  // groups, never the people or the exact records they can reach.
+  const payload = `${JSON.stringify(snapshot)} ${JSON.stringify(security)}`.toUpperCase();
+  for (const name of [
+    "FARRER",
+    "RAYAMAJHI",
+    "SCHINDELE",
+    "ANTCAST",
+    "2573180018",
+    "9500316722",
+    "9500317253",
+    "9500312705",
+  ]) {
+    assert.ok(!payload.includes(name), `"${name}" must not ship in a frontend asset`);
+  }
+});
+
+test("no credentials, tokens or local filesystem paths are shipped to the browser", () => {
+  const payload = `${JSON.stringify(snapshot)} ${JSON.stringify(security)}`.toLowerCase();
+  for (const term of [
+    "password",
+    "secret",
+    "bearer ",
+    "session token",
+    "mysapsso2",
+    "jsessionid",
+    "/users/",
+    "unredacted",
+  ]) {
+    assert.ok(!payload.includes(term), `"${term}" must not ship in a frontend asset`);
+  }
+});
+
+test("the excluded case's subject matter is not described in the shipped asset either", () => {
+  const payload = `${JSON.stringify(snapshot)} ${JSON.stringify(security)}`.toLowerCase();
+  assert.ok(!payload.includes("sap transmission"));
+});
+
+// --- Page wiring (static source inspection - no component-render harness) -
+
+test("QaStatusPage.tsx derives its totals from the presentation module", () => {
+  const source = readSource("../../pages/QaStatusPage.tsx");
+  assert.match(
+    source,
+    /from\s*"[^"]*qaStatusPresentation\.mjs"/,
+    "the page must use the shared, tested helpers rather than its own counting",
+  );
+  assert.match(source, /securityRequirements\.json/, "the page must render the security section");
+});
+
+test("App.tsx routes /qa-status to the page", () => {
+  const source = readSource("../../App.tsx");
+  const routeBlock = source.match(/path="qa-status"[\s\S]{0,120}/)?.[0];
+  assert.ok(routeBlock, "expected a qa-status route block");
+  assert.match(routeBlock, /QaStatusPage/);
+});
+
+test("the QA status link is declared in the shared navigation config, not inline in AppLayout", () => {
+  // AppLayout renders from navigationPresentation.mjs; a second inline
+  // list there is exactly the drift the navigation tests guard against.
+  const nav = readSource("../navigation/navigationPresentation.mjs");
+  assert.match(nav, /path:\s*"\/qa-status"/);
+
+  const layout = readSource("../../layout/AppLayout.tsx");
+  assert.ok(
+    !/to="\/qa-status"/.test(layout),
+    "AppLayout must not hard-code the QA status link",
+  );
+});

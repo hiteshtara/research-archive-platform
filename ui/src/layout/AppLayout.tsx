@@ -1,6 +1,7 @@
 import {
   AccountCircleOutlined,
   ArchiveOutlined,
+  FactCheckOutlined,
   CloseOutlined,
   DashboardOutlined,
   DescriptionOutlined,
@@ -59,6 +60,7 @@ const NAV_ICONS: Record<string, React.ReactNode> = {
   subawards: <GavelOutlined />,
   archivedFiles: <FindInPageOutlined />,
   globalSearch: <SearchOutlined />,
+  qaStatus: <FactCheckOutlined />,
 };
 
 type NavigationEntry = {

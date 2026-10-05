@@ -527,10 +527,10 @@ test("Archived File Finder is NOT in the primary sidebar navigation", () => {
   assert.doesNotMatch(source, /label:\s*"Archived File Finder"/);
 });
 
-test("primary navigation is exactly the seven archive domains, Global Search last", () => {
+test("the seven archive domains lead the sidebar, in order, Global Search last of them", () => {
   const source = readSource("../navigation/navigationPresentation.mjs");
   const labels = [...source.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(labels, [
+  assert.deepEqual(labels.slice(0, 7), [
     "Dashboard",
     "Awards",
     "Historical Awards",
@@ -539,6 +539,17 @@ test("primary navigation is exactly the seven archive domains, Global Search las
     "Subawards",
     "Global Search",
   ]);
+});
+
+test("the only sidebar entry after the archive domains is the QA status page", () => {
+  // The domains above are the ways into the records. The exact-list
+  // assertion this replaced existed to stop other entries accumulating,
+  // so the tail is pinned too - Archived File Finder and the developer
+  // tools stay out, asserted separately above. QA status is temporary
+  // scaffolding and this line goes when the page does.
+  const source = readSource("../navigation/navigationPresentation.mjs");
+  const labels = [...source.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(labels.slice(7), ["QA status"]);
 });
 
 test("no developer-tool entries appear in the sidebar", () => {
