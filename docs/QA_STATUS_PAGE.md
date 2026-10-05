@@ -83,54 +83,6 @@ page at phone width.
 without a Cognito session. They are dev-server only and are not part of the
 production build; confirm with `ls dist` after a build.
 
-## Deployment wording is time-sensitive
-
-Entries that describe merge and deployment state go stale between being
-written and being published. Re-check each claim at publication, not at
-authoring:
-
-- which PRs are merged, and their merge commits
-- what the running API revision is, and the source SHA of its image
-- which PRs are still open
-
-**Ancestry alone does not describe running behaviour.** Once a later API
-build contains both PR #27's ancestry and PR #28's removal of its gate,
-"#27 is merged but not deployed" becomes wrong even though the ancestry
-check still passes. The accurate wording then is:
-
-> #27's gate was never deployed before being superseded by #28.
-
-Verify against the deployed artifact's own source tree, not only
-`git merge-base`:
-
-```
-git show <deployed-source-sha>:api/src/main/java/edu/bu/archive/application/service/GlobalSearchService.java \
-  | grep -c anyLexicalMatch      # 0 = gate not in the running build
-```
-
-## Release only from the cumulative main tree
-
-Independent branches still need coordinated releases. A branch that
-merges cleanly can still ship the wrong tree.
-
-Worked example, measured 5 Oct 2026: PR #30 branches from `637502e`,
-which is main **after** #27 merged, and #30 does not remove #27's gate.
-Its branch tree therefore still contains `anyLexicalMatch`. Deploying
-#30's branch directly — even after #28 merged — would **restore the
-rejected gate**.
-
-So: deploy from `main` after both have merged, and verify the release
-SHA carries both changes before trusting it:
-
-```
-git show <release-sha>:...GlobalSearchService.java | grep -c anyLexicalMatch              # expect 0
-git show <release-sha>:...GlobalSearchService.java | grep -c findSummariesForDocumentNumbers  # expect 1+
-```
-
-Record the API revision and the UI Amplify job together at each rollout,
-so API/UI version compatibility is recoverable afterwards rather than
-inferred.
-
 ## How to remove it
 
 - `ui/src/pages/QaStatusPage.tsx`
