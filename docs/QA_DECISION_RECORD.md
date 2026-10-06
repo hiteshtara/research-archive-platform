@@ -35,7 +35,7 @@ restricted-account, handset and screen-reader protocols).
 | TC-015 Empty search | Add the initial hint, keep API behaviour | Fixed in code, awaiting release | Hint verified on dev |
 | TC-019 Hint tags non-interactive | Ratify informational | Awaiting re-verification | Chips confirmed non-interactive on dev |
 | TC-021 Breadcrumb navigation | Keep hierarchy nav, add explicit return | Fixed in code, awaiting release | Return link verified on dev |
-| TC-026 Download confirmation | No prompt; criterion revised | Open — needs integrity evidence | Content and filename verified separately |
+| TC-026 Download confirmation | No prompt; criterion revised | **Closed on dev 2026-10-06** (entry prepared in PR #36) | Done — content and filename verified separately |
 | TC-029 Specific sequence filter | Defer the feature | **Not implemented / deferred** | Never, under current scope |
 | TC-042 Search response time | Measure before optimising | Open — needs measurement | A target is approved and met |
 
@@ -404,8 +404,40 @@ is *right*, only that it was read correctly. Treating either as evidence
 of download integrity would mark a case passed on the strength of
 something that cannot fail for the reason the case is testing.
 
-**Resulting status: open.** Part 1 is satisfied by current behaviour.
-Part 2 needs evidence that has not been gathered. TC-026 is not Passed.
+**Resulting status: closed on the development website, 2026-10-06.**
+Both parts now have evidence; the dashboard entry is prepared separately
+in PR #36 and is not merged.
+
+Part 1 was satisfied by current behaviour. Part 2 was gathered properly
+rather than inferred: the report was downloaded through the real button
+in a signed-in session, then opened and parsed by two independent
+parsers (`pdfinfo` and `pypdf`), which agree it opens cleanly, is
+unencrypted and holds 39 pages, with every page parsing to extractable
+text. The first page, a middle page and the last page were rendered and
+read — a cover carrying the Award's summary fields, a populated interior
+section whose tables keep their headers and rows, and a closing appendix
+that ends the document cleanly. Footer page numbering runs 1 to 39 and
+matches the parsed count, so nothing is truncated. The server supplied
+the filename, and it names the Award the report was opened from.
+
+Limits, recorded rather than glossed: one Award, one build, and three of
+39 pages actually read — the other 36 were confirmed to parse but not
+read. The downloaded file is held locally and deliberately not attached
+to any pull request, because it carries real archived award data.
+
+### A separate audit finding this does NOT close
+
+This project carries an unresolved audit note that the Award Report PDF
+leaked credentials at API rev 63, with an explicit instruction not to
+trust any prior clean claim. Since a report was in hand at rev 75, its
+visible text was scanned for credential shapes — password, secret,
+token, bearer, API key, connection string, AWS key id. **None were
+found.** The report does carry a SAP Transmission History section, but
+as archive audit metadata rather than credentials.
+
+**That is a limited non-reproduction, not a clearance.** One Award, one
+build, a pattern scan of visible text only. The audit finding stays
+**open**, and nothing in this record should be cited as closing it.
 
 ---
 
