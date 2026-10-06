@@ -104,6 +104,9 @@ public class AwardArchiveService {
                 new edu.bu.archive.application.service.SearchTimingLog(false);
     }
 
+    // Two constructors, so Spring is told which one to use - without
+    // this it looks for a no-arg constructor and fails to start.
+    @org.springframework.beans.factory.annotation.Autowired
     public AwardArchiveService(
             AwardArchiveRepository repository,
             AwardAttachmentStorage attachmentStorage,
