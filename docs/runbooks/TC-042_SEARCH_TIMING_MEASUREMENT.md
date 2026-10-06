@@ -292,9 +292,30 @@ command — it returns both the image and the flag to exactly what is
 running today. Wait for the service to stabilise and confirm the
 revision; `search-timing` lines stop appearing once it has.
 
-**After the measurement run**, roll back by the same command even if
-nothing went wrong: the instrumentation is scaffolding and should not
-sit enabled in dev. Removing the code is a separate PR.
+**Rollback to rev 75 is for a DEPLOYMENT FAILURE** - the new revision
+will not stabilise, the API is unhealthy, something is wrong with the
+image. It is not the way to switch the instrumentation off, because it
+also discards the new image.
+
+### Routine shutdown after the run
+
+Register ANOTHER revision cloned from the measurement one, **keeping the
+new image** and setting the flag off:
+
+```diff
+  image: .../research-archive-platform-dev-api:<the measurement image>   (unchanged)
+- APP_SEARCH_TIMING_ENABLED = "true"
++ APP_SEARCH_TIMING_ENABLED = "false"
+```
+
+or drop the variable entirely, which defaults to false. Update the
+service to it and confirm `search-timing` lines stop.
+
+This keeps the deployed code moving forward - the measurement image is
+the current main, and reverting to rev 75 would silently roll the API
+back past everything merged since. Removing the instrumentation code is
+then a separate PR, and the revision after that carries an image that no
+longer contains it.
 
 ### What this plan deliberately avoids
 
