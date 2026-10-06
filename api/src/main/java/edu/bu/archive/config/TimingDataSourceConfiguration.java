@@ -2,7 +2,8 @@ package edu.bu.archive.config;
 
 import edu.bu.archive.application.service.SearchTimingLog;
 
-import org.springframework.boot.jdbc.DataSourceBuilder;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,11 +48,39 @@ import java.util.logging.Logger;
 @Configuration
 public class TimingDataSourceConfiguration {
 
+    /*
+     * THE BUG THIS REPLACES, because it is worth not repeating:
+     * @ConfigurationProperties on a method binds to the object the
+     * method RETURNS. The previous version returned the wrapper, so
+     * spring.datasource.* bound to the wrapper and the Hikari pool
+     * inside it was built with no jdbcUrl - "dataSource or
+     * dataSourceClassName or jdbcUrl is required" - and the application
+     * could not start at all. Every test passed, because the test
+     * contexts build their own datasource.
+     *
+     * Now the properties bind to the things that actually need them:
+     * DataSourceProperties for url/credentials, the Hikari bean for
+     * pool settings (maximum-pool-size, minimum-idle,
+     * connection-timeout). The wrapper is only a decorator and binds
+     * nothing.
+     */
+    // DataSourceProperties comes from Spring Boot's own
+    // DataSourceAutoConfiguration, already bound to spring.datasource.
+    // Declaring a second one here collided with it
+    // (NoUniqueBeanDefinitionException) and broke startup a second
+    // time - caught by TimingDataSourceStartupTest.
+    @Bean
+    @ConfigurationProperties("spring.datasource.hikari")
+    public HikariDataSource timingHikariDataSource(DataSourceProperties properties) {
+        return properties
+                .initializeDataSourceBuilder()
+                .type(HikariDataSource.class)
+                .build();
+    }
+
     @Bean
     @Primary
-    @ConfigurationProperties("spring.datasource")
-    public DataSource dataSource(SearchTimingLog timingLog) {
-        DataSource delegate = DataSourceBuilder.create().build();
+    public DataSource dataSource(HikariDataSource delegate, SearchTimingLog timingLog) {
         return new TimingDataSource(delegate, timingLog);
     }
 
