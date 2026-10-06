@@ -49,3 +49,41 @@ export function isValidAwardIdInput(value) {
   }
   return /^\d+$/.test(trimmed);
 }
+
+/*
+ * Whether the applied state on Historical Awards amounts to a search.
+ *
+ * The Versions filter narrows a search but never starts one: selecting
+ * "historical" on its own would list every archived version in the
+ * archive, which is not what anyone means by it. It also carries a
+ * default of "all", so if it counted the page would look permanently
+ * searched and would fire a list-everything query on arrival.
+ *
+ * TWO STATES THAT MUST STAY DISTINCT. An untouched default and an
+ * explicit selection are different things, and activeFilters() is what
+ * separates them - it drops any value equal to its field's default. So
+ * `versionFilter` is absent here when untouched, and present when
+ * someone chose "current" or "historical". That is why this predicate
+ * can ignore the key outright without also ignoring a real choice: a
+ * real choice still travels to the API, and still changes the query key
+ * that triggers a refetch. Choosing "All versions" explicitly collapses
+ * back to the default, which is correct - it asks for the same rows.
+ *
+ * Extracted from the page so those states are covered by tests rather
+ * than only reasoned about.
+ */
+export function startsVersionSearch({
+  appliedQuery = "",
+  appliedActiveFilters = {},
+  awardIdError = null,
+} = {}) {
+  if (awardIdError) {
+    return false;
+  }
+  if (appliedQuery.trim().length > 0) {
+    return true;
+  }
+  return Object.keys(appliedActiveFilters).some(
+    (key) => key !== "versionFilter",
+  );
+}

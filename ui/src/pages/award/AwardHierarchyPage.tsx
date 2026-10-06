@@ -1,7 +1,7 @@
 import { Box, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { getAwardHierarchyV1 } from "../../api/client";
 import { AwardBreadcrumb } from "../../components/award/AwardBreadcrumb";
@@ -9,6 +9,7 @@ import { AwardHierarchyTree } from "../../components/award/AwardHierarchyTree";
 import { flattenHierarchyNodes } from "../../components/award/hierarchyUtils";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
+import { forwardSearchReturn } from "../../features/award/searchReturnContext.mjs";
 import type { AwardHierarchyNode } from "../../types/api";
 
 // Standalone hierarchy screen, reached after selecting a search result.
@@ -18,6 +19,10 @@ import type { AwardHierarchyNode } from "../../types/api";
 export function AwardHierarchyPage() {
   const { awardNumber } = useParams<{ awardNumber: string }>();
   const navigate = useNavigate();
+  // This page sits between the result list and the Dashboard, so it has
+  // to pass the return context along or the Dashboard's "Back to search
+  // results" link would never appear (QA TC-021).
+  const searchReturn = forwardSearchReturn(useLocation().state);
 
   const hierarchyQuery = useQuery({
     queryKey: ["award-hierarchy-v1", awardNumber],
@@ -38,7 +43,7 @@ export function AwardHierarchyPage() {
       return;
     }
 
-    navigate(`/awards/${node.awardId}`);
+    navigate(`/awards/${node.awardId}`, { state: searchReturn });
   }
 
   if (hierarchyQuery.isLoading) {
