@@ -1,6 +1,6 @@
-import { Alert, Chip, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
@@ -19,11 +19,14 @@ import {
   searchErrorMessage,
 } from "../features/common/searchPresentation.mjs";
 import {
+  describeGlobalSearchOutcome,
   describeResultCard,
   filterOutIrbResults,
+  incompleteSearchMessage,
+  noDirectMatchesMessage,
 } from "../features/search/globalSearchPresentation.mjs";
 import { GLOBAL_SEARCH_FILTER_FIELDS } from "../features/search/searchFilterFields.mjs";
-import { emptyResultsMessage } from "../features/common/filterPresentation.mjs";
+import type { GlobalSearchItem } from "../types/api";
 import type { GlobalSearchFilterKey } from "../features/search/searchFilterFields.d.mts";
 import { useFilteredSearch } from "../hooks/useFilteredSearch";
 
@@ -85,6 +88,13 @@ export function GlobalSearchPage() {
     enabled: longEnough,
   });
 
+  // Revealing related results is a per-search decision: a new query
+  // starts hidden again, so a suggestion never carries over.
+  const [relatedRevealed, setRelatedRevealed] = useState(false);
+  useEffect(() => {
+    setRelatedRevealed(false);
+  }, [query]);
+
   const results = searchQuery.data ?? null;
 
   const state = resolveSearchState({
@@ -131,85 +141,107 @@ export function GlobalSearchPage() {
           "Search results could not be loaded.",
         )}
       >
-        {results && (
-          <>
-            <ResultCount total={results.totalResults} singular="result" />
+        {results && (() => {
+          const outcome = describeGlobalSearchOutcome({
+            results: results.results,
+            failedModules: results.failedModules,
+            relatedRevealed,
+          });
 
-            {results.failedModules.length > 0 && (
-              <Alert severity="warning" sx={{ mb: 1.5 }}>
-                {results.failedModules.join(", ")} could not be searched right
-                now. Showing results from the remaining modules.
-              </Alert>
-            )}
+          const renderCard = (result: GlobalSearchItem) => {
+            const card = describeResultCard(result);
 
-            {results.results.length === 0 && (
-              <EmptyState
-                variant="text"
-                message={emptyResultsMessage({
-                  noun: "archive records",
-                  query,
-                  filterCount: search.appliedCount,
-                })}
+            return (
+              <ResultCard
+                key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
+                to={result.route || undefined}
+                identifier={card.identifier}
+                secondaryIdentifier={
+                  <>
+                    <Chip label={result.module} size="small" color="primary" />
+                    {result.documentNumber && (
+                      <Chip
+                        label={`Doc ${result.documentNumber}`}
+                        size="small"
+                        variant="outlined"
+                      />
+                    )}
+                    {card.showSemanticChip && (
+                      <Chip
+                        label={card.semanticChipLabel}
+                        size="small"
+                        variant="outlined"
+                      />
+                    )}
+                  </>
+                }
+                status={
+                  result.status ? (
+                    <StatusPill
+                      status={result.status}
+                      domain={STATUS_DOMAINS[result.module ?? ""] ?? "award"}
+                    />
+                  ) : undefined
+                }
+                title={card.title}
+                // card.identifierLine repeats the identifier that is
+                // already this card's first line, so the secondary
+                // detail uses card.subtitleLine instead.
+                metadata={joinMetadata([
+                  card.subtitleLine,
+                  card.piLine,
+                  card.matchedCaption,
+                ])}
               />
-            )}
+            );
+          };
 
-            <Stack spacing={1.25}>
-              {results.results.map((result) => {
-                const card = describeResultCard(result);
+          return (
+            <>
+              <ResultCount total={outcome.directCount} singular="result" />
 
-                return (
-                  <ResultCard
-                    key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
-                    to={result.route || undefined}
-                    identifier={card.identifier}
-                    secondaryIdentifier={
-                      <>
-                        <Chip
-                          label={result.module}
-                          size="small"
-                          color="primary"
-                        />
-                        {result.documentNumber && (
-                          <Chip
-                            label={`Doc ${result.documentNumber}`}
-                            size="small"
-                            variant="outlined"
-                          />
-                        )}
-                        {card.showSemanticChip && (
-                          <Chip
-                            label={card.semanticChipLabel}
-                            size="small"
-                            variant="outlined"
-                          />
-                        )}
-                      </>
-                    }
-                    status={
-                      result.status ? (
-                        <StatusPill
-                          status={result.status}
-                          domain={
-                            STATUS_DOMAINS[result.module ?? ""] ?? "award"
-                          }
-                        />
-                      ) : undefined
-                    }
-                    title={card.title}
-                    // card.identifierLine repeats the identifier that
-                    // is already this card's first line, so the
-                    // secondary detail uses card.subtitleLine instead.
-                    metadata={joinMetadata([
-                      card.subtitleLine,
-                      card.piLine,
-                      card.matchedCaption,
-                    ])}
-                  />
-                );
-              })}
-            </Stack>
-          </>
-        )}
+              {/* A module that failed is not a module that found
+                  nothing, so this is never collapsed into "no
+                  matches". */}
+              {outcome.searchIncomplete && (
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  {incompleteSearchMessage(outcome.failedModules)}
+                </Alert>
+              )}
+
+              {outcome.showNoDirectMatches && (
+                <EmptyState variant="text" message={noDirectMatchesMessage(query)} />
+              )}
+
+              {outcome.directCount > 0 && (
+                <Stack spacing={1.25}>{outcome.direct.map(renderCard)}</Stack>
+              )}
+
+              {/* With nothing direct, related results stay behind a
+                  deliberate action - a suggestion should never arrive
+                  looking like an answer. */}
+              {outcome.offerRelatedToggle && !relatedRevealed && (
+                <Box sx={{ mt: 1 }}>
+                  <Button variant="outlined" onClick={() => setRelatedRevealed(true)}>
+                    {outcome.showRelatedActionLabel}
+                  </Button>
+                </Box>
+              )}
+
+              {outcome.showRelatedSection && (
+                <Box sx={{ mt: outcome.directCount > 0 ? 3 : 2 }}>
+                  <Typography component="h2" variant="h6">
+                    {outcome.relatedHeading}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1.5 }}>
+                    {outcome.relatedExplanation}
+                  </Typography>
+                  <Stack spacing={1.25}>{outcome.related.map(renderCard)}</Stack>
+                </Box>
+              )}
+            </>
+          );
+        })()}
       </SearchStates>
     </SearchPageLayout>
   );

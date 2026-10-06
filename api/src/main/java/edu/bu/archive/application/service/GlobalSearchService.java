@@ -189,38 +189,25 @@ public class GlobalSearchService {
         }
 
         /*
-         * Relevance policy (QA TC-041): a semantic result is a
-         * suggestion alongside real matches, never an answer on its own.
+         * Semantic results are NOT withheld when nothing matched
+         * lexically. An earlier attempt did exactly that and was
+         * rejected: it silently threw away the one kind of result that
+         * helps a searcher who used a different word than the archive
+         * does - a synonym, a general term, a phrase from a grant
+         * rather than a title. Returning nothing is not more honest
+         * than returning something clearly labelled as related.
          *
-         * Semantic search has no similarity cutoff - see
-         * SemanticSearchRepository, which explains why no single global
-         * threshold works - so it always returns its nearest few rows,
-         * however far away they are. For a query that matches nothing,
-         * "nearest" is simply "least unrelated", and the page filled up
-         * with records having no visible connection to what was typed:
-         * "zzzznotfound123" returned five Negotiations and
-         * "qzxwvnonsense987" five Awards, measured on dev 2026-10-05.
+         * Relevance is a presentation problem, not a filtering one.
+         * Every semantic row carries matchType RELATED, and the page
+         * separates them: direct matches first, related results in
+         * their own section, and - when nothing matched directly -
+         * behind an explicit action, so a loose suggestion is never
+         * mistaken for an answer.
          *
-         * So the rule is relative, not absolute: keep semantic results
-         * only when something was actually found by name, number or
-         * field. That needs no threshold and invents no score - it asks
-         * whether the query matched anything at all.
-         *
-         * Measured against dev, this removes exactly the nonsense cases
-         * and touches nothing useful: "pediatric asthma" (7 lexical + 3
-         * semantic), "quantum" (87 + 4), "climate" (86 + 2),
-         * "neurodegeneration" (88 + 1) and "opioid" (86 + 1) all keep
-         * every semantic result they had, because each already matched
-         * lexically.
+         * failedModules stays untouched here on purpose. A module that
+         * failed is not a module that found nothing, and the page has
+         * to be able to tell a searcher which happened.
          */
-        boolean anyLexicalMatch = !irbResults.isEmpty()
-                || !awardResults.isEmpty()
-                || !negotiationResults.isEmpty()
-                || !subawardResults.isEmpty()
-                || !proposalResults.isEmpty();
-        if (!anyLexicalMatch) {
-            semanticResults = List.of();
-        }
 
         List<GlobalSearchItemResponse> merged = new ArrayList<>(
                 irbResults.size() + awardResults.size()
