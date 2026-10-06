@@ -546,34 +546,40 @@
       "steps": "Search a nonsense string such as zzzznotfound123",
       "expected": "Verify whether irrelevant Semantic match results are returned; flag as a possible relevance/precision defect if unrelated records appear (observed during exploration)",
       "priority": "High",
-      "status": "issue",
-      "note": "TC-041 remains open until the released UI and API pass acceptance checks. What was last seen, and on which builds, is recorded below - the site may have changed since.",
+      "status": "passed",
+      "note": "Verified on the development website. A search that matches nothing now says so, and offers loosely-related suggestions only if you ask for them - they are no longer presented as answers. Suggestions carry the record's real title instead of its document number or code.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29",
+      "environment": "dev: UI Amplify job #113 @ 8292260 (bundle index-DBgB5TIF.js); API ECS rev 75 (image 20261006T123638Z-8292260, source 8292260); signed-in session, 2026-10-06",
       "history": [
         {
           "on": "2026-09-29",
           "stage": "knownIssue",
           "summary": "A nonsense query returned five Negotiations labelled “Semantic match” with no visible relation to it, and their cards showed the document number where the title should be.",
           "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29"
+        },
+        {
+          "on": "2026-10-05",
+          "stage": "inProgress",
+          "summary": "Fixes prepared and reviewed but not released: the relevance change (PR #28) and the missing Negotiation and Subaward titles (PR #30). An earlier attempt, PR #27, withheld semantic results entirely when nothing matched; it was rejected, merged but never deployed, and reversed by #28 before any build carried it to this website.",
+          "environment": "dev: UI Amplify job #110 @ 637502e; API ECS rev 74 (image 20261005T181208Z-77773ee)"
         }
       ],
       "progress": {
-        "stage": "inProgress",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "Historical, as at 5 October 2026: PR #27 (lexical gating) merged as 637502e but never deployed; PR #28 reverses it; PR #30 adds the missing titles. Branch and merge states move; this line is a record of that date, not a current status. What is live is given by the released build below.",
-        "deployedBuild": "Not deployed",
-        "verifiedOn": "",
-        "verifiedIn": "",
-        "results": "",
-        "limitations": "Merging is not releasing, and the UI and API do not release together: the UI rebuilds automatically when main changes, while the API is deployed by hand, so the site can carry a new UI against an older API for a time. Read the observation above as a dated record on named builds, not as a description of the site right now. No improvement to semantic relevance is claimed: the ranking is unchanged, and the work in review changes how results are presented, not how they are scored.",
-        "verificationStatus": "Open. Closes only when the released UI and API together pass the acceptance checks on this website.",
+        "verificationStatus": "Closed. The released UI and API passed the acceptance checks on this website.",
+        "change": "PR #28 (merged 4f076c6) and PR #30 (merged 8292260), released together as 8292260.",
+        "deployedBuild": "UI Amplify job #113 @ 8292260 (bundle index-DBgB5TIF.js); API ECS rev 75 (image 20261006T123638Z-8292260)",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
         "lastObservation": {
-          "on": "2026-10-05",
-          "uiBuild": "Amplify job #110 @ 637502e",
-          "apiBuild": "API ECS rev 74 (image 20261005T181208Z-77773ee)",
-          "behaviour": "Global Search answered a query it had found nothing for with five loosely-related Negotiation suggestions, and those suggestions showed a document number where the title should be."
-        }
+          "on": "2026-10-06",
+          "uiBuild": "Amplify job #113 @ 8292260",
+          "apiBuild": "API ECS rev 75 (image 20261006T123638Z-8292260)",
+          "behaviour": "A query matching nothing showed “No direct matches” with no results and a “Show 5 related results” action; revealing them produced a Related results section, and a new search hid them again. Suggestions showed real titles."
+        },
+        "results": "Checked in the browser on the released builds. A nonsense query showed 0 results, “No direct matches” and an explicit “Show 5 related results” action, with nothing related rendered until it was clicked; revealing added a Related results section explaining the suggestions, and running a new search hid them again. A mixed query (pediatric asthma) showed 7 direct results above the Related heading and 3 suggestions below it, with no action needed and no “no direct matches” claim; direct cards carried no Semantic match chip and every suggestion did. Each of five Negotiation suggestions carried its own title and no other card's - Vertex fellowship BU CI, Teaming agreement, evaluation of Abbvie immunology compounds, Potential FFS Engagement - and a Subaward suggestion showed title, sponsor and status (1008, An internet based prospective study of time to pregnancy, NIH/NICHD, 07. Executed). Genuinely empty searches returned nothing at all with no failures. Ordinary and wildcard searches were unaffected, Global Search kept its two-character minimum, and TC-017's control-character handling and TC-018's 200-character limit both still applied. One finding raised during this verification was withdrawn: cards appeared to show a document number instead of a title, which turned out to be an error in how the check read the page rather than anything the page did - the identifier is the card's first line by design and the title renders beneath it. Traced from the browser's own response through to the rendered card; no change was needed.",
+        "limitations": "Two checks are covered by automated tests only and were not reproduced on this website. A module failing mid-search cannot be triggered from the browser - every malformed input is now refused before it reaches a module - so the behaviour that keeps a failure distinct from “nothing found” is proven by test rather than observation. The fallback that shows a document number when a record has no title is likewise test-proven: only one such Negotiation is known on dev (document number 1120419) and semantic ranking cannot reliably be steered to it."
       }
     },
     {
