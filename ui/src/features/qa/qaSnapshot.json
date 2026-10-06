@@ -757,19 +757,19 @@
       "steps": "In Kuali Documents, search proposal 01394406 and open Document 1000570 (version 2).",
       "expected": "The detail page shows version 2 and workflow document 1000570.",
       "priority": "High",
-      "status": "issue",
+      "status": "passed",
       "note": "Confirmed functional defect, reported by Lalitha. Opening document 1000570 (version 2) showed a page headed Version 4 / Workflow 1000951 - the latest version, not the one selected. Cause: a proposal document row carried the proposal NUMBER as its destination, and that address is the family page, which forwards to whichever version is current. Every one of the four documents therefore led to the same page. Fixed in code by sending each row to its own version instead. Award, Negotiation, Subaward and IRB already did this, so only Proposal was affected.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06",
       "progress": {
-        "stage": "fixedInCode",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
-        "deployedBuild": "Not deployed as of 2026-10-06. Last observed deployment on that date: UI Amplify job #119 @ f7acec7 and API ECS rev 78 (image 20261006T161658Z-f7acec7), neither of which contains this fix. This records what was deployed when the case was written - it does not claim what the website does after any later release, so re-check the deployed build before relying on it.",
-        "verifiedOn": null,
-        "verifiedIn": "Not yet verified on the development website",
-        "results": "Checked locally against the real pages, not yet on this website. Opening document 1000570 now shows Version 2 and Workflow 1000570. Versions 1 to 4 each open their own record (documents 1000005, 1000570, 1000653, 1000951). Refreshing, opening the address directly and opening it in a new tab all show the same version. An address that names no real version says the proposal was not found rather than quietly showing the latest one. Searching Proposals still opens the current version, as before.",
-        "limitations": "Verified on a local copy with stand-in sign-in and with document numbers filled in for this proposal, because the local data has them blank. Not yet checked on the development website against real data."
+        "change": "UI + API: PR #41 (merged b10e4e3a), on the startup repair in PR #40 (merged b85e6584). Recorded on the board by PR #42.",
+        "deployedBuild": "UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3), rollout COMPLETED, timing off, /actuator/health 200",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked on the development website against real archived data, not a local copy. The four documents of proposal 01394406 now lead to four different pages: 1000005 opens version 1, 1000570 opens version 2, 1000653 opens version 3 and 1000951 opens version 4, each showing its own workflow document number. Opening 1000570 shows Version 2 and Workflow 1000570 - the reported case. Refreshing holds the version, opening the address in a new tab shows the same one, and an address naming no real version says the proposal was not found rather than quietly showing the latest. Searching Proposals still opens the current version.",
+        "limitations": "Verified for this proposal's four versions. Proposal was the only module affected - Award, Negotiation, Subaward and IRB already addressed a single version - and Historical Awards was checked separately and showed no equivalent problem."
       },
       "history": [
         {
@@ -777,6 +777,12 @@
           "stage": "knownIssue",
           "summary": "Reported by Lalitha from the development website.",
           "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Fixed in code and reviewed (PR #41, on the startup repair in PR #40); not yet released, so the website still behaved as reported at that point.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7)"
         }
       ]
     },
@@ -789,19 +795,19 @@
       "steps": "From the dashboard, open the Historical Proposal Records card.",
       "expected": "A list of archived proposal documents, one row per version.",
       "priority": "Medium",
-      "status": "issue",
+      "status": "passed",
       "note": "Navigation mismatch against the agreed destination, reported by Lalitha. The card opened the Proposals page, which shows one result per proposal number and only its current version - so a card offering all preserved history rows led somewhere that shows one row per proposal. Fixed in code to open Kuali Documents with the Proposal filter already applied. The ordinary Proposals card still opens the Proposals page, which is correct for it. No separate Historical Proposals page was added - those rows already exist in Kuali Documents.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06",
       "progress": {
-        "stage": "fixedInCode",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
-        "deployedBuild": "Not deployed as of 2026-10-06. Last observed deployment on that date: UI Amplify job #119 @ f7acec7 and API ECS rev 78 (image 20261006T161658Z-f7acec7), neither of which contains this fix. This records what was deployed when the case was written - it does not claim what the website does after any later release, so re-check the deployed build before relying on it.",
-        "verifiedOn": null,
-        "verifiedIn": "Not yet verified on the development website",
-        "results": "Checked locally. The card now opens Kuali Documents with Proposal selected and the results already loaded, rather than an empty form. The Proposals page now also says where each question is answered: every archived document in Kuali Documents, one proposal’s versions on the record itself.",
-        "limitations": "Local only. Not yet checked on the development website."
+        "change": "UI + API: PR #41 (merged b10e4e3a), on the startup repair in PR #40 (merged b85e6584). Recorded on the board by PR #42.",
+        "deployedBuild": "UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3), rollout COMPLETED, timing off, /actuator/health 200",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked on the development website by clicking the card itself. It opens Kuali Documents with the Proposal filter applied and historical document rows reachable. Judged on the filter being applied and the rows being reachable; the total number of proposal documents is a separate question and is not part of this case.",
+        "limitations": "Covers the destination and the applied filter only. How many proposal documents exist is deferred to the database audit and is not evidence for or against this case."
       },
       "history": [
         {
@@ -809,6 +815,12 @@
           "stage": "knownIssue",
           "summary": "Reported by Lalitha from the development website.",
           "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Fixed in code and reviewed (PR #41, on the startup repair in PR #40); not yet released, so the website still behaved as reported at that point.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7)"
         }
       ]
     },
@@ -821,19 +833,19 @@
       "steps": "Compare the status shown in the Proposals list with the statuses on a proposal detail page.",
       "expected": "It is clear which status is being shown and what it means.",
       "priority": "Medium",
-      "status": "issue",
+      "status": "passed",
       "note": "Usability clarification, reported by Lalitha - the stored statuses are correct and none were changed. The Proposals list showed a bare ACTIVE, which reads as an open or pending proposal. It is actually the sequence status, which says whether a row is the current version. The detail page shows the same record as Sequence status ACTIVE and Status Not Funded, and both are right: version 4 is the current version of a proposal that was not funded. Kuali Documents separately showed Archived for that same version, which is a third thing again - what became of the record. Fixed in code by naming each one: the list value is labelled Sequence status, and the Kuali Documents badge is labelled a Disposition. Board category: this sits under Known issue because the website still showed the confusing label at the last observed deployment, not because any stored value is wrong.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06",
       "progress": {
-        "stage": "fixedInCode",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
-        "deployedBuild": "Not deployed as of 2026-10-06. Last observed deployment on that date: UI Amplify job #119 @ f7acec7 and API ECS rev 78 (image 20261006T161658Z-f7acec7), neither of which contains this fix. This records what was deployed when the case was written - it does not claim what the website does after any later release, so re-check the deployed build before relying on it.",
-        "verifiedOn": null,
-        "verifiedIn": "Not yet verified on the development website",
-        "results": "Checked locally. The Proposals list now labels its value Sequence status, and Kuali Documents says its badge is a Disposition - what became of the record - and not the sequence status shown on a record’s Versions tab.",
-        "limitations": "Labels only. No status mapping and no stored status was changed; the existing mapping is pinned by a test so it cannot drift unnoticed. Local only, not yet checked on the development website."
+        "change": "UI + API: PR #41 (merged b10e4e3a), on the startup repair in PR #40 (merged b85e6584). Recorded on the board by PR #42.",
+        "deployedBuild": "UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3), rollout COMPLETED, timing off, /actuator/health 200",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked on the development website. The Proposals list labels its value Sequence status and Kuali Documents labels its badge Disposition. Real data shows why both are needed: for proposal 01394406, versions 1 to 3 carry the disposition Pending and version 4 carries Archived, while version 4's sequence status is ACTIVE - it is the current version of a proposal that was not funded.",
+        "limitations": "Labels only. No stored status was changed and no mapping was altered."
       },
       "history": [
         {
@@ -841,6 +853,12 @@
           "stage": "knownIssue",
           "summary": "Reported by Lalitha from the development website.",
           "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Fixed in code and reviewed (PR #41, on the startup repair in PR #40); not yet released, so the website still behaved as reported at that point.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7)"
         }
       ]
     },
@@ -853,19 +871,19 @@
       "steps": "Compare the date shown for a proposal document in Kuali Documents with the Updated column on the Versions tab.",
       "expected": "It is clear which date is being shown.",
       "priority": "Low",
-      "status": "issue",
+      "status": "passed",
       "note": "Usability clarification, reported by Lalitha - not a data defect. For version 4 of proposal 01394406, Kuali Documents showed 2024-01-01 while the Versions tab showed Updated 2023-06-02, with nothing saying they were different fields. They are: the Kuali Documents date is the start of the proposal period, never an update time. Fixed in code by labelling it Period start date. The label is per module because the underlying field differs - for IRB it is a received date, where Period start date would be wrong. Board category: this sits under Known issue because the website still showed the confusing label at the last observed deployment, not because any stored value is wrong.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06",
       "progress": {
-        "stage": "fixedInCode",
+        "stage": "verified",
         "requiredEnvironment": "Development website",
-        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
-        "deployedBuild": "Not deployed as of 2026-10-06. Last observed deployment on that date: UI Amplify job #119 @ f7acec7 and API ECS rev 78 (image 20261006T161658Z-f7acec7), neither of which contains this fix. This records what was deployed when the case was written - it does not claim what the website does after any later release, so re-check the deployed build before relying on it.",
-        "verifiedOn": null,
-        "verifiedIn": "Not yet verified on the development website",
-        "results": "Checked locally. The date on a document row is now labelled, so it no longer reads as an update time that disagrees with the Versions tab.",
-        "limitations": "Label only; no date value changed. Local only, not yet checked on the development website."
+        "change": "UI + API: PR #41 (merged b10e4e3a), on the startup repair in PR #40 (merged b85e6584). Recorded on the board by PR #42.",
+        "deployedBuild": "UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3), rollout COMPLETED, timing off, /actuator/health 200",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked on the development website. The date on a document row is labelled Period start date. Real data confirms the source: of the four versions only version 4 carries a date, 2024-01-01, which is the start of the proposal period and not an update time.",
+        "limitations": "Label only. No date value was changed."
       },
       "history": [
         {
@@ -873,6 +891,12 @@
           "stage": "knownIssue",
           "summary": "Reported by Lalitha from the development website.",
           "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Fixed in code and reviewed (PR #41, on the startup repair in PR #40); not yet released, so the website still behaved as reported at that point.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7)"
         }
       ]
     }
