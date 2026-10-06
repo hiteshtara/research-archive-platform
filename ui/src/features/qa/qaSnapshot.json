@@ -132,8 +132,8 @@
         {
           "on": "2026-10-06",
           "stage": "fixedInCode",
-          "summary": "Decision taken: keep the behaviour, correct the guidance. Written and tested, not yet released, so the website still showed the old wording.",
-          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic"
+          "summary": "Decision taken: keep the behaviour, correct the guidance. Written and tested, not yet released, so the website still showed the old wording. Recorded while the development website was still serving Amplify job #115 @ f1ca19d, which did not contain this change, so nothing was observable there yet. Live verification came later the same day on Amplify job #117 @ bce99fc - a separate event on a different build.",
+          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic. The development website at this point was Amplify job #115 @ f1ca19d (API ECS rev 75), i.e. without this change."
         }
       ]
     },
@@ -228,8 +228,8 @@
         {
           "on": "2026-10-06",
           "stage": "fixedInCode",
-          "summary": "Decision taken: show a short starting hint naming both ways in - a search term or a filter. Written and tested, not yet released.",
-          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic"
+          "summary": "Decision taken: show a short starting hint naming both ways in - a search term or a filter. Written and tested, not yet released. Recorded while the development website was still serving Amplify job #115 @ f1ca19d, which did not contain this change, so nothing was observable there yet. Live verification came later the same day on Amplify job #117 @ bce99fc - a separate event on a different build.",
+          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic. The development website at this point was Amplify job #115 @ f1ca19d (API ECS rev 75), i.e. without this change."
         }
       ]
     },
@@ -390,8 +390,8 @@
         {
           "on": "2026-10-06",
           "stage": "fixedInCode",
-          "summary": "Decision taken: keep hierarchy navigation, add a separate return link carrying the exact search. Written and tested, not yet released.",
-          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic"
+          "summary": "Decision taken: keep hierarchy navigation, add a separate return link carrying the exact search. Written and tested, not yet released. Recorded while the development website was still serving Amplify job #115 @ f1ca19d, which did not contain this change, so nothing was observable there yet. Live verification came later the same day on Amplify job #117 @ bce99fc - a separate event on a different build.",
+          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic. The development website at this point was Amplify job #115 @ f1ca19d (API ECS rev 75), i.e. without this change."
         }
       ]
     },
