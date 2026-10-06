@@ -97,6 +97,8 @@ public class GlobalSearchService {
     private final SemanticSearchRepository semanticSearchRepository;
     private final SemanticSearchProperties semanticSearchProperties;
     private final ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider;
+    // Temporary TC-042 measurement instrumentation, off by default.
+    private final SearchTimingLog timingLog;
 
     public GlobalSearchService(
             GlobalSearchRepository irbSearchRepository,
@@ -106,7 +108,8 @@ public class GlobalSearchService {
             ProposalArchiveRepository proposalArchiveRepository,
             SemanticSearchRepository semanticSearchRepository,
             SemanticSearchProperties semanticSearchProperties,
-            ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider
+            ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider,
+            SearchTimingLog timingLog
     ) {
         this.irbSearchRepository = irbSearchRepository;
         this.awardArchiveService = awardArchiveService;
@@ -116,6 +119,7 @@ public class GlobalSearchService {
         this.semanticSearchRepository = semanticSearchRepository;
         this.semanticSearchProperties = semanticSearchProperties;
         this.embeddingProviderObjectProvider = embeddingProviderObjectProvider;
+        this.timingLog = timingLog;
     }
 
     /**
@@ -141,20 +145,25 @@ public class GlobalSearchService {
     public GlobalSearchResponse search(String query, Set<String> modules) {
         String normalizedQuery = query == null ? "" : query.trim();
         Set<String> selected = normalizeModules(modules);
+        // TC-042: the id for this request, set by
+        // SearchRequestTimingInterceptor, so the whole-request line and
+        // these stages read as one request.
+        String cid = timingLog.correlationId();
+        long requestStartNanos = System.nanoTime();
 
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
                 selected.isEmpty()
                         ? CompletableFuture.supplyAsync(() ->
-                                timed("IRB", () -> searchIrb(normalizedQuery)))
+                                timedLeg(cid, "IRB", () -> searchIrb(normalizedQuery)))
                         : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
-                startIfSelected(selected, "AWARD", () -> searchAward(normalizedQuery));
+                startIfSelected(selected, cid, "AWARD", () -> searchAward(normalizedQuery));
         CompletableFuture<List<GlobalSearchItemResponse>> negotiationFuture =
-                startIfSelected(selected, "NEGOTIATION", () -> searchNegotiation(normalizedQuery));
+                startIfSelected(selected, cid, "NEGOTIATION", () -> searchNegotiation(normalizedQuery));
         CompletableFuture<List<GlobalSearchItemResponse>> subawardFuture =
-                startIfSelected(selected, "SUBAWARD", () -> searchSubaward(normalizedQuery));
+                startIfSelected(selected, cid, "SUBAWARD", () -> searchSubaward(normalizedQuery));
         CompletableFuture<List<GlobalSearchItemResponse>> proposalFuture =
-                startIfSelected(selected, "PROPOSAL", () -> searchProposal(normalizedQuery));
+                startIfSelected(selected, cid, "PROPOSAL", () -> searchProposal(normalizedQuery));
 
         // Semantic search is a strictly optional 6th input - see the
         // class comment. It is never started at all (no Bedrock call,
@@ -167,7 +176,11 @@ public class GlobalSearchService {
         CompletableFuture<List<GlobalSearchItemResponse>> semanticFuture =
                 semanticEligible
                         ? CompletableFuture.supplyAsync(() ->
-                                timed("SEMANTIC", () -> searchSemantic(normalizedQuery)))
+                                timed("SEMANTIC", () -> timingLog.time(
+                                        cid,
+                                        "SEMANTIC_TOTAL",
+                                        () -> searchSemantic(normalizedQuery, cid),
+                                        List::size)))
                         : null;
 
         List<String> failedModules = new ArrayList<>();
@@ -230,6 +243,19 @@ public class GlobalSearchService {
 
         List<GlobalSearchItemResponse> deduplicated = deduplicate(merged);
 
+        // TC-042: the service call only. The WHOLE request - including
+        // parameter validation before this method and response writing
+        // after it - is REQUEST_TOTAL, recorded by
+        // SearchRequestTimingInterceptor. Keeping them separate is the
+        // point: the gap between the two is the part this method cannot
+        // see.
+        timingLog.record(
+                cid,
+                "SERVICE_TOTAL",
+                (System.nanoTime() - requestStartNanos) / 1_000_000,
+                deduplicated.size()
+        );
+
         return new GlobalSearchResponse(
                 normalizedQuery,
                 deduplicated.size(),
@@ -260,13 +286,14 @@ public class GlobalSearchService {
 
     private CompletableFuture<List<GlobalSearchItemResponse>> startIfSelected(
             Set<String> selected,
+            String cid,
             String module,
             java.util.function.Supplier<List<GlobalSearchItemResponse>> search
     ) {
         if (!selected.isEmpty() && !selected.contains(module)) {
             return CompletableFuture.completedFuture(List.of());
         }
-        return CompletableFuture.supplyAsync(() -> timed(module, search));
+        return CompletableFuture.supplyAsync(() -> timedLeg(cid, module, search));
     }
 
     private List<GlobalSearchItemResponse> joinOrRecordFailure(
@@ -299,6 +326,21 @@ public class GlobalSearchService {
                     elapsedMillis
             );
         }
+    }
+
+    /*
+     * TC-042: the same per-module measurement, but emitted through the
+     * timing log so one run shows the lexical legs and the semantic
+     * stages together under a single correlation id. The debug line
+     * above is left exactly as it was.
+     */
+    private <T extends java.util.Collection<?>> T timedLeg(
+            String cid,
+            String moduleName,
+            java.util.function.Supplier<T> work
+    ) {
+        return timingLog.time(cid, "LEG_" + moduleName, () -> timed(moduleName, work),
+                java.util.Collection::size);
     }
 
     // --- IRB -----------------------------------------------------------
@@ -762,16 +804,30 @@ public class GlobalSearchService {
     // matches - see dedupeByBusinessRecord.
     private static final int SEMANTIC_CANDIDATE_LIMIT = 50;
 
-    private List<GlobalSearchItemResponse> searchSemantic(String query) {
+    private List<GlobalSearchItemResponse> searchSemantic(String query, String cid) {
         EmbeddingProvider embeddingProvider =
                 embeddingProviderObjectProvider.getIfAvailable();
         if (embeddingProvider == null) {
             return List.of();
         }
 
-        float[] queryEmbedding = embeddingProvider.embed(query);
-        List<SemanticSearchRow> candidates =
-                semanticSearchRepository.findNearest(queryEmbedding, SEMANTIC_CANDIDATE_LIMIT);
+        /*
+         * TC-042. The embedding call is a network round trip to Bedrock.
+         * Its duration here INCLUDES any retries the AWS SDK performs
+         * internally - the SDK retries without telling the caller, so a
+         * single slow figure covering the retries is what we can
+         * honestly measure from this side. A configured timeout bounds
+         * one attempt, not this number.
+         */
+        float[] queryEmbedding = timingLog.time(
+                cid, "SEMANTIC_EMBED", () -> embeddingProvider.embed(query));
+
+        List<SemanticSearchRow> candidates = timingLog.time(
+                cid,
+                "SEMANTIC_VECTOR_QUERY",
+                () -> semanticSearchRepository.findNearest(
+                        queryEmbedding, SEMANTIC_CANDIDATE_LIMIT),
+                List::size);
 
         List<SemanticSearchRow> deduped = dedupeByBusinessRecord(candidates);
 
@@ -780,7 +836,12 @@ public class GlobalSearchService {
             deduped = deduped.subList(0, topK);
         }
 
-        return enrichSemanticResults(deduped);
+        List<SemanticSearchRow> toEnrich = deduped;
+        return timingLog.time(
+                cid,
+                "SEMANTIC_ENRICH_TOTAL",
+                () -> enrichSemanticResults(toEnrich, cid),
+                List::size);
     }
 
     // Keeps the single best-scoring (lowest-distance) row per business
@@ -810,7 +871,8 @@ public class GlobalSearchService {
     // of scope for this pass) and keep the bare-identifier presentation
     // they've always had.
     private List<GlobalSearchItemResponse> enrichSemanticResults(
-            List<SemanticSearchRow> rows
+            List<SemanticSearchRow> rows,
+            String cid
     ) {
         List<String> awardNumbers = rows.stream()
                 .filter(row -> "AWARD".equals(row.module()))
@@ -823,22 +885,34 @@ public class GlobalSearchService {
                 .distinct()
                 .toList();
 
+        // TC-042: each enrichment lookup is timed separately, with the
+        // number of identifiers it was given - never the identifiers.
         Map<String, AwardSemanticSummaryRow> awardSummaries = awardNumbers.isEmpty()
                 ? Map.of()
-                : awardArchiveService.findSummariesForAwardNumbers(awardNumbers).stream()
-                        .collect(Collectors.toMap(
-                                AwardSemanticSummaryRow::awardNumber,
-                                summary -> summary,
-                                (first, second) -> first
-                        ));
+                : timingLog.time(
+                        cid,
+                        "SEMANTIC_ENRICH_AWARD",
+                        () -> awardArchiveService
+                                .findSummariesForAwardNumbers(awardNumbers).stream()
+                                .collect(Collectors.toMap(
+                                        AwardSemanticSummaryRow::awardNumber,
+                                        summary -> summary,
+                                        (first, second) -> first
+                                )),
+                        Map::size);
         Map<String, ProposalSemanticSummaryRow> proposalSummaries = proposalNumbers.isEmpty()
                 ? Map.of()
-                : proposalArchiveRepository.findCurrentSummariesForNumbers(proposalNumbers).stream()
-                        .collect(Collectors.toMap(
-                                ProposalSemanticSummaryRow::proposalNumber,
-                                summary -> summary,
-                                (first, second) -> first
-                        ));
+                : timingLog.time(
+                        cid,
+                        "SEMANTIC_ENRICH_PROPOSAL",
+                        () -> proposalArchiveRepository
+                                .findCurrentSummariesForNumbers(proposalNumbers).stream()
+                                .collect(Collectors.toMap(
+                                        ProposalSemanticSummaryRow::proposalNumber,
+                                        summary -> summary,
+                                        (first, second) -> first
+                                )),
+                        Map::size);
 
         /*
          * Negotiation and Subaward were previously left unenriched, so
@@ -869,22 +943,32 @@ public class GlobalSearchService {
         Map<String, NegotiationSemanticSummaryRow> negotiationSummaries =
                 negotiationDocumentNumbers.isEmpty()
                         ? Map.of()
-                        : negotiationArchiveService
-                                .findSummariesForDocumentNumbers(negotiationDocumentNumbers)
-                                .stream()
-                                .collect(Collectors.toMap(
-                                        NegotiationSemanticSummaryRow::documentNumber,
-                                        summary -> summary,
-                                        (first, second) -> first
-                                ));
+                        : timingLog.time(
+                                cid,
+                                "SEMANTIC_ENRICH_NEGOTIATION",
+                                () -> negotiationArchiveService
+                                        .findSummariesForDocumentNumbers(
+                                                negotiationDocumentNumbers)
+                                        .stream()
+                                        .collect(Collectors.toMap(
+                                                NegotiationSemanticSummaryRow::documentNumber,
+                                                summary -> summary,
+                                                (first, second) -> first
+                                        )),
+                                Map::size);
         Map<String, SubawardSemanticSummaryRow> subawardSummaries = subawardCodes.isEmpty()
                 ? Map.of()
-                : subawardArchiveService.findActiveSummariesForCodes(subawardCodes).stream()
-                        .collect(Collectors.toMap(
-                                SubawardSemanticSummaryRow::subawardCode,
-                                summary -> summary,
-                                (first, second) -> first
-                        ));
+                : timingLog.time(
+                        cid,
+                        "SEMANTIC_ENRICH_SUBAWARD",
+                        () -> subawardArchiveService
+                                .findActiveSummariesForCodes(subawardCodes).stream()
+                                .collect(Collectors.toMap(
+                                        SubawardSemanticSummaryRow::subawardCode,
+                                        summary -> summary,
+                                        (first, second) -> first
+                                )),
+                        Map::size);
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
