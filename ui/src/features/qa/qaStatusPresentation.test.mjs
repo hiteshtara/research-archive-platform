@@ -708,6 +708,42 @@ test("several missing pieces are all reported, not just the first", () => {
   assert.equal(verificationShortfalls(empty).length, 4);
 });
 
+test("no stage description claims what the site currently does", () => {
+  /*
+   * A stage label is shared by every case at that stage and cannot know
+   * which build a reader is looking at - and the UI and API release
+   * separately, so the site may be mid-rollout. A present-tense
+   * behaviour claim here contradicts the case's own dated observation,
+   * which is exactly what happened: "Being worked on. The behaviour
+   * below is still what the site does." rendered directly above a
+   * status that said the opposite.
+   */
+  for (const stage of PROGRESS_STAGES) {
+    const description = stage.description.toLowerCase();
+    for (const claim of [
+      "still what",
+      "what the site does",
+      "what you will see",
+      "currently",
+      "right now",
+      "today",
+    ]) {
+      assert.ok(
+        !description.includes(claim),
+        `${stage.key}: a stage description must not claim "${claim}"`,
+      );
+    }
+  }
+});
+
+test("the stages that precede verification point at the dated observation", () => {
+  for (const key of ["inProgress", "fixedInCode"]) {
+    const stage = PROGRESS_STAGES.find((candidate) => candidate.key === key);
+    assert.match(stage.description, /Verification is pending/);
+    assert.match(stage.description, /dated observation/);
+  }
+});
+
 test("every progress stage has a label and a plain-language description", () => {
   for (const stage of PROGRESS_STAGES) {
     assert.ok(stage.label, `${stage.key}: label must be set`);
