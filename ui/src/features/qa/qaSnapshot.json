@@ -747,6 +747,134 @@
       "note": "Passed in the recorded test environment. Retest after relevant changes.",
       "scope": "Development website",
       "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29"
+    },
+    {
+      "id": "TC-049",
+      "reportedBy": "Lalitha",
+      "source": "Reported during front-end review, 2026-10-06",
+      "category": "Proposals",
+      "title": "Historical proposal version navigation",
+      "steps": "In Kuali Documents, search proposal 01394406 and open Document 1000570 (version 2).",
+      "expected": "The detail page shows version 2 and workflow document 1000570.",
+      "priority": "High",
+      "status": "issue",
+      "note": "Confirmed functional defect, reported by Lalitha. Opening document 1000570 (version 2) showed a page headed Version 4 / Workflow 1000951 - the latest version, not the one selected. Cause: a proposal document row carried the proposal NUMBER as its destination, and that address is the family page, which forwards to whichever version is current. Every one of the four documents therefore led to the same page. Fixed in code by sending each row to its own version instead. Award, Negotiation, Subaward and IRB already did this, so only Proposal was affected.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "fixedInCode",
+        "requiredEnvironment": "Development website",
+        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
+        "deployedBuild": "Not deployed. Dev still runs UI Amplify #119 @ f7acec7 and API rev 78, which do NOT contain this fix - the behaviour described above is still what the website does.",
+        "verifiedOn": null,
+        "verifiedIn": "Not yet verified on the development website",
+        "results": "Checked locally against the real pages, not yet on this website. Opening document 1000570 now shows Version 2 and Workflow 1000570. Versions 1 to 4 each open their own record (documents 1000005, 1000570, 1000653, 1000951). Refreshing, opening the address directly and opening it in a new tab all show the same version. An address that names no real version says the proposal was not found rather than quietly showing the latest one. Searching Proposals still opens the current version, as before.",
+        "limitations": "Verified on a local copy with stand-in sign-in and with document numbers filled in for this proposal, because the local data has them blank. Not yet checked on the development website against real data."
+      },
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Reported by Lalitha from the development website.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": "TC-050",
+      "reportedBy": "Lalitha",
+      "source": "Reported during front-end review, 2026-10-06",
+      "category": "Dashboard",
+      "title": "Historical Proposal Records card destination",
+      "steps": "From the dashboard, open the Historical Proposal Records card.",
+      "expected": "A list of archived proposal documents, one row per version.",
+      "priority": "Medium",
+      "status": "issue",
+      "note": "Navigation mismatch against the agreed destination, reported by Lalitha. The card opened the Proposals page, which shows one result per proposal number and only its current version - so a card offering all preserved history rows led somewhere that shows one row per proposal. Fixed in code to open Kuali Documents with the Proposal filter already applied. The ordinary Proposals card still opens the Proposals page, which is correct for it. No separate Historical Proposals page was added - those rows already exist in Kuali Documents.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "fixedInCode",
+        "requiredEnvironment": "Development website",
+        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
+        "deployedBuild": "Not deployed. Dev still runs UI Amplify #119 @ f7acec7 and API rev 78, which do NOT contain this fix - the behaviour described above is still what the website does.",
+        "verifiedOn": null,
+        "verifiedIn": "Not yet verified on the development website",
+        "results": "Checked locally. The card now opens Kuali Documents with Proposal selected and the results already loaded, rather than an empty form. The Proposals page now also says where each question is answered: every archived document in Kuali Documents, one proposal’s versions on the record itself.",
+        "limitations": "Local only. Not yet checked on the development website."
+      },
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Reported by Lalitha from the development website.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": "TC-051",
+      "reportedBy": "Lalitha",
+      "source": "Reported during front-end review, 2026-10-06",
+      "category": "Proposals",
+      "title": "Proposal status labelling",
+      "steps": "Compare the status shown in the Proposals list with the statuses on a proposal detail page.",
+      "expected": "It is clear which status is being shown and what it means.",
+      "priority": "Medium",
+      "status": "issue",
+      "note": "Usability clarification, reported by Lalitha - the stored statuses are correct and none were changed. The Proposals list showed a bare ACTIVE, which reads as an open or pending proposal. It is actually the sequence status, which says whether a row is the current version. The detail page shows the same record as Sequence status ACTIVE and Status Not Funded, and both are right: version 4 is the current version of a proposal that was not funded. Kuali Documents separately showed Archived for that same version, which is a third thing again - what became of the record. Fixed in code by naming each one: the list value is labelled Sequence status, and the Kuali Documents badge is labelled a Disposition.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "fixedInCode",
+        "requiredEnvironment": "Development website",
+        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
+        "deployedBuild": "Not deployed. Dev still runs UI Amplify #119 @ f7acec7 and API rev 78, which do NOT contain this fix - the behaviour described above is still what the website does.",
+        "verifiedOn": null,
+        "verifiedIn": "Not yet verified on the development website",
+        "results": "Checked locally. The Proposals list now labels its value Sequence status, and Kuali Documents says its badge is a Disposition - what became of the record - and not the sequence status shown on a record’s Versions tab.",
+        "limitations": "Labels only. No status mapping and no stored status was changed; the existing mapping is pinned by a test so it cannot drift unnoticed. Local only, not yet checked on the development website."
+      },
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Reported by Lalitha from the development website.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": "TC-052",
+      "reportedBy": "Lalitha",
+      "source": "Reported during front-end review, 2026-10-06",
+      "category": "Proposals",
+      "title": "Document date labelling",
+      "steps": "Compare the date shown for a proposal document in Kuali Documents with the Updated column on the Versions tab.",
+      "expected": "It is clear which date is being shown.",
+      "priority": "Low",
+      "status": "issue",
+      "note": "Usability clarification, reported by Lalitha - not a data defect. For version 4 of proposal 01394406, Kuali Documents showed 2024-01-01 while the Versions tab showed Updated 2023-06-02, with nothing saying they were different fields. They are: the Kuali Documents date is the start of the proposal period, never an update time. Fixed in code by labelling it Period start date. The label is per module because the underlying field differs - for IRB it is a received date, where Period start date would be wrong.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "fixedInCode",
+        "requiredEnvironment": "Development website",
+        "change": "UI + API: PR #41, based on the startup repair in PR #40. Neither is merged.",
+        "deployedBuild": "Not deployed. Dev still runs UI Amplify #119 @ f7acec7 and API rev 78, which do NOT contain this fix - the behaviour described above is still what the website does.",
+        "verifiedOn": null,
+        "verifiedIn": "Not yet verified on the development website",
+        "results": "Checked locally. The date on a document row is now labelled, so it no longer reads as an update time that disagrees with the Versions tab.",
+        "limitations": "Label only; no date value changed. Local only, not yet checked on the development website."
+      },
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Reported by Lalitha from the development website.",
+          "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7); signed-in session, 2026-10-06"
+        }
+      ]
     }
   ],
   "reconciledOn": "2026-10-05"

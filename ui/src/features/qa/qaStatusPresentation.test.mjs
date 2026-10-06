@@ -44,15 +44,51 @@ const requirements = security.requirements;
 
 // --- The snapshot itself ---------------------------------------------------
 
-test("the snapshot holds 47 of the original 48 cases, and TC-022 is not one of them", () => {
+test("John's matrix still contributes 47 of its 48 cases, and TC-022 is not one of them", () => {
   // TC-022 is excluded by owner direction. Its historical finding stays
   // in the source workbook; it must never appear here, and must never be
   // counted as passed.
-  assert.equal(cases.length, 47);
+  //
+  // The snapshot now also carries cases reported outside that workbook,
+  // which carry reportedBy. The matrix total is counted on its own so
+  // that adding a reported case can never quietly look like a matrix
+  // case, and so originalCaseCount keeps describing the workbook rather
+  // than the page.
+  const fromMatrix = cases.filter((item) => !item.reportedBy);
+
+  assert.equal(fromMatrix.length, 47);
   assert.equal(snapshot.originalCaseCount, 48);
   assert.equal(snapshot.excludedCaseCount, 1);
-  assert.equal(cases.length + snapshot.excludedCaseCount, snapshot.originalCaseCount);
+  assert.equal(fromMatrix.length + snapshot.excludedCaseCount, snapshot.originalCaseCount);
   assert.ok(!cases.some((item) => item.id === "TC-022"));
+});
+
+test("every case reported outside the matrix names who reported it", () => {
+  // Provenance has to survive: a reader seeing a case on the board
+  // should be able to tell whose finding it was without reading the note.
+  for (const item of cases.filter((candidate) => candidate.reportedBy)) {
+    assert.ok(item.reportedBy.length > 0, `${item.id} has an empty reportedBy`);
+    assert.ok(item.source, `${item.id} has no source`);
+  }
+});
+
+test("Lalitha's proposal-history findings are recorded as known issues, not passed", () => {
+  // They are fixed in code but NOT deployed - dev still behaves as
+  // reported - so they must not read as passed on the board.
+  const reported = ["TC-049", "TC-050", "TC-051", "TC-052"].map((id) => {
+    const item = cases.find((candidate) => candidate.id === id);
+    assert.ok(item, `expected ${id} in the snapshot`);
+    return item;
+  });
+
+  for (const item of reported) {
+    assert.equal(item.reportedBy, "Lalitha");
+    assert.equal(item.status, "issue");
+    assert.equal(item.progress.stage, "fixedInCode");
+    // Not deployed, so nothing may claim verification.
+    assert.equal(item.progress.verifiedOn, null);
+    assert.match(item.progress.deployedBuild, /Not deployed/);
+  }
 });
 
 test("every case carries the fields a tester needs to act on it", () => {
