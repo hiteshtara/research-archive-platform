@@ -39,6 +39,9 @@ public class SearchRequestTimingInterceptor implements HandlerInterceptor {
 
     private static final String START_NANOS = "searchTimingStartNanos";
 
+    /** Response header carrying this request's correlation id. */
+    public static final String CORRELATION_HEADER = "X-Search-Timing-Cid";
+
     private final SearchTimingLog timingLog;
 
     public SearchRequestTimingInterceptor(SearchTimingLog timingLog) {
@@ -54,7 +57,21 @@ public class SearchRequestTimingInterceptor implements HandlerInterceptor {
         if (!timingLog.isEnabled()) {
             return true;
         }
-        timingLog.beginRequest(timingLog.newCorrelationId());
+        String correlationId = timingLog.newCorrelationId();
+        timingLog.beginRequest(correlationId);
+        /*
+         * Hand the id back to the caller so a measurement run can
+         * associate a request with its stage lines EXACTLY, instead of
+         * bucketing log events into timestamp windows. Windows
+         * misassociate as soon as anything else is talking to the API -
+         * a second tester, a browser tab, a health probe - and the
+         * misassociation is silent.
+         *
+         * Safe to expose: the id is random, carries no information
+         * about the query, and only appears while the temporary TC-042
+         * flag is on.
+         */
+        response.setHeader(CORRELATION_HEADER, correlationId);
         request.setAttribute(START_NANOS, System.nanoTime());
         return true;
     }

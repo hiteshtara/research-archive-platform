@@ -211,4 +211,36 @@ class SearchRequestTimingInterceptorTest {
         assertThat(line).contains("status=500");
         assertThat(line).contains("outcome=completed");
     }
+
+    @Test
+    void theCorrelationIdIsReturnedToTheCallerSoARunCanAssociateExactly() {
+        // Without this, a measurement run has to bucket log events into
+        // timestamp windows, which misassociates silently as soon as
+        // anything else is talking to the API - another tester, a
+        // browser tab, a health probe.
+        SearchTimingLog timing = new SearchTimingLog(true);
+        SearchRequestTimingInterceptor interceptor = new SearchRequestTimingInterceptor(timing);
+        MockHttpServletRequest request = request();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        interceptor.preHandle(request, response, new Object());
+        String header = response.getHeader(SearchRequestTimingInterceptor.CORRELATION_HEADER);
+
+        assertThat(header).isNotBlank();
+        // ...and it is the id the stage lines carry.
+        assertThat(timing.correlationId()).isEqualTo(header);
+        interceptor.afterCompletion(request, response, new Object(), null);
+        assertThat(messages()).allMatch(m -> m.contains("cid=" + header));
+    }
+
+    @Test
+    void noCorrelationHeaderIsSetWhenTimingIsDisabled() {
+        SearchTimingLog timing = new SearchTimingLog(false);
+        SearchRequestTimingInterceptor interceptor = new SearchRequestTimingInterceptor(timing);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        interceptor.preHandle(request(), response, new Object());
+
+        assertThat(response.getHeader(SearchRequestTimingInterceptor.CORRELATION_HEADER)).isNull();
+    }
 }
