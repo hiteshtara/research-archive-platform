@@ -184,7 +184,11 @@ public class DocumentExplorerService {
         }
         return switch (module) {
             case "AWARD" -> "/awards/" + targetId;
-            case "PROPOSAL" -> "/proposals/" + targetId;
+            // The version dashboard, addressed by proposal_id, so a
+            // document row opens the version it names. "/proposals/{number}"
+            // is the FAMILY route and redirects to the current version,
+            // which is what made every version open as version 4.
+            case "PROPOSAL" -> "/proposals/dashboard/" + targetId;
             case "NEGOTIATION" -> "/negotiations/" + targetId;
             case "SUBAWARD" -> "/subawards/" + targetId;
             default -> null;

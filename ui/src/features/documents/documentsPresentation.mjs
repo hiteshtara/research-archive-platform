@@ -143,3 +143,66 @@ export function additionalRelationshipsLabel(count, noun) {
 export function unitSourceLabel(module) {
   return module === "NEGOTIATION" ? "Unit (via associated Award)" : "Unit";
 }
+
+/*
+ * Seeds the Kuali Documents filters from the address.
+ *
+ * "Historical Proposal Records" on the dashboard links here with
+ * ?module=PROPOSAL and expects proposal document rows on arrival. The
+ * seeded value goes into both the draft (so the Module control shows
+ * it) and the applied filters (so the search has already run) - a
+ * filter that is visible but not applied is worse than none, because
+ * the page then contradicts itself.
+ *
+ * Only a known module is honoured. An unrecognised or absent value
+ * leaves the filters untouched rather than being passed through: the
+ * API treats an unknown module as an ordinary equality parameter and
+ * would return zero rows, which reads as "there are no proposal
+ * documents" rather than "that link was wrong".
+ */
+export function seedFiltersFromParams(emptyFilters, searchParams) {
+  if (!searchParams || typeof searchParams.get !== "function") {
+    return emptyFilters;
+  }
+  const requested = (searchParams.get("module") ?? "").trim().toUpperCase();
+  if (!EXPLORER_MODULES.includes(requested)) {
+    return emptyFilters;
+  }
+  return { ...emptyFilters, module: requested };
+}
+
+/*
+ * What a document row's date actually is, per module.
+ *
+ * There is one `documentDate` field on the row, but it is NOT one
+ * concept - the union behind it selects a different column per module:
+ *
+ *   AWARD        award_version.begin_date
+ *   PROPOSAL     proposal_version.initial_start_date
+ *   NEGOTIATION  negotiation.negotiation_start_date
+ *   SUBAWARD     subaward.start_date
+ *   IRB          irb_protocol_version.received_date
+ *
+ * Four of those are the start of a period; IRB's is when a protocol was
+ * received. None of them is an update timestamp, which is what made the
+ * unlabelled value confusing: for proposal 01394406 version 4 this
+ * shows 2024-01-01 (the period start) while the Versions tab shows
+ * Updated 2023-06-02, and with no label the two look like the same
+ * thing disagreeing.
+ *
+ * Labelled per module rather than renaming the shared field, because
+ * "Period start date" would be wrong for IRB.
+ */
+export function documentDateLabel(module) {
+  switch (module) {
+    case "AWARD":
+    case "PROPOSAL":
+    case "NEGOTIATION":
+    case "SUBAWARD":
+      return "Period start date";
+    case "IRB":
+      return "Received date";
+    default:
+      return "Date";
+  }
+}

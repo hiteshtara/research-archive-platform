@@ -1,5 +1,6 @@
-import { Box, Chip, Stack } from "@mui/material";
+import { Box, Chip, Link, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
+import { Link as RouterLink } from "react-router-dom";
 
 import { searchProposalFamilies } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
@@ -89,6 +90,22 @@ export function ProposalFamiliesPage() {
               <InitialSearchHint message={INITIAL_SEARCH_HINT} />
             </Box>
           )}
+
+          {/*
+            * Two different questions get asked here and this page
+            * answers only one. "Every historical proposal row" belongs
+            * in Kuali Documents; "this proposal's versions" belongs on
+            * the record itself. Saying so is cheaper than a third page
+            * listing the same rows.
+            */}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
+            This lists one result per Proposal Number, showing its current
+            version. To browse every archived proposal document,{" "}
+            <Link component={RouterLink} to="/documents?module=PROPOSAL">
+              use Kuali Documents
+            </Link>
+            . To see one proposal&rsquo;s versions, open it and choose Versions.
+          </Typography>
         </>
       }
     >
@@ -121,7 +138,27 @@ export function ProposalFamiliesPage() {
                   to={`/proposals/dashboard/${encodeURIComponent(proposal.currentProposalId)}`}
                   identifier={proposal.proposalNumber}
                   status={
-                    <StatusPill status={proposal.status} domain="proposal" />
+                    /*
+                     * This value is proposal_sequence_status (the
+                     * repository selects it AS status), which says
+                     * whether this is the current version of the
+                     * proposal - not whether the proposal is open,
+                     * pending or funded. Unlabelled, "ACTIVE" was read
+                     * as an open proposal, while the detail page shows
+                     * the same record as Sequence status ACTIVE and
+                     * Status Not Funded. The label is what keeps those
+                     * apart.
+                     */
+                    <Stack
+                      direction="row"
+                      spacing={0.75}
+                      sx={{ alignItems: "center" }}
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Sequence status
+                      </Typography>
+                      <StatusPill status={proposal.status} domain="proposal" />
+                    </Stack>
                   }
                   title={proposal.title ?? "Untitled Proposal"}
                   metadata={joinMetadata([

@@ -61,13 +61,15 @@ class DocumentSearchServiceTest {
                 any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 anyInt(), anyInt()
         )).thenReturn(List.of(
+                // targetId is the VERSION key (proposal_id), not the
+                // family number - that distinction is the whole fix.
                 new DocumentSearchRow(
                         "PROPOSAL", "430102", "01128961", "CARB-X",
-                        "Funded", "3", LocalDate.of(2019, 6, 1), "01128961"
+                        "Funded", "3", LocalDate.of(2019, 6, 1), "7003"
                 ),
                 new DocumentSearchRow(
                         "PROPOSAL", "451704", "01128961", "CARB-X",
-                        "Funded", "4", LocalDate.of(2019, 6, 1), "01128961"
+                        "Funded", "4", LocalDate.of(2019, 6, 1), "7004"
                 )
         ));
 
@@ -78,12 +80,64 @@ class DocumentSearchServiceTest {
         assertThat(result.content())
                 .extracting(DocumentSearchResultResponse::documentNumber)
                 .containsExactly("430102", "451704");
+        /*
+         * Two documents of the same proposal must lead to two DIFFERENT
+         * pages. They previously both carried "/proposals/01128961" -
+         * the family route, which redirects to the current version - so
+         * opening any version showed the latest one.
+         */
         assertThat(result.content())
                 .extracting(DocumentSearchResultResponse::targetRoute)
-                .containsOnly("/proposals/01128961");
+                .containsExactly("/proposals/dashboard/7003", "/proposals/dashboard/7004");
+        // The family number is still reported, for display.
         assertThat(result.content())
                 .extracting(DocumentSearchResultResponse::businessRecordNumber)
                 .containsOnly("01128961");
+    }
+
+    @Test
+    void everyVersionOfAProposalRoutesToItsOwnVersionPage() {
+        /*
+         * Lalitha's report, as reproduced: proposal 01394406 has four
+         * archived documents, and selecting document 1000570 (version 2)
+         * opened a page headed Version 4 / Workflow 1000951. Every row
+         * carried the same family route.
+         */
+        when(repository.count(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(4L);
+        when(repository.search(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyInt()
+        )).thenReturn(List.of(
+                new DocumentSearchRow("PROPOSAL", "1000005", "01394406", "Thermogenic fat",
+                        "Pending", "1", LocalDate.of(2024, 1, 1), "8001"),
+                new DocumentSearchRow("PROPOSAL", "1000570", "01394406", "Thermogenic fat",
+                        "Pending", "2", LocalDate.of(2024, 1, 1), "8002"),
+                new DocumentSearchRow("PROPOSAL", "1000653", "01394406", "Thermogenic fat",
+                        "Pending", "3", LocalDate.of(2024, 1, 1), "8003"),
+                new DocumentSearchRow("PROPOSAL", "1000951", "01394406", "Thermogenic fat",
+                        "Not Funded", "4", LocalDate.of(2024, 1, 1), "8004")
+        ));
+
+        PageResponse<DocumentSearchResultResponse> result =
+                service.search(null, "PROPOSAL", "01394406", null, null, 0, 25);
+
+        assertThat(result.content())
+                .extracting(DocumentSearchResultResponse::targetRoute)
+                .containsExactly(
+                        "/proposals/dashboard/8001",
+                        "/proposals/dashboard/8002",
+                        "/proposals/dashboard/8003",
+                        "/proposals/dashboard/8004"
+                )
+                // Four documents, four destinations.
+                .doesNotHaveDuplicates();
+
+        // And none of them is the family route, which is what sent every
+        // version to version 4.
+        assertThat(result.content())
+                .extracting(DocumentSearchResultResponse::targetRoute)
+                .noneMatch(route -> route.equals("/proposals/01394406"));
     }
 
     @Test
