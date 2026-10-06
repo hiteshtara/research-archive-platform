@@ -921,6 +921,50 @@
           "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06"
         }
       ]
+    },
+    {
+      "id": "TC-054",
+      "reportedBy": "Claude",
+      "source": "Found while checking which components share TC-053's pattern, 2026-10-06",
+      "category": "Navigation",
+      "title": "Historical-version tables navigate from a row, with no link in it",
+      "steps": "Open an Award or Subaward, find the historical-versions table, and try to open one of its rows in a new tab with a middle-click or Cmd/Ctrl-click, or to copy its address.",
+      "expected": "Each row offers a real link to the version it names - one that can be opened in a new tab and whose address can be copied - while the table stays a valid table.",
+      "priority": "Low",
+      "status": "issue",
+      "note": "Same shape as TC-053, in a different place: the Award and Subaward historical-version tables navigate from the table ROW, which carries role=\"button\" and tabindex=\"0\" with an Enter/Space handler. Clicking a row opens the version; there is no link anywhere in the row, so there is nothing to open in a new tab and no address to copy.\n\nWhy it is not the same fix as TC-053. The dashboard cards could simply become links because a card is a div. These rows are table rows, and a <tr> cannot be an anchor - making the row itself a link would put an <a> inside <tbody>, which is invalid and breaks the table. The fix direction is to put a real link in the identifying cell, the one holding the sequence number, and keep the row click as a convenience on top of it, leaving the table markup valid.\n\nBasis for this entry is source review, not a browser session: AwardVersionsSection.tsx and SubawardVersionsSection.tsx were read while establishing which components shared TC-053's pattern. The behaviour follows from the markup, but it has not been reproduced on the website, and no measurement of keyboard reach or focus visibility has been taken here - unlike TC-053, where those were measured. Live confirmation is still owed.\n\nNot checked with a real screen reader.\n\nBoard category: Known issue - reachable on the website today, nothing broken for mouse or keyboard users, and no fix proposed yet. Deliberately excluded from the TC-053 fix.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); source review, 2026-10-06",
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Recorded as a separate case after review of the TC-053 fix asked which other components share the clickable-div pattern. Two do, both as table rows, which need a different remedy from the dashboard cards.",
+          "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); source review, 2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": "TC-055",
+      "reportedBy": "Claude",
+      "source": "Found while checking which components share TC-053's pattern, 2026-10-06",
+      "category": "Award Hierarchy",
+      "title": "Hierarchy nodes navigate as pressable buttons, and some have no address at all",
+      "steps": "Open an Award hierarchy, reach a node with the Tab key, and consider both a node that opens an Award and one that does not. Try to open a node in a new tab, and return to the search results afterwards.",
+      "expected": "A node that opens an Award is distinguishable from one that cannot, navigable nodes offer a real address, and returning to the search results still works.",
+      "priority": "Low",
+      "status": "issue",
+      "note": "The third place sharing TC-053's pattern, and the one furthest from its fix. Hierarchy nodes are a Box with role=\"button\", tabindex=\"0\" and aria-pressed, calling onSelect; on the hierarchy page that handler navigates to the Award.\n\nThree separate problems, which is why this is its own case rather than part of TC-054:\n\n1. Nodes whose awardId is null cannot navigate at all - the handler returns early - yet they look and announce exactly like the nodes that can. A node with no address should not present itself as activatable.\n\n2. Navigation carries router state (the search return context) so that leaving the hierarchy and coming back lands where the user was. A plain address cannot carry that state, so any change here has to keep same-tab return working rather than trade it for a new-tab address.\n\n3. aria-pressed is a toggle attribute. It describes a control that is on or off, which is not what a node that navigates is, and it also reflects selection within the tree. Whether these nodes should be links, buttons, or tree items is a question about the whole tree's keyboard model - the nodes also manage their own focus scrolling - and that model should be reviewed before any role is changed.\n\nBasis for this entry is source review of AwardHierarchyTree.tsx and AwardHierarchyPage.tsx, not a browser session. Nothing here has been reproduced on the website, and no keyboard or focus measurement has been taken. Live confirmation is still owed.\n\nNot checked with a real screen reader.\n\nBoard category: Known issue - reachable today, navigation works for mouse and keyboard users, and no fix proposed yet. Deliberately excluded from the TC-053 fix.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); source review, 2026-10-06",
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Recorded separately from TC-054: the hierarchy is a selection tree that also navigates, carries return state a bare address cannot, and contains nodes with no address, so its keyboard model needs reviewing before roles change.",
+          "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); source review, 2026-10-06"
+        }
+      ]
     }
   ],
   "reconciledOn": "2026-10-05"
