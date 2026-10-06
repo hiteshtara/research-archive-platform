@@ -113,11 +113,20 @@ git show <deployed-source-sha>:api/src/main/java/edu/bu/archive/application/serv
 Independent branches still need coordinated releases. A branch that
 merges cleanly can still ship the wrong tree.
 
-Worked example, measured 5 Oct 2026: PR #30 branches from `637502e`,
-which is main **after** #27 merged, and #30 does not remove #27's gate.
-Its branch tree therefore still contains `anyLexicalMatch`. Deploying
-#30's branch directly — even after #28 merged — would **restore the
-rejected gate**.
+**Historical worked example — resolved, and NOT a description of main
+today.** PRs #28 and #30 merged on 6 Oct 2026 and `anyLexicalMatch` is
+absent from main; the example is kept because the trap is general, not
+because the condition persists.
+
+As measured on 5 Oct 2026, before those merges: PR #30 branched from
+`637502e`, which was main **after** the rejected #27 merged, and #30 did
+not remove #27's gate. Its branch tree therefore still contained
+`anyLexicalMatch`, so deploying #30's branch directly — even after #28
+had merged — would have **restored the rejected gate**.
+
+The general rule is what survives: a branch cut after an unwanted change
+landed still carries that change unless it removes it, however cleanly
+the branch merges.
 
 So: deploy from `main` after both have merged, and verify the release
 SHA carries both changes before trusting it:
