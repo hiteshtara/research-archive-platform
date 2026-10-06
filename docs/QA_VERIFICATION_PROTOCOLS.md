@@ -58,8 +58,25 @@ records only the outcome:
 Record: *"precondition confirmed — group absent"*, plus the date and who
 confirmed it. Do not paste the group listing, which names other users.
 
-If this cannot be confirmed, stop. A pass recorded against an account
-whose membership is unknown proves nothing.
+### If membership cannot be confirmed
+
+**Stop the acceptance checks.** A1 and A2 cannot produce acceptance
+evidence against an account whose membership is unknown — a denial could
+mean the rule works, or simply that the tester is in the group and
+something else is wrong, and the result cannot tell those apart.
+
+**Exploratory checking may still go ahead**, and is useful: it can
+surface a broken message or a leaked filename before access is sorted
+out. Label every such result **"precondition unconfirmed — not
+acceptance evidence"**, and record it that way in the ticket. It must
+never be copied into the QA dashboard as a pass, and TC-023 and TC-027
+stay blocked until the precondition is confirmed and the checks are run
+again.
+
+**No credentials are to be collected to resolve this.** Confirming
+membership is an administrator's read of the user pool, not something a
+tester supplies, and nothing about an unconfirmed precondition justifies
+asking anyone for a password or a token.
 
 ### A1 — TC-023 · Attachments section shows a clear denial
 
@@ -289,3 +306,8 @@ status page.
 left honestly blocked is worth more than a case marked passed on a
 partial run; TC-023 and TC-027 have been held open for exactly this
 reason rather than closed on automated evidence alone.
+
+**Exploratory results are not acceptance evidence.** Anything run without
+its precondition confirmed carries the label *"precondition unconfirmed
+— not acceptance evidence"* in the Result column, and the case stays
+blocked.

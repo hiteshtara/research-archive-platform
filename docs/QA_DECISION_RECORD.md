@@ -239,12 +239,22 @@ dashboard, and any number of later breadcrumb hops between Awards.
 browser history. `navigate(-1)` lands wherever the reader happened to
 be, which after a few breadcrumb hops is another Award, not the search.
 
-### Where the context survives — measured, not asserted
+### Where the context survives — measured, with a stated scope
 
 Router state is **not** part of a link's URL, so this does not preserve
 context across every route into a detail page. Raised in review, and
-measured in a browser driving the real helper module through the real
-navigation chain rather than reasoned about:
+measured in a real browser rather than reasoned about.
+
+**What was measured, precisely.** The three helper functions
+(`buildSearchReturn`, `forwardSearchReturn`, `readSearchReturn`) running
+under React Router, behind three routes that **mirror** search →
+hierarchy → dashboard. The helpers are the real ones; the pages are not.
+So this establishes how router state behaves across these navigation
+paths — which is the question review asked — and it does **not** stand
+in for verifying the application's own navigation. The Awards pages,
+with their real links, data and breadcrumb, still need a browser check
+on dev after release, and that check is what moves TC-021 from *fixed in
+code* to Passed.
 
 | Path | Result |
 |---|---|
@@ -275,7 +285,14 @@ remain real anchors, so new-tab and copy-link keep working; and the
 context travels as router state, so a copied Award link carries no
 search terms.
 
-### Proposal for durable preservation (not implemented, needs a decision)
+### Decision taken
+
+**Router state is accepted, with the new-tab and bookmark limitation
+documented above.** Search terms are **not** to be added to shared URLs
+in this change. The alternative below is recorded for completeness and
+is explicitly out of scope for it.
+
+### The URL-based alternative, recorded and not taken
 
 To cover the new-tab paths the target has to be in the URL. The
 straightforward form is a query parameter on the detail route:
@@ -302,13 +319,13 @@ with the real target in `sessionStorage`. `sessionStorage` is per-tab,
 so a new tab would find nothing — it fails in exactly the case it is
 meant to fix.
 
-**Recommendation.** Ship the router-state version as it stands and leave
-the new-tab path without a link. It is the common journey that matters,
-the limitation is invisible rather than misleading, and it keeps search
-terms out of shared links. Revisit if testers report the new-tab case
-as a real friction — at which point the query-parameter version is a
-small change on top of this one, because the validation and the capture
-already exist.
+**Why it was not taken.** The common journey is the one that matters,
+the limitation is invisible rather than misleading, and keeping search
+terms out of shared links avoids a disclosure question for no functional
+gain on that journey. Revisit only if testers report the new-tab case as
+real friction; the query-parameter version would then be a small change
+on top of this one, because the capture and the validation already
+exist.
 
 **How to reproduce the measurements.** A throwaway harness mounted
 `buildSearchReturn` / `forwardSearchReturn` / `readSearchReturn` behind
