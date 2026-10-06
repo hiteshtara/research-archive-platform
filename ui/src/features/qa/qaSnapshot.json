@@ -899,6 +899,28 @@
           "environment": "dev: UI Amplify job #119 @ f7acec7; API ECS rev 78 (image 20261006T161658Z-f7acec7)"
         }
       ]
+    },
+    {
+      "id": "TC-053",
+      "reportedBy": "Claude",
+      "source": "Found while verifying TC-050 on the development website, 2026-10-06",
+      "category": "Dashboard",
+      "title": "Dashboard cards are buttons, not links",
+      "steps": "Reach a dashboard card with the Tab key, activate it with Enter, and try to open it in a new tab with a middle-click or Cmd/Ctrl-click.",
+      "expected": "A control that navigates behaves like a link: it can be opened in a new tab, its address can be copied, and it is announced as a link.",
+      "priority": "Low",
+      "status": "issue",
+      "note": "Found while verifying TC-050 on the development website. The dashboard cards are a div carrying role=\"button\" and tabindex=\"0\", not a link.\n\nMeasured: Tab reaches the card, Enter activates it and navigates to Kuali Documents, and the focused card draws a visible outline (1px, rgb(0, 95, 204)). So keyboard use and focus visibility are fine.\n\nWhat is missing is link behaviour. With no address on the control there is nothing to middle-click into a new tab and nothing to copy, and a screen reader announces a button where the thing actually navigates.\n\nBoard category: this sits under Known issue because it is reachable on the website today. Nothing is broken for mouse or keyboard users, and no fix is proposed yet.\n\nNot checked with a real screen reader - how it is announced is inferred from the role, not heard. Applies to the dashboard cards generally, not only the one checked.",
+      "scope": "Development website",
+      "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06",
+      "history": [
+        {
+          "on": "2026-10-06",
+          "stage": "knownIssue",
+          "summary": "Noticed while verifying the Historical Proposal Records card: a probe looking for a link found none, because the card is a button. The click test itself was valid; this is a separate observation about the control.",
+          "environment": "dev: UI Amplify job #123 @ b10e4e3a; API ECS rev 80 (image 20261006T182647Z-b10e4e3); signed-in session, 2026-10-06"
+        }
+      ]
     }
   ],
   "reconciledOn": "2026-10-05"
