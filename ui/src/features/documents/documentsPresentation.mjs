@@ -87,6 +87,19 @@ export function normalizedStatusLabel(status) {
   return NORMALIZED_STATUS_LABELS[status] ?? status;
 }
 
+/*
+ * What the badge on a document row IS, so "Archived" here is not read
+ * as the sequence status that also says ARCHIVED on a record's Versions
+ * tab. A disposition says what became of the record; a sequence status
+ * says whether a version is the current one. For proposal 01394406 the
+ * two disagree and both are right - version 4 is the current version
+ * (sequence ACTIVE) of a proposal that was not funded (disposition
+ * Archived).
+ *
+ * Naming only. No status mapping is changed.
+ */
+export const DOCUMENT_STATUS_KIND_LABEL = "Disposition";
+
 export function explorerModuleLabel(module) {
   return EXPLORER_MODULE_LABELS[module] ?? module;
 }

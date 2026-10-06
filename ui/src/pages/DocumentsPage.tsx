@@ -148,10 +148,10 @@ export function DocumentsPage() {
           * named for what it is.
           */}
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Each row shows the document&rsquo;s status, grouped from the Kuali
-          status in brackets. That is what became of the record &mdash; it is
-          not the record&rsquo;s sequence status, which says whether a version
-          is the current one and is shown on the record&rsquo;s Versions tab.
+          Each row shows a <strong>Disposition</strong> &mdash; what became of
+          the record, grouped from the Kuali status in brackets. It is not the
+          record&rsquo;s sequence status, which says whether a version is the
+          current one and is shown on the record&rsquo;s Versions tab.
         </Typography>
       </Box>
 

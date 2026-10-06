@@ -58,3 +58,5 @@ export function seedFiltersFromParams<T>(
 ): T;
 
 export function documentDateLabel(module: string): string;
+
+export const DOCUMENT_STATUS_KIND_LABEL: string;
