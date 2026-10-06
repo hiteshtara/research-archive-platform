@@ -162,12 +162,91 @@ runs inline on the Tomcat worker (`nio-N-exec-N`). That is a real
 difference between the paths, and the queue-wait line measures it instead
 of arguing about it.
 
+**What queue wait can and cannot settle.** It measures the delay before
+a worker *starts*. It says nothing about CPU contention *after* it
+starts: on a 0.5 vCPU task two running threads stretch each other's
+wall-clock without any of that appearing as queue wait. A near-zero
+queue wait therefore excludes scheduling delay only — it does not
+exonerate contention. That is why the run below captures CPU alongside
+the timings.
+
 **What the statement timers are, and are not.** They are the duration of
 the repository CALL: connection acquisition, driver work, network, server
-execution and row materialisation together. They are **not** server-side
-execution time. Separating that further needs either Hikari's
-connection-acquire metric (already exported by the actuator, no code
-change) or `EXPLAIN (ANALYZE, BUFFERS)`, which is separately gated.
+execution and row materialisation together — **not** server-side
+execution time.
+
+One part of that bundle is now separated. `DB_CONNECTION_ACQUIRE` times
+`DataSource.getConnection()` through a thin wrapper
+(`TimingDataSourceConfiguration`), under the same correlation id and the
+same single flag. Hikari already measures this and exports it through
+Micrometer, but `management.endpoints.web.exposure.include` is
+`health,info`, so the metrics endpoint is not reachable — and widening
+that exposure on a deployed API to read one number during a temporary
+investigation is a worse trade than a default-off wrapper that exposes
+nothing new.
+
+What remains inside the repository-call number after connection
+acquisition is removed is driver, network, server execution and row
+materialisation. Splitting *that* needs `EXPLAIN (ANALYZE, BUFFERS)`,
+which stays separately gated and should be chosen only once the timings
+name a statement.
+
+### A2. The run itself — alternating, both paths
+
+**Alternate the two paths rather than batching them.** Blocks of one
+then blocks of the other confound the comparison with anything that
+drifts over the run — environment load, pool state, a deploy elsewhere.
+Alternating puts both paths under the same conditions minute by minute:
+
+```
+for term in [autism, cancer, neuroscience, genomics, imaging, 105698, 100004]:
+    for i in 1..10:
+        GET /api/v1/awards/search?q=<term>&page=0&size=25     # standalone
+        GET /api/global-search?query=<term>&modules=AWARD      # Global Search leg
+```
+
+Identical terms and identical parameters on both sides; `page=0&size=25`
+matches `PER_DOMAIN_LIMIT`. Sequential, concurrency 1, 5 discarded
+warm-up requests per path first.
+
+**Check every response.** Record the HTTP status of each request and
+discard anything that is not 200 — a session token expiring mid-run
+returns 401 in 25–60 ms, which is indistinguishable from a fast success
+if status is not recorded. That happened during the first measurement
+run and cost 10 observations before it was caught.
+
+**Carry the correlation id.** Group the server-side stage lines by `cid`
+so each request is reconstructed whole, and bucket cids into term
+windows by timestamp, since the log deliberately carries no query text.
+
+**Capture CPU alongside.** Container Insights is enabled on this
+cluster, so no code change is needed. For the run window, pull from
+`ECS/ContainerInsights` for `ServiceName=research-archive-platform-dev-api`:
+`CpuUtilized` and `CpuReserved` (and `MemoryUtilized`/`MemoryReserved`
+for completeness), at the finest period available, plus
+`AWS/ECS` `CPUUtilization`. Report them beside the timings.
+
+`CpuUtilized` approaching `CpuReserved` (512 units) during the Global
+Search requests but not during the standalone ones would be direct
+evidence for contention; both well below it would weigh against.
+
+Note the limit honestly: these are 1-minute aggregates, so they
+characterise the window rather than any single request, and cgroup
+throttle counters are not exported here.
+
+**What the run should answer.** Where the gap sits:
+
+| If the gap is in | Reading |
+|---|---|
+| `AWARD_COUNT` | the count statement differs between paths |
+| `AWARD_PAGE` | the page statement differs |
+| `AWARD_EXACT_DOC` | the exact-document lookup differs |
+| `DB_CONNECTION_ACQUIRE` | the pool, not the SQL |
+| `LEG_AWARD_QUEUE_WAIT` | scheduling delay before the worker starts |
+| none of them — `LEG_AWARD` exceeds their sum | the cost is **outside** the repository calls: CPU contention, GC, or the mapping loop |
+
+That last row is a real possible outcome and the reason the whole-leg
+figure is kept alongside the parts.
 
 ### B. Then, and only then, plans and buffers
 
