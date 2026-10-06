@@ -117,6 +117,40 @@ class SearchTimingLogTest {
     }
 
     @Test
+    void aFailedStageRecordsItsOutcomeButNeverTheExceptionMessage() {
+        // The exception message is the one field that can carry a query
+        // fragment, an identifier or a connection string. It must not
+        // reach this log even though the failure itself must.
+        SearchTimingLog timing = new SearchTimingLog(true);
+
+        try {
+            timing.time("abc123", "SEMANTIC_EMBED", () -> {
+                throw new IllegalStateException(
+                        "embedding failed for query 'autism' against host db-prod:5432");
+            });
+        } catch (IllegalStateException expected) {
+            // propagation is asserted separately below
+        }
+
+        String line = messages().get(0);
+        assertThat(line).contains("stage=SEMANTIC_EMBED");
+        assertThat(line).contains("outcome=error");
+        assertThat(line).contains("ms=");
+        assertThat(line)
+                .doesNotContain("autism")
+                .doesNotContain("db-prod")
+                .doesNotContain("embedding failed")
+                .doesNotContain("IllegalStateException");
+    }
+
+    @Test
+    void aSucceededStageSaysSo() {
+        SearchTimingLog timing = new SearchTimingLog(true);
+        timing.time("abc123", "SEMANTIC_VECTOR_QUERY", () -> List.of(1), List::size);
+        assertThat(messages().get(0)).contains("outcome=ok");
+    }
+
+    @Test
     void aFailedStageIsStillRecordedAndTheFailurePropagates() {
         // A stage that throws is exactly the one worth timing - a slow
         // failure (a retried, then failing, embedding call) is a

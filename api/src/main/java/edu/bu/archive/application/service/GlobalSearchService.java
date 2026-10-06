@@ -145,8 +145,10 @@ public class GlobalSearchService {
     public GlobalSearchResponse search(String query, Set<String> modules) {
         String normalizedQuery = query == null ? "" : query.trim();
         Set<String> selected = normalizeModules(modules);
-        // TC-042: one id ties this request's stages together in the log.
-        String cid = timingLog.newCorrelationId();
+        // TC-042: the id for this request, set by
+        // SearchRequestTimingInterceptor, so the whole-request line and
+        // these stages read as one request.
+        String cid = timingLog.correlationId();
         long requestStartNanos = System.nanoTime();
 
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
@@ -241,11 +243,15 @@ public class GlobalSearchService {
 
         List<GlobalSearchItemResponse> deduplicated = deduplicate(merged);
 
-        // TC-042: the whole request, so the stages above can be read as
-        // a share of it. Count is the result count, never the results.
+        // TC-042: the service call only. The WHOLE request - including
+        // parameter validation before this method and response writing
+        // after it - is REQUEST_TOTAL, recorded by
+        // SearchRequestTimingInterceptor. Keeping them separate is the
+        // point: the gap between the two is the part this method cannot
+        // see.
         timingLog.record(
                 cid,
-                "REQUEST_TOTAL",
+                "SERVICE_TOTAL",
                 (System.nanoTime() - requestStartNanos) / 1_000_000,
                 deduplicated.size()
         );

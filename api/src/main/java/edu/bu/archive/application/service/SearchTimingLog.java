@@ -34,8 +34,12 @@ import java.util.concurrent.ThreadLocalRandom;
  *      This is the intended switch and stops the work as well as the
  *      logging - no timestamps are taken.
  *   2. Set the logger `edu.bu.archive.search.timing` to a level above
- *      INFO. Silences the output while leaving the (negligible)
- *      nanoTime calls in place.
+ *      INFO. This silences the OUTPUT ONLY. The flag is still true, so
+ *      every stage still takes its timestamps, computes its duration,
+ *      counts its result and calls the logger - the work happens and is
+ *      then discarded at the logger. Use this to quieten a noisy log,
+ *      never as the way to switch the instrumentation off. Only option
+ *      1 gives the zero-timestamp path.
  *   3. Delete this class and its call sites. It is temporary
  *      scaffolding for TC-042 and is expected to be removed once a
  *      target is agreed and met - see docs/QA_DECISION_RECORD.md.
@@ -64,6 +68,38 @@ public class SearchTimingLog {
     }
 
     /*
+     * The id for the request currently being served, set by
+     * SearchRequestTimingInterceptor so the whole-request line and the
+     * stages inside it share one id. The service reads it on the
+     * request thread and captures it into its own lambdas before any
+     * fan-out, so the worker threads never touch this.
+     */
+    private final ThreadLocal<String> currentCorrelationId = new ThreadLocal<>();
+
+    public void beginRequest(String correlationId) {
+        if (enabled) {
+            currentCorrelationId.set(correlationId);
+        }
+    }
+
+    public void endRequest() {
+        currentCorrelationId.remove();
+    }
+
+    /**
+     * The current request's id, or a fresh one when there is no request
+     * scope - a scheduled or test call still gets coherent output
+     * rather than blank ids.
+     */
+    public String correlationId() {
+        if (!enabled) {
+            return "";
+        }
+        String existing = currentCorrelationId.get();
+        return existing != null ? existing : newCorrelationId();
+    }
+
+    /*
      * A correlation id ties the stages of one request together in the
      * log. Random, short, and never derived from the query - two
      * identical searches get different ids, and an id reveals nothing
@@ -83,15 +119,42 @@ public class SearchTimingLog {
      * when the stage has no meaningful count.
      */
     public void record(String correlationId, String stage, long durationMillis, int count) {
+        record(correlationId, stage, durationMillis, count, true);
+    }
+
+    /**
+     * Records one stage, including whether it succeeded.
+     *
+     * A stage that FAILED is still recorded, with its duration and
+     * {@code outcome=error} - a slow failure (an embedding call that
+     * retried and then gave up) is a performance finding, and dropping
+     * it would hide the most interesting case. The exception's message
+     * is deliberately NOT logged: it is the one field that can carry a
+     * query fragment, an identifier or a connection string, and this
+     * log exists to be safe against real archive data. The exception
+     * itself still propagates, so the application's own error handling
+     * reports it as it always did.
+     */
+    public void record(
+            String correlationId,
+            String stage,
+            long durationMillis,
+            int count,
+            boolean succeeded
+    ) {
         if (!enabled) {
             return;
         }
+        String outcome = succeeded ? "ok" : "error";
         if (count < 0) {
-            log.info("search-timing cid={} stage={} ms={}", correlationId, stage, durationMillis);
+            log.info(
+                    "search-timing cid={} stage={} ms={} outcome={}",
+                    correlationId, stage, durationMillis, outcome
+            );
         } else {
             log.info(
-                    "search-timing cid={} stage={} ms={} count={}",
-                    correlationId, stage, durationMillis, count
+                    "search-timing cid={} stage={} ms={} count={} outcome={}",
+                    correlationId, stage, durationMillis, count, outcome
             );
         }
     }
@@ -108,8 +171,10 @@ public class SearchTimingLog {
         }
         long startNanos = System.nanoTime();
         T value = null;
+        boolean succeeded = false;
         try {
             value = work.get();
+            succeeded = true;
             return value;
         } finally {
             long millis = (System.nanoTime() - startNanos) / 1_000_000;
@@ -121,7 +186,7 @@ public class SearchTimingLog {
                     count = -1;
                 }
             }
-            record(correlationId, stage, millis, count);
+            record(correlationId, stage, millis, count, succeeded);
         }
     }
 

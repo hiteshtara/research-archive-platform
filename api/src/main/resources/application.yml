@@ -92,7 +92,9 @@ app:
     #   - set this back to false (or drop the override) - stops the work
     #     as well as the logging
     #   - raise the level of logger edu.bu.archive.search.timing above
-    #     INFO - silences the output only
+    #     INFO - silences the OUTPUT ONLY. The timestamps are still
+    #     taken and the durations still computed; only the writing is
+    #     dropped. Quietening, not switching off.
     #   - remove SearchTimingLog and its call sites; this is scaffolding
     #     and is expected to go once a target is agreed and met
     timing:
