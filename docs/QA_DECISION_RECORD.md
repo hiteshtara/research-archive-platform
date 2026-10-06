@@ -31,10 +31,10 @@ restricted-account, handset and screen-reader protocols).
 
 | Case | Decision | Resulting status | Becomes Passed when |
 |---|---|---|---|
-| TC-009 Wildcard search | Keep behaviour, correct the guidance | Fixed in code, awaiting release | Revised guidance verified on dev |
-| TC-015 Empty search | Add the initial hint, keep API behaviour | Fixed in code, awaiting release | Hint verified on dev |
+| TC-009 Wildcard search | Keep behaviour, correct the guidance | **Passed on dev 2026-10-06** | Done — verified on build #117 |
+| TC-015 Empty search | Add the initial hint, keep API behaviour | **Passed on dev 2026-10-06** | Done — verified on build #117 |
 | TC-019 Hint tags non-interactive | Ratify informational | Awaiting re-verification | Chips confirmed non-interactive on dev |
-| TC-021 Breadcrumb navigation | Keep hierarchy nav, add explicit return | Fixed in code, awaiting release | Return link verified on dev |
+| TC-021 Breadcrumb navigation | Keep hierarchy nav, add explicit return | **Passed on dev 2026-10-06** | Done — verified on build #117 |
 | TC-026 Download confirmation | No prompt; criterion revised | **Closed on dev 2026-10-06** (entry prepared in PR #36) | Done — content and filename verified separately |
 | TC-029 Specific sequence filter | Defer the feature | **Not implemented / deferred** | Never, under current scope |
 | TC-042 Search response time | Measure before optimising | Open — needs measurement | A target is approved and met |
@@ -54,6 +54,45 @@ Adding a `deferred` label is a dashboard change and is **not** made
 here; it needs separate approval, and until then TC-029 should stay
 `decision` with this record as its reference rather than being
 mislabelled.
+
+---
+
+## Live verification, 2026-10-06 — and one retracted observation
+
+TC-009, TC-015 and TC-021 were verified on the development website after
+PRs #34, #35 and #36 merged.
+
+**Build used:** UI Amplify job **#117** at `bce99fc` (bundle
+`index-DqGd72qq.js`), **API ECS rev 75** (image
+`20261006T123638Z-8292260`) — unchanged, no API deployment. Signed-in
+session.
+
+Amplify coalesced the three merges: job #116 ran on `a54a0a2` and
+`a959f280` got no standalone build, so #117 is the only build the
+evidence rests on.
+
+### Retracted: the earlier `/global-search` observations
+
+Several checks before this date probed `/global-search`, **which is not a
+route in this application.** The router's catch-all served the Dashboard
+instead, so those rows described the wrong page — both in the local run
+and in the first dev run. They are withdrawn, not reinterpreted.
+
+The real route is **`/search`**. Re-run there, Global Search:
+
+- carries its own guidance and neither the wildcard sentence nor the
+  shared initial hint, which is correct
+- answers a single character with *"Enter at least 2 characters to
+  search."* and does not search
+- searches normally on a longer query, returning results with their
+  Semantic match labels intact
+
+Every other route used in those checks was valid; this was the only
+wrong one.
+
+**Rule taken from it:** a browser check asserts the page's identity
+before asserting anything about its behaviour. A negative result on a
+page you never loaded looks exactly like a passing one.
 
 ---
 

@@ -108,10 +108,34 @@
       "steps": "Enter a wildcard query such as *105698*",
       "expected": "Results include all awards matching the wildcard pattern",
       "priority": "Medium",
-      "status": "decision",
-      "note": "Confirm how wildcard searches should behave and how the hint should explain them.",
+      "status": "passed",
+      "note": "Decided: the wildcard behaviour stays as it is, and the guidance that describes it was corrected. The old hint advertised \"*text*\", the one form that changes nothing - a plain term already matches anywhere in the field, so *105698* and 105698 run the same search. The pages now explain what a wildcard actually buys: 105698* for starts-with, *105698 for ends-with. Shown on Awards and Historical Awards only, because those are the two searches that support it.",
       "scope": "Development website",
-      "environment": "dev after release: UI Amplify job #93 @ 79b792a; API ECS rev 71 digest 57ef662b"
+      "environment": "dev: UI Amplify job #117 @ bce99fc; API ECS rev 75 (image 20261006T123638Z-8292260); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "verified",
+        "requiredEnvironment": "Development website",
+        "change": "UI: PR #34 (merged a54a0a2; commits 889b579 and 303336a).",
+        "deployedBuild": "UI Amplify job #117 @ bce99fc (bundle index-DqGd72qq.js); API ECS rev 75 (image 20261006T123638Z-8292260) - unchanged, no API deployment",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked in the browser on the development website. The guidance appears on Awards and Historical Awards and on no other search page - Proposals, Subawards, Negotiations and Global Search carry none, which is correct because those searches do not translate a *. The old \"Use *text* for a wildcard search\" wording and the \"Wildcard (*text*)\" and \"Partial Award Number\" hint chips are gone everywhere. Each form was then run against real archive data and behaves as described: 105698, 105698* and *105698 each returned 2 awards, and on a term where anchoring makes a difference the three forms separated clearly - 00001 returned 15,099 awards, 00001* returned 11, and *00001 returned 15,092. Anchoring demonstrably narrows the search.",
+        "limitations": "The guidance is deliberately not shown on Proposals, Negotiations, Subawards or Global Search: those searches bind the typed term directly, so a * there is matched as a literal character and finds nothing. That difference between modules is unchanged by this work and is not itself covered by this case."
+      },
+      "history": [
+        {
+          "on": "2026-09-29",
+          "stage": "decisionNeeded",
+          "summary": "Raised as needing a decision: wildcard searches appeared to do nothing, because the hint advertised the one form identical to typing the term plain.",
+          "environment": "dev after release: UI Amplify job #93 @ 79b792a; API ECS rev 71 digest 57ef662b"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Decision taken: keep the behaviour, correct the guidance. Written and tested, not yet released, so the website still showed the old wording.",
+          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic"
+        }
+      ]
     },
     {
       "id": "TC-010",
@@ -180,10 +204,34 @@
       "steps": "Submit the search with an empty input field",
       "expected": "App shows an appropriate prompt/validation instead of erroring or showing all records",
       "priority": "Medium",
-      "status": "decision",
-      "note": "Confirm the empty-search guidance. Searching with filters alone is supported.",
+      "status": "passed",
+      "note": "Decided: an empty search is a starting state, not an error. Submitting with an empty box and no filters makes no request and shows no records - that was already true - and the page now says \"Enter a search term, or apply a filter, to see results.\" instead of simply doing nothing. Searching with filters alone is supported and unchanged, and Global Search keeps its own two-character minimum.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #92 @ fd2b2ee; API ECS rev 69 digest 0ba53c5c (tree = 848b8b6)"
+      "environment": "dev: UI Amplify job #117 @ bce99fc; API ECS rev 75 (image 20261006T123638Z-8292260); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "verified",
+        "requiredEnvironment": "Development website",
+        "change": "UI: PR #34 (merged a54a0a2; commit 889b579).",
+        "deployedBuild": "UI Amplify job #117 @ bce99fc (bundle index-DqGd72qq.js); API ECS rev 75 (image 20261006T123638Z-8292260) - unchanged, no API deployment",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked in the browser on the development website. With an empty box and no filters the page shows the guidance, fires no search request at all, shows no records and shows no error. Applying a filter alone - no typed text - runs a real search and returned 9,586 awards, so filter-only searching still works. Global Search keeps its own behaviour: a single character answers \"Enter at least 2 characters to search.\" and does not search, while a longer query searched normally. On Historical Awards the guidance carries an extra sentence, because choosing a Versions value on its own does not start a search there; with a search term and Versions set to historical the search ran and returned 30 records.",
+        "limitations": "The case as written expected a prompt \"instead of erroring or showing all records\". Neither of those was ever happening - the page made no request and showed nothing - so what was added is the missing acknowledgement, not a new guard. The module API still accepts an empty query and lists everything, paginated; that is deliberate and reachable only by typing a URL, not through the page."
+      },
+      "history": [
+        {
+          "on": "2026-09-29",
+          "stage": "decisionNeeded",
+          "summary": "Raised as needing a decision on what an empty search should say. Searching with filters alone was already supported.",
+          "environment": "dev: UI Amplify job #92 @ fd2b2ee; API ECS rev 69 digest 0ba53c5c (tree = 848b8b6)"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Decision taken: show a short starting hint naming both ways in - a search term or a filter. Written and tested, not yet released.",
+          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic"
+        }
+      ]
     },
     {
       "id": "TC-016",
@@ -318,10 +366,34 @@
       "steps": "From an award detail page, click the breadcrumb back to hierarchy/search",
       "expected": "User is returned to the correct prior page/state",
       "priority": "Medium",
-      "status": "decision",
-      "note": "Decide whether the breadcrumb should show parent lineage or provide a way back to search results.",
+      "status": "passed",
+      "note": "Decided: the breadcrumb keeps doing what it was built for - moving between related Awards inside a family - and a separate \"Back to search results\" link was added above it for returning to the result list. They answer two different questions, so they are two different controls. The return link brings back the exact search: same text, same filters, same sort, same page.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29"
+      "environment": "dev: UI Amplify job #117 @ bce99fc; API ECS rev 75 (image 20261006T123638Z-8292260); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "verified",
+        "requiredEnvironment": "Development website",
+        "change": "UI: PR #34 (merged a54a0a2; commit 889b579).",
+        "deployedBuild": "UI Amplify job #117 @ bce99fc (bundle index-DqGd72qq.js); API ECS rev 75 (image 20261006T123638Z-8292260) - unchanged, no API deployment",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked in the browser on the development website, on a real two-level Award family. Opening a result and then an Award showed the \"Back to search results\" link alongside the breadcrumb, pointing at the exact search that was run, page number included. Moving up the breadcrumb to the parent Award kept the link pointing at the same search, and so did reloading the page. Clicking it returned to the result list exactly as it had been left. Hand-crafted return targets were refused rather than followed: an off-site address, a protocol-relative one, a javascript: one and one carrying a hidden control character each produced no link at all, while an ordinary internal search address was accepted.",
+        "limitations": "The return link appears only when the reader actually arrived from a search. Opening a result in a NEW TAB - middle-click, or Cmd/Ctrl-click - and opening a bookmarked or pasted Award address both arrive without that context, and in those cases the link is not shown at all rather than guessing a destination. Both were confirmed on the website. The breadcrumb is unaffected and still appears. This is deliberate: the search is carried in the page's navigation state rather than in the address, which is also why a copied Award link never carries someone else's search terms."
+      },
+      "history": [
+        {
+          "on": "2026-09-29",
+          "stage": "decisionNeeded",
+          "summary": "Raised as needing a decision: the breadcrumb moved between Awards rather than returning to the search, and was read as a way back.",
+          "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29"
+        },
+        {
+          "on": "2026-10-06",
+          "stage": "fixedInCode",
+          "summary": "Decision taken: keep hierarchy navigation, add a separate return link carrying the exact search. Written and tested, not yet released.",
+          "environment": "local stack at PR #34 review head 303336a; stubbed auth and a seeded hierarchy fixture; no shared dev traffic"
+        }
+      ]
     },
     {
       "id": "TC-023",
