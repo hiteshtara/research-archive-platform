@@ -15,6 +15,8 @@ import edu.bu.archive.adapter.out.persistence.GlobalSearchRepository;
 import edu.bu.archive.adapter.out.persistence.IrbGlobalSearchRow;
 import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.ProposalSemanticSummaryRow;
+import edu.bu.archive.adapter.out.persistence.SubawardSemanticSummaryRow;
+import edu.bu.archive.adapter.out.persistence.NegotiationSemanticSummaryRow;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRepository;
 import edu.bu.archive.adapter.out.persistence.SemanticSearchRow;
 import edu.bu.archive.application.award.AwardArchiveService;
@@ -32,6 +34,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -837,12 +840,60 @@ public class GlobalSearchService {
                                 (first, second) -> first
                         ));
 
+        /*
+         * Negotiation and Subaward were previously left unenriched, so
+         * their cards showed the identifier where the title belongs -
+         * "713214" rather than what the Negotiation is about (QA
+         * TC-041). Both are resolved the same set-based way as Award
+         * and Proposal: one query per module for the whole page, never
+         * one per result.
+         *
+         * The keys differ by module because the embedding does:
+         * build_search_embedding.py stores document_number as the
+         * business number for NEGOTIATION and subaward_code for
+         * SUBAWARD.
+         */
+        List<String> negotiationDocumentNumbers = rows.stream()
+                .filter(row -> "NEGOTIATION".equals(row.module()))
+                .map(SemanticSearchRow::businessNumber)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        List<String> subawardCodes = rows.stream()
+                .filter(row -> "SUBAWARD".equals(row.module()))
+                .map(SemanticSearchRow::businessNumber)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        Map<String, NegotiationSemanticSummaryRow> negotiationSummaries =
+                negotiationDocumentNumbers.isEmpty()
+                        ? Map.of()
+                        : negotiationArchiveService
+                                .findSummariesForDocumentNumbers(negotiationDocumentNumbers)
+                                .stream()
+                                .collect(Collectors.toMap(
+                                        NegotiationSemanticSummaryRow::documentNumber,
+                                        summary -> summary,
+                                        (first, second) -> first
+                                ));
+        Map<String, SubawardSemanticSummaryRow> subawardSummaries = subawardCodes.isEmpty()
+                ? Map.of()
+                : subawardArchiveService.findActiveSummariesForCodes(subawardCodes).stream()
+                        .collect(Collectors.toMap(
+                                SubawardSemanticSummaryRow::subawardCode,
+                                summary -> summary,
+                                (first, second) -> first
+                        ));
+
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
             mapped.add(toGlobalSearchItem(
                     row,
                     awardSummaries.get(row.businessNumber()),
-                    proposalSummaries.get(row.businessNumber())
+                    proposalSummaries.get(row.businessNumber()),
+                    negotiationSummaries.get(row.businessNumber()),
+                    subawardSummaries.get(row.businessNumber())
             ));
         }
         return mapped;
@@ -862,7 +913,9 @@ public class GlobalSearchService {
     private GlobalSearchItemResponse toGlobalSearchItem(
             SemanticSearchRow row,
             AwardSemanticSummaryRow awardSummary,
-            ProposalSemanticSummaryRow proposalSummary
+            ProposalSemanticSummaryRow proposalSummary,
+            NegotiationSemanticSummaryRow negotiationSummary,
+            SubawardSemanticSummaryRow subawardSummary
     ) {
         String route = switch (row.module()) {
             case "AWARD" -> "/awards/" + row.canonicalFamilyId();
@@ -873,21 +926,32 @@ public class GlobalSearchService {
         };
         Long awardId = "AWARD".equals(row.module()) ? row.canonicalFamilyId() : null;
 
-        boolean enriched = awardSummary != null || proposalSummary != null;
+        boolean enriched = awardSummary != null
+                || proposalSummary != null
+                || negotiationSummary != null
+                || subawardSummary != null;
         String title = row.businessNumber();
         String sponsor = null;
         String status = null;
         String principalInvestigator = null;
         if (awardSummary != null) {
-            title = awardSummary.title() != null ? awardSummary.title() : title;
+            title = usableTitle(awardSummary.title(), title);
             sponsor = awardSummary.sponsor();
             status = awardSummary.status();
             principalInvestigator = awardSummary.principalInvestigator();
         } else if (proposalSummary != null) {
-            title = proposalSummary.title() != null ? proposalSummary.title() : title;
+            title = usableTitle(proposalSummary.title(), title);
             sponsor = proposalSummary.sponsor();
             status = proposalSummary.status();
             principalInvestigator = proposalSummary.principalInvestigator();
+        } else if (negotiationSummary != null) {
+            title = usableTitle(negotiationSummary.title(), title);
+            status = negotiationSummary.status();
+            principalInvestigator = negotiationSummary.negotiator();
+        } else if (subawardSummary != null) {
+            title = usableTitle(subawardSummary.title(), title);
+            sponsor = subawardSummary.sponsor();
+            status = subawardSummary.status();
         }
 
         return new GlobalSearchItemResponse(
@@ -957,4 +1021,15 @@ public class GlobalSearchService {
         }
         return new ArrayList<>(byKey.values());
     }
+
+    /*
+     * A resolved title, or the identifier we already had. Blank counts
+     * as missing: a record whose title is an empty string would
+     * otherwise render a card with no heading at all, which is worse
+     * than showing its number (QA TC-041).
+     */
+    private static String usableTitle(String resolved, String fallback) {
+        return resolved != null && !resolved.isBlank() ? resolved : fallback;
+    }
+
 }
