@@ -87,9 +87,10 @@ test("the two labelling cases are clarifications, not incorrect-data claims", ()
   }
 });
 
-test("Lalitha's proposal-history findings are recorded as known issues, not passed", () => {
-  // They are fixed in code but NOT deployed - dev still behaves as
-  // reported - so they must not read as passed on the board.
+test("Lalitha's proposal-history findings are closed on verified evidence", () => {
+  // They were Known issues while fixed-in-code and undeployed. They are
+  // now passed, and may only say so with a build and a date attached -
+  // that is what separates a verified close from an assumed one.
   const reported = ["TC-049", "TC-050", "TC-051", "TC-052"].map((id) => {
     const item = cases.find((candidate) => candidate.id === id);
     assert.ok(item, `expected ${id} in the snapshot`);
@@ -97,19 +98,25 @@ test("Lalitha's proposal-history findings are recorded as known issues, not pass
   });
 
   for (const item of reported) {
+    // Attribution survives closing the case.
     assert.equal(item.reportedBy, "Lalitha");
-    assert.equal(item.status, "issue");
-    assert.equal(item.progress.stage, "fixedInCode");
-    // Not deployed, so nothing may claim verification.
-    assert.equal(item.progress.verifiedOn, null);
-    // The build line must describe the LAST OBSERVED deployment, not
-    // make an open-ended claim about what the site does now - that
-    // would quietly go stale the moment anything is released.
-    assert.match(item.progress.deployedBuild, /Not deployed as of/);
-    assert.match(item.progress.deployedBuild, /[Ll]ast observed deployment/);
+    assert.equal(item.status, "passed");
+    assert.equal(item.progress.stage, "verified");
+    assert.equal(item.progress.verifiedOn, "2026-10-06");
+    assert.equal(item.progress.verifiedIn, "Development website");
+    // The exact build the evidence came from, named so the close can be
+    // re-checked rather than taken on trust.
+    assert.match(item.progress.deployedBuild, /20261006T182647Z-b10e4e3/);
+    assert.match(item.progress.deployedBuild, /rev 80/);
+    assert.match(item.progress.deployedBuild, /#123 @ b10e4e3a/);
+    // The original observation is kept, not overwritten by the close.
     assert.ok(
-      !/still (runs|does|behaves)/.test(item.progress.deployedBuild),
-      `${item.id} claims current behaviour rather than an observation`,
+      item.history.some((entry) => entry.stage === "knownIssue"),
+      `${item.id} lost the observation it was opened on`,
+    );
+    assert.ok(
+      item.history.some((entry) => entry.stage === "fixedInCode"),
+      `${item.id} lost the fixed-in-code step`,
     );
   }
 });
