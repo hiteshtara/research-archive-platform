@@ -72,6 +72,21 @@ test("every case reported outside the matrix names who reported it", () => {
   }
 });
 
+test("the two labelling cases are clarifications, not incorrect-data claims", () => {
+  // Known issue is the BOARD category - the site still showed a
+  // confusing label when they were written. Neither claims the stored
+  // data is wrong, and neither changed a stored value.
+  for (const id of ["TC-051", "TC-052"]) {
+    const item = cases.find((candidate) => candidate.id === id);
+    assert.match(item.note, /clarification/i);
+    assert.match(item.note, /Board category/);
+    assert.ok(
+      /not a data defect|none were changed|no .* was changed/i.test(item.note),
+      `${id} should say plainly that no stored value changed`,
+    );
+  }
+});
+
 test("Lalitha's proposal-history findings are recorded as known issues, not passed", () => {
   // They are fixed in code but NOT deployed - dev still behaves as
   // reported - so they must not read as passed on the board.
@@ -87,7 +102,15 @@ test("Lalitha's proposal-history findings are recorded as known issues, not pass
     assert.equal(item.progress.stage, "fixedInCode");
     // Not deployed, so nothing may claim verification.
     assert.equal(item.progress.verifiedOn, null);
-    assert.match(item.progress.deployedBuild, /Not deployed/);
+    // The build line must describe the LAST OBSERVED deployment, not
+    // make an open-ended claim about what the site does now - that
+    // would quietly go stale the moment anything is released.
+    assert.match(item.progress.deployedBuild, /Not deployed as of/);
+    assert.match(item.progress.deployedBuild, /[Ll]ast observed deployment/);
+    assert.ok(
+      !/still (runs|does|behaves)/.test(item.progress.deployedBuild),
+      `${item.id} claims current behaviour rather than an observation`,
+    );
   }
 });
 
