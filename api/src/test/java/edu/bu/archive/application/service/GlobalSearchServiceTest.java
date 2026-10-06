@@ -102,7 +102,10 @@ class GlobalSearchServiceTest {
                 proposalArchiveRepository,
                 semanticSearchRepository,
                 semanticSearchProperties,
-                embeddingProviderObjectProvider
+                embeddingProviderObjectProvider,
+                // TC-042 timing instrumentation, disabled - these tests
+                // are about search behaviour, not measurement.
+                new SearchTimingLog(false)
         );
 
         // Default: empty results for every domain unless a test
