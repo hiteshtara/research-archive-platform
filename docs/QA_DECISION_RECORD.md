@@ -105,6 +105,34 @@ default, `105698*` for starts-with, `*105698` for ends-with. A tester
 can confirm each of the three forms behaves as described. No wildcard
 guidance appears on Proposal, Negotiation, Subaward or Global Search.
 
+**A gap found by browser verification, after this criterion was first
+written.** The criterion above says *Awards and Historical Awards*. The
+first implementation put the guidance on Awards only. Historical Awards
+runs its free-text box through the same `AwardSearchPattern`
+(`AwardArchiveService.searchVersions` calls `toLikePattern`), so it
+supports the identical contains / starts-with / ends-with behaviour with
+nothing on the page explaining it — which is precisely the TC-009 defect,
+on a second page.
+
+No test caught this and none could have: the project has no
+rendered-component test setup, and every unit test passed throughout.
+It was found by opening the real pages locally and reading them.
+
+**What `303336a` changes** (second commit on PR #34):
+
+- adds the same guidance sentence to the Historical Awards subtitle
+- moves the sentence to `AWARD_WILDCARD_HINT` in
+  `features/award/awardSearchPresentation.mjs`, so it has one definition
+  shared by the two pages that support wildcards — and only those two
+- states the page boundary where the constant lives rather than in a
+  page comment, so the next page added inherits the rule
+
+The criterion itself is unchanged; the implementation now meets it. The
+first commit on that PR, `889b579`, met it only on Awards.
+
+Verified in a browser at the PR's review head: the guidance appears on
+Awards and Historical Awards, and on no other search page.
+
 **Why it differs.** The original expectation describes a capability that
 works; what failed was the explanation of it. Testing the explanation is
 the only way this case can discriminate.
@@ -486,8 +514,15 @@ is measurement, in this order:
 
 ## The UI change
 
-Commit `889b579` on `ui/qa-search-guidance-and-return-nav`, covering
-TC-009, TC-015 and TC-021. UI only — no API, ETL or schema change.
+PR **#34** on `ui/qa-search-guidance-and-return-nav`, covering TC-009,
+TC-015 and TC-021. UI only — no API, ETL or schema change. Two commits:
+
+| Commit | What it carries |
+|---|---|
+| `889b579` | The three cases: wildcard guidance on Awards, the initial hint, the return link |
+| `303336a` | The Historical Awards wildcard gap found in browser verification, and the shared `AWARD_WILDCARD_HINT` constant |
+
+`303336a` is the review head and has its own CI.
 
 | File | Why |
 |---|---|
@@ -508,7 +543,15 @@ regression. Global Search keeps its own 2-character-minimum messaging.
 
 **Verification.** UI 629/629 `node:test` — 11 new covering the return
 context, 6 covering the two Versions states, 2 pinning the agreed copy;
-`tsc -b` exit 0; `oxlint` 0 warnings; `vite build` exit 0. The new tests were confirmed to actually
+`tsc -b` exit 0; `oxlint` 0 warnings; `vite build` exit 0. CI green on
+the review head with all three jobs executing.
+
+Also run against the real application locally at the review head, not
+only against the helpers: page-specific copy on all six search pages,
+the Versions filter's two states, the full search → hierarchy →
+dashboard chain with two breadcrumb hops, reload, new-tab and
+direct-entry arrival, and eight rejected return-state values with two
+accepted controls. The new tests were confirmed to actually
 execute by name, because `ui/package.json`'s test script enumerates
 feature directories explicitly and a file in an unlisted directory
 silently never runs.
