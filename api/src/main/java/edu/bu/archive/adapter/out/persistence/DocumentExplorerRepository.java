@@ -169,7 +169,9 @@ public class DocumentExplorerRepository {
                     NULL::text,
                     NULL::text,
                     pv.initial_start_date,
-                    pv.proposal_number,
+                    -- Version-level key, not the family number: see
+                    -- DocumentSearchRepository for why.
+                    pv.proposal_id::text,
                     0,
                     CASE WHEN pv.principal_investigator_name IS NOT NULL THEN 1 ELSE 0 END,
                     0
@@ -381,7 +383,9 @@ public class DocumentExplorerRepository {
                     NULL::text,
                     NULL::text,
                     pv.initial_start_date,
-                    pv.proposal_number,
+                    -- Version-level key, not the family number: see
+                    -- DocumentSearchRepository for why.
+                    pv.proposal_id::text,
                     0,
                     CASE WHEN pv.principal_investigator_name IS NOT NULL THEN 1 ELSE 0 END,
                     0,

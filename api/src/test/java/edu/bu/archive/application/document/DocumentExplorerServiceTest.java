@@ -82,15 +82,24 @@ class DocumentExplorerServiceTest {
     }
 
     @Test
-    void proposalRowRoutesByProposalNumber() {
+    void proposalRowRoutesToItsOwnVersionNotTheFamilyPage() {
+        /*
+         * The target is proposal_id - one version - not proposal_number,
+         * which every version of a proposal shares. Routing on the
+         * family number sent all of a proposal's documents to
+         * "/proposals/{number}", which redirects to the current version,
+         * so opening version 2 showed version 4.
+         */
         stub(List.of(new DocumentExplorerRow(
                 "PROPOSAL", "430102", "01128961", "CARB-X", "ACTIVE", "3",
                 "Funded", "3", null, null, "pi-1", "Jane Smith",
                 "Principal Investigator", "NIH", "National Institutes of Health", null, null,
-                LocalDate.of(2019, 6, 1), "01128961", 0, 1, 0
+                LocalDate.of(2019, 6, 1), "7003", 0, 1, 0
         )), 1L);
         DocumentExplorerResultResponse row = search(null).results().content().get(0);
-        assertThat(row.targetRoute()).isEqualTo("/proposals/01128961");
+        assertThat(row.targetRoute()).isEqualTo("/proposals/dashboard/7003");
+        // The family number is still carried for display.
+        assertThat(row.businessRecordNumber()).isEqualTo("01128961");
     }
 
     @Test

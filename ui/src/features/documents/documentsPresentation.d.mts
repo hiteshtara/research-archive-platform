@@ -51,3 +51,12 @@ export function additionalRelationshipsLabel(
 ): string | null;
 
 export function unitSourceLabel(module: string): string;
+
+export function seedFiltersFromParams<T>(
+  emptyFilters: T,
+  searchParams: URLSearchParams | null | undefined,
+): T;
+
+export function documentDateLabel(module: string): string;
+
+export const DOCUMENT_STATUS_KIND_LABEL: string;

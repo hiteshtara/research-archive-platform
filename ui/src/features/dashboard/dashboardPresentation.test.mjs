@@ -275,3 +275,24 @@ test("supported Award, Historical Award, Proposal, Negotiation, Subaward, Docume
   assert.match(source, /path="documents"[\s\S]{0,40}DocumentsPage/);
   assert.match(source, /path="explorer"/);
 });
+
+test("Historical Proposal Records opens Kuali Documents filtered to Proposal", () => {
+  // It used to point at /proposals - the family page, one result per
+  // proposal number showing only the current version. A card promising
+  // "all preserved history rows" must land somewhere that lists them.
+  const card = historicalActivityCards.find(
+    (entry) => entry.key === "proposalHistoryRecords",
+  );
+  assert.equal(card.path, "/documents?module=PROPOSAL");
+});
+
+test("the ordinary Proposals card still opens the family-level page", () => {
+  // The two cards answer different questions and must not converge.
+  const proposals = primaryBusinessCards.find((entry) => entry.key === "proposals");
+  assert.equal(proposals.path, "/proposals");
+
+  const history = historicalActivityCards.find(
+    (entry) => entry.key === "proposalHistoryRecords",
+  );
+  assert.notEqual(proposals.path, history.path);
+});

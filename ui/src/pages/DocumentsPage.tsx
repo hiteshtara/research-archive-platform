@@ -17,8 +17,8 @@ import {
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiRequestError, searchDocumentExplorer } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
@@ -34,7 +34,9 @@ import {
   documentSearchResultsCountLabel,
   explorerModuleLabel,
   isNavigable,
+  documentDateLabel,
   moduleFacetLabel,
+  seedFiltersFromParams,
   normalizedStatusLabel,
   unitSourceLabel,
 } from "../features/documents/documentsPresentation.mjs";
@@ -70,8 +72,31 @@ const EMPTY_FILTERS = {
 export function DocumentsPage() {
   const navigate = useNavigate();
 
-  const [draft, setDraft] = useState(EMPTY_FILTERS);
-  const [applied, setApplied] = useState(EMPTY_FILTERS);
+  /*
+   * Filters can be seeded from the address, so a link can land here with
+   * a module already chosen AND applied - "Historical Proposal Records"
+   * on the dashboard points at /documents?module=PROPOSAL and expects to
+   * show proposal document rows, not an empty form the reader has to
+   * fill in again.
+   *
+   * Seeded into BOTH draft and applied: draft so the Module control
+   * shows it, applied so the search has already run. Seeding only the
+   * draft would show a filter that had not been applied, which is worse
+   * than not seeding at all.
+   *
+   * Read once, on first render. After that the controls own the state -
+   * re-reading the address on every render would fight the user every
+   * time they changed the module.
+   */
+  const [searchParams] = useSearchParams();
+  const seededFilters = useMemo<typeof EMPTY_FILTERS>(
+    () => seedFiltersFromParams(EMPTY_FILTERS, searchParams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const [draft, setDraft] = useState(seededFilters);
+  const [applied, setApplied] = useState(seededFilters);
   const [page, setPage] = useState(0);
 
   const searchQuery = useQuery({
@@ -114,6 +139,19 @@ export function DocumentsPage() {
           Search archived workflow and business documents across Award,
           Proposal, Negotiation, and Subaward. Attachments are separate
           files reached from the owning record, not shown here.
+        </Typography>
+        {/*
+          * "Archived" means two different things across these screens -
+          * here it is what became of the record, on a record's Versions
+          * tab it is whether that row is the current version. They can
+          * disagree for the same document and both be right, so each is
+          * named for what it is.
+          */}
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Each row shows a <strong>Disposition</strong> &mdash; what became of
+          the record, grouped from the Kuali status in brackets. It is not the
+          record&rsquo;s sequence status, which says whether a version is the
+          current one and is shown on the record&rsquo;s Versions tab.
         </Typography>
       </Box>
 
@@ -430,7 +468,12 @@ export function DocumentsPage() {
                     {result.versionOrSequence
                       ? ` · version ${result.versionOrSequence}`
                       : ""}
-                    {result.documentDate ? ` · ${result.documentDate}` : ""}
+                    {/* Labelled, because this column is a different
+                        field per module and is never an update
+                        timestamp - see documentDateLabel. */}
+                    {result.documentDate
+                      ? ` · ${documentDateLabel(result.module)} ${result.documentDate}`
+                      : ""}
                   </Typography>
 
                   {result.leadUnitNumber && (

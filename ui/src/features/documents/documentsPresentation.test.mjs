@@ -10,6 +10,7 @@ import {
   MODULES,
   NORMALIZED_STATUSES,
   additionalRelationshipsLabel,
+  documentDateLabel,
   documentSearchErrorMessage,
   documentSearchResultsCountLabel,
   explorerModuleLabel,
@@ -18,6 +19,7 @@ import {
   moduleLabel,
   normalizedStatusLabel,
   resultsAreApprovedModulesOnly,
+  seedFiltersFromParams,
   unitSourceLabel,
 } from "./documentsPresentation.mjs";
 
@@ -291,4 +293,120 @@ test("App.tsx routes /documents to DocumentsPage, not ComingSoonPage", () => {
   assert.ok(documentsRouteBlock, "expected a documents route block");
   assert.match(documentsRouteBlock, /DocumentsPage/);
   assert.doesNotMatch(documentsRouteBlock, /ComingSoonPage/);
+});
+
+// --- Lalitha's proposal-history findings ---
+
+test("a proposal document row routes to its own version, not the family page", () => {
+  // The defect: every version of proposal 01394406 carried
+  // targetRoute "/proposals/01394406", the FAMILY route, which
+  // redirects to the current version - so clicking document 1000570
+  // (version 2) opened version 4 / workflow 1000951.
+  //
+  // The route must now name the version. These are the four documents
+  // from the report, with proposal_id as the version key.
+  const versions = [
+    { module: "PROPOSAL", documentNumber: "1000005", versionOrSequence: "1", targetRoute: "/proposals/dashboard/9001" },
+    { module: "PROPOSAL", documentNumber: "1000570", versionOrSequence: "2", targetRoute: "/proposals/dashboard/9002" },
+    { module: "PROPOSAL", documentNumber: "1000653", versionOrSequence: "3", targetRoute: "/proposals/dashboard/9003" },
+    { module: "PROPOSAL", documentNumber: "1000951", versionOrSequence: "4", targetRoute: "/proposals/dashboard/9004" },
+  ];
+
+  assert.equal(versions.every(isNavigable), true);
+  // Four documents, four DISTINCT destinations - the whole point.
+  assert.equal(new Set(versions.map((v) => v.targetRoute)).size, 4);
+  // None of them may be the family route.
+  assert.equal(
+    versions.some((v) => /^\/proposals\/[^d]/.test(v.targetRoute)),
+    false,
+  );
+});
+
+test("seeding applies a known module so a link lands on filtered results", () => {
+  const empty = { query: "", module: "", sort: "" };
+  const seeded = seedFiltersFromParams(empty, new URLSearchParams("module=PROPOSAL"));
+  assert.equal(seeded.module, "PROPOSAL");
+  // Everything else untouched.
+  assert.equal(seeded.query, "");
+});
+
+test("seeding accepts a lowercase module from a hand-typed link", () => {
+  const seeded = seedFiltersFromParams({ module: "" }, new URLSearchParams("module=proposal"));
+  assert.equal(seeded.module, "PROPOSAL");
+});
+
+test("an unknown module seeds nothing rather than filtering to zero rows", () => {
+  // Passing it through would return no rows, which reads as "there are
+  // no proposal documents" rather than "that link was wrong".
+  const empty = { module: "" };
+  assert.deepEqual(seedFiltersFromParams(empty, new URLSearchParams("module=BANANA")), empty);
+  assert.deepEqual(seedFiltersFromParams(empty, new URLSearchParams("")), empty);
+  assert.deepEqual(seedFiltersFromParams(empty, null), empty);
+});
+
+test("the document date is labelled by what it actually is, per module", () => {
+  // One field, a different column per module. For proposal 01394406
+  // version 4 this is initial_start_date (2024-01-01), NOT the
+  // Updated timestamp the Versions tab shows (2023-06-02).
+  assert.equal(documentDateLabel("PROPOSAL"), "Period start date");
+  assert.equal(documentDateLabel("AWARD"), "Period start date");
+  assert.equal(documentDateLabel("NEGOTIATION"), "Period start date");
+  assert.equal(documentDateLabel("SUBAWARD"), "Period start date");
+  // IRB's column is received_date - "Period start date" would be wrong.
+  assert.equal(documentDateLabel("IRB"), "Received date");
+  assert.equal(documentDateLabel("SOMETHING_ELSE"), "Date");
+});
+
+test("the Proposal status mapping is a DISPOSITION, and is pinned against the SQL", () => {
+  /*
+   * Two different things are called "archived" on screens a reader
+   * moves between, which is what made proposal 01394406 confusing:
+   *
+   *   Kuali Documents, version 4 -> badge "Archived"
+   *     from proposal_version.status_description = 'Not Funded',
+   *     grouped by the CASE below. It describes the proposal's
+   *     DISPOSITION - what became of it.
+   *
+   *   Versions tab, version 4 -> Sequence status "ACTIVE"
+   *     from proposal_version.proposal_sequence_status. It describes
+   *     whether this row is the current version.
+   *
+   * They disagree for the same record and both are correct, because
+   * they answer different questions. Version 4 is the current version
+   * (sequence ACTIVE) of a proposal that was not funded (disposition
+   * archived). Versions 1-3 are superseded (sequence ARCHIVED) and
+   * still Pending as dispositions.
+   *
+   * This pins the mapping against the SQL so a change to either side
+   * fails here rather than silently shifting what a badge means. The
+   * mapping itself is NOT changed - no stored status is touched.
+   */
+  const explorerSql = readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../../../api/src/main/java/edu/bu/archive/adapter/out/persistence/DocumentExplorerRepository.java",
+    ),
+    "utf8",
+  );
+
+  for (const [native, normalized] of [
+    ["Pending", "PENDING"],
+    ["Pending-Revised", "PENDING"],
+    ["Funded", "ACTIVE"],
+    ["Not Funded", "ARCHIVED"],
+    ["Withdrawn", "ARCHIVED"],
+    ["Deactivated Record", "ARCHIVED"],
+  ]) {
+    assert.ok(
+      explorerSql.includes(`WHEN '${native}' THEN '${normalized}'`),
+      `expected proposal status mapping ${native} -> ${normalized} in the SQL`,
+    );
+  }
+
+  // The sequence status is a separate column and must never be the
+  // source of this badge.
+  assert.ok(
+    !/CASE pv\.proposal_sequence_status/.test(explorerSql),
+    "the document status badge must not be derived from proposal_sequence_status",
+  );
 });

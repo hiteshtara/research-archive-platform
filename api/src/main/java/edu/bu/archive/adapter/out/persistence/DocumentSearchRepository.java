@@ -51,7 +51,15 @@ public class DocumentSearchRepository {
                     pv.status_description,
                     pv.version_number::text,
                     pv.initial_start_date,
-                    pv.proposal_number
+                    -- target_id must identify the VERSION, not the family.
+                    -- proposal_number is the same for every version, so
+                    -- routing on it sent all four of a proposal's
+                    -- documents to whichever version the family page
+                    -- resolves to - always the current one. Every other
+                    -- module here already uses a version-level key
+                    -- (award_id, subaward_id, protocol_id); Proposal was
+                    -- the exception.
+                    pv.proposal_id::text
                 FROM archive.proposal_version pv
                 WHERE pv.document_number IS NOT NULL
 
