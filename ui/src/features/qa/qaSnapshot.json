@@ -366,10 +366,20 @@
       "steps": "Click Download Award Report on an award detail page",
       "expected": "A confirmation prompt appears before download; resulting file is correctly named and not corrupted",
       "priority": "Medium",
-      "status": "decision",
-      "note": "Decide whether downloading an Award report needs a confirmation prompt.",
+      "status": "passed",
+      "note": "Decided: no confirmation prompt. The archive is read-only, so a report download is non-destructive and a prompt would prevent nothing; the button instead shows a busy state and cannot be submitted twice. The file itself was checked separately rather than inferred from that busy state - it was opened in a PDF reader, parsed, and representative pages were read.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #92 @ fd2b2ee; API ECS rev 69 digest 0ba53c5c (tree = 848b8b6)"
+      "environment": "dev: UI Amplify job #115 @ f1ca19d; API ECS rev 75 (image 20261006T123638Z-8292260); signed-in session, 2026-10-06",
+      "progress": {
+        "stage": "verified",
+        "requiredEnvironment": "Development website",
+        "change": "No code change. The decision and the revised criterion are recorded in docs/QA_DECISION_RECORD.md.",
+        "deployedBuild": "UI Amplify job #115 @ f1ca19d; API ECS rev 75 (image 20261006T123638Z-8292260)",
+        "verifiedOn": "2026-10-06",
+        "verifiedIn": "Development website",
+        "results": "Checked in the browser on an Award detail page, signed in. Clicking Download Award Report started the download immediately with no confirmation dialog, and the control showed a busy state while the report was prepared. The downloaded file was then checked on its own terms, because a busy state says a request is in flight and a parsed filename says only that a name was read - neither shows the file is sound. The server supplied the filename itself, and it named the Award the report was opened from. Two independent parsers agreed the document opens cleanly, is not encrypted, and holds 39 pages, and every one of those pages parsed with readable text. The first page, a middle page and the last page were then rendered and read: a cover carrying the Award's own summary fields and the read-only archive notice, a populated interior section whose tables render with their headers and rows intact, and a closing appendix that ends the document cleanly. Page numbering runs 1 to 39 and matches the parsed count, so nothing is truncated.",
+        "limitations": "One Award and one build. Three of 39 pages were read; the other 36 were confirmed to parse with extractable text but were not read. The downloaded report is held locally as evidence and is not attached here, because it carries real archived award data. A separate, still open audit finding about credentials in this report is unaffected by this case - a limited scan of this one file did not reproduce it, which is not a clearance."
+      }
     },
     {
       "id": "TC-027",
