@@ -68,11 +68,23 @@ public class SearchTimingLog {
     }
 
     /*
-     * The id for the request currently being served, set by
-     * SearchRequestTimingInterceptor so the whole-request line and the
-     * stages inside it share one id. The service reads it on the
-     * request thread and captures it into its own lambdas before any
-     * fan-out, so the worker threads never touch this.
+     * The id for the request currently being served.
+     *
+     * PROPAGATION CONTRACT, because this is easy to get wrong. This
+     * ThreadLocal is set and cleared by SearchRequestTimingInterceptor
+     * on the SERVLET thread and nowhere else. Global Search fans out
+     * across CompletableFuture workers, and a ThreadLocal does not
+     * follow a task onto another thread - so the id is NOT read from
+     * here on a worker. The service reads it once, on the request
+     * thread, into a local which its lambdas then capture by value;
+     * every stage recorded from a worker is passed that captured id
+     * explicitly.
+     *
+     * Two consequences worth stating, both covered by tests:
+     *   - a worker thread's own ThreadLocal is never set, so there is
+     *     nothing on a pooled worker to leak into the next request
+     *   - stages recorded from workers still carry the request's id, by
+     *     capture rather than by thread affinity
      */
     private final ThreadLocal<String> currentCorrelationId = new ThreadLocal<>();
 
@@ -157,6 +169,38 @@ public class SearchTimingLog {
                     correlationId, stage, durationMillis, count, outcome
             );
         }
+    }
+
+    /**
+     * Records the MVC dispatch of one request.
+     *
+     * STATUS AND OUTCOME ARE SEPARATE FACTS, deliberately. A handled
+     * error reaches afterCompletion with no exception at all - an
+     * @ExceptionHandler turns it into a 500 response and the dispatch
+     * completes normally - so deriving "did it fail" from the status
+     * would mislabel it, and deriving it from the exception alone would
+     * miss it. Both are recorded and neither is inferred from the
+     * other: {@code status} is what the client received, {@code
+     * outcome} is whether an exception escaped the handler chain.
+     */
+    public void recordDispatch(
+            String correlationId,
+            String stage,
+            long durationMillis,
+            int httpStatus,
+            boolean exceptionEscaped
+    ) {
+        if (!enabled) {
+            return;
+        }
+        log.info(
+                "search-timing cid={} stage={} ms={} status={} outcome={}",
+                correlationId,
+                stage,
+                durationMillis,
+                httpStatus,
+                exceptionEscaped ? "exception" : "completed"
+        );
     }
 
     /** Times a supplier and records it, returning the supplier's value. */

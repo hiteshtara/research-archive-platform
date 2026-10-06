@@ -16,18 +16,27 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /*
- * QA TC-042. REQUEST_TOTAL has to mean the WHOLE request, or a stage
- * compared against it reads as a smaller share of the cost than it
- * really is.
+ * QA TC-042. MVC_REQUEST_TOTAL has to cover more than the service call,
+ * or a stage compared against it reads as a smaller share of the cost
+ * than it really is.
  *
- * A timer inside GlobalSearchService cannot deliver that: it starts
- * after routing and parameter validation and stops before the response
- * is written. This interceptor's preHandle runs before the handler is
- * invoked - and so before the @Validated parameter checks that run on
- * invocation - and its afterCompletion runs after the response has been
- * written. These tests pin that window, including the case that proves
- * it: a request REFUSED during validation never reaches the service, so
- * only an interceptor can time it at all.
+ * A timer inside GlobalSearchService starts after routing and parameter
+ * validation and stops before the response is written. This
+ * interceptor's preHandle runs before the handler is invoked - and so
+ * before the @Validated parameter checks that run on invocation - and
+ * its afterCompletion runs after the response has been written. The
+ * case that proves where the measurement belongs: a request REFUSED
+ * during validation never reaches the service, so only an interceptor
+ * can time it at all.
+ *
+ * The name is MVC_REQUEST_TOTAL, not REQUEST_TOTAL, because it covers
+ * the DispatcherServlet's dispatch and nothing earlier - filters,
+ * security, CORS and the load balancer are all outside it, and a
+ * failure before handler selection never reaches preHandle.
+ *
+ * Status and outcome are separate fields throughout: a handled error
+ * arrives with a 500 status and NO exception, so neither can be
+ * inferred from the other.
  */
 class SearchRequestTimingInterceptorTest {
 
@@ -85,9 +94,9 @@ class SearchRequestTimingInterceptorTest {
         interceptor.preHandle(request, response, new Object());
         interceptor.afterCompletion(request, response, new Object(), null);
 
-        assertThat(messages()).anyMatch(m -> m.contains("stage=REQUEST_TOTAL"));
-        assertThat(messages()).anyMatch(m -> m.contains("stage=REQUEST_STATUS_200"));
-        assertThat(messages()).allMatch(m -> m.contains("outcome=ok"));
+        assertThat(messages()).anyMatch(m -> m.contains("stage=MVC_REQUEST_TOTAL"));
+        assertThat(messages()).anyMatch(m -> m.contains("status=200"));
+        assertThat(messages()).allMatch(m -> m.contains("outcome=completed"));
     }
 
     @Test
@@ -106,10 +115,12 @@ class SearchRequestTimingInterceptorTest {
         response.setStatus(400);
         interceptor.afterCompletion(request, response, new Object(), null);
 
-        assertThat(messages()).anyMatch(m -> m.contains("stage=REQUEST_TOTAL"));
-        assertThat(messages()).anyMatch(m -> m.contains("stage=REQUEST_STATUS_400"));
-        // A refusal is a correct outcome, not a failure of the service.
-        assertThat(messages()).allMatch(m -> m.contains("outcome=ok"));
+        assertThat(messages()).anyMatch(m -> m.contains("stage=MVC_REQUEST_TOTAL"));
+        assertThat(messages()).anyMatch(m -> m.contains("status=400"));
+        // The dispatch completed - the request was refused, not broken.
+        // Status carries the refusal; outcome carries whether anything
+        // escaped. They are not the same fact.
+        assertThat(messages()).allMatch(m -> m.contains("outcome=completed"));
     }
 
     @Test
@@ -125,7 +136,8 @@ class SearchRequestTimingInterceptorTest {
                 request, response, new Object(),
                 new IllegalStateException("pgvector connection to db-prod:5432 failed"));
 
-        assertThat(messages()).anyMatch(m -> m.contains("outcome=error"));
+        assertThat(messages()).anyMatch(m -> m.contains("outcome=exception"));
+        assertThat(messages()).anyMatch(m -> m.contains("status=500"));
         assertThat(messages()).noneMatch(m -> m.contains("db-prod"));
         assertThat(messages()).noneMatch(m -> m.contains("pgvector connection"));
     }
@@ -176,5 +188,27 @@ class SearchRequestTimingInterceptorTest {
                 request(), new MockHttpServletResponse(), new Object(), null);
 
         assertThat(messages()).isEmpty();
+    }
+
+    @Test
+    void aHandledErrorIsRecordedAsCompletedWithItsErrorStatus() {
+        // The case that makes status and outcome separate fields. An
+        // @ExceptionHandler turns a failure into a 500 response and the
+        // dispatch finishes normally, so afterCompletion is handed NO
+        // exception. Deriving the outcome from the status would call
+        // this a failure of the handler chain; deriving the status from
+        // the exception would lose the 500 entirely. Both are recorded.
+        SearchTimingLog timing = new SearchTimingLog(true);
+        SearchRequestTimingInterceptor interceptor = new SearchRequestTimingInterceptor(timing);
+        MockHttpServletRequest request = request();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        interceptor.preHandle(request, response, new Object());
+        response.setStatus(500);
+        interceptor.afterCompletion(request, response, new Object(), null);
+
+        String line = messages().get(0);
+        assertThat(line).contains("status=500");
+        assertThat(line).contains("outcome=completed");
     }
 }

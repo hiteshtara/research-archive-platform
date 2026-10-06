@@ -201,4 +201,70 @@ class SearchTimingLogTest {
                 .doesNotContain("100004")
                 .doesNotContain("autism");
     }
+
+    @Test
+    void aStageRecordedOnAWorkerThreadCarriesTheRequestsId() throws Exception {
+        // Global Search fans out across CompletableFuture workers. A
+        // ThreadLocal does NOT follow a task onto another thread, so
+        // the id has to travel by capture - the service reads it once
+        // on the request thread and its lambdas close over the value.
+        // This asserts that contract end to end rather than assuming
+        // it.
+        SearchTimingLog timing = new SearchTimingLog(true);
+        timing.beginRequest("req0001");
+
+        String captured = timing.correlationId();
+        java.util.concurrent.CompletableFuture
+                .supplyAsync(() -> timing.time(captured, "LEG_AWARD", () -> List.of(1, 2)))
+                .get();
+
+        assertThat(messages()).hasSize(1);
+        assertThat(messages().get(0)).contains("cid=req0001");
+        timing.endRequest();
+    }
+
+    @Test
+    void aWorkerThreadNeverHasAnIdOfItsOwnToLeak() throws Exception {
+        // The cleanup question. Because the id is never SET on a worker,
+        // there is nothing on a pooled worker to leak into whatever
+        // task runs there next - which is a stronger guarantee than
+        // remembering to clear it.
+        SearchTimingLog timing = new SearchTimingLog(true);
+        timing.beginRequest("req0002");
+
+        String onWorker = java.util.concurrent.CompletableFuture
+                .supplyAsync(() -> {
+                    String id = timing.correlationId();
+                    // Read twice: a value that persisted would repeat.
+                    return id + "|" + timing.correlationId();
+                })
+                .get();
+
+        String[] reads = onWorker.split("\\|");
+        assertThat(reads[0]).isNotEqualTo("req0002");
+        assertThat(reads[0]).isNotEqualTo(reads[1]);
+        timing.endRequest();
+    }
+
+    @Test
+    void endRequestClearsTheServletThreadsId() {
+        SearchTimingLog timing = new SearchTimingLog(true);
+        timing.beginRequest("req0003");
+        assertThat(timing.correlationId()).isEqualTo("req0003");
+
+        timing.endRequest();
+
+        assertThat(timing.correlationId()).isNotEqualTo("req0003");
+    }
+
+    @Test
+    void recordDispatchKeepsStatusAndOutcomeSeparate() {
+        SearchTimingLog timing = new SearchTimingLog(true);
+
+        timing.recordDispatch("req0004", "MVC_REQUEST_TOTAL", 120, 500, false);
+
+        String line = messages().get(0);
+        assertThat(line).contains("status=500");
+        assertThat(line).contains("outcome=completed");
+    }
 }

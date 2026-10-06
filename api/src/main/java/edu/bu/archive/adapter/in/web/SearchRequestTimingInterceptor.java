@@ -16,10 +16,17 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * orchestration and calls the rest of it "free". Spring runs this
  * interceptor's preHandle BEFORE the handler method is invoked (and so
  * before the @Validated parameter checks that run on invocation), and
- * afterCompletion AFTER the response has been written. Measuring
- * between those two points therefore covers validation, orchestration
- * and completion, which is what a reader comparing a stage against the
- * total needs it to mean.
+ * afterCompletion AFTER the response has been written.
+ *
+ * WHAT IT IS CALLED, AND WHY NOT "REQUEST_TOTAL". The stage is
+ * MVC_REQUEST_TOTAL, because that is honestly all it covers: the
+ * DispatcherServlet's handling of the request. It EXCLUDES anything
+ * earlier in the chain - servlet filters, Spring Security, CORS
+ * handling, TLS termination, the load balancer - and it cannot see a
+ * failure that happens before a handler is selected, since preHandle
+ * never runs for one. Calling it the total would overstate it, and
+ * would make every stage inside look like a larger share of the real
+ * cost than it is.
  *
  * It also owns the correlation id, so the whole-request line and every
  * stage inside it share one id and can be read as one request.
@@ -67,25 +74,22 @@ public class SearchRequestTimingInterceptor implements HandlerInterceptor {
             if (start instanceof Long startNanos) {
                 long millis = (System.nanoTime() - startNanos) / 1_000_000;
                 /*
-                 * The HTTP status carries the outcome without carrying a
-                 * message: a refused request (400) and a failed one
-                 * (500) are both worth seeing in a timing run, and
-                 * neither needs its text here.
+                 * Status and outcome are recorded as SEPARATE fields,
+                 * never derived from one another. A handled error
+                 * reaches here with exception == null - an
+                 * @ExceptionHandler turned it into a 500 and the
+                 * dispatch completed normally - so a status-derived
+                 * outcome would call that a success, and an
+                 * exception-derived status would miss it entirely.
+                 * Neither the status nor the outcome carries any
+                 * message.
                  */
-                int status = response.getStatus();
-                timingLog.record(
+                timingLog.recordDispatch(
                         timingLog.correlationId(),
-                        "REQUEST_TOTAL",
+                        "MVC_REQUEST_TOTAL",
                         millis,
-                        -1,
-                        exception == null && status < 500
-                );
-                timingLog.record(
-                        timingLog.correlationId(),
-                        "REQUEST_STATUS_" + status,
-                        millis,
-                        -1,
-                        exception == null && status < 500
+                        response.getStatus(),
+                        exception != null
                 );
             }
         } finally {
