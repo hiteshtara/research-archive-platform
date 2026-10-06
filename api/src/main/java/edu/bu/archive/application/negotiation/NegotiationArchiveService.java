@@ -1,5 +1,7 @@
 package edu.bu.archive.application.negotiation;
 
+import edu.bu.archive.adapter.out.persistence.NegotiationSemanticSummaryRow;
+
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationActivityResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAssociatedRecordResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
@@ -281,4 +283,16 @@ public class NegotiationArchiveService {
                         )
                 );
     }
+
+    /*
+     * Display fields for a set of Negotiations, keyed by document
+     * number - the identifier a semantic result carries (QA TC-041).
+     * One query for the whole set; see the repository for why.
+     */
+    public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
+            List<String> documentNumbers
+    ) {
+        return repository.findSummariesForDocumentNumbers(documentNumbers);
+    }
+
 }
