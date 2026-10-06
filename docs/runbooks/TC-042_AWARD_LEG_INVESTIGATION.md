@@ -209,15 +209,25 @@ Identical terms and identical parameters on both sides; `page=0&size=25`
 matches `PER_DOMAIN_LIMIT`. Sequential, concurrency 1, 5 discarded
 warm-up requests per path first.
 
-**Check every response.** Record the HTTP status of each request and
-discard anything that is not 200 — a session token expiring mid-run
-returns 401 in 25–60 ms, which is indistinguishable from a fast success
-if status is not recorded. That happened during the first measurement
-run and cost 10 observations before it was caught.
+**Record and COUNT every non-200 — do not silently exclude them.** The
+report carries, per path and per term: observations attempted,
+observations at 200, and a count of each non-200 status seen. A run
+where 15% of Global Search requests failed is a different result from a
+clean one, and dropping them without saying so hides that. A session
+token expiring mid-run returns 401 in 25–60 ms, indistinguishable from a
+fast success if status is not recorded — that happened in the first run
+and cost 10 observations before it was caught.
 
-**Carry the correlation id.** Group the server-side stage lines by `cid`
-so each request is reconstructed whole, and bucket cids into term
-windows by timestamp, since the log deliberately carries no query text.
+**Associate by returned correlation id, not by timestamp.** Each
+response now carries its id in the `X-Search-Timing-Cid` header (set
+only while the flag is on). Read it from the response and join directly
+to the stage lines with that `cid`.
+
+Timestamp windows are the fallback only, and a poor one: they
+misassociate as soon as anything else is talking to the API — a second
+tester, an open browser tab, a health probe — and the misassociation is
+silent. If the header is ever absent, say so in the report and treat
+those observations as windowed rather than joined.
 
 **Capture CPU alongside.** Container Insights is enabled on this
 cluster, so no code change is needed. For the run window, pull from
@@ -226,13 +236,16 @@ cluster, so no code change is needed. For the run window, pull from
 for completeness), at the finest period available, plus
 `AWS/ECS` `CPUUtilization`. Report them beside the timings.
 
-`CpuUtilized` approaching `CpuReserved` (512 units) during the Global
-Search requests but not during the standalone ones would be direct
-evidence for contention; both well below it would weigh against.
+**How to read it, and how not to.** `CpuUtilized` approaching
+`CpuReserved` (512 units) during the Global Search requests but not the
+standalone ones shows the task is **saturated**, which is consistent
+with contention. It does **not** prove contention caused any individual
+request's duration — a 1-minute aggregate cannot speak to one request
+inside it. Both figures well below the reservation would weigh against
+contention, which is the more useful direction.
 
-Note the limit honestly: these are 1-minute aggregates, so they
-characterise the window rather than any single request, and cgroup
-throttle counters are not exported here.
+Cgroup throttle counters are not exported here, so actual throttling is
+not directly observable.
 
 **What the run should answer.** Where the gap sits:
 
@@ -247,6 +260,16 @@ throttle counters are not exported here.
 
 That last row is a real possible outcome and the reason the whole-leg
 figure is kept alongside the parts.
+
+**Reconciling the leg total — do not double-count.**
+`DB_CONNECTION_ACQUIRE` is **nested inside** the repository-call timers:
+the call acquires its connection and then uses it, so that duration is
+already contained in `AWARD_COUNT`, `AWARD_PAGE` or `AWARD_EXACT_DOC`.
+When checking whether the parts account for `LEG_AWARD`, add the three
+statement timers and the queue wait — **not** connection acquisition on
+top. Treat it as a breakdown *within* a statement's number, answering
+"how much of this call was waiting for a connection", never as an
+additional term in the sum.
 
 ### B. Then, and only then, plans and buffers
 
