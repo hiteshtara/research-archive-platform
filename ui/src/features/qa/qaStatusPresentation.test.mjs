@@ -252,59 +252,54 @@ test("TC-018 keeps its local-only findings in history rather than losing them", 
   assert.ok(item.history.length >= 3);
 });
 
-test("TC-041 separates a stable verification status from a dated observation", () => {
-  /*
-   * The entry has to stay true at every rollout stage, and there are
-   * more of them than "merged" and "released": the UI rebuilds
-   * automatically when main changes while the API is deployed by hand,
-   * so the site can carry a new UI against an older API; and after both
-   * land, a present-tense claim about broken behaviour becomes false
-   * before anyone has verified it.
-   *
-   * So the status says only that the case is open until the released UI
-   * and API pass, and everything observational is dated and attributed
-   * to the builds it was seen on.
-   */
+test("TC-041 is closed, verified on the released UI and API together", () => {
   const item = cases.find((candidate) => candidate.id === "TC-041");
   assert.ok(item);
-  assert.equal(item.status, "issue");
-  assert.equal(item.progress.stage, "inProgress");
+  assert.equal(item.status, "passed");
+  assert.equal(item.progress.stage, "verified");
+  assert.equal(item.scope, "Development website");
+  assert.equal(item.progress.verifiedOn, "2026-10-06");
+  assert.equal(item.progress.verifiedIn, "Development website");
+  assert.deepEqual(verificationShortfalls(item), []);
 
-  // Stable status: no behaviour claim, no branch state, no date.
-  assert.match(item.progress.verificationStatus, /^Open\./);
-  assert.match(item.progress.verificationStatus, /released UI and API/);
-  for (const stale of ["#27", "#28", "#30", "is open", "merged"]) {
-    assert.ok(!item.note.includes(stale), `the status must not depend on "${stale}"`);
-  }
-  assert.match(item.note, /remains open until the released UI and API pass/);
+  // Both builds recorded, tied to the one release SHA, so neither half
+  // can be mistaken for the whole.
+  assert.match(item.progress.deployedBuild, /#113/);
+  assert.match(item.progress.deployedBuild, /rev 75/);
+  assert.match(item.progress.deployedBuild, /8292260/);
+  assert.match(item.progress.change, /PR #28/);
+  assert.match(item.progress.change, /PR #30/);
 
-  // The observation is dated and attributed to both builds, and reads
-  // as a record rather than as the present state.
-  const observed = item.progress.lastObservation;
-  assert.ok(observed, "a dated observation must be recorded");
-  assert.match(observed.on, /^\d{4}-\d{2}-\d{2}$/);
-  assert.match(observed.uiBuild, /Amplify job #\d+/);
-  assert.match(observed.apiBuild, /rev \d+/);
-  assert.match(observed.behaviour, /answered|showed/, "past tense: what was seen, not what is");
-  assert.doesNotMatch(observed.behaviour, /\bstill\b|\bcurrently\b|\btoday\b/i);
-
-  // And the separate-rollout caveat is stated, not left to be inferred.
-  assert.match(item.progress.limitations, /do not release together/);
-  assert.match(item.progress.limitations, /not as a description of the site right now/);
-
-  assert.equal(item.progress.deployedBuild, "Not deployed");
-  assert.equal(item.progress.verifiedOn, "");
-  assert.deepEqual(casesClaimingAnUnverifiedPass([item]), []);
-  assert.match(item.progress.change, /^Historical, as at/);
-  assert.match(item.progress.limitations, /No improvement to semantic relevance is claimed/);
+  // Nothing pending may survive on a closed case.
+  assert.doesNotMatch(item.note, /in review|Not deployed|being corrected|remains open/i);
+  assert.match(item.progress.verificationStatus, /^Closed\./);
 });
 
-test("the page shows the verification status and the dated observation", () => {
-  const page = readSource("../../pages/QaStatusPage.tsx");
-  assert.match(page, /Verification status:/);
-  assert.match(page, /Last verified observation/);
-  assert.match(page, /lastObservation\.uiBuild/);
-  assert.match(page, /lastObservation\.apiBuild/);
+test("TC-041's closure states what was checked live and what is test-only", () => {
+  const item = cases.find((candidate) => candidate.id === "TC-041");
+  // Live acceptance evidence.
+  for (const proof of [
+    /No direct matches/,
+    /Show 5 related results/,
+    /pediatric asthma/,
+    /Teaming agreement/,
+    /time to pregnancy/,
+    /two-character minimum/,
+    /TC-017/,
+    /TC-018/,
+  ]) {
+    assert.match(item.progress.results, proof);
+  }
+  // The two boundaries, stated as test-only rather than implied.
+  assert.match(item.progress.limitations, /automated tests only/);
+  assert.match(item.progress.limitations, /module failing/);
+  assert.match(item.progress.limitations, /1120419/);
+  // The withdrawn finding is kept as a probe error, not a defect.
+  assert.match(item.progress.results, /withdrawn/);
+  assert.match(item.progress.results, /error in how the check read the page/);
+  // History keeps the path, including the rejected approach.
+  assert.ok(item.history.some((entry) => /never deployed/.test(entry.summary)));
+  assert.ok(item.history.some((entry) => /document number/i.test(entry.summary)));
 });
 
 test("TC-018 stays closed and verified while TC-041 is worked on", () => {
