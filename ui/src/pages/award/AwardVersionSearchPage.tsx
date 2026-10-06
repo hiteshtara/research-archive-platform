@@ -21,6 +21,7 @@ import {
   resolveSearchState,
   searchErrorMessage,
 } from "../../features/common/searchPresentation.mjs";
+import { AWARD_WILDCARD_HINT } from "../../features/award/awardSearchPresentation.mjs";
 import {
   startsVersionSearch,
   describeVersionSearchResults,
@@ -115,7 +116,12 @@ export function AwardVersionSearchPage() {
   return (
     <SearchPageLayout
       title="Search Historical Awards"
-      subtitle="Each result is an individual archived Award version, not a family or current-record summary - every historical sequence is searchable, including by its exact internal Award ID. Selecting a result opens that exact version."
+      // The free-text box here runs through the same AwardSearchPattern
+      // as Awards (AwardArchiveService.searchVersions), so the wildcard
+      // guidance is true on this page too and belongs on it - a page
+      // where the capability works but is never explained is exactly
+      // the TC-009 defect.
+      subtitle={`Each result is an individual archived Award version, not a family or current-record summary - every historical sequence is searchable, including by its exact internal Award ID. Selecting a result opens that exact version. ${AWARD_WILDCARD_HINT}`}
       search={
         <FilteredSearchBar
           search={search}

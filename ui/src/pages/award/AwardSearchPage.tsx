@@ -23,7 +23,10 @@ import {
 } from "../../features/common/searchPresentation.mjs";
 import { buildSearchReturn } from "../../features/award/searchReturnContext.mjs";
 import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
-import { describeSearchResults } from "../../features/award/awardSearchPresentation.mjs";
+import {
+  AWARD_WILDCARD_HINT,
+  describeSearchResults,
+} from "../../features/award/awardSearchPresentation.mjs";
 import {
   AWARD_DATE_RANGES,
   AWARD_FILTER_FIELDS,
@@ -41,26 +44,6 @@ const SEARCH_DIMENSIONS = [
   "Title",
   "Document Number",
 ];
-
-/*
- * QA TC-009. The old guidance advertised "*text*", which is the one
- * wildcard form that changes nothing: a plain term is already wrapped
- * in %...% by AwardSearchPattern, so "*105698*" and "105698" run the
- * identical query. What a wildcard actually buys is anchoring - putting
- * the * on one side only - and that was never mentioned, so a reader
- * following the hint could not tell wildcards did anything at all.
- *
- * Scoped to this page and Historical Awards on purpose: wildcard
- * translation lives in AwardSearchPattern (Award) and
- * DocumentSearchPattern (Archived File Finder) only. Proposal,
- * Negotiation, Subaward and Global Search bind the raw term into
- * '%' || :query || '%' in SQL and never translate '*', so the same
- * sentence would be false on those pages. Each page declares its own
- * SEARCH_DIMENSIONS; only the HintChips component is shared.
- */
-const WILDCARD_HINT =
-  "Searches match anywhere in the field. Use 105698* for starts-with, "
-  + "or *105698 for ends-with.";
 
 // Entry point of the primary Award workflow: Search -> Search Results ->
 // Award Hierarchy -> Award Dashboard.
@@ -112,7 +95,7 @@ export function AwardSearchPage() {
   return (
     <SearchPageLayout
       title="Find an Award"
-      subtitle={`Search by Award number, Grant Number, PI, sponsor, lead unit, title, or document number. ${WILDCARD_HINT}`}
+      subtitle={`Search by Award number, Grant Number, PI, sponsor, lead unit, title, or document number. ${AWARD_WILDCARD_HINT}`}
       search={
         <FilteredSearchBar
           search={search}
