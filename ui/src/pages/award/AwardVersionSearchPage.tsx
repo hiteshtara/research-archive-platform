@@ -10,14 +10,20 @@ import { FilteredSearchBar } from "../../components/common/search/FilteredSearch
 import { ResultCard } from "../../components/common/search/ResultCard";
 import { ResultCount } from "../../components/common/search/ResultCount";
 import { SearchPageLayout } from "../../components/common/search/SearchPageLayout";
-import { SearchStates } from "../../components/common/search/SearchStates";
+import {
+  InitialSearchHint,
+  SearchStates,
+} from "../../components/common/search/SearchStates";
 import { emptyResultsMessage } from "../../features/common/filterPresentation.mjs";
 import type { FilterErrors } from "../../features/common/filterPresentation.mjs";
 import {
+  INITIAL_SEARCH_HINT,
   resolveSearchState,
   searchErrorMessage,
 } from "../../features/common/searchPresentation.mjs";
+import { AWARD_WILDCARD_HINT } from "../../features/award/awardSearchPresentation.mjs";
 import {
+  startsVersionSearch,
   describeVersionSearchResults,
   isValidAwardIdInput,
   versionCurrentLabel,
@@ -75,10 +81,11 @@ export function AwardVersionSearchPage() {
   // A hand-edited or old link can carry a non-numeric Award ID that never
   // went through the panel's validation: never send it, say why instead.
   const appliedAwardIdError = validateAwardId(search.appliedFilters).awardId;
-  const hasSearched =
-    !appliedAwardIdError &&
-    (appliedQuery.trim().length > 0 ||
-      Object.keys(appliedActiveFilters).some((key) => key !== "versionFilter"));
+  const hasSearched = startsVersionSearch({
+    appliedQuery,
+    appliedActiveFilters,
+    awardIdError: appliedAwardIdError,
+  });
 
   const searchQuery = useQuery({
     queryKey: ["award-version-search-v1", appliedQuery, appliedActiveFilters, sort, page],
@@ -109,7 +116,12 @@ export function AwardVersionSearchPage() {
   return (
     <SearchPageLayout
       title="Search Historical Awards"
-      subtitle="Each result is an individual archived Award version, not a family or current-record summary - every historical sequence is searchable, including by its exact internal Award ID. Selecting a result opens that exact version."
+      // The free-text box here runs through the same AwardSearchPattern
+      // as Awards (AwardArchiveService.searchVersions), so the wildcard
+      // guidance is true on this page too and belongs on it - a page
+      // where the capability works but is never explained is exactly
+      // the TC-009 defect.
+      subtitle={`Each result is an individual archived Award version, not a family or current-record summary - every historical sequence is searchable, including by its exact internal Award ID. Selecting a result opens that exact version. ${AWARD_WILDCARD_HINT}`}
       search={
         <FilteredSearchBar
           search={search}
@@ -126,6 +138,22 @@ export function AwardVersionSearchPage() {
               {appliedAwardIdError} Correct it in Filters to search.
             </Typography>
           )}
+          {/* QA TC-015, with this page's own wrinkle: hasSearched
+              deliberately ignores versionFilter, because it carries a
+              default of "all" and would otherwise make the page look
+              permanently searched. So choosing only a Versions value
+              submits nothing - and said nothing. The agreed sentence is
+              kept verbatim; the second sentence is specific to this
+              page and is why the copy is not shared from
+              INITIAL_SEARCH_HINT alone. */}
+          {!hasSearched && !appliedAwardIdError && (
+            <Box sx={{ mt: 2.5 }}>
+              <InitialSearchHint
+                message={`${INITIAL_SEARCH_HINT} The Versions choice narrows a search; it does not start one.`}
+              />
+            </Box>
+          )}
+
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
             Looking for the current record for an Award number instead?{" "}
             <Link component={RouterLink} to="/awards/search">

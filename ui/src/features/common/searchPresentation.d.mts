@@ -40,6 +40,8 @@ export function buildSearchParams(options?: {
   extra?: Record<string, string | number | null | undefined>;
 }): Record<string, string>;
 
+export const INITIAL_SEARCH_HINT: string;
+
 export function resolveSearchState(options?: {
   hasSearched?: boolean;
   isLoading?: boolean;

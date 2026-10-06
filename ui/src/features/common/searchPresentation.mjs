@@ -129,6 +129,28 @@ export function buildSearchParams({ query, page = 0, extra } = {}) {
   return params;
 }
 
+/*
+ * What a search page says before anything has been searched (QA TC-015).
+ *
+ * Submitting an empty box makes no request and renders no result area -
+ * that part is deliberate, because a module must not put 10,775 rows on
+ * screen merely because the data exists. What was missing is any
+ * acknowledgement: the page simply did nothing, which reads as broken
+ * rather than as waiting. The matrix expected "a prompt or validation
+ * instead of erroring or showing all records"; nothing erroneous ever
+ * happened, so this supplies only the missing half.
+ *
+ * Not a validation error, and not role="alert": an empty box is a
+ * perfectly ordinary starting state, not a mistake to be corrected.
+ *
+ * Both routes into a search are named, because filter-only searching is
+ * supported and a reader cannot be expected to infer it - with no text
+ * and one filter applied, hasCriteria is already true and the search
+ * runs.
+ */
+export const INITIAL_SEARCH_HINT =
+  "Enter a search term, or apply a filter, to see results.";
+
 /**
  * Which of the four search states a page is in.
  *

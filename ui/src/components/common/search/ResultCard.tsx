@@ -19,6 +19,7 @@ import { ResultSurface } from "./ResultSurface";
  */
 export function ResultCard({
   to,
+  state,
   identifier,
   secondaryIdentifier,
   status,
@@ -35,6 +36,14 @@ export function ResultCard({
    * renders identically but is not a link and is not clickable.
    */
   to?: string;
+  /**
+   * Router state carried to the destination - used to hand a detail
+   * page the search it was opened from, so it can offer a way back
+   * (QA TC-021). Deliberately state rather than part of `to`: it must
+   * not appear in the copied link, and a card opened in a new tab
+   * correctly arrives without it.
+   */
+  state?: unknown;
   identifier: ReactNode;
   secondaryIdentifier?: ReactNode;
   status?: ReactNode;
@@ -47,7 +56,7 @@ export function ResultCard({
 }) {
   return (
     <ResultSurface
-      cardProps={to ? { component: RouterLink, to } : undefined}
+      cardProps={to ? { component: RouterLink, to, state } : undefined}
       interactive={Boolean(to)}
       identifier={identifier}
       secondaryIdentifier={secondaryIdentifier}

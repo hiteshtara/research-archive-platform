@@ -1,6 +1,6 @@
 import { Box, Chip, Link, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useLocation } from "react-router-dom";
 
 import { searchAwardsV1 } from "../../api/client";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -11,14 +11,22 @@ import { HintChips } from "../../components/common/search/HintChips";
 import { ResultCard } from "../../components/common/search/ResultCard";
 import { ResultCount } from "../../components/common/search/ResultCount";
 import { SearchPageLayout } from "../../components/common/search/SearchPageLayout";
-import { SearchStates } from "../../components/common/search/SearchStates";
+import {
+  InitialSearchHint,
+  SearchStates,
+} from "../../components/common/search/SearchStates";
 import { emptyResultsMessage } from "../../features/common/filterPresentation.mjs";
 import {
+  INITIAL_SEARCH_HINT,
   resolveSearchState,
   searchErrorMessage,
 } from "../../features/common/searchPresentation.mjs";
+import { buildSearchReturn } from "../../features/award/searchReturnContext.mjs";
 import { formatCurrencyAmount } from "../../features/award/awardSectionsPresentation.mjs";
-import { describeSearchResults } from "../../features/award/awardSearchPresentation.mjs";
+import {
+  AWARD_WILDCARD_HINT,
+  describeSearchResults,
+} from "../../features/award/awardSearchPresentation.mjs";
 import {
   AWARD_DATE_RANGES,
   AWARD_FILTER_FIELDS,
@@ -30,8 +38,6 @@ const PAGE_SIZE = 25;
 
 const SEARCH_DIMENSIONS = [
   "Award Number",
-  "Partial Award Number",
-  "Wildcard (*text*)",
   "PI",
   "Sponsor",
   "Lead Unit",
@@ -51,6 +57,12 @@ export function AwardSearchPage() {
     dateRanges: AWARD_DATE_RANGES,
   });
   const { appliedQuery, appliedActiveFilters, page, hasCriteria } = search;
+
+  // The exact result list to come back to (QA TC-021). Every applied
+  // criterion, the sort and the page number already live in the URL, so
+  // this one string is the whole state - nothing to keep in sync.
+  const location = useLocation();
+  const searchReturn = buildSearchReturn(location.pathname, location.search);
 
   // Keyed on the complete applied request and cancelled via `signal`, so a
   // superseded response can never render under newer criteria.
@@ -83,12 +95,12 @@ export function AwardSearchPage() {
   return (
     <SearchPageLayout
       title="Find an Award"
-      subtitle="Search by Award number, Grant Number, PI, sponsor, lead unit, title, or document number. Use *text* for a wildcard search."
+      subtitle={`Search by Award number, Grant Number, PI, sponsor, lead unit, title, or document number. ${AWARD_WILDCARD_HINT}`}
       search={
         <FilteredSearchBar
           search={search}
           fields={AWARD_FILTER_FIELDS}
-          placeholder="105698, *105698*, Orsmond, NIH..."
+          placeholder="105698, 105698*, Orsmond, NIH..."
           ariaLabel="Search Awards"
           panelId="award-filters"
         />
@@ -96,6 +108,17 @@ export function AwardSearchPage() {
       belowSearch={
         <>
           <HintChips hints={SEARCH_DIMENSIONS} />
+
+          {/* QA TC-015. An empty submit makes no request and renders no
+              result area, which is correct - but it used to say nothing
+              at all, so the page looked broken rather than waiting.
+              InitialSearchHint already existed for this and no page had
+              ever used it. */}
+          {!hasCriteria && (
+            <Box sx={{ mt: 2.5 }}>
+              <InitialSearchHint message={INITIAL_SEARCH_HINT} />
+            </Box>
+          )}
 
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2.5 }}>
             This searches for one current Award record per Award number. Looking
@@ -120,6 +143,7 @@ export function AwardSearchPage() {
             {results.exactDocumentMatch && (
               <ResultCard
                 to={`/awards/${results.exactDocumentMatch.awardId}`}
+                state={searchReturn}
                 emphasized
                 sx={{ mb: 2.5 }}
                 banner={
@@ -160,6 +184,7 @@ export function AwardSearchPage() {
                 <ResultCard
                   key={hit.awardId}
                   to={`/awards/hierarchy/${encodeURIComponent(hit.awardNumber)}`}
+                  state={searchReturn}
                   identifier={hit.awardNumber}
                   status={<StatusPill status={hit.status} domain="award" />}
                   title={hit.title ?? "Untitled award"}

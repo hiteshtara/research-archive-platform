@@ -4,13 +4,19 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Link,
   Stack,
   Tooltip,
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  Link as RouterLink,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 import {
   downloadAwardReportV1,
@@ -46,6 +52,11 @@ import {
   REPORT_WITH_ATTACHMENTS,
   isReportActionAvailable,
 } from "../../features/award/awardReportDownloadPresentation.mjs";
+import {
+  SEARCH_RETURN_LABEL,
+  forwardSearchReturn,
+  readSearchReturn,
+} from "../../features/award/searchReturnContext.mjs";
 import { useAttachmentAccess } from "../../hooks/useAttachmentAccess";
 import type { AwardHierarchyNode } from "../../types/api";
 
@@ -103,6 +114,12 @@ export function AwardDashboardPage() {
   const awardId = Number(awardIdParameter);
   const navigate = useNavigate();
   const attachmentAccess = useAttachmentAccess();
+  // QA TC-021. The breadcrumb below moves around this Award's hierarchy;
+  // it is not a way back to the result list, and was read as one. This
+  // is the separate control, and it appears only when the reader
+  // actually arrived from a search - never a guess from history.
+  const searchReturnPath = readSearchReturn(useLocation().state);
+  const searchReturn = forwardSearchReturn(useLocation().state);
 
   const [activeSection, setActiveSection] = useState<SectionKey>("summary");
   const [reportDownloading, setReportDownloading] = useState(false);
@@ -140,7 +157,9 @@ export function AwardDashboardPage() {
     }
 
     setActiveSection("summary");
-    navigate(`/awards/${node.awardId}`);
+    // Carried across the hop so the return link survives breadcrumb
+    // navigation between Awards.
+    navigate(`/awards/${node.awardId}`, { state: searchReturn });
   }
 
   async function handleDownloadReportWithAttachments() {
@@ -208,6 +227,26 @@ export function AwardDashboardPage() {
 
   return (
     <Stack spacing={3}>
+      {/* Two separate affordances, deliberately not merged: this link
+          leaves the Award family and returns to the result list the
+          reader came from; the breadcrumb below stays inside the family.
+          Rendered above the breadcrumb and in its own row so neither
+          reads as part of the other (QA TC-021). */}
+      {searchReturnPath && (
+        <Box>
+          <Link
+            component={RouterLink}
+            to={searchReturnPath}
+            variant="body2"
+            underline="hover"
+          >
+            {/* An arrow, not a chevron: this is leaving the hierarchy,
+                not stepping up a level within it. */}
+            &larr; {SEARCH_RETURN_LABEL}
+          </Link>
+        </Box>
+      )}
+
       {hierarchyQuery.data && (
         <AwardBreadcrumb
           path={hierarchyQuery.data.selectedAwardPath}

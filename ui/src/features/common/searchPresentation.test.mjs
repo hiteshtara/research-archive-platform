@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  INITIAL_SEARCH_HINT,
   SEARCH_INPUT_REJECTED_MESSAGE,
   SEARCH_TEXT_MAX_LENGTH,
   buildSearchParams,
@@ -559,4 +560,25 @@ test("no search input anywhere truncates a paste", () => {
   // And the value is carried intact however long it is.
   const pasted = "x".repeat(1200);
   assert.equal(searchTextLength(pasted), 1200);
+});
+
+/*
+ * QA TC-015 / TC-009. These pin agreed copy, so a later reword is a
+ * deliberate decision rather than a silent drift.
+ */
+test("the initial-search hint is the agreed sentence and names both routes", () => {
+  assert.equal(
+    INITIAL_SEARCH_HINT,
+    "Enter a search term, or apply a filter, to see results.",
+  );
+  // Filter-only searching is supported, so the hint must not imply that
+  // typing is the only way in.
+  assert.match(INITIAL_SEARCH_HINT, /filter/);
+});
+
+test("the initial hint is guidance, not a validation error", () => {
+  // An empty box is an ordinary starting state. Wording that blames the
+  // reader would be wrong, and would also contradict TC-015's finding
+  // that nothing erroneous happens.
+  assert.doesNotMatch(INITIAL_SEARCH_HINT, /error|invalid|must|required/i);
 });

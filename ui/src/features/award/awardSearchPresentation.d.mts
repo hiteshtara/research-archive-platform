@@ -12,3 +12,5 @@ export function describeSearchResults(
   content: AwardSearchHit[];
   exactDocumentMatch: AwardDocumentNumberMatchV1 | null;
 };
+
+export const AWARD_WILDCARD_HINT: string;

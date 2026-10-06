@@ -6,9 +6,12 @@ import test from "node:test";
 import {
   describeVersionSearchResults,
   isValidAwardIdInput,
+  startsVersionSearch,
   versionCurrentLabel,
   versionDetailPath,
 } from "./awardVersionSearchPresentation.mjs";
+import { activeFilters } from "../common/filterPresentation.mjs";
+import { AWARD_VERSION_FILTER_FIELDS } from "../search/searchFilterFields.mjs";
 
 function readAwardVersionSearchPageSource() {
   const pagePath = fileURLToPath(
@@ -174,5 +177,87 @@ test("the Historical Awards page's helper link goes back to the current Award-fa
     source,
     /component=\{RouterLink\}\s*\n?\s*to="\/awards\/search"/,
     'the back-link must navigate to "/awards/search"',
+  );
+});
+
+/*
+ * Historical Awards: the Versions filter narrows a search but does not
+ * start one, and an untouched default must stay distinguishable from an
+ * explicit selection. Raised in review of the TC-015 hint, because the
+ * hint tells the reader exactly this and would be wrong if the
+ * underlying states were conflated.
+ *
+ * activeFilters() is the thing that separates them - it omits a value
+ * equal to its field's default - so these tests use it rather than
+ * hand-built filter objects, or they would be testing a fiction.
+ */
+test("the Versions filter alone does not start a search", () => {
+  const applied = activeFilters(
+    { versionFilter: "historical" },
+    AWARD_VERSION_FILTER_FIELDS,
+  );
+  // Present, because it was explicitly chosen...
+  assert.deepEqual(applied, { versionFilter: "historical" });
+  // ...and still not a search, because "historical" alone means every
+  // archived version in the archive.
+  assert.equal(startsVersionSearch({ appliedActiveFilters: applied }), false);
+});
+
+test("an untouched Versions default is not an applied filter at all", () => {
+  const applied = activeFilters(
+    { versionFilter: "all" },
+    AWARD_VERSION_FILTER_FIELDS,
+  );
+  assert.deepEqual(applied, {});
+  assert.equal(startsVersionSearch({ appliedActiveFilters: applied }), false);
+});
+
+test("changing Versions after a real search keeps the search and applies the selection", () => {
+  // The review case. Text was entered, then Versions was changed: the
+  // search must still be a search, and the selection must reach the
+  // request - which it does by being present in appliedActiveFilters,
+  // the value the page both sends and keys its query on.
+  const applied = activeFilters(
+    { versionFilter: "historical" },
+    AWARD_VERSION_FILTER_FIELDS,
+  );
+
+  assert.equal(
+    startsVersionSearch({ appliedQuery: "smith", appliedActiveFilters: applied }),
+    true,
+  );
+  assert.equal(applied.versionFilter, "historical");
+});
+
+test("another filter plus a Versions selection is a search", () => {
+  const applied = activeFilters(
+    { sponsor: "NIH", versionFilter: "current" },
+    AWARD_VERSION_FILTER_FIELDS,
+  );
+  assert.equal(startsVersionSearch({ appliedActiveFilters: applied }), true);
+  assert.equal(applied.versionFilter, "current");
+});
+
+test("explicitly choosing All versions collapses to the default", () => {
+  // Correct rather than lossy: it asks for the same rows the default
+  // asks for, so dropping it changes nothing that reaches the API.
+  const applied = activeFilters(
+    { sponsor: "NIH", versionFilter: "all" },
+    AWARD_VERSION_FILTER_FIELDS,
+  );
+  assert.deepEqual(applied, { sponsor: "NIH" });
+  assert.equal(startsVersionSearch({ appliedActiveFilters: applied }), true);
+});
+
+test("an invalid Award ID blocks the search whatever else is applied", () => {
+  // The page shows the reason instead, and the initial hint stays out
+  // of the way so the error reads alone.
+  assert.equal(
+    startsVersionSearch({
+      appliedQuery: "smith",
+      appliedActiveFilters: { sponsor: "NIH" },
+      awardIdError: "Award ID must be a whole number.",
+    }),
+    false,
   );
 });

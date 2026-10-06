@@ -10,9 +10,13 @@ import { HintChips } from "../components/common/search/HintChips";
 import { ResultCard } from "../components/common/search/ResultCard";
 import { ResultCount } from "../components/common/search/ResultCount";
 import { SearchPageLayout } from "../components/common/search/SearchPageLayout";
-import { SearchStates } from "../components/common/search/SearchStates";
+import {
+  InitialSearchHint,
+  SearchStates,
+} from "../components/common/search/SearchStates";
 import { emptyResultsMessage } from "../features/common/filterPresentation.mjs";
 import {
+  INITIAL_SEARCH_HINT,
   joinMetadata,
   resolveSearchState,
   searchErrorMessage,
@@ -75,7 +79,18 @@ export function ProposalFamiliesPage() {
           panelId="proposal-filters"
         />
       }
-      belowSearch={<HintChips hints={SEARCH_DIMENSIONS} />}
+      belowSearch={
+        <>
+          <HintChips hints={SEARCH_DIMENSIONS} />
+          {/* QA TC-015: say that nothing was searched yet,
+              rather than rendering nothing at all. */}
+          {!hasCriteria && (
+            <Box sx={{ mt: 2.5 }}>
+              <InitialSearchHint message={INITIAL_SEARCH_HINT} />
+            </Box>
+          )}
+        </>
+      }
     >
       <SearchStates
         state={state}

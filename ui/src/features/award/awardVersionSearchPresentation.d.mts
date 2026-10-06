@@ -15,3 +15,9 @@ export function versionCurrentLabel(
 ): string;
 
 export function isValidAwardIdInput(value: string | null | undefined): boolean;
+
+export function startsVersionSearch(state?: {
+  appliedQuery?: string;
+  appliedActiveFilters?: Record<string, string>;
+  awardIdError?: string | null;
+}): boolean;
