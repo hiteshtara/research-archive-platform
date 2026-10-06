@@ -153,8 +153,7 @@ public class GlobalSearchService {
 
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
                 selected.isEmpty()
-                        ? CompletableFuture.supplyAsync(() ->
-                                timedLeg(cid, "IRB", () -> searchIrb(normalizedQuery)))
+                        ? supplyLeg(cid, "IRB", () -> searchIrb(normalizedQuery))
                         : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
                 startIfSelected(selected, cid, "AWARD", () -> searchAward(normalizedQuery));
@@ -293,7 +292,44 @@ public class GlobalSearchService {
         if (!selected.isEmpty() && !selected.contains(module)) {
             return CompletableFuture.completedFuture(List.of());
         }
-        return CompletableFuture.supplyAsync(() -> timedLeg(cid, module, search));
+        return supplyLeg(cid, module, search);
+    }
+
+    /*
+     * TC-042. Schedules a leg and records how long it waited before the
+     * worker actually began, separately from how long the work took.
+     *
+     * Why this matters here specifically: the legs are handed to
+     * CompletableFuture.supplyAsync with no executor. That uses the
+     * common ForkJoinPool - UNLESS its parallelism is 1, in which case
+     * the JDK silently falls back to a thread-per-task executor. The
+     * deployed task is 0.5 vCPU, and the timing run's own log lines come
+     * from threads named Thread-N rather than
+     * ForkJoinPool.commonPool-worker-N, which is the fallback's
+     * signature. So the Award leg runs on a freshly created thread while
+     * the same search through AwardV1Controller runs inline on the
+     * Tomcat worker - a real difference between the two paths, and one
+     * worth measuring rather than reasoning about.
+     *
+     * A thread-per-task executor should show a near-zero wait. If it
+     * does, scheduling is excluded and the cost is inside the work. If
+     * it does not, that is the finding.
+     */
+    private CompletableFuture<List<GlobalSearchItemResponse>> supplyLeg(
+            String cid,
+            String module,
+            java.util.function.Supplier<List<GlobalSearchItemResponse>> work
+    ) {
+        long scheduledAtNanos = System.nanoTime();
+        return CompletableFuture.supplyAsync(() -> {
+            timingLog.record(
+                    cid,
+                    "LEG_" + module + "_QUEUE_WAIT",
+                    (System.nanoTime() - scheduledAtNanos) / 1_000_000,
+                    -1
+            );
+            return timedLeg(cid, module, work);
+        });
     }
 
     private List<GlobalSearchItemResponse> joinOrRecordFailure(

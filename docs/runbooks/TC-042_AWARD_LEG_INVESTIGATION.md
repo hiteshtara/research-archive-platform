@@ -48,12 +48,16 @@ Same term, same paging, same deployed build, 5 requests each:
 An identifier query is the control: both paths agree at ~1.1–1.3 s. The
 divergence appears only on a word query.
 
-### 3. It is not contention between the legs
+### 3. The other four lexical legs are not what stretches it
 
-`modules=AWARD` leaves only the Award leg and the semantic leg running
-(semantic is not gated by `modules`). That request still takes **10,072 ms
-p50** — indistinguishable from the full six-leg request at 10,764 ms. So
-the other four legs are not what stretches it.
+`modules=AWARD` leaves the Award leg **and the semantic leg** running —
+`modules` does not gate semantic. That request still takes **10,072 ms
+p50**, indistinguishable from the full six-leg request at 10,764 ms.
+
+**This reduces contention; it does not eliminate it.** Two legs still run
+concurrently on a 0.5 vCPU task, so contention between the Award and
+semantic legs remains a live hypothesis. What is excluded is the other
+four lexical legs as the explanation.
 
 ### 4. It is not an accumulation effect
 
@@ -100,33 +104,70 @@ them:
   not isolate
 
 **No index, schema migration or query rewrite should follow from this
-document.** Timing alone cannot tell us which statement to change, and a
-leading-wildcard `ILIKE` theory is not supported: the identical statement
-is fast through the other path.
+document.** Timing alone cannot tell us which statement to change.
+
+On the leading-wildcard `ILIKE` theory: the identical statement running
+fast through the other path shows that **wildcard matching alone cannot
+explain the gap** — something else differs between the paths. It does
+**not** rule the wildcard out as a contributor. The Awards endpoint's own
+893 ms for a 226-result word query is itself not fast, and a scan could
+well be part of both numbers with a second factor multiplying it on one
+path.
+
+## Static comparison of the two paths
+
+Asked for before any further deployment. Same term, same parameters.
+
+| | `AwardV1Controller` | Global Search `searchAward` |
+|---|---|---|
+| Method | `search(q, filters, page, size)` | `search(query, 0, 25)` → delegates to the same 4-arg method |
+| Bound filters | `new AwardSearchFilters(null ×6)` | `AwardSearchFilters.none()` — **literally the same all-null record** |
+| Page / size | `page=0`, `size=25` | `page=0`, `size=PER_DOMAIN_LIMIT=25` |
+| Statements reached | count, page, exact-doc | the same three |
+| Transaction | none — no `@Transactional` on controller, service or repository | same |
+| Statement timeout | none configured | same |
+| Pool | Hikari, max 10, min-idle 2, 30 s connection timeout | same |
+| **Thread** | Tomcat worker, inline (`nio-N-exec-N`) | **a new `Thread-N` per leg** via `supplyAsync` fallback |
+| **Concurrent work in flight** | none | the semantic leg at minimum (~2.5 s), on 0.5 vCPU |
+
+The bound values, transaction context, timeouts and pool settings are
+**identical**. The two differences that survive are the executor and what
+else is running alongside — which is what the new instrumentation
+targets.
 
 ## Next diagnostic step
 
 Two measurements, in this order.
 
-### A. Time the three statements separately
+### A. Finer timing — PREPARED in this branch
 
-A small addition to the existing `SearchTimingLog`, in
-`AwardArchiveService.search`:
+Added to the existing default-off `SearchTimingLog`:
 
 | Stage | Covers |
 |---|---|
 | `AWARD_COUNT` | `repository.countSearchAwards(...)` |
-| `AWARD_PAGE` | `repository.searchAwards(...)` |
+| `AWARD_PAGE` | `repository.searchAwards(...)`, with row count |
 | `AWARD_EXACT_DOC` | `repository.findExactWorkflowDocumentMatch(...)` |
-| `AWARD_SEARCH_TOTAL` | the whole method |
+| `LEG_<MODULE>_QUEUE_WAIT` | scheduling to worker start, per leg |
 
-The same correlation id ties them to the enclosing `LEG_AWARD` and
-`MVC_REQUEST_TOTAL`, so the same request can be read on both paths. Run
-the identical comparison from section 2 and read which statement differs.
+**Queue wait matters here specifically.** The legs go to
+`CompletableFuture.supplyAsync` with no executor. That uses the common
+ForkJoinPool *unless* its parallelism is 1, in which case the JDK falls
+back to a thread-per-task executor. The measurement run's own log lines
+came from threads named `Thread-N`, not
+`ForkJoinPool.commonPool-worker-N` — the fallback's signature, consistent
+with a 0.5 vCPU task reporting one processor. So the Award leg runs on a
+freshly created thread while the same search through `AwardV1Controller`
+runs inline on the Tomcat worker (`nio-N-exec-N`). That is a real
+difference between the paths, and the queue-wait line measures it instead
+of arguing about it.
 
-This answers "which statement" without any database access, and reuses
-instrumentation that is already reviewed, already default-off, and
-already proven not to log anything identifying.
+**What the statement timers are, and are not.** They are the duration of
+the repository CALL: connection acquisition, driver work, network, server
+execution and row materialisation together. They are **not** server-side
+execution time. Separating that further needs either Hikari's
+connection-acquire metric (already exported by the actuator, no code
+change) or `EXPLAIN (ANALYZE, BUFFERS)`, which is separately gated.
 
 ### B. Then, and only then, plans and buffers
 

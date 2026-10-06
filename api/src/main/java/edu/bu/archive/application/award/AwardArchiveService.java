@@ -87,13 +87,39 @@ public class AwardArchiveService {
 
     private final AwardArchiveRepository repository;
     private final AwardAttachmentStorage attachmentStorage;
+    private final edu.bu.archive.application.service.SearchTimingLog timingLog;
 
+    /*
+     * Pre-TC-042 signature, kept so the existing unit tests construct
+     * this service unchanged. Timing is disabled on this path, which is
+     * what a unit test wants. Remove alongside the instrumentation.
+     */
     public AwardArchiveService(
             AwardArchiveRepository repository,
             AwardAttachmentStorage attachmentStorage
     ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
+        this.timingLog =
+                new edu.bu.archive.application.service.SearchTimingLog(false);
+    }
+
+    public AwardArchiveService(
+            AwardArchiveRepository repository,
+            AwardAttachmentStorage attachmentStorage,
+            // TEMPORARY TC-042 measurement, default-off. ObjectProvider
+            // so a slice test constructing this service need not supply
+            // it; absent means disabled.
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.service.SearchTimingLog> timingLogProvider
+    ) {
+        this.repository = repository;
+        this.attachmentStorage = attachmentStorage;
+        edu.bu.archive.application.service.SearchTimingLog provided =
+                timingLogProvider == null ? null : timingLogProvider.getIfAvailable();
+        this.timingLog = provided != null
+                ? provided
+                : new edu.bu.archive.application.service.SearchTimingLog(false);
     }
 
     public AwardWorkspaceResponse findWorkspace(
@@ -501,8 +527,28 @@ public class AwardArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
-        long totalElements =
-                repository.countSearchAwards(pattern, rawQuery, safeFilters);
+        /*
+         * TC-042. The same three statements run on two paths that differ
+         * by about 11x on a word query - ~893ms through
+         * AwardV1Controller, ~9,961ms as Global Search's AWARD leg, with
+         * identical bound parameters (AwardSearchFilters.none() is
+         * literally the all-null record the controller builds) and no
+         * transaction on either. LEG_AWARD times the leg as a whole, so
+         * it cannot say which statement differs. These three can.
+         *
+         * WHAT THESE NUMBERS ARE: the duration of the repository CALL -
+         * connection acquisition, driver work, network, server execution
+         * and row materialisation together. They are NOT server-side
+         * execution time. Separating that needs either Hikari's
+         * connection-acquire metric (already exported, no code change)
+         * or EXPLAIN (ANALYZE, BUFFERS) against the statement, which is
+         * separately gated. Stated here so a reader does not mistake a
+         * call duration for a query plan's cost.
+         */
+        long totalElements = timingLog.time(
+                timingLog.correlationId(),
+                "AWARD_COUNT",
+                () -> repository.countSearchAwards(pattern, rawQuery, safeFilters));
 
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
@@ -513,14 +559,17 @@ public class AwardArchiveService {
 
         int offset = safePage * safeSize;
 
-        List<AwardSearchResultResponse> content =
-                repository.searchAwards(
+        List<AwardSearchResultResponse> content = timingLog.time(
+                timingLog.correlationId(),
+                "AWARD_PAGE",
+                () -> repository.searchAwards(
                         pattern,
                         rawQuery,
                         safeFilters,
                         safeSize,
                         offset
-                );
+                ),
+                List::size);
 
         // Additive, unrelated to the family-level results above (never
         // scoped to is_primary_current) - an exact match against a real
@@ -535,8 +584,11 @@ public class AwardArchiveService {
         AwardDocumentNumberMatchResponse exactDocumentMatch =
                 safeFilters.hasStructuredFilters()
                         ? null
-                        : repository.findExactWorkflowDocumentMatch(rawQuery)
-                                .orElse(null);
+                        : timingLog.time(
+                                timingLog.correlationId(),
+                                "AWARD_EXACT_DOC",
+                                () -> repository.findExactWorkflowDocumentMatch(rawQuery)
+                                        .orElse(null));
 
         PageResponse<AwardSearchResultResponse> results = new PageResponse<>(
                 content,
