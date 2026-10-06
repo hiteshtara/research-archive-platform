@@ -272,6 +272,24 @@ export function QaStatusPage() {
                       </AlertTitle>
                       {progressStage(item.progress.stage)?.description}
                       <Stack spacing={0.5} sx={{ mt: 1.5 }}>
+                        {item.progress.verificationStatus && (
+                          <Typography variant="body2">
+                            <strong>Verification status:</strong>{" "}
+                            {item.progress.verificationStatus}
+                          </Typography>
+                        )}
+                        {/* Dated and attributed to the builds it was seen
+                            on, because the UI and API release separately
+                            and the site may have moved since. */}
+                        {item.progress.lastObservation && (
+                          <Typography variant="body2">
+                            <strong>Last verified observation</strong> (
+                            {item.progress.lastObservation.on}, on{" "}
+                            {item.progress.lastObservation.uiBuild} and{" "}
+                            {item.progress.lastObservation.apiBuild}):{" "}
+                            {item.progress.lastObservation.behaviour}
+                          </Typography>
+                        )}
                         <Typography variant="body2">
                           <strong>Change:</strong> {item.progress.change || "Not recorded"}
                         </Typography>

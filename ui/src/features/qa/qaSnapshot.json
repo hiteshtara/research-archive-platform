@@ -547,9 +547,34 @@
       "expected": "Verify whether irrelevant Semantic match results are returned; flag as a possible relevance/precision defect if unrelated records appear (observed during exploration)",
       "priority": "High",
       "status": "issue",
-      "note": "Unrelated semantic matches can appear for nonsense queries. Relevance policy and result titles need review.",
+      "note": "TC-041 remains open until the released UI and API pass acceptance checks. What was last seen, and on which builds, is recorded below - the site may have changed since.",
       "scope": "Development website",
-      "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29"
+      "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29",
+      "history": [
+        {
+          "on": "2026-09-29",
+          "stage": "knownIssue",
+          "summary": "A nonsense query returned five Negotiations labelled “Semantic match” with no visible relation to it, and their cards showed the document number where the title should be.",
+          "environment": "dev: UI Amplify job #94 @ a61a456; API ECS rev 71 digest 57ef662b (source 1e5f1e1); Chromium via Playwright, 1280x900, signed in (normal read-only use); 2026-09-29"
+        }
+      ],
+      "progress": {
+        "stage": "inProgress",
+        "requiredEnvironment": "Development website",
+        "change": "Historical, as at 5 October 2026: PR #27 (lexical gating) merged as 637502e but never deployed; PR #28 reverses it; PR #30 adds the missing titles. Branch and merge states move; this line is a record of that date, not a current status. What is live is given by the released build below.",
+        "deployedBuild": "Not deployed",
+        "verifiedOn": "",
+        "verifiedIn": "",
+        "results": "",
+        "limitations": "Merging is not releasing, and the UI and API do not release together: the UI rebuilds automatically when main changes, while the API is deployed by hand, so the site can carry a new UI against an older API for a time. Read the observation above as a dated record on named builds, not as a description of the site right now. No improvement to semantic relevance is claimed: the ranking is unchanged, and the work in review changes how results are presented, not how they are scored.",
+        "verificationStatus": "Open. Closes only when the released UI and API together pass the acceptance checks on this website.",
+        "lastObservation": {
+          "on": "2026-10-05",
+          "uiBuild": "Amplify job #110 @ 637502e",
+          "apiBuild": "API ECS rev 74 (image 20261005T181208Z-77773ee)",
+          "behaviour": "Global Search answered a query it had found nothing for with five loosely-related Negotiation suggestions, and those suggestions showed a document number where the title should be."
+        }
+      }
     },
     {
       "id": "TC-042",
