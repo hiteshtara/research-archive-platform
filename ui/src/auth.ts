@@ -18,6 +18,12 @@ const userPoolClientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const redirectSignInUrl = import.meta.env.VITE_COGNITO_REDIRECT_URL;
 const redirectSignOutUrl = import.meta.env.VITE_COGNITO_LOGOUT_URL;
+// Optional: name of a SAML/OIDC identity provider configured on the User
+// Pool (e.g. "BUShibboleth"). Not a secret - just an identifier. When set,
+// login() skips Cognito's Hosted UI picker and redirects straight to that
+// provider. When unset, Cognito shows its normal picker (native login +
+// a button per configured provider).
+const identityProviderName = import.meta.env.VITE_COGNITO_IDENTITY_PROVIDER;
 
 for (const [name, value] of Object.entries({
   VITE_AWS_REGION: awsRegion,
@@ -58,11 +64,16 @@ Amplify.configure({
 });
 
 export async function login(): Promise<void> {
-  await signInWithRedirect();
+  if (identityProviderName) {
+    await signInWithRedirect({ provider: { custom: identityProviderName } });
+  } else {
+    await signInWithRedirect();
+  }
 }
 
 export async function logout(): Promise<void> {
-  await signOut({ global: true });
+  // Explicit redirectUrl: Amplify rejects a cross-origin sign-out URL (e.g. the IdP's logout page) otherwise.
+  await signOut({ global: true, oauth: { redirectUrl: redirectSignOutUrl } });
 
   const logoutUrl =
     `https://${cognitoDomain}/logout` +

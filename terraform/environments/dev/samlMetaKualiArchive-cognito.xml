@@ -1,0 +1,57 @@
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" ID="_5a18adcffdc5da9bd04e470f55fa1f2c9656f0f3" entityID="urn:amazon:cognito:sp:us-east-2_YeNYsPvBL">
+
+  <md:Extensions xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport">
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#sha384"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#sha224"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2009/xmldsig11#dsa-sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2000/09/xmldsig#dsa-sha1"/>
+  </md:Extensions>
+
+  <md:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol urn:oasis:names:tc:SAML:1.1:protocol urn:oasis:names:tc:SAML:1.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:KeyName>kuali-archive-cognito-signing-key</ds:KeyName>
+        <ds:X509Data>
+          <ds:X509SubjectName>CN=us-east-2_YeNYsPvBL</ds:X509SubjectName>
+          <ds:X509Certificate>
+MIICvDCCAaSgAwIBAgIILl49FSi/FM4wDQYJKoZIhvcNAQELBQAwHjEcMBoGA1UEAwwTdXMtZWFzdC0y
+X1llTllzUHZCTDAeFw0yNjA5MjUxODQ2MzdaFw0zNjA5MjUwNDU4MzdaMB4xHDAaBgNVBAMME3VzLWVh
+c3QtMl9ZZU5Zc1B2QkwwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDaVtUCyrexO4dZXMY9
+bXYvwX5HzpLcnsc1dFN05u1ofADWfqpZwA7LlJrspAuNetvjfieI8hzyNTEhfiWGFh+Jqgu3Ifk6BH/P
+yv5kYFdrfyoUiY5XU0Gb6cLy2qlTRV6MudDqBbkvxw40o78z5MOG2yzgpaEd+VOVPt+UOubWkSqyg/cR
+38tnI1F2QwCtwmkqYGQx7oAnTunXyzk1KBVCK1j35pyVVii2/LcISgUotdFisZjTJhJRGn0TwdYVN4pW
+gI++617nun9VF/CLUPF6C5UpsEYsSwvHwSnvQ17WGwaLj/d2yPPBp3aQrypCo63VMlGxpqfKazdCDvPo
+pYL5AgMBAAEwDQYJKoZIhvcNAQELBQADggEBAArv7OArSWkiaLZIQzXppG5wzzCW+kQCAnJpf2Eg2+NZ
+ifzqYIJLO6VEH5BBajnuy/KjckNEk3IxhcC5awOSWOdBtAFbJ8tSzfoOKTvzginrpkt+u7t59svWNfwE
+xp9/JIcq5puonNsUhBb8f6ArOcT1ZOSwmaajT50sXiRKy7N/nTClyCwLcyIG/+U/R4rZ4YSjn/bQFFWN
++jR3XBTxxij3uy+bizaidgvnGUrWPgYN7OIYwIto5APLSGoNwILO5rsVBz14vvv4PL84il0IOaRZBJOm
+BG03aMYzTpqs0C3m1mnhZYpBIWxwVwQk9iKzjfRXI/vtZ+b8340gBXQc288=
+          </ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+
+    <!-- Preferred: email-address format (loginname@bu.edu) -->
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+
+    <!-- Fallback if the IdP can only release bare loginname -->
+    <!-- <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat> -->
+
+    <!-- Cognito's only real ACS endpoint - HTTP-POST binding, /saml2/idpresponse. -->
+    <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://kuali-archive-dev-7k2m9x.auth.us-east-2.amazoncognito.com/saml2/idpresponse" index="0" isDefault="true"/>
+
+  </md:SPSSODescriptor>
+
+</md:EntityDescriptor>

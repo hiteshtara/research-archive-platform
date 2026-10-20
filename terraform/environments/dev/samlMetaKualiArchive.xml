@@ -1,0 +1,68 @@
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" ID="_5a18adcffdc5da9bd04e470f55fa1f2c9656f0f3" entityID="https://*.kuali-archive.bu.edu/shibboleth">
+
+  <md:Extensions xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport">
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#sha384"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#sha224"/>j
+    <alg:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha512"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2009/xmldsig11#dsa-sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2000/09/xmldsig#dsa-sha1"/>
+  </md:Extensions>
+
+<!--
+  SEE: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-saml-idp.html#cognito-user-pools-saml-idp-reference
+-->
+  <md:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol urn:oasis:names:tc:SAML:1.1:protocol urn:oasis:names:tc:SAML:1.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:KeyName>kuali-archive-cognito-signing-key</ds:KeyName>
+        <ds:X509Data>
+          <ds:X509SubjectName>CN=*.kuali-archive.bu.edu</ds:X509SubjectName>
+          <ds:X509Certificate>
+            <!-- 
+            aws cognito-idp get-signing-certificate \-\-user-pool-id us-east-2_YeNYsPvBL \-\-region us-east-2 | jq -r '.Certificate'
+            -->
+          </ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+
+    <!-- Preferred: email-address format (loginname@bu.edu) -->
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+
+    <!-- Fallback if the IdP can only release bare loginname -->
+    <!-- <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat> -->
+
+    <!-- Cognito's only real ACS endpoint - HTTP-POST binding, /saml2/idpresponse. -->
+    <!-- 
+      1) Get userpool ID using:
+
+      COGNITO_USER_POOL_ID=$(aws cognito-idp list-user-pools \
+        \-\-max-results 60 \
+        \-\-region us-east-2 \
+        \-\-query "UserPools[?Name=='research-archive-platform-dev'].Id" \
+        \-\-output text)
+
+      2) Get userpool domain using:
+
+      COGNITO_USER_POOL_DOMAIN=$(aws cognito-idp describe-user-pool \
+        \-\-user-pool-id $COGNITO_USER_POOL_ID \
+        \-\-region us-east-2 \
+        \-\-query 'UserPool.Domain' \
+        \-\-output text)
+    -->
+    <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://${COGNITO_USER_POOL_DOMAIN}.auth.us-east-2.amazoncognito.com/saml2/idpresponse" index="0" isDefault="true"/>
+
+  </md:SPSSODescriptor>
+
+</md:EntityDescriptor>

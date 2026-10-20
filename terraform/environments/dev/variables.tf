@@ -381,6 +381,18 @@ variable "cognito_attachment_viewer_usernames" {
   default     = []
 }
 
+variable "shibboleth_idp_metadata_url" {
+  description = "BU Shibboleth IdP SAML metadata URL. Leave null to skip Shibboleth federation entirely. Only used when manage_cognito = true. See docs/SHIBBOLETH-PLAN-3.md."
+  type        = string
+  default     = null
+}
+
+variable "shibboleth_require_signed_requests" {
+  description = "Require Cognito to sign outbound SAML AuthnRequests to Shibboleth, using a Cognito-managed keypair. Only relevant when shibboleth_idp_metadata_url is set."
+  type        = bool
+  default     = true
+}
+
 #
 # Amplify / UI hosting
 #

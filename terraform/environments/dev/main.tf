@@ -244,6 +244,9 @@ module "cognito" {
   allow_admin_password_auth = var.cognito_allow_admin_password_auth
 
   attachment_viewer_usernames = var.cognito_attachment_viewer_usernames
+
+  shibboleth_idp_metadata_url        = var.shibboleth_idp_metadata_url
+  shibboleth_require_signed_requests = var.shibboleth_require_signed_requests
 }
 
 locals {

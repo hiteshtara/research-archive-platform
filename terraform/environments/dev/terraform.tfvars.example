@@ -123,6 +123,11 @@ cognito_mfa_configuration      = "OFF"     # OFF, ON, or OPTIONAL
 # initialize at all, even before any real browser-based login is
 # tested - domain prefixes must be globally unique.
 cognito_hosted_ui_domain_prefix = "REPLACE_WITH_A_GLOBALLY_UNIQUE_PREFIX"
+
+# BU Shibboleth SAML federation (see docs/SHIBBOLETH-PLAN-3.md). Leave
+# commented out / unset to skip creating the identity provider entirely.
+# shibboleth_idp_metadata_url        = "https://shib.bu.edu/idp/shibboleth"
+# shibboleth_require_signed_requests = true
 # Dev/test convenience ONLY - lets a token be obtained for an
 # admin-created user via `aws cognito-idp admin-initiate-auth`, no
 # browser needed. Never enable this once real end users authenticate
