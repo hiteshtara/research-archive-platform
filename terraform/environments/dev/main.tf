@@ -251,6 +251,20 @@ module "subaward_sync_schedule" {
   private_subnet_ids     = module.vpc.private_subnet_ids
   security_group_id      = module.loader_ecs.loader_security_group_id
   log_group_name         = "/ecs/${var.project_name}-${var.environment}-loader"
+
+  # Explicitly pinned, reviewed revision - NOT family-latest.
+  # Rev 237 = image 20260817T011034Z-4a82821, built from committed commit
+  # 4a82821 (present on bu/main and origin/main), which contains
+  # --sync-all and the Subaward Stage-2 duplicate-batch fix, and whose
+  # image is still present in ECR.
+  # Deliberately NOT rev 245 (evidence-idx-20260817T144632Z): that image
+  # was built from a dirty working tree including untracked CARBX files
+  # and is not reproducible from any commit.
+  loader_task_definition_revision = 237
+
+  # Must resolve to the same manifest as the pinned revision's image.
+  # Protected by modules/ecr's priority-1 lifecycle rule.
+  protected_image_tag = "protected-20260817T011034Z-4a82821"
 }
 
 module "api_ecr" {
@@ -626,3 +640,75 @@ resource "aws_route53_record" "ui" {
     evaluate_target_health = false
   }
 }
+
+#
+# CloudShell analyst read-only PostgreSQL access. Restored 2026-10-22 - these
+# three resources and their variable were applied to AWS but their declaration
+# only ever existed in the uncommitted working tree preserved at 27f4dd5, so
+# main did not manage them and an untargeted plan offered to DESTROY them.
+# See docs/operations/TERRAFORM_DRIFT_RECONCILIATION.md and
+# docs/runbooks/CLOUDSHELL_ANALYSIS.md.
+#
+
+resource "aws_security_group" "cloudshell_analyst" {
+  count = var.manage_cloudshell_analyst_access ? 1 : 0
+
+  name        = "${var.project_name}-${var.environment}-cloudshell-analyst-sg"
+  description = "CloudShell VPC environment ENI for read-only PostgreSQL analysis - select this security group when creating the VPC environment"
+  vpc_id      = module.vpc.vpc_id
+
+  # ingress is explicitly empty, so Terraform actively keeps this SG at
+  # genuinely zero inbound (the paired RDS-side ingress rule lives on the
+  # database security group, not here).
+  ingress = []
+
+  # egress is deliberately NOT declared inline, which is a correction to the
+  # preserved 27f4dd5 version. That version set `egress = []` to force
+  # Terraform to revoke the implicit AWS-default allow-all-outbound rule a new
+  # security group receives. It achieved that, but it also conflicts with
+  # aws_vpc_security_group_egress_rule.cloudshell_analyst_to_database below:
+  # AWS reports that separately-managed rule back through this resource's
+  # `egress` attribute, so `egress = []` makes every plan propose revoking the
+  # one rule this SG exists to provide. Verified 2026-10-22 - a plan with
+  # `egress = []` proposed removing the 5432-to-RDS rule, and applying it
+  # would have broken the CloudShell path and then re-added it on the next
+  # apply, forever.
+  #
+  # The implicit allow-all-outbound rule is already revoked on the live SG
+  # (sg-002be83bf1cf249fa) by the original apply, so omitting `egress` here
+  # changes nothing today and leaves the single 5432 rule as the only egress.
+  # If this SG is ever destroyed and recreated, re-check that the default
+  # allow-all-outbound rule is gone, because Terraform will no longer revoke
+  # it automatically.
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-cloudshell-analyst-sg"
+  }
+}
+
+resource "aws_vpc_security_group_egress_rule" "cloudshell_analyst_to_database" {
+  count = var.manage_cloudshell_analyst_access ? 1 : 0
+
+  security_group_id            = aws_security_group.cloudshell_analyst[0].id
+  referenced_security_group_id = module.rds.database_security_group_id
+
+  from_port   = 5432
+  to_port     = 5432
+  ip_protocol = "tcp"
+
+  description = "PostgreSQL to dev RDS from a CloudShell VPC environment session"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "database_from_cloudshell_analyst" {
+  count = var.manage_cloudshell_analyst_access ? 1 : 0
+
+  security_group_id            = module.rds.database_security_group_id
+  referenced_security_group_id = aws_security_group.cloudshell_analyst[0].id
+
+  from_port   = 5432
+  to_port     = 5432
+  ip_protocol = "tcp"
+
+  description = "PostgreSQL access from a CloudShell VPC environment session (read-only analysis) - see docs/runbooks/CLOUDSHELL_ANALYSIS.md"
+}
+

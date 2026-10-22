@@ -426,6 +426,12 @@ variable "api_image_rollback_guard" {
   default     = true
 }
 
+variable "manage_cloudshell_analyst_access" {
+  description = "Create the CloudShell-analyst security group and its RDS ingress/egress rules, so a CloudShell VPC environment session can reach RDS on 5432 for human/read-only analysis. Zero additional AWS resource cost (no EC2, no interface endpoints, no NAT) - see docs/runbooks/CLOUDSHELL_ANALYSIS.md. Defaults to false."
+  type        = bool
+  default     = false
+}
+
 variable "ui_route53_zone_id" {
   description = "Route53 hosted zone ID that amplify_custom_domain belongs to, so Terraform can publish Amplify's certificate-validation record and the domain's traffic record. Required when amplify_custom_domain is set. The parent zone (kuali-archive.bu.edu) is NOT in this account - only the delegated child zone is, so this must be the child zone's ID."
   type        = string

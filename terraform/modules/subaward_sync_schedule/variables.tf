@@ -70,3 +70,14 @@ variable "schedule_timezone" {
   type        = string
   default     = "America/New_York"
 }
+
+variable "loader_task_definition_revision" {
+  description = "Explicit, reviewed loader task-definition revision for the nightly sync. Set this to a revision whose image is BOTH commit-traceable and still present in ECR. Null falls back to family-latest, which is NOT recommended: `latest` can be an ad-hoc image built from a dirty working tree (see rev 245 / evidence-idx-20260817T144632Z), and a pinned revision whose image the ECR lifecycle policy later expires fails silently at PROVISIONING with no container logs."
+  type        = number
+  default     = null
+}
+
+variable "protected_image_tag" {
+  description = "ECR tag of the image the pinned loader task definition uses. Must carry the protected-* prefix so the ECR lifecycle policy's priority-1 rule claims it and the keep-20 sweep cannot expire it. Read (not created) by the aws_ecr_image guard below, so `terraform plan` fails loudly if the image is ever missing."
+  type        = string
+}
