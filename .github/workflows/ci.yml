@@ -60,13 +60,15 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      # The Testcontainers suites run in api-db. Four of them use plain
-      # @Testcontainers, which errors (rather than skips) without Docker, so
-      # they are excluded here by name.
+      # The Testcontainers suites run in api-db, where a guard fails the job
+      # closed if anything could point them at a real database or a remote
+      # Docker host. They use plain @Testcontainers, which errors (rather
+      # than skips) without Docker, so they are excluded here by name.
+      # Adding a Testcontainers suite means naming it in BOTH lists.
       - name: mvn test (database suites excluded)
         run: >
           mvn -B -ntp test
-          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest'
+          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest,!AuthorizationStoreIntegrationTest,!ArchiveAdminConcurrencyIntegrationTest,!AuthorizationSchemaAndAuditIntegrationTest'
           -Dsurefire.failIfNoSpecifiedTests=false
       - name: Upload test reports
         if: failure()
@@ -109,7 +111,7 @@ jobs:
       - name: mvn test (database suites)
         run: >
           mvn -B -ntp test
-          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest'
+          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest,AuthorizationStoreIntegrationTest,ArchiveAdminConcurrencyIntegrationTest,AuthorizationSchemaAndAuditIntegrationTest'
           -Dsurefire.failIfNoSpecifiedTests=false
       - name: Upload test reports
         if: failure()
