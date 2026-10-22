@@ -112,3 +112,14 @@ variable "documents_bucket_name" {
   type        = string
   default     = null
 }
+
+variable "expected_live_image" {
+  description = <<-EOT
+    Image currently registered on the newest ACTIVE revision of this task
+    family, supplied by the caller. When non-null, the task definition refuses
+    to plan unless api_image matches it - the rollback guard. Null disables the
+    check (deliberate rollback, or an environment with no task family yet).
+    EOT
+  type        = string
+  default     = null
+}

@@ -348,6 +348,20 @@ resource "aws_ecs_cluster" "api" {
 }
 
 resource "aws_ecs_task_definition" "api" {
+  # Rollback guard. ops/deploy-api.sh deploys API images outside Terraform, so
+  # the caller's api_image_tag drifts behind what is actually running. This
+  # precondition lives on the task definition itself - NOT on a separate guard
+  # resource in the root module - because every apply here is run with
+  # -target=module.api_service, and -target skips preconditions on resources
+  # outside the target set. Verified 2026-10-22: a root-module precondition
+  # did not fire for a 209-commit rollback under -target; this one does.
+  lifecycle {
+    precondition {
+      condition     = var.expected_live_image == null || var.expected_live_image == var.api_image
+      error_message = "api_image would roll the API back. Requested '${var.api_image}' but the newest ACTIVE revision of this task family runs '${coalesce(var.expected_live_image, "<unknown>")}'. Re-pin api_image_tag to the deployed image, or set api_image_rollback_guard = false for a deliberate rollback."
+    }
+  }
+
   family                   = "${var.project_name}-${var.environment}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"

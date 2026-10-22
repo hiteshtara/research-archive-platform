@@ -153,3 +153,13 @@ output "amplify_app_id" {
   description = "Amplify app ID (only when manage_amplify = true; null otherwise). Needed for aws amplify CLI commands - never hardcode this, it's assigned by AWS at creation time and is account-specific."
   value       = var.manage_amplify ? module.amplify[0].app_id : null
 }
+
+output "ui_custom_domain_dns_records_required" {
+  description = "DNS records Amplify needs published into ui_route53_zone_id before the custom domain becomes AVAILABLE. Read this after the first apply, then set ui_publish_dns_records = true and apply again."
+  value = {
+    certificate_validation = try(module.amplify[0].custom_domain_certificate_verification_record, null)
+    traffic_records        = try(module.amplify[0].custom_domain_sub_domain_records, [])
+    hosted_zone_id         = var.ui_route53_zone_id
+    domain                 = var.amplify_custom_domain
+  }
+}

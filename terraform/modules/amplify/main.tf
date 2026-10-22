@@ -9,9 +9,11 @@ resource "aws_amplify_app" "ui" {
 
   environment_variables = var.environment_variables
 
-  auto_branch_creation_config {
-    enable_auto_build = false
-  }
+  # auto_branch_creation_config is intentionally NOT declared. enable_auto_branch_creation
+  # is never set on this app, so AWS does not persist or return the block, and
+  # declaring it produced a phantom "+ auto_branch_creation_config" on every
+  # single plan - noise that masks real drift. Removing it is a no-op against
+  # AWS because the block was never in effect.
 
   # SPA routing fallback: a direct browser request for a React route
   # (e.g. /awards/100004-00001) has no matching object in Amplify's
@@ -74,6 +76,20 @@ resource "aws_amplify_domain_association" "custom" {
 
   app_id      = aws_amplify_app.ui.id
   domain_name = var.custom_domain
+
+  # Amplify issues its own managed certificate and then waits for two DNS
+  # records to appear before the domain becomes AVAILABLE: a certificate
+  # validation CNAME, and the record for the sub_domain itself. Those record
+  # values are only known *after* this resource is created.
+  #
+  # wait_for_verification must therefore be false. Left at its default (true),
+  # Terraform blocks inside this resource's create waiting for DNS records that
+  # Terraform itself only creates *later in the same graph* - a deadlock that
+  # ends in a create timeout, with the association left behind in
+  # PENDING_VERIFICATION. With it false, create returns immediately, the record
+  # values become readable, and aws_route53_record.ui_* (in the dev root
+  # module) publish them into the hosted zone we own.
+  wait_for_verification = false
 
   sub_domain {
     branch_name = aws_amplify_branch.main.branch_name

@@ -1,5 +1,37 @@
 data "aws_caller_identity" "current" {}
 
+#
+# API image rollback guard - see var.api_image_rollback_guard.
+#
+# ops/deploy-api.sh builds and deploys API images directly to ECR/ECS, so
+# var.api_image_tag in terraform.tfvars drifts behind reality. On 2026-10-22
+# the pin was 209 commits behind the live image, and applying an unrelated CORS
+# change would have reverted the API to the 2026-08-10 build - including
+# 846a840 "fix(api): make the application start again".
+#
+# These data sources read whatever is registered on the newest ACTIVE revision
+# of the task family. The precondition in terraform_data.config_guard then
+# fails the PLAN - not the apply - if the pin disagrees.
+#
+data "aws_ecs_task_definition" "api_live" {
+  count = var.api_image_rollback_guard ? 1 : 0
+
+  task_definition = "${var.project_name}-${var.environment}-api"
+}
+
+data "aws_ecs_container_definition" "api_live" {
+  count = var.api_image_rollback_guard ? 1 : 0
+
+  task_definition = data.aws_ecs_task_definition.api_live[0].id
+  container_name  = "api"
+}
+
+locals {
+  # Single source of truth for the API image this configuration intends to
+  # run, used both by module.api_service and by the rollback guard below.
+  api_image_desired = "${module.api_ecr.repository_url}:${var.api_image_tag}"
+}
+
 # Cross-variable guards Terraform's per-variable validation blocks can't
 # express on their own (a variable's validation can only see itself).
 resource "terraform_data" "config_guard" {
@@ -52,6 +84,11 @@ resource "terraform_data" "config_guard" {
     precondition {
       condition     = var.api_domain_name == null || var.api_route53_zone_id != null
       error_message = "api_domain_name is set but api_route53_zone_id is not - provide the Route53 hosted zone ID that api_domain_name belongs to, so Terraform can create the DNS record pointing it at the ALB."
+    }
+
+    precondition {
+      condition     = var.amplify_custom_domain == null || var.ui_route53_zone_id != null
+      error_message = "amplify_custom_domain is set but ui_route53_zone_id is not - provide the Route53 hosted zone ID that amplify_custom_domain belongs to, so Terraform can publish Amplify's certificate-validation record and the domain's traffic record. Note the parent zone kuali-archive.bu.edu is not in this account; use the delegated child zone."
     }
 
     precondition {
@@ -299,11 +336,17 @@ locals {
   # via `terraform plan -destroy -target=...aws_amplify_branch.main`
   # before this fix - see docs/architecture/AWARD_IMPLEMENTATION_ROADMAP.md's
   # "Fourteenth same-day follow-up".
+  # The *.amplifyapp.com origin is deliberately KEPT alongside the custom
+  # domain, not replaced: it stays operational as a fallback, and the API must
+  # accept browser requests from whichever origin actually served the UI.
+  # Without the custom domain here, the UI at https://nonprod.kuali-archive.bu.edu
+  # loads but every API call fails CORS - the page renders and then errors.
   cors_allowed_origins = compact(concat(
     ["http://localhost:5173"],
     var.manage_amplify
     ? ["https://${var.amplify_branch_name}.${module.amplify[0].default_domain}"]
-    : []
+    : [],
+    var.amplify_custom_domain != null ? ["https://${var.amplify_custom_domain}"] : []
   ))
 }
 
@@ -337,11 +380,21 @@ module "amplify" {
     VITE_COGNITO_DOMAIN       = local.cognito_hosted_ui_domain_hostname
     VITE_COGNITO_REDIRECT_URL = local.ui_redirect_url
     VITE_COGNITO_LOGOUT_URL   = local.ui_logout_url
+    # Approved origins the UI may redirect back to after login/logout, so one
+    # build served at several approved addresses returns the user to whichever
+    # address they started at (ui/src/features/auth/authRedirects.mjs).
+    #
+    # Derived from cognito_callback_urls rather than restated, so the browser's
+    # allow-list cannot drift from the Cognito app client's own callback list -
+    # anything Cognito would reject with redirect_mismatch is absent here too.
+    # An origin not on this list is ignored and VITE_COGNITO_REDIRECT_URL is
+    # used instead, so this never widens what Cognito already permits.
+    VITE_COGNITO_ALLOWED_ORIGINS = join(",", var.cognito_callback_urls)
     # Archive Explorer (Phase 2, /explorer) - dev-only developer tool,
     # hidden entirely (nav item + route) unless this matches the API's
     # own APP_EXPLORER_ENABLED. See docs/ARCHIVE_EXPLORER.md. Never set
     # in test/prod.
-    VITE_EXPLORER_ENABLED     = local.explorer_enabled_ui ? "true" : "false"
+    VITE_EXPLORER_ENABLED = local.explorer_enabled_ui ? "true" : "false"
   }
 }
 
@@ -411,7 +464,11 @@ module "api_service" {
   public_subnet_ids  = module.vpc.public_subnet_ids
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  api_image = "${module.api_ecr.repository_url}:${var.api_image_tag}"
+  api_image = local.api_image_desired
+
+  # Rollback guard input - see modules/api_service's expected_live_image and
+  # var.api_image_rollback_guard.
+  expected_live_image = var.api_image_rollback_guard ? try(data.aws_ecs_container_definition.api_live[0].image, null) : null
 
   database_secret_arn        = module.rds.database_secret_arn
   database_security_group_id = module.rds.database_security_group_id
@@ -470,5 +527,81 @@ resource "aws_route53_record" "api" {
     name                   = module.api_service.alb_dns_name
     zone_id                = module.api_service.alb_zone_id
     evaluate_target_health = true
+  }
+}
+
+#
+# UI custom domain DNS - published into the delegated child zone
+# nonprod.kuali-archive.bu.edu, which this account owns
+# (Z02648057ZNNZSP3RPBA). The PARENT zone kuali-archive.bu.edu is in another
+# AWS account and is deliberately untouched: it already delegates "nonprod" to
+# us, and its apex is reserved for the eventual production application.
+#
+# Amplify returns both records as single space-separated
+# "<name> <TYPE> <value>" strings, and ONLY after the domain association
+# exists. That is why publishing is gated on ui_publish_dns_records rather than
+# on the parsed values themselves: a count/for_each derived from an
+# as-yet-uncreated resource's attribute is unknown at plan time, which makes
+# "terraform plan" fail outright with "Invalid count argument". The gate is a
+# plain bool, so both phases plan cleanly:
+#
+#   apply 1 - ui_publish_dns_records = false -> association created, records 0
+#   read    - terraform output ui_custom_domain_dns_records_required
+#   apply 2 - ui_publish_dns_records = true  -> the two records published
+#
+locals {
+  ui_cert_record_parts = compact(split(
+    " ",
+    trimspace(coalesce(try(module.amplify[0].custom_domain_certificate_verification_record, ""), ""))
+  ))
+
+  ui_cert_validation = length(local.ui_cert_record_parts) >= 3 ? {
+    name  = trimsuffix(local.ui_cert_record_parts[0], ".")
+    type  = local.ui_cert_record_parts[1]
+    value = trimsuffix(local.ui_cert_record_parts[2], ".")
+  } : null
+
+  # Target of the domain's own traffic record - an Amplify-fronted CloudFront
+  # distribution.
+  ui_traffic_targets = [
+    for raw in try(module.amplify[0].custom_domain_sub_domain_records, []) :
+    trimsuffix(element(compact(split(" ", trimspace(raw))), 2), ".")
+    if length(compact(split(" ", trimspace(raw)))) >= 3
+  ]
+
+  ui_traffic_target = length(local.ui_traffic_targets) > 0 ? local.ui_traffic_targets[0] : null
+}
+
+resource "aws_route53_record" "ui_certificate_validation" {
+  for_each = var.ui_publish_dns_records ? { validation = local.ui_cert_validation } : {}
+
+  zone_id = var.ui_route53_zone_id
+  name    = each.value.name
+  type    = each.value.type
+  records = [each.value.value]
+  ttl     = 60
+
+  # Amplify re-issues this record on certificate renewal; allow_overwrite stops
+  # a renewal from failing the apply on an already-present record.
+  allow_overwrite = true
+}
+
+# amplify_custom_domain is the APEX of the zone it sits in
+# (nonprod.kuali-archive.bu.edu), and Route53 forbids a CNAME at a zone apex.
+# Amplify hands back a CNAME-shaped record, so it is published as an ALIAS A
+# record to the same CloudFront target instead. Z2FDTNDATAQYW2 is AWS's fixed
+# global hosted-zone ID for CloudFront - identical in every account and region,
+# not a value derived from this stack.
+resource "aws_route53_record" "ui" {
+  count = var.ui_publish_dns_records ? 1 : 0
+
+  zone_id = var.ui_route53_zone_id
+  name    = var.amplify_custom_domain
+  type    = "A"
+
+  alias {
+    name                   = local.ui_traffic_target
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
   }
 }
