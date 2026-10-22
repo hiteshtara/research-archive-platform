@@ -420,6 +420,24 @@ variable "amplify_custom_domain" {
   default     = null
 }
 
+variable "api_image_rollback_guard" {
+  description = "Refuse to plan when api_image_tag does not match the image already registered on the newest ACTIVE revision of the API task-definition family. ops/deploy-api.sh deploys outside Terraform, so this pin goes stale, and any module.api_service change then silently reverts the API to an older build. Set false only for a deliberate rollback, or for an environment where the task family does not exist yet."
+  type        = bool
+  default     = true
+}
+
+variable "ui_route53_zone_id" {
+  description = "Route53 hosted zone ID that amplify_custom_domain belongs to, so Terraform can publish Amplify's certificate-validation record and the domain's traffic record. Required when amplify_custom_domain is set. The parent zone (kuali-archive.bu.edu) is NOT in this account - only the delegated child zone is, so this must be the child zone's ID."
+  type        = string
+  default     = null
+}
+
+variable "ui_publish_dns_records" {
+  description = "Publish Amplify's certificate-validation record and the custom domain's traffic record into ui_route53_zone_id. Leave false for the first apply: Amplify only reports those record values after the domain association exists, and gating on the values themselves makes terraform plan fail with \"Invalid count argument\". Read terraform output ui_custom_domain_dns_records_required after the first apply, then set this true and apply again."
+  type        = bool
+  default     = false
+}
+
 variable "ui_api_base_url" {
   description = "Value of the UI's VITE_API_BASE_URL build-time environment variable. Defaults to the API's own computed URL if left null; override only if the UI should point somewhere else (e.g. a shared API across environments)."
   type        = string
