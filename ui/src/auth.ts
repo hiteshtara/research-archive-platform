@@ -6,6 +6,8 @@ import {
   signOut,
 } from "aws-amplify/auth";
 
+import { resolveOauthRedirects } from "./features/auth/authRedirects.mjs";
+
 // Every value here is environment-specific (dev/test/prod each have their
 // own Cognito User Pool and app client) and is injected at build time via
 // Terraform's Amplify environment_variables - see terraform/environments/
@@ -18,6 +20,11 @@ const userPoolClientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const redirectSignInUrl = import.meta.env.VITE_COGNITO_REDIRECT_URL;
 const redirectSignOutUrl = import.meta.env.VITE_COGNITO_LOGOUT_URL;
+// Optional. Approved origins this UI may redirect back to, mirroring the
+// Cognito app client's callback URLs. Needed because one build is served at
+// more than one approved origin; when unset, behaviour is exactly as before
+// (the build-time redirect URL is used unconditionally).
+const allowedOriginsRaw = import.meta.env.VITE_COGNITO_ALLOWED_ORIGINS;
 
 for (const [name, value] of Object.entries({
   VITE_AWS_REGION: awsRegion,
@@ -39,6 +46,16 @@ if (!userPoolId.startsWith(`${awsRegion}_`)) {
   );
 }
 
+// Resolved at module load, from window.location.origin only - never from a
+// query parameter, hash, or referrer - and only honoured when that origin is
+// on the approved list. See features/auth/authRedirects.mjs.
+const redirects = resolveOauthRedirects({
+  currentOrigin: typeof window === "undefined" ? null : window.location.origin,
+  allowedOriginsRaw,
+  configuredSignInUrl: redirectSignInUrl,
+  configuredSignOutUrl: redirectSignOutUrl,
+});
+
 Amplify.configure({
   Auth: {
     Cognito: {
@@ -48,8 +65,8 @@ Amplify.configure({
         oauth: {
           domain: cognitoDomain,
           scopes: ["openid", "email", "profile"],
-          redirectSignIn: [redirectSignInUrl],
-          redirectSignOut: [redirectSignOutUrl],
+          redirectSignIn: [redirects.signIn],
+          redirectSignOut: [redirects.signOut],
           responseType: "code",
         },
       },
@@ -67,7 +84,7 @@ export async function logout(): Promise<void> {
   const logoutUrl =
     `https://${cognitoDomain}/logout` +
     `?client_id=${encodeURIComponent(userPoolClientId)}` +
-    `&logout_uri=${encodeURIComponent(redirectSignOutUrl)}`;
+    `&logout_uri=${encodeURIComponent(redirects.signOut)}`;
 
   window.location.assign(logoutUrl);
 }
