@@ -597,7 +597,12 @@ them beyond historical context.
 - Domain association `nonprod.kuali-archive.bu.edu` on app `d288p9gmoteftb`,
   `domainStatus: AVAILABLE`, certificate type `AMPLIFY_MANAGED`.
 - Build job **126**, status `SUCCEED`, commit `2709109`,
-  2026-10-22 11:55:45–11:57:10 EDT. (Job 125 built #49's merge beforehand.)
+  2026-10-22 11:55:45–11:57:10 EDT — this is the job that put the
+  origin-aware UI live. Job 125 built #49's merge beforehand; job **127**
+  then built #50's merge (`fa84fc7`) and, because #50 is Terraform-only,
+  produced the **identical** bundle `index-BOwp-FY7.js`. Amplify rebuilds on
+  every push to `main`, so a job number higher than 126 does not imply a UI
+  change — compare the bundle hash.
 - New environment variable `VITE_COGNITO_ALLOWED_ORIGINS` =
   `https://main.d288p9gmoteftb.amplifyapp.com/,http://localhost:5173/,https://nonprod.kuali-archive.bu.edu/`,
   derived in Terraform from `cognito_callback_urls` so the browser's
