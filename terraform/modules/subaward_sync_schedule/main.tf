@@ -11,6 +11,26 @@ data "aws_ecs_task_definition" "loader_latest" {
   task_definition = var.task_definition_family
 }
 
+# Detective control for the 2026-08-18 outage: the pinned task
+# definition's image was silently expired by the ECR lifecycle policy
+# and every nightly run failed at PROVISIONING with no container logs.
+# This data source turns that into a loud `terraform plan` failure.
+data "aws_ecr_image" "protected_loader" {
+  repository_name = "${var.project_name}-${var.environment}-loader"
+  image_tag       = var.protected_image_tag
+}
+
+# An explicitly reviewed revision always wins over family-latest. The
+# 2026-08-18..08-31 outage happened because the schedule silently held a
+# revision (222) whose image the ECR lifecycle policy had expired, while
+# family-latest had meanwhile become an untraceable dirty-tree build.
+locals {
+  task_definition_arn = var.loader_task_definition_revision != null ? (
+    "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${var.task_definition_family}:${var.loader_task_definition_revision}"
+  ) : data.aws_ecs_task_definition.loader_latest.arn
+}
+
+
 # --- EventBridge Scheduler ------------------------------------------------
 
 data "aws_iam_policy_document" "scheduler_assume_role" {
@@ -76,7 +96,7 @@ resource "aws_scheduler_schedule" "subaward_nightly" {
     role_arn = aws_iam_role.scheduler.arn
 
     ecs_parameters {
-      task_definition_arn = data.aws_ecs_task_definition.loader_latest.arn
+      task_definition_arn = local.task_definition_arn
       launch_type         = "FARGATE"
       platform_version    = "LATEST"
 
@@ -235,4 +255,56 @@ resource "aws_cloudwatch_metric_alarm" "no_recent_sync_attempt" {
   treat_missing_data  = "breaching"
   alarm_actions       = [aws_sns_topic.subaward_sync_alerts.arn]
   ok_actions          = [aws_sns_topic.subaward_sync_alerts.arn]
+}
+
+# --- ECS task-start / runtime failure alerting -------------------------
+#
+# The three log-metric alarms above all require the loader to have
+# actually run and logged something. When the image is unpullable the
+# container never starts, so none of them can fire - which is exactly
+# how 14 nightly runs were lost. This rule watches ECS itself.
+#
+# Event pattern verified against AWS with `aws events test-event-pattern`:
+#   CannotPullContainerError ......... matches
+#   ResourceInitializationError ...... matches
+#   non-zero container exitCode ...... matches
+#   clean exit 0 ..................... does NOT match (no alert noise)
+resource "aws_cloudwatch_event_rule" "loader_task_failed" {
+  name        = "${var.project_name}-${var.environment}-loader-task-failed"
+  description = "Loader ECS task STOPPED abnormally (provisioning failure or non-zero exit)"
+
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Task State Change"]
+    detail = {
+      clusterArn = [var.ecs_cluster_arn]
+      lastStatus = ["STOPPED"]
+      "$or" = [
+        { stoppedReason = [{ "anything-but" = { prefix = "Essential container in task exited" } }] },
+        { containers = { exitCode = [{ "anything-but" = 0 }] } }
+      ]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "loader_task_failed_sns" {
+  rule      = aws_cloudwatch_event_rule.loader_task_failed.name
+  target_id = "subaward-sync-alerts"
+  arn       = aws_sns_topic.subaward_sync_alerts.arn
+}
+
+# EventBridge cannot publish to the topic without this.
+resource "aws_sns_topic_policy" "subaward_sync_alerts_events" {
+  arn = aws_sns_topic.subaward_sync_alerts.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowEventBridgePublish"
+      Effect    = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+      Action    = "sns:Publish"
+      Resource  = aws_sns_topic.subaward_sync_alerts.arn
+    }]
+  })
 }
