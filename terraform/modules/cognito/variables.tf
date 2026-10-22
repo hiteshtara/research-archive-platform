@@ -108,3 +108,20 @@ variable "allow_admin_password_auth" {
   type        = bool
   default     = false
 }
+
+variable "shibboleth_idp_metadata_url" {
+  description = <<-EOT
+    BU Shibboleth IdP SAML metadata URL. Leave null (the default) to skip
+    creating the aws_cognito_identity_provider resource entirely - useful
+    for environments that haven't onboarded Shibboleth yet. See
+    docs/shibboleth/SHIBBOLETH-PLAN-3.md.
+    EOT
+  type        = string
+  default     = null
+}
+
+variable "shibboleth_require_signed_requests" {
+  description = "Require Cognito to sign outbound SAML AuthnRequests to the Shibboleth IdP, using a keypair Cognito generates and manages internally (never exported - see docs/shibboleth/SHIBBOLETH-PLAN-3.md's 'Correction: No Private Key Belongs in the App'). Only relevant when shibboleth_idp_metadata_url is set."
+  type        = bool
+  default     = true
+}
