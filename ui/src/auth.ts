@@ -25,6 +25,12 @@ const redirectSignOutUrl = import.meta.env.VITE_COGNITO_LOGOUT_URL;
 // more than one approved origin; when unset, behaviour is exactly as before
 // (the build-time redirect URL is used unconditionally).
 const allowedOriginsRaw = import.meta.env.VITE_COGNITO_ALLOWED_ORIGINS;
+// Optional. Name of a Cognito identity provider (e.g. "BUShibboleth") to send
+// users straight to, skipping Cognito's Hosted UI provider picker. Not a
+// secret - just an identifier. Empty or unset means show the picker, which is
+// what keeps native Cognito login reachable as a fallback. Terraform renders
+// this as "" when unconfigured, so the falsy check below covers both.
+const identityProviderName = import.meta.env.VITE_COGNITO_IDENTITY_PROVIDER;
 
 for (const [name, value] of Object.entries({
   VITE_AWS_REGION: awsRegion,
@@ -75,11 +81,24 @@ Amplify.configure({
 });
 
 export async function login(): Promise<void> {
+  // The redirect target still comes from the origin-aware resolver via
+  // Amplify.configure above, so a user who starts at either approved origin
+  // returns to that same origin after authenticating at the IdP.
+  if (identityProviderName) {
+    await signInWithRedirect({ provider: { custom: identityProviderName } });
+    return;
+  }
+
   await signInWithRedirect();
 }
 
 export async function logout(): Promise<void> {
-  await signOut({ global: true });
+  // redirectUrl is passed explicitly because redirects.signOut may be on
+  // another site - an identity provider's logout page, which is how the IdP
+  // session is ended when federated login is enabled. Amplify throws
+  // InvalidOriginException for a cross-origin sign-out URL unless it is given
+  // here, and the first logout click then silently does nothing.
+  await signOut({ global: true, oauth: { redirectUrl: redirects.signOut } });
 
   const logoutUrl =
     `https://${cognitoDomain}/logout` +
