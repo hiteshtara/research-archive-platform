@@ -1,20 +1,32 @@
 # Terraform drift reconciliation proposal — `environments/dev`
 
-**Status:** proposal. Nothing in here has been applied. No resource was
-destroyed, replaced, disabled, or removed from state while producing it.
+**Status: RESOLVED in configuration, 2026-10-22.** The restoration shipped in
+**#53** (merge commit `27bc22e`). This document is kept as the investigation
+record and the rationale behind what #53 did — read the *Historical* framing
+below, not as a live warning.
+
+Everything in the investigation was read-only. No resource was destroyed,
+replaced, disabled, or removed from state, and **no `terraform apply` was run**
+at any point.
 
 **Investigated 2026-10-22** against account `770203350335`, `us-east-1`,
-from `origin/main` at `f33f4ab` with the real `terraform.tfvars`.
+originally from `origin/main` at `f33f4ab`, with the real `terraform.tfvars`.
 
-An **unrestricted** `terraform plan` in `terraform/environments/dev` reports:
+### Then and now
 
-```
-Plan: 2 to add, 1 to change, 7 to destroy.
-```
+| | Unrestricted `terraform plan` in `environments/dev` |
+|---|---|
+| Before #53 (`f33f4ab`) | `Plan: 2 to add, 1 to change, 7 to destroy.` |
+| **After #53 (`27bc22e`)** | **`Plan: 1 to add, 0 to change, 0 to destroy.`** |
 
-**Do not run an unrestricted `terraform apply` in this directory.** Every
-apply must be scoped with `-target`. The reasons are below, and two of them
-would cause real damage.
+All seven resources below are now `no-op`. There is no `delete` action
+anywhere in the plan, no replacement, and the nightly Subaward schedule is a
+`no-op` still pinned to the known-good revision **237**. The single remaining
+add is `terraform_data.explorer_flags_match`, a local feature-flag precondition
+that creates no AWS resource.
+
+**`-target` is still the right habit**, but it is no longer load-bearing for
+these seven: an unrestricted plan no longer proposes destroying them.
 
 ---
 
@@ -91,7 +103,7 @@ resource*.
   the variable) and `variables.tf` (the variable, `default = false`).
 - **Cost of the resources:** none — a security group and two rules, no EC2,
   no endpoints, no NAT.
-- **Recommendation: RESTORE the declaration.** Cherry-pick or re-apply the
+- **Recommendation (implemented by #53): RESTORE the declaration.** Re-apply the
   three resources and the variable from `27f4dd5`, then confirm a targeted
   plan reports **no changes** (the resources already exist at index `[0]`,
   which is what `count = 1` produces, so a correct restoration is a no-op).
@@ -118,7 +130,7 @@ resource*.
   on the strength of observed clean runs. If its alerting is deleted, a later
   failure becomes silent, and the next person to look will see "healthy"
   because nothing told them otherwise.
-- **Recommendation: RESTORE the declaration** from `27f4dd5`
+- **Recommendation (implemented by #53): RESTORE the declaration** from `27f4dd5`
   (`terraform/modules/subaward_sync_schedule/`), then confirm a targeted plan
   reports no changes. Do not delete alerting to tidy a plan.
 
@@ -153,7 +165,13 @@ sync eligible for expiry. Combined with items 4–6, an unrestricted apply would
 delete the image protection, delete the alerting that would report the
 resulting failure, and (see below) retarget the schedule — all in one run.
 
-- **Recommendation: RESTORE the protection rule in configuration.** The policy
+> **Resolved by #53.** The priority-1 `protected-*` rule is back in
+> configuration with the keep-20 sweep renumbered to priority 2, matching live
+> exactly, so this resource now plans as `no-op`. The expiry risk described
+> above is **historical** — it describes what an unrestricted apply *would*
+> have done before #53, and what in fact already happened once in August.
+
+- **Recommendation (implemented by #53): RESTORE the protection rule in configuration.** The policy
   is declared at `terraform/modules/ecr/main.tf:19`
   (`aws_ecr_lifecycle_policy.loader`), reached through
   `module "loader_ecr" { source = "../../modules/ecr" }` in
@@ -211,36 +229,99 @@ is the revision the sync's observed clean runs were made on — it is the
 known-good. Revision 252 is a month newer and, as far as this investigation
 can tell, has never run the nightly sync.
 
-- **Recommendation: decide deliberately, do not let it ride along.** Either
-  (a) update configuration to pin 237, matching the known-good live state, or
-  (b) deliberately move to 252 and watch the next scheduled run. Option (a) is
-  the safe default and makes the plan quiet; option (b) is a change that
-  deserves its own review and a verified run.
-- Note the interaction: option (a) keeps the dependency on the `protected-`
-  image, which reinforces item 7's recommendation to restore the protection
-  rule.
+**Correction to this document's first draft.** It suggested "update
+configuration to pin 237" as if that were a config tweak. It is not. The module
+derives the ARN from `data "aws_ecs_task_definition" "loader_latest"`
+*deliberately* — the comment there explains that re-applying should re-point
+the schedule at whatever was most recently deployed "rather than silently
+keeping a stale revision pinned forever." Hard-pinning would reverse a design
+decision.
+
+`27f4dd5` had already solved this properly, and **#53 restored that solution**:
+an optional `loader_task_definition_revision` variable (default `null`, which
+keeps the family-latest behaviour) plus a `protected_image_tag`, with the dev
+root passing revision **237** and its protected tag. Family-latest remains the
+module's default for any other caller.
+
+- **Resolved for now:** the schedule plans as `no-op` at revision 237, so an
+  unrestricted plan no longer proposes moving it.
+- **Still an open decision (current, not historical):** whether 237 should
+  remain the pin indefinitely, or the sync should move to a newer, reviewed
+  revision whose image is also `protected-` tagged. That is a deliberate
+  change deserving its own review and a verified overnight run. Deferred.
+- Note the interaction: staying on 237 keeps the dependency on the
+  `protected-` image, which is exactly why item 7's rule matters.
 
 ---
 
-## Proposed order of work
+## What #53 actually did, and one correction it had to make
 
-Each step should leave the untargeted plan strictly quieter, and none of them
-destroys anything.
+The order of work this document proposed was carried out in a single PR (#53)
+rather than four, because each piece was a no-op once correct and the plan
+could be verified as a whole.
 
-1. **Restore the ECR protection rule** (item 7). Highest value: it removes the
-   only change that could break a running scheduled job. Verify with a
-   targeted plan on `module.loader_ecr` reporting **no changes**.
-2. **Restore the Subaward alerting declarations** (items 4–6) from `27f4dd5`.
-   Verify `-target=module.subaward_sync_schedule` reports no changes except
-   the scheduler decision in step 4.
-3. **Restore the CloudShell analyst declarations** (items 1–3) from `27f4dd5`,
-   including the `manage_cloudshell_analyst_access` variable. This also
-   silences the `init`-time undeclared-variable warning. Verify a targeted
-   plan reports no changes.
-4. **Decide the scheduler revision** (237 vs 252) as its own reviewed change.
-5. Only once steps 1–4 are done and an untargeted plan shows **no destroys**,
-   consider whether unrestricted applies should be allowed again. Until then,
-   `-target` is mandatory.
+Restored, using `27f4dd5` as reference and reconciled against live AWS:
+
+- `modules/ecr` — the priority-1 `protected-*` rule, keep-20 renumbered to 2.
+- `modules/subaward_sync_schedule` — the EventBridge failure rule, SNS target
+  and SNS topic policy, plus the `aws_ecr_image` detective control and the
+  pinned-revision local.
+- `environments/dev` — the CloudShell security group and its two 5432 rules,
+  the `manage_cloudshell_analyst_access` variable (which also silences an
+  undeclared-variable warning at `init`), and the two module arguments pinning
+  revision 237 with its protected image tag.
+
+**One deliberate deviation from `27f4dd5`, which this document had not
+anticipated.** `27f4dd5` set `egress = []` on the CloudShell security group to
+force Terraform to revoke the implicit AWS-default allow-all-outbound rule a
+new security group receives. That conflicts with the separately-managed
+`aws_vpc_security_group_egress_rule`: AWS reports that rule back through the
+security group's own `egress` attribute, so `egress = []` made the plan propose
+**revoking the single 5432-to-RDS rule the group exists to provide**. Observed
+directly — restoring `27f4dd5` verbatim produced `1 to change` on exactly that
+revocation, and applying it would have broken the CloudShell path and re-added
+it on the next apply, indefinitely.
+
+So the inline `egress` is omitted and the separate rule resource owns it. The
+implicit allow-all rule is already revoked on the live group
+(`sg-002be83bf1cf249fa`), so this changes nothing today. **If that group is
+ever destroyed and recreated, re-check that the default allow-all-outbound rule
+is gone** — Terraform will no longer revoke it automatically.
+
+Values verified independently before the preserved ones were trusted:
+
+- `4a82821` is an ancestor of `origin/main`.
+- `20260817T011034Z-4a82821` and `protected-20260817T011034Z-4a82821` resolve
+  to the same manifest `sha256:5339636d…`, which is what `loader:237` runs.
+- Revision 245 is the non-commit-traceable `evidence-idx-20260817T144632Z`
+  build the preserved comments warn against.
+- `modules/subaward_sync_schedule` is instantiated only by dev, so the newly
+  required `protected_image_tag` cannot break test or prod.
+- The `aws_ecr_image` guard resolves to that digest, confirming it reads the
+  real image and would fail `terraform plan` loudly if it disappeared.
+
+---
+
+## Current risks (as of 2026-10-22, after #53)
+
+Distinct from the historical risks above, which #53 closed.
+
+1. **`modules/ecr` is shared with test and prod.** It is instantiated by
+   `environments/{dev,test,prod}/main.tf`. Each environment has its own state,
+   so applying dev does not touch them — but **whoever next applies test or
+   prod will see a lifecycle-policy replacement there**. Check first whether
+   those environments' live policies already carry a `protected-` rule; if they
+   differ, the rule may need to be variable-driven rather than hardcoded.
+   Neither account was readable during this investigation.
+2. **The scheduler pin (237) is a deferred decision**, not a settled one. See
+   the scheduler section above.
+3. **`terraform_data.explorer_flags_match` is still unapplied.** Harmless — it
+   creates no AWS resource — but it means the Explorer flag agreement between
+   UI and API has never actually been asserted by an apply.
+4. **Nothing here has been applied.** Configuration and live state now agree,
+   which is why the plan is quiet; that agreement has not been *exercised* by
+   an apply. The first apply that includes these resources should still be
+   `-target`-scoped and read carefully.
 
 ## Why "restore", not "remove from state", everywhere here
 
@@ -260,10 +341,20 @@ made to retire the CloudShell analyst path or the event-driven alerting. That
 is a product decision, not a cleanup, and it should be taken explicitly rather
 than by letting an untargeted apply make it.
 
-## Verification performed for this proposal
+## Verification performed
 
-Read-only throughout: `terraform plan` (with `-lock=false`), `terraform show
--json`, `git log`/`git grep`/`git show`, and AWS describe/list calls
-(`ecs describe-task-definition`, `ecr describe-images`,
-`amplify get-domain-association`, `route53 list-resource-record-sets`). No
-apply, no state mutation, no resource change.
+Read-only throughout, both for the investigation and for confirming #53:
+`terraform fmt -check`, `terraform validate`, `terraform plan` (with
+`-lock=false`, full and `-target`-scoped), `terraform show -json`,
+`git log`/`git grep`/`git show`, and AWS describe/list calls
+(`ecs describe-task-definition`, `ecs describe-services`,
+`ecr describe-images`, `scheduler get-schedule`,
+`ec2 describe-security-groups`, `amplify get-domain-association`,
+`route53 list-resource-record-sets`). **No apply, no state mutation, no
+resource change at any point.**
+
+Post-merge confirmation on `origin/main` at `27bc22e`: `terraform validate`
+Success; full unrestricted plan `1 to add, 0 to change, 0 to destroy`; all seven
+resources `no-op`; zero delete actions; zero replacements; schedule `no-op` at
+revision 237. Live state unchanged throughout — schedule still 237, protected
+image still present (`sha256:5339636d…`), API service still ECS revision 81.
