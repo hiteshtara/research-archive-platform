@@ -563,10 +563,22 @@ locals {
 
   # Target of the domain's own traffic record - an Amplify-fronted CloudFront
   # distribution.
+  #
+  # Amplify documents these as "<name> <TYPE> <value>", but for a record at the
+  # ZONE APEX the name is empty, so the string arrives as
+  # " CNAME d1mgq4btdvw5k9.cloudfront.net" - two fields once compacted, not
+  # three. Take the value as the LAST field so both shapes parse. Found during
+  # the 2026-10-22 rollout: an index-2 lookup behind a ">= 3" length filter
+  # silently produced null for the apex record, which would have been applied
+  # as an ALIAS with a null target.
   ui_traffic_targets = [
     for raw in try(module.amplify[0].custom_domain_sub_domain_records, []) :
-    trimsuffix(element(compact(split(" ", trimspace(raw))), 2), ".")
-    if length(compact(split(" ", trimspace(raw)))) >= 3
+    trimsuffix(one(slice(
+      compact(split(" ", trimspace(raw))),
+      length(compact(split(" ", trimspace(raw)))) - 1,
+      length(compact(split(" ", trimspace(raw))))
+    )), ".")
+    if length(compact(split(" ", trimspace(raw)))) >= 2
   ]
 
   ui_traffic_target = length(local.ui_traffic_targets) > 0 ? local.ui_traffic_targets[0] : null
@@ -594,6 +606,15 @@ resource "aws_route53_record" "ui_certificate_validation" {
 # not a value derived from this stack.
 resource "aws_route53_record" "ui" {
   count = var.ui_publish_dns_records ? 1 : 0
+
+  # Fail loudly rather than publishing a record with a null target. Without
+  # this, a parsing miss produces an ALIAS pointing nowhere.
+  lifecycle {
+    precondition {
+      condition     = local.ui_traffic_target != null
+      error_message = "Could not determine the Amplify traffic target for amplify_custom_domain. Check `terraform output ui_custom_domain_dns_records_required` - the domain association must exist and report its sub_domain dns_record before ui_publish_dns_records is set true."
+    }
+  }
 
   zone_id = var.ui_route53_zone_id
   name    = var.amplify_custom_domain
