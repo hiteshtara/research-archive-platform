@@ -557,6 +557,121 @@ section above):**
   not a gap: push to `origin/main` first if that commit needs to reach
   the live UI.
 
+## Nonproduction custom domain — deployed and verified 2026-10-22 (16:00 UTC)
+
+`https://nonprod.kuali-archive.bu.edu` now serves the dev UI. The Amplify
+URL `https://main.d288p9gmoteftb.amplifyapp.com/` **remains operational**
+and is not a redirect — both origins serve the same build independently.
+Point-in-time verified facts (`AWS_PROFILE=bu-nprd`, account
+`770203350335` confirmed before every call); re-verify before relying on
+them beyond historical context.
+
+**Pull requests merged:**
+- **#49** `feat/nonprod-custom-domain` → merge commit `219267d`.
+  Amplify domain association, Route 53 publication controls, Cognito
+  callback/logout additions, API CORS, API image rollback guard.
+- **#48** `fix/auth-origin-aware-redirects` → merge commit `2709109`.
+  Origin-aware OAuth redirects, so a login started at either URL returns
+  to that same URL.
+- **#50** `fix/amplify-apex-dns-record-parsing` → merge commit `fa84fc7`.
+  Corrects the apex `dns_record` parsing shipped in #49 (see below).
+
+**Terraform apply (targeted: `module.cognito`, `module.amplify`,
+`module.api_service`): 2 added, 3 changed, 1 destroyed.**
+
+**ECS API:**
+- Task definition `research-archive-platform-dev-api` **revision 80 → 81**.
+  The `1 destroyed` is revision 80 being superseded; task definitions are
+  immutable, so a "replace" is a new revision, not a service outage.
+- Image **unchanged**: `770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api:20261006T182647Z-b10e4e3`
+  (commit `b10e4e3`). Verified byte-identical between live revision 80 and
+  the planned revision before applying.
+- Rollout `COMPLETED`, 1 desired / 1 running / 0 pending, `/actuator/health`
+  200 throughout.
+- Only field changed: `APP_CORS_ALLOWED_ORIGINS` →
+  `http://localhost:5173,https://main.d288p9gmoteftb.amplifyapp.com,https://nonprod.kuali-archive.bu.edu`.
+  All 8 environment variables (including `APP_SEARCH_TIMING_ENABLED=false`)
+  and all 5 secrets preserved; cpu/memory/roles/ports/logs identical.
+
+**Amplify:**
+- Domain association `nonprod.kuali-archive.bu.edu` on app `d288p9gmoteftb`,
+  `domainStatus: AVAILABLE`, certificate type `AMPLIFY_MANAGED`.
+- Build job **126**, status `SUCCEED`, commit `2709109`,
+  2026-10-22 11:55:45–11:57:10 EDT — this is the job that put the
+  origin-aware UI live. Job 125 built #49's merge beforehand; job **127**
+  then built #50's merge (`fa84fc7`) and, because #50 is Terraform-only,
+  produced the **identical** bundle `index-BOwp-FY7.js`. Amplify rebuilds on
+  every push to `main`, so a job number higher than 126 does not imply a UI
+  change — compare the bundle hash.
+- New environment variable `VITE_COGNITO_ALLOWED_ORIGINS` =
+  `https://main.d288p9gmoteftb.amplifyapp.com/,http://localhost:5173/,https://nonprod.kuali-archive.bu.edu/`,
+  derived in Terraform from `cognito_callback_urls` so the browser's
+  allow-list cannot drift from the Cognito app client's own callback list.
+- `ui_redirect_url`/`ui_logout_url` deliberately left on the Amplify URL,
+  so no existing user is forced to the new address.
+
+**Route 53 — zone `Z02648057ZNNZSP3RPBA` (`nonprod.kuali-archive.bu.edu`):**
+
+| Name | Type | Value |
+|---|---|---|
+| `nonprod.kuali-archive.bu.edu.` | A (ALIAS) | `d1mgq4btdvw5k9.cloudfront.net.`, hosted zone `Z2FDTNDATAQYW2`, `EvaluateTargetHealth: false` |
+| `_bbe229c06869fc81b71c180986861a7a.nonprod.kuali-archive.bu.edu.` | CNAME | `_a828fdb1dc14b0aaec2ca1480568f97a.wzccmgtwzk.acm-validations.aws.` |
+
+**Amplify created both records itself, and they are NOT in Terraform
+state.** This happens because the hosted zone lives in the *same* AWS
+account as the Amplify app. Consequences, which matter:
+
+- **Keep `ui_publish_dns_records = false` for this domain.** Enabling it
+  makes `aws_route53_record.ui` attempt to create a record Amplify already
+  owns, and that resource has no `allow_overwrite`, so the apply fails.
+- **Do not recreate, import, overwrite or delete these records.** They are
+  working and Amplify-managed.
+- `aws_route53_record.ui` / `ui_certificate_validation` and the
+  `ui_publish_dns_records` gate only earn their place for a
+  **cross-account** zone — i.e. the eventual production apex
+  `kuali-archive.bu.edu`, whose zone is in another account.
+- The parent zone `kuali-archive.bu.edu` was **not** touched. It already
+  delegates `nonprod` to this zone's four nameservers
+  (`ns-1467.awsdns-55.org`, `ns-1769.awsdns-29.co.uk`,
+  `ns-406.awsdns-50.com`, `ns-959.awsdns-55.net`), and its apex stays
+  reserved for production.
+
+**Certificate:** `CN=*.nonprod.kuali-archive.bu.edu`, issuer
+`C=US, O=Amazon, CN=Amazon RSA 2048 S22`, valid
+**2026-10-22 → 2027-05-08**, Amplify-managed (auto-renewing). TLS chain
+verifies (`curl` `ssl_verify_result=0`).
+
+**The defect #50 fixed, recorded so it is not reintroduced:** Amplify
+documents `subDomains[].dnsRecord` as `"<name> <TYPE> <value>"`, but for a
+record at the **zone apex the name is empty**, so the real value is
+`" CNAME d1mgq4btdvw5k9.cloudfront.net"` — two fields once compacted, not
+three. #49 read index 2 behind a `>= 3` field filter, which silently
+evaluated to `null`; with the publication gate enabled that would have
+applied an ALIAS record pointing nowhere. #50 takes the value as the
+*last* field and adds a precondition that fails the plan on a null target.
+
+**Browser-verified on the live site (2026-10-22):** login from each URL
+returns to that same URL (`redirect_uri` confirmed for both origins);
+logout issues an origin-aware `logout_uri`; `GET /api/dashboard` returns
+200 with a bearer token and 401 without it; the access token still carries
+`cognito:groups: ["ArchiveAttachmentViewer"]`; zero CORS errors.
+
+**Cognito unchanged:** pool `us-east-1_VJ4ekQ27c`, 6 users, Hosted UI
+domain `research-archive-platform-dev-770203350335`, group
+`ArchiveAttachmentViewer` with its 2 enabled/CONFIRMED members,
+`supported_identity_providers: ["COGNITO"]`. Shibboleth (PR #47) remains
+separate, pending ServiceNow INC21002534.
+
+**Standing hazard re-confirmed while verifying this work.** An
+**untargeted** `terraform plan` in `environments/dev` reports
+`2 to add, 1 to change, 7 to destroy`, including the three
+`cloudshell_analyst` resources (the approved read-only Postgres
+reconciliation path) *and* the Subaward nightly sync's failure alerting
+(`aws_cloudwatch_event_rule.loader_task_failed`,
+`aws_cloudwatch_event_target.loader_task_failed_sns`,
+`aws_sns_topic_policy.subaward_sync_alerts_events`). These exist in state
+but not in configuration. **Always scope dev applies with `-target`.**
+
 ## Open items
 
 - The reconciliation in this file covers Award `204713-00117`/`204713-00088`
@@ -596,3 +711,47 @@ section above):**
   itself is still left untouched on disk, unresolved, uncommitted — do
   not delete it and do not commit it; its ownership is a separate,
   still-open question from V077.
+
+### Cognito global sign-out returns HTTP 400 — open, investigated 2026-10-22, not changed
+
+Clicking sign-out produces a failed `POST https://cognito-idp.us-east-1.amazonaws.com/`
+with status **400**, visible in the browser console. **Sign-out still
+works** — Amplify tolerates the failure, local tokens are cleared, and the
+app goes on to Cognito's `/logout` endpoint, which clears the Hosted UI
+session. This is **pre-existing** and unrelated to the origin-aware
+redirect change in #48, which did not touch the `signOut` call.
+
+**Most likely cause, evidence-backed but not body-confirmed.** Amplify's
+`signOut({ global: true })` calls Cognito's `GlobalSignOut` API, which
+requires the caller's access token to carry the
+`aws.cognito.signin.user.admin` scope. The app client's
+`AllowedOAuthScopes` is `["email", "openid", "profile"]` — that scope is
+**absent**, so `GlobalSignOut` is rejected. The browser console records
+only the status, not the response body, so the specific error code
+(expected `NotAuthorizedException`) has not been read directly. To confirm:
+open devtools Network on the next sign-out and read the response body.
+
+**Security assessment — limited impact, one real gap:**
+- The *current* session is fully ended: local tokens cleared, Hosted UI
+  session cleared, and because the client has `EnableTokenRevocation: true`
+  the `/logout` leg revokes that session's refresh token.
+- Access tokens are JWTs validated by signature and expiry, so an
+  already-issued access token stays valid until it expires regardless of
+  whether `GlobalSignOut` succeeds. Validity is **1 hour**, so the exposure
+  window is unchanged by this bug.
+- **The gap:** "sign out everywhere" does not work. Refresh tokens held by
+  *other* sessions or devices for the same user are not revoked, and
+  refresh-token validity is **30 days**. On a shared or compromised device
+  this matters.
+
+**Options, none applied — needs review before any auth change:**
+1. Drop `global: true` from `signOut()`. Removes the failing call; same
+   practical behaviour as today. Smallest, most honest change.
+2. Add `aws.cognito.signin.user.admin` to `AllowedOAuthScopes` so
+   `GlobalSignOut` succeeds. Weighs against it: the access token then also
+   authorises Cognito user self-administration calls (change password,
+   update attributes, delete user) — a real widening of token capability.
+3. Leave as-is and accept that sign-out is per-session only.
+
+Recommendation: option 1 for dev now, and decide 1-vs-2 deliberately before
+production, where "sign out everywhere" is more likely to be expected.
