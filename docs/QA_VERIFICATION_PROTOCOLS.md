@@ -13,10 +13,15 @@ Covers the four cases still open for evidence or access:
 | C — Screen reader | TC-020, TC-045 | No assistive technology in the harness |
 
 **Environment for all three:** the development website,
-`https://main.d288p9gmoteftb.amplifyapp.com`. Record the UI build and
-API revision at the time of testing — they release independently, so the
-site can carry a new UI against an older API, and a result that doesn't
-name both cannot be reproduced.
+`https://nonprod.kuali-archive.bu.edu`. This is the only development URL to
+use or to quote in results. The old `*.amplifyapp.com` address still serves
+the same build — Amplify Hosting cannot disable its default domain — but the
+application now redirects it here, and a result recorded against it is
+ambiguous about which URL was actually exercised.
+
+Record the UI build and API revision at the time of testing — they release
+independently, so the site can carry a new UI against an older API, and a
+result that doesn't name both cannot be reproduced.
 
 ## Ground rules
 
