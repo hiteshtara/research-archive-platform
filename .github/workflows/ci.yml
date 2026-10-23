@@ -68,7 +68,7 @@ jobs:
       - name: mvn test (database suites excluded)
         run: >
           mvn -B -ntp test
-          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest,!AuthorizationStoreIntegrationTest,!ArchiveAdminConcurrencyIntegrationTest,!AuthorizationSchemaAndAuditIntegrationTest'
+          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest,!AuthorizationStoreIntegrationTest,!ArchiveAdminConcurrencyIntegrationTest,!AuthorizationSchemaAndAuditIntegrationTest,!AuthorizationInertWhenDisabledTest'
           -Dsurefire.failIfNoSpecifiedTests=false
       - name: Upload test reports
         if: failure()
@@ -111,7 +111,7 @@ jobs:
       - name: mvn test (database suites)
         run: >
           mvn -B -ntp test
-          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest,AuthorizationStoreIntegrationTest,ArchiveAdminConcurrencyIntegrationTest,AuthorizationSchemaAndAuditIntegrationTest'
+          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest,AuthorizationStoreIntegrationTest,ArchiveAdminConcurrencyIntegrationTest,AuthorizationSchemaAndAuditIntegrationTest,AuthorizationInertWhenDisabledTest'
           -Dsurefire.failIfNoSpecifiedTests=false
       - name: Upload test reports
         if: failure()
