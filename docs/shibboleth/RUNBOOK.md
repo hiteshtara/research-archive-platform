@@ -383,7 +383,7 @@ User Pool:
 manage_cognito                  = true
 cognito_hosted_ui_domain_prefix = "<globally-unique-prefix>"   # becomes <prefix>.auth.<region>.amazoncognito.com
 cognito_callback_urls           = ["http://localhost:5173/"]
-cognito_logout_urls             = ["http://localhost:5173/", "https://shib-test.bu.edu/idp/logout.jsp"]
+cognito_logout_urls             = ["http://localhost:5173/", "https://shib-test.bu.edu/idp/profile/Logout"]
 ```
 
 The Hosted UI domain is required even though users will skip the
@@ -398,16 +398,34 @@ that Step 11 can end the user's **IdP** session on logout, not just the
 Cognito one. Listing it here changes nothing by itself;
 `VITE_COGNITO_LOGOUT_URL` chooses which entry the UI actually uses.
 
-For BU's test IdP that page is `https://shib-test.bu.edu/idp/logout.jsp`,
-confirmed by Kevin Ruderman (INC21002534). Use it, **not**
-`/idp/profile/Logout`: that is the SAML single-logout *profile*
-endpoint, and BU's IdP metadata advertises no `SingleLogoutService`
-(verified: zero occurrences in both the shib-test and shib metadata), so
-there is no SLO for it to run. Sent there directly it answers 302 into a
-Spring WebFlow execution (`/idp/profile/Logout?execution=e1s1`) that
-cannot complete. `logout.jsp` answers 200 and ends the local IdP
-session, which is the most logout BU's IdP supports - true single logout
-across all BU services is not available.
+For BU's test IdP that page is `https://shib-test.bu.edu/idp/profile/Logout`,
+as originally specified in PR #47. Use it, **not** `/idp/logout.jsp`.
+
+> **Correction.** An earlier revision of this runbook told you the
+> opposite, on the strength of Kevin Ruderman's reply on INC21002534 plus
+> an *unauthenticated* probe in which `/idp/profile/Logout` appeared to
+> 302 into a Spring WebFlow execution that "cannot complete". The flow
+> completes perfectly well; it looked inert only because that probe
+> carried no IdP session, so there was nothing for it to terminate.
+> Clean-browser testing on 2026-10-23 settled it — see
+> [LOGOUT.md](LOGOUT.md) for the full evidence:
+>
+> | | `/idp/profile/Logout` | `/idp/logout.jsp` |
+> |---|---|---|
+> | `__Host-shib_idp_session` after visiting | **deleted** | **survives** |
+> | Revisiting the app | **fresh BU password challenge** | **silent dashboard** |
+>
+> `logout.jsp` answers `200` with "You have successfully logged out", and
+> that message is false. It expires cookies named `shib_idp_session`,
+> `shib_idp_session_ss`, `_idp_session` and `JSESSIONID` at `Path=/idp` —
+> none of which is a name the IdP sets. It is a legacy page predating the
+> `__Host-` cookie prefix.
+
+The absence of a `SingleLogoutService` in BU's metadata (still true —
+zero occurrences in both the shib-test and shib metadata) means there is
+no cross-service SAML single logout. It does **not** mean the IdP cannot
+end its own browser session, and `/idp/profile/Logout` does exactly
+that. True single logout across all BU services remains unavailable.
 
 **Shibboleth** — setting the metadata URL is what causes the SAML
 identity provider to be created at all (the resource is count-gated on
@@ -579,7 +597,7 @@ In `ui/.env.local`, set these two together:
 
 ```
 VITE_COGNITO_IDENTITY_PROVIDER=BUShibboleth
-VITE_COGNITO_LOGOUT_URL=https://shib-test.bu.edu/idp/logout.jsp
+VITE_COGNITO_LOGOUT_URL=https://shib-test.bu.edu/idp/profile/Logout
 ```
 
 `login()` in [auth.ts](../../ui/src/auth.ts) then calls

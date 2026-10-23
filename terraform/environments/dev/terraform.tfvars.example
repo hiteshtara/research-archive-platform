@@ -131,13 +131,17 @@ cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
 # parameters missing", not a redirect - so this entry must be applied BEFORE a
 # UI build that uses it is deployed.
 #
-# For BU's test IdP that page is https://shib-test.bu.edu/idp/logout.jsp. It is
-# NOT /idp/profile/Logout: BU's metadata advertises no SingleLogoutService, so
-# the SAML single-logout profile has nothing to run.
+# For BU's test IdP that page is https://shib-test.bu.edu/idp/profile/Logout -
+# the IdP's real logout flow. Do NOT use /idp/logout.jsp: it answers 200 with
+# "You have successfully logged out" but leaves the live session cookie
+# __Host-shib_idp_session intact, and the user is silently signed back in
+# (clean-browser test, 2026-10-23). It expires shib_idp_session,
+# shib_idp_session_ss, _idp_session and JSESSIONID at Path=/idp, none of which
+# is a name the IdP sets - it predates the __Host- prefix.
 cognito_logout_urls = [
   "https://REPLACE_WITH_YOUR_UI_DOMAIN/",
   "https://REPLACE_WITH_YOUR_UI_DOMAIN/signed-out",
-  # "https://shib-test.bu.edu/idp/logout.jsp",
+  # "https://shib-test.bu.edu/idp/profile/Logout",
 ]
 cognito_advanced_security_mode = "AUDIT"   # OFF, AUDIT, or ENFORCED
 cognito_deletion_protection    = "INACTIVE" # ACTIVE or INACTIVE
@@ -185,7 +189,7 @@ manage_amplify = false
 # With SAML federation enabled, ui_logout_url is the identity provider's
 # logout page rather than one of our own URLs - that redirect is what ends the
 # IdP session. It must already be in cognito_logout_urls above.
-# ui_logout_url           = "https://shib-test.bu.edu/idp/logout.jsp"
+# ui_logout_url           = "https://shib-test.bu.edu/idp/profile/Logout"
 
 # --- AI feature (optional) --------------------------------------------------
 
