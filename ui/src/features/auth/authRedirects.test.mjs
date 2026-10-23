@@ -117,7 +117,7 @@ test("an external identity-provider logout URL is preserved verbatim", () => {
   // PR #47 points VITE_COGNITO_LOGOUT_URL at Shibboleth's logout page on
   // purpose, to end the IdP session. Origin-aware sign-in must not override
   // it, or logout silently signs the user straight back in.
-  const idpLogout = "https://shib-test.bu.edu/idp/profile/Logout";
+  const idpLogout = "https://shib-test.bu.edu/idp/logout.jsp";
 
   const { signIn, signOut } = resolveOauthRedirects({
     ...deployed,
