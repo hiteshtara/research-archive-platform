@@ -128,13 +128,36 @@ export async function login(): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
+  // A local sign-out, deliberately NOT { global: true }.
+  //
+  // global: true calls Cognito's GlobalSignOut API, which requires the
+  // aws.cognito.signin.user.admin scope. This app client is scoped to
+  // openid/email/profile on purpose, so that call always failed:
+  //
+  //   x-amz-target:        ...GlobalSignOut
+  //   x-amzn-errortype:    NotAuthorizedException
+  //   x-amzn-errormessage: Access Token does not have required scopes
+  //
+  // (captured from a real federated sign-out, 2026-10-22). Adding the scope
+  // would widen this client's privileges to user administration just to log
+  // out, so the call is dropped instead. Nothing is lost: the Hosted UI
+  // /logout redirect below is what actually ends the Cognito session, and
+  // sign-out already worked despite the failed GlobalSignOut.
+  //
   // redirectUrl is passed explicitly because redirects.signOut may be on
   // another site - an identity provider's logout page, which is how the IdP
   // session is ended when federated login is enabled. Amplify throws
   // InvalidOriginException for a cross-origin sign-out URL unless it is given
   // here, and the first logout click then silently does nothing.
-  await signOut({ global: true, oauth: { redirectUrl: redirects.signOut } });
+  // global is declared `global: boolean` (required, not optional) on
+  // AuthSignOutInput, so it is passed explicitly as false rather than omitted;
+  // omitting it while keeping oauth.redirectUrl does not typecheck.
+  await signOut({ global: false, oauth: { redirectUrl: redirects.signOut } });
 
+  // Ends the Cognito session and hands the browser to redirects.signOut, which
+  // for a federated deployment is the IdP's own logout page. Cognito only
+  // redirects to a URL on the app client's logout allow-list, so that page
+  // must be listed in cognito_logout_urls.
   const logoutUrl =
     `https://${cognitoDomain}/logout` +
     `?client_id=${encodeURIComponent(userPoolClientId)}` +
