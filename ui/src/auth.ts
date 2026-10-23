@@ -107,23 +107,36 @@ export async function loginWithBu(): Promise<void> {
 /**
  * Sign in through Cognito's own Hosted UI, where native archive accounts live.
  *
- * This is deliberately kept reachable whatever else is configured: it is the
- * fallback that keeps the archive accessible if BU federation is misconfigured
- * or BU's IdP is unavailable. Passing no provider is what shows the Hosted UI,
- * which lists every enabled provider including native sign-in.
+ * Not reachable from the application interface when BU login is configured -
+ * that is deliberate. It stays in the code as the emergency rollback path: if
+ * BU federation breaks or BU's IdP is unavailable, clearing
+ * VITE_COGNITO_IDENTITY_PROVIDER and rebuilding sends {@link login} here
+ * again, and the native user pool accounts still work. Passing no provider is
+ * what shows the Hosted UI.
  */
 export async function loginWithCognito(): Promise<void> {
   await signInWithRedirect();
 }
 
 /**
- * The default sign-in path, used when the UI redirects without asking.
+ * The sign-in path the application uses.
  *
- * Always the Cognito Hosted UI. When BU login is configured the sign-in screen
- * offers an explicit choice instead of calling this, so a federated user is
- * never silently forced down one path and native login never disappears.
+ * When BU login is configured this goes straight to BU Web Login, so users
+ * never see Cognito's Hosted UI or a provider chooser. Cognito remains the
+ * authentication gateway behind it - it issues the tokens and holds the user
+ * pool; it simply stops being a screen anyone looks at.
+ *
+ * When unconfigured this falls back to the Hosted UI, which is both today's
+ * behaviour and the emergency rollback path: clearing
+ * VITE_COGNITO_IDENTITY_PROVIDER restores native sign-in without a code
+ * change. See {@link loginWithCognito}.
  */
 export async function login(): Promise<void> {
+  if (buIdentityProvider) {
+    await loginWithBu();
+    return;
+  }
+
   await loginWithCognito();
 }
 

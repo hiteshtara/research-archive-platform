@@ -2,20 +2,12 @@ import {
   Alert,
   Button,
   CircularProgress,
-  Divider,
-  Paper,
   Stack,
   Typography,
 } from "@mui/material";
 import { useEffect, useState } from "react";
 
-import {
-  accessToken,
-  buIdentityProvider,
-  login,
-  loginWithBu,
-  loginWithCognito,
-} from "./auth";
+import { accessToken, buIdentityProvider, login } from "./auth";
 
 export function AuthGate({
   children,
@@ -23,8 +15,7 @@ export function AuthGate({
   children: React.ReactNode;
 }) {
   const [authenticated, setAuthenticated] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -38,21 +29,24 @@ export function AuthGate({
 
       if (token) {
         setAuthenticated(true);
-        setChecking(false);
         return;
       }
 
-      // With BU login configured, offer the choice rather than picking for the
-      // user: sending everyone straight to BU would take native archive
-      // accounts off the screen entirely, and they are the fallback if BU
-      // federation is misconfigured or BU's IdP is down. With it unconfigured
-      // this redirects immediately, exactly as it always has.
-      if (buIdentityProvider) {
-        setChecking(false);
-        return;
+      // Straight to the configured identity provider - BU Web Login in
+      // deployed environments. No provider chooser and no native sign-in
+      // screen: Cognito stays the gateway that issues tokens, but users only
+      // ever see BU. Native accounts still exist in the pool for emergency
+      // rollback and are reached by clearing
+      // VITE_COGNITO_IDENTITY_PROVIDER and rebuilding, not from here.
+      try {
+        await login();
+      } catch {
+        if (active) {
+          // Without this a failed redirect leaves a spinner forever, with no
+          // indication of what went wrong or any way to retry.
+          setFailed(true);
+        }
       }
-
-      await login();
     }
 
     void checkAuthentication();
@@ -66,7 +60,7 @@ export function AuthGate({
     return <>{children}</>;
   }
 
-  if (checking) {
+  if (failed) {
     return (
       <Stack
         spacing={2}
@@ -74,77 +68,37 @@ export function AuthGate({
           minHeight: "100vh",
           alignItems: "center",
           justifyContent: "center",
+          p: 2,
         }}
       >
-        <CircularProgress />
-        <Typography color="text.secondary">
-          Redirecting to secure sign-in…
-        </Typography>
+        <Alert severity="error" sx={{ maxWidth: 440 }}>
+          Sign-in could not be started.
+          {buIdentityProvider
+            ? " If this continues, BU Web Login may be unavailable — please contact the Research Archive team."
+            : " Please try again, or contact the Research Archive team if this continues."}
+        </Alert>
+        <Button variant="contained" onClick={() => window.location.reload()}>
+          Try again
+        </Button>
       </Stack>
     );
   }
 
-  async function choose(signIn: () => Promise<void>) {
-    setError(null);
-    try {
-      await signIn();
-    } catch {
-      // A failed redirect otherwise leaves the user on a dead screen with no
-      // way to try the other option.
-      setError("Sign-in could not be started. Please try again.");
-    }
-  }
-
   return (
     <Stack
+      spacing={2}
       sx={{
         minHeight: "100vh",
         alignItems: "center",
         justifyContent: "center",
-        p: 2,
       }}
     >
-      <Paper sx={{ p: 4, maxWidth: 420, width: "100%" }}>
-        <Stack spacing={3}>
-          <Stack spacing={1}>
-            <Typography variant="h6" component="h1">
-              Research Archive
-            </Typography>
-            <Typography color="text.secondary" variant="body2">
-              Sign in to continue.
-            </Typography>
-          </Stack>
-
-          {error ? <Alert severity="error">{error}</Alert> : null}
-
-          <Stack spacing={1.5}>
-            <Button
-              variant="contained"
-              size="large"
-              fullWidth
-              onClick={() => void choose(loginWithBu)}
-            >
-              Sign in with BU
-            </Button>
-
-            <Divider>or</Divider>
-
-            <Button
-              variant="outlined"
-              size="large"
-              fullWidth
-              onClick={() => void choose(loginWithCognito)}
-            >
-              Sign in with Cognito
-            </Button>
-          </Stack>
-
-          <Typography color="text.secondary" variant="caption">
-            Use BU if you have a BU login. Use Cognito for an archive account
-            issued directly by the project.
-          </Typography>
-        </Stack>
-      </Paper>
+      <CircularProgress />
+      <Typography color="text.secondary">
+        {buIdentityProvider
+          ? "Redirecting to BU Web Login…"
+          : "Redirecting to secure sign-in…"}
+      </Typography>
     </Stack>
   );
 }
