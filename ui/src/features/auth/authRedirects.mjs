@@ -90,7 +90,7 @@ export function resolveOauthRedirects({
   // The build-time sign-in origin is always approved: it is, by definition,
   // already a Cognito callback URL. The sign-out origin is deliberately NOT
   // added - it may legitimately point at an external identity-provider logout
-  // page (BU Shibboleth's /idp/profile/Logout), which is an allowed Cognito
+  // page (BU Shibboleth's /idp/logout.jsp), which is an allowed Cognito
   // logout target but never an origin this application is served from.
   const allowedOrigins = parseAllowedOrigins(allowedOriginsRaw);
   const configuredSignInOrigin = originOf(configuredSignInUrl);
