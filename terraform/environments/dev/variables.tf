@@ -528,3 +528,27 @@ variable "additional_api_environment_variables" {
   type        = map(string)
   default     = {}
 }
+
+variable "ui_canonical_origin" {
+  description = <<-EOT
+    The single advertised origin for the deployed UI, e.g.
+    "https://nonprod.kuali-archive.bu.edu". Feeds VITE_CANONICAL_ORIGIN into
+    the Amplify build; the application then redirects visitors who arrive on
+    any other origin - notably the retired default *.amplifyapp.com URL -
+    to this one, preserving the path and dropping OAuth parameters.
+
+    Leave null (the default) to disable the redirect entirely. That is also
+    the rollback: clear it, re-apply, and every origin serves the application
+    directly again, which matters if the custom domain becomes unavailable.
+
+    This is a courtesy redirect, not an access control. Amplify Hosting
+    cannot disable its default domain (defaultDomain is API output only,
+    enableBasicAuth is app-wide, CustomRule.condition matches a country code
+    rather than a Host, and the CloudFront distribution is AWS-managed), so
+    the old URL keeps serving the bundle regardless. Removing the old URL
+    from cognito_callback_urls is the only real enforcement, and is a
+    separate decision.
+    EOT
+  type        = string
+  default     = null
+}

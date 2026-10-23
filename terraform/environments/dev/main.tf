@@ -389,11 +389,11 @@ module "amplify" {
   branch_name         = var.amplify_branch_name
   custom_domain       = var.amplify_custom_domain
 
-  # VITE_COGNITO_IDENTITY_PROVIDER is merged in only when
-  # var.ui_identity_provider is set, so that until the IdP operator confirms
-  # the SP registration this module proposes NO change to the Amplify app at
-  # all. Emitting the key with an empty value would instead show up as an
-  # environment-variable change and trigger a rebuild for no behavioural gain.
+  # VITE_COGNITO_IDENTITY_PROVIDER and VITE_CANONICAL_ORIGIN are each merged
+  # in only when their variable is set, so this module proposes NO change to
+  # the Amplify app while either is unconfigured. Emitting a key with an empty
+  # value would instead show up as an environment-variable change and trigger
+  # a rebuild for no behavioural gain.
   environment_variables = merge({
     VITE_API_BASE_URL         = coalesce(var.ui_api_base_url, local.api_url)
     VITE_AWS_REGION           = var.aws_region
@@ -420,6 +420,9 @@ module "amplify" {
     },
     var.ui_identity_provider == null ? {} : {
       VITE_COGNITO_IDENTITY_PROVIDER = var.ui_identity_provider
+    },
+    var.ui_canonical_origin == null ? {} : {
+      VITE_CANONICAL_ORIGIN = var.ui_canonical_origin
     }
   )
 }
