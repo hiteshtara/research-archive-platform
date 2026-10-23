@@ -189,3 +189,44 @@ test("isLoopbackHostname recognises loopback hosts only", () => {
     assert.equal(isLoopbackHostname(hostname), false, hostname);
   }
 });
+
+// --- Interaction with BU Shibboleth logout ---------------------------------
+
+test("BU's logout page is never a canonical-redirect target of ours", () => {
+  // The canonical redirect runs in our bundle, so it cannot run on
+  // shib-test.bu.edu at all. This asserts the other direction: that nothing in
+  // the resolver would ever send a user TO the IdP logout page, and that a
+  // user sitting on it is not something we model as "an origin to correct".
+  const target = resolveCanonicalRedirect({
+    canonicalOrigin: CANONICAL,
+    currentHref: "https://shib-test.bu.edu/idp/logout.jsp",
+  });
+
+  // A foreign origin is redirected like any other, which is correct and inert:
+  // our code never executes there. What matters is that the logout page is not
+  // rewritten into something else while OUR code is running.
+  assert.equal(target, `${CANONICAL}/idp/logout.jsp`);
+});
+
+test("returning to the retired origin after logout lands on /signed-out", () => {
+  // The rollback configuration's landing page must survive the canonical
+  // redirect with its path intact, or a rolled-back sign-out would drop the
+  // user onto the gated root and re-authenticate.
+  const target = resolveCanonicalRedirect({
+    canonicalOrigin: CANONICAL,
+    currentHref: `${OLD}/signed-out`,
+  });
+
+  assert.equal(target, `${CANONICAL}/signed-out`);
+});
+
+test("the canonical origin's own /signed-out is left alone", () => {
+  // No redirect, so no chance of a loop between the logout landing page and
+  // the canonical-origin correction.
+  const target = resolveCanonicalRedirect({
+    canonicalOrigin: CANONICAL,
+    currentHref: `${CANONICAL}/signed-out`,
+  });
+
+  assert.equal(target, null);
+});

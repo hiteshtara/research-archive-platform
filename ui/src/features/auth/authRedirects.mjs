@@ -80,6 +80,7 @@ export function parseAllowedOrigins(raw) {
  *   signOut: string,
  *   allowedOrigins: string[],
  *   originAware: boolean,
+ *   signOutEndsIdpSession: boolean,
  * }}
  */
 export function resolveOauthRedirects({
@@ -115,6 +116,23 @@ export function resolveOauthRedirects({
   const signOutIsOwnOrigin =
     configuredSignOutOrigin !== null && allowedOrigins.includes(configuredSignOutOrigin);
 
+  // True when sign-out hands the browser to somewhere that is not one of our
+  // own origins - in this deployment, BU's Shibboleth logout page, which ends
+  // the IdP session that Cognito's own /logout cannot touch.
+  //
+  // Callers use this to decide whether the deliberate-sign-out marker is still
+  // needed. That marker exists only to compensate for an IdP session which
+  // outlives sign-out: with no way to end it, the next visit to a gated route
+  // is answered by the IdP with no prompt, so the marker holds the user on the
+  // signed-out page instead. When the IdP session really is ended there is
+  // nothing left to compensate for, and keeping the marker would replace the
+  // IdP's own login screen with our page - the opposite of what sign-out is
+  // being asked to prove.
+  //
+  // A malformed configured URL yields false, so the marker is kept: failing
+  // towards the more defensive behaviour, which is also today's behaviour.
+  const signOutEndsIdpSession = configuredSignOutOrigin !== null && !signOutIsOwnOrigin;
+
   // signOutPath is where Cognito drops the browser after ending its session.
   // It defaults to "/" - the historical behaviour - but the application sends
   // users to a public post-logout page instead. Landing back on "/" is what
@@ -130,6 +148,7 @@ export function resolveOauthRedirects({
         : configuredSignOutUrl,
       allowedOrigins,
       originAware: false,
+      signOutEndsIdpSession,
     };
   }
 
@@ -138,5 +157,6 @@ export function resolveOauthRedirects({
     signOut: signOutIsOwnOrigin ? `${currentOrigin}${signOutPath}` : configuredSignOutUrl,
     allowedOrigins,
     originAware: true,
+    signOutEndsIdpSession,
   };
 }

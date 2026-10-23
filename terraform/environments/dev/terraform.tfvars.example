@@ -122,9 +122,22 @@ cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
 # provider redirect, and a still-valid SSO session signs the user straight back
 # in - sign-out then appears to do nothing. Keep the root entry as well; it is
 # still a valid logout target and removing it would break any older build.
+#
+# When the UI signs in through a SAML identity provider, ALSO list that
+# provider's logout page here and point ui_logout_url at it. Ending Cognito's
+# session does not end the IdP's, so without this the IdP answers the next
+# sign-in with no prompt and sign-out only appears to have worked. Cognito
+# refuses any logout_uri that is not on this list - with HTTP 400 "Required
+# parameters missing", not a redirect - so this entry must be applied BEFORE a
+# UI build that uses it is deployed.
+#
+# For BU's test IdP that page is https://shib-test.bu.edu/idp/logout.jsp. It is
+# NOT /idp/profile/Logout: BU's metadata advertises no SingleLogoutService, so
+# the SAML single-logout profile has nothing to run.
 cognito_logout_urls = [
   "https://REPLACE_WITH_YOUR_UI_DOMAIN/",
   "https://REPLACE_WITH_YOUR_UI_DOMAIN/signed-out",
+  # "https://shib-test.bu.edu/idp/logout.jsp",
 ]
 cognito_advanced_security_mode = "AUDIT"   # OFF, AUDIT, or ENFORCED
 cognito_deletion_protection    = "INACTIVE" # ACTIVE or INACTIVE
@@ -168,6 +181,11 @@ manage_amplify = false
 # amplify_branch_name     = "main"
 # ui_redirect_url         = "http://localhost:5173/"  # see README bring-up note
 # ui_logout_url           = "http://localhost:5173/"
+#
+# With SAML federation enabled, ui_logout_url is the identity provider's
+# logout page rather than one of our own URLs - that redirect is what ends the
+# IdP session. It must already be in cognito_logout_urls above.
+# ui_logout_url           = "https://shib-test.bu.edu/idp/logout.jsp"
 
 # --- AI feature (optional) --------------------------------------------------
 

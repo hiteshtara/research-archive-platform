@@ -14,4 +14,9 @@ export function resolveOauthRedirects(input: {
   signOut: string;
   allowedOrigins: string[];
   originAware: boolean;
+  /**
+   * True when `signOut` points somewhere that is not one of our own origins -
+   * an identity provider's logout page, which ends the IdP session.
+   */
+  signOutEndsIdpSession: boolean;
 };
