@@ -1,0 +1,46 @@
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" ID="_bu_research_archive_dev_useast1_cognito_sp" entityID="urn:amazon:cognito:sp:us-east-1_VJ4ekQ27c">
+
+  <md:Extensions xmlns:alg="urn:oasis:names:tc:SAML:metadata:algsupport">
+    <alg:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+    <alg:SigningMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+  </md:Extensions>
+
+  <md:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:KeyName>research-archive-platform-dev-cognito-signing-key</ds:KeyName>
+        <ds:X509Data>
+          <ds:X509SubjectName>CN=us-east-1_VJ4ekQ27c</ds:X509SubjectName>
+          <ds:X509Certificate>
+          MIICvDCCAaSgAwIBAgIIaC5FyX+dRR8wDQYJKoZIhvcNAQELBQAwHjEcMBoGA1UEAwwTdXMtZWFzdC0x
+          X1ZKNGVrUTI3YzAeFw0yNjEwMjIxNDEzMTdaFw0zNjEwMjIwMDI1MTdaMB4xHDAaBgNVBAMME3VzLWVh
+          c3QtMV9WSjRla1EyN2MwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC5ceS1Kjzk9ZDgppRy
+          piPPMZmQo16pXg7/DpokSZanf9CVfW4JjALLJ80WfwK/54zbAIkC/+H5cUZEFB2dLNRTb8bSo/9Nyf03
+          Vrw40g5hmmSoizEJWJZhl/qSyntdA7mqB98wTU4iie5ioghKAtEFRa1SZudc+qjR6FNYIx4FaxAodduE
+          RlrxhvfRYSZZ1SDA+8TOM+GCDF1kxitnmZ5aZuM/9k0aEbkBBLmKcIEMseKxyHuSQZ0ZHZ7CgSoUYB/5
+          lWHv8Q6HGUcHovl71zNqrgcmB8kKN7JExeNYOX6pHl1L54MBcISQ4hTHMIZ0DuM4JKkvWiAYLcQ1fvuZ
+          KXEJAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAClYEBuzrq/j3fvAKuNo7vnoqQdCa5846J9BJQHGu86U
+          3dtAHBEZY8kMxlCsGUHiVFUaLki1j9DdVq6joN1J4BWb6HI4BACckalel/6OrN+ufvIxlH5BBO/PzngA
+          Vp7hdbpb32fmZhWf6oDqQ9/ypw4QHLPtPewB0RX+k7n406t4oz+ObQX8G5Yq2lrDYBNkFeuQkgRinCmJ
+          WtlHoWgKF9EXQhY7OVwA8YTChsbTSml+zML+sNMXbboXghVlL7V+ckuIY+ogDpci2E4i4z4nCBRJjd9w
+          +4JDQ0oujJuPgEjy4XjSJOpMv/OUfOGpZMWs8LO+9JKTRFXsYO24Ivs6dxU=
+          </ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+
+    <!-- Preferred: email-address format (loginname@bu.edu) -->
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+
+    <!-- Fallback if the IdP can only release bare loginname -->
+    <!-- <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat> -->
+
+    <!-- Cognito's only ACS endpoint - HTTP-POST binding, /saml2/idpresponse.
+         No SingleLogoutService is declared: BU's IdP metadata (both shib-test
+         and shib) advertises no SingleLogoutService, so SAML single logout is
+         not available. -->
+    <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://research-archive-platform-dev-770203350335.auth.us-east-1.amazoncognito.com/saml2/idpresponse" index="0" isDefault="true"/>
+
+  </md:SPSSODescriptor>
+
+</md:EntityDescriptor>

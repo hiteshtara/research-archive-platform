@@ -45,6 +45,62 @@ resource "aws_cognito_user_pool" "this" {
   }
 }
 
+# BU Shibboleth SAML federation - see docs/shibboleth/SHIBBOLETH-PLAN-3.md. Cognito
+# is the SAML SP here; the signing keypair (when
+# shibboleth_require_signed_requests is true) is generated and held
+# entirely inside Cognito - never supplied by or exported to this
+# codebase. count-gated on the metadata URL being set so this module
+# still works for environments that haven't onboarded Shibboleth yet.
+resource "aws_cognito_identity_provider" "shibboleth" {
+  count = var.shibboleth_idp_metadata_url == null ? 0 : 1
+
+  user_pool_id  = aws_cognito_user_pool.this.id
+  provider_name = "BUShibboleth"
+  provider_type = "SAML"
+
+  provider_details = merge(
+    {
+      MetadataURL = var.shibboleth_idp_metadata_url
+      IDPSignout  = "true"
+    },
+    var.shibboleth_require_signed_requests ? {
+      RequestSigningAlgorithm = "rsa-sha256"
+    } : {}
+  )
+
+  # Exact urn:oid:... values must be confirmed against BU's IdP
+  # attribute release policy before relying on them - see
+  # docs/shibboleth/SHIBBOLETH-PLAN-3.md section 1.1.
+  attribute_mapping = {
+    email    = "urn:oid:0.9.2342.19200300.100.1.3" # mail
+    username = "urn:oid:1.3.6.1.4.1.5923.1.1.1.6"  # eduPersonPrincipalName (eppn)
+    # "custom:entitlement" removed for now - requires a schema attribute
+    # on the User Pool, which can only be added at creation time.
+    # Deferred to Phase 2 (group sync) - see docs/shibboleth/SHIBBOLETH-PLAN-3.md.
+  }
+
+  lifecycle {
+    # Cognito fetches MetadataURL and writes what it derives back into
+    # provider_details - the IdP's signing/encryption certificate and its SSO
+    # redirect binding. Neither is in this config, so without this block every
+    # later plan proposes stripping them, and any unrelated change to this
+    # module (adding a logout URL, say) drags that along as a dependency.
+    # Observed on the dev pool straight after creation:
+    #
+    #   ~ ActiveEncryptionCertificate: MIICvDCC... -> <absent>
+    #   ~ SSORedirectBindingURI: https://shib-test.bu.edu/idp/.../SSO -> <absent>
+    #
+    # They are AWS-managed values derived from the IdP's published metadata,
+    # not settings we own, and they are what makes the federation work. Ignore
+    # them so Terraform stops trying to remove a working configuration.
+    # MetadataURL stays declared, so a genuine metadata change is still a diff.
+    ignore_changes = [
+      provider_details["ActiveEncryptionCertificate"],
+      provider_details["SSORedirectBindingURI"],
+    ]
+  }
+}
+
 resource "aws_cognito_user_pool_client" "app" {
   name         = "${var.project_name}-${var.environment}-app-client"
   user_pool_id = aws_cognito_user_pool.this.id
@@ -56,7 +112,16 @@ resource "aws_cognito_user_pool_client" "app" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
 
-  supported_identity_providers = ["COGNITO"]
+  # Referencing the resource's own provider_name (rather than a hardcoded
+  # "BUShibboleth" string) gives Terraform an explicit dependency edge, so the
+  # IdP is always created before this client is updated to reference it.
+  #
+  # "COGNITO" is kept unconditionally, so the existing native user pool logins
+  # keep working as a fallback throughout Shibboleth rollout and testing.
+  supported_identity_providers = concat(
+    ["COGNITO"],
+    [for idp in aws_cognito_identity_provider.shibboleth : idp.provider_name]
+  )
 
   callback_urls = var.callback_urls
   logout_urls   = var.logout_urls

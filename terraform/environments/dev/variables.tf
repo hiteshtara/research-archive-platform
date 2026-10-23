@@ -381,6 +381,40 @@ variable "cognito_attachment_viewer_usernames" {
   default     = []
 }
 
+variable "shibboleth_idp_metadata_url" {
+  description = "BU Shibboleth IdP SAML metadata URL. Leave null to skip Shibboleth federation entirely. Only used when manage_cognito = true. See docs/shibboleth/SHIBBOLETH-PLAN-3.md."
+  type        = string
+  default     = null
+}
+
+variable "shibboleth_require_signed_requests" {
+  description = "Require Cognito to sign outbound SAML AuthnRequests to Shibboleth, using a Cognito-managed keypair. Only relevant when shibboleth_idp_metadata_url is set."
+  type        = bool
+  default     = true
+}
+
+variable "ui_identity_provider" {
+  description = <<-EOT
+    Name of the Cognito identity provider the DEPLOYED UI should redirect
+    straight to, skipping the Hosted UI provider picker. Feeds
+    VITE_COGNITO_IDENTITY_PROVIDER into the Amplify build.
+
+    Leave null (the default) to keep the Hosted UI picker and native Cognito
+    login on the deployed site. Set to "BUShibboleth" only once the IdP
+    operator has CONFIRMED the SP registration - until then the direct-to-IdP
+    redirect fails for real users with "Web Login Service - Unsupported
+    Request", and leaving this null is what keeps the deployed login working.
+
+    CROSS-PR DEPENDENCY: setting this alone does nothing. The UI must also be
+    reading VITE_COGNITO_IDENTITY_PROVIDER, which arrives in the separate
+    UI-authentication PR (ui/src/auth.ts). Until that is merged and the UI
+    rebuilt, this variable only adds an unread environment variable to the
+    Amplify build. Set it after that PR has landed, not before.
+    EOT
+  type        = string
+  default     = null
+}
+
 #
 # Amplify / UI hosting
 #

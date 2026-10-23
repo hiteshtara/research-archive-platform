@@ -170,3 +170,17 @@ manage_amplify = false
 #   APP_AI_PROVIDER       = "openai"
 #   APP_AI_OPENAI_ENABLED = "true"
 # }
+
+# --- BU Shibboleth SSO (see docs/shibboleth/RUNBOOK.md) ---------------------
+#
+# Setting shibboleth_idp_metadata_url is the single switch that creates the
+# Cognito SAML identity provider named "BUShibboleth". "COGNITO" stays in the
+# app client's supported_identity_providers either way, so native logins keep
+# working as a fallback.
+# shibboleth_idp_metadata_url        = "https://shib-test.bu.edu/idp/shibboleth"
+# shibboleth_require_signed_requests = true
+#
+# ui_identity_provider switches the DEPLOYED site to redirect straight to BU
+# Web Login. Leave it unset until the IdP operator confirms the SP
+# registration, or real users get "Unsupported Request".
+# ui_identity_provider = "BUShibboleth"

@@ -295,6 +295,9 @@ module "cognito" {
   allow_admin_password_auth = var.cognito_allow_admin_password_auth
 
   attachment_viewer_usernames = var.cognito_attachment_viewer_usernames
+
+  shibboleth_idp_metadata_url        = var.shibboleth_idp_metadata_url
+  shibboleth_require_signed_requests = var.shibboleth_require_signed_requests
 }
 
 locals {
@@ -386,7 +389,12 @@ module "amplify" {
   branch_name         = var.amplify_branch_name
   custom_domain       = var.amplify_custom_domain
 
-  environment_variables = {
+  # VITE_COGNITO_IDENTITY_PROVIDER is merged in only when
+  # var.ui_identity_provider is set, so that until the IdP operator confirms
+  # the SP registration this module proposes NO change to the Amplify app at
+  # all. Emitting the key with an empty value would instead show up as an
+  # environment-variable change and trigger a rebuild for no behavioural gain.
+  environment_variables = merge({
     VITE_API_BASE_URL         = coalesce(var.ui_api_base_url, local.api_url)
     VITE_AWS_REGION           = var.aws_region
     VITE_COGNITO_USER_POOL_ID = local.cognito_user_pool_id
@@ -409,7 +417,11 @@ module "amplify" {
     # own APP_EXPLORER_ENABLED. See docs/ARCHIVE_EXPLORER.md. Never set
     # in test/prod.
     VITE_EXPLORER_ENABLED = local.explorer_enabled_ui ? "true" : "false"
-  }
+    },
+    var.ui_identity_provider == null ? {} : {
+      VITE_COGNITO_IDENTITY_PROVIDER = var.ui_identity_provider
+    }
+  )
 }
 
 #
