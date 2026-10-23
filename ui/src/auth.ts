@@ -7,6 +7,11 @@ import {
 } from "aws-amplify/auth";
 
 import { resolveOauthRedirects } from "./features/auth/authRedirects.mjs";
+import {
+  clearSignedOutMarker as removeSignedOutMarker,
+  markSignedOut as setSignedOutMarker,
+  wasSignedOut as readSignedOutMarker,
+} from "./features/auth/signedOutMarker.mjs";
 
 // Every value here is environment-specific (dev/test/prod each have their
 // own Cognito User Pool and app client) and is injected at build time via
@@ -54,11 +59,19 @@ if (!userPoolId.startsWith(`${awsRegion}_`)) {
 // Resolved at module load, from window.location.origin only - never from a
 // query parameter, hash, or referrer - and only honoured when that origin is
 // on the approved list. See features/auth/authRedirects.mjs.
+/**
+ * Public post-logout route. Must stay in step with the route registered in
+ * main.tsx and with the Cognito app client's logout URL allow-list - Cognito
+ * only redirects to a URL on that list.
+ */
+export const SIGNED_OUT_PATH = "/signed-out";
+
 const redirects = resolveOauthRedirects({
   currentOrigin: typeof window === "undefined" ? null : window.location.origin,
   allowedOriginsRaw,
   configuredSignInUrl: redirectSignInUrl,
   configuredSignOutUrl: redirectSignOutUrl,
+  signOutPath: SIGNED_OUT_PATH,
 });
 
 Amplify.configure({
@@ -86,6 +99,25 @@ Amplify.configure({
 // null the UI must behave exactly as it did before BU login existed.
 export const buIdentityProvider: string | null = identityProviderName || null;
 
+// Deliberate-sign-out marker, held in sessionStorage so it lasts exactly as
+// long as the tab - the identity provider's SSO session is also a
+// browser-session thing, and closing the browser is what actually ends it.
+// The logic and its failure handling live in features/auth/signedOutMarker.mjs
+// so they are unit-testable; these wrappers only supply the storage.
+
+export function markSignedOut(): void {
+  setSignedOutMarker(window.sessionStorage);
+}
+
+export function clearSignedOutMarker(): void {
+  removeSignedOutMarker(window.sessionStorage);
+}
+
+/** True when this tab signed out and has not deliberately signed in since. */
+export function wasSignedOut(): boolean {
+  return readSignedOutMarker(window.sessionStorage);
+}
+
 /**
  * Sign in through BU Web Login (Shibboleth).
  *
@@ -101,6 +133,10 @@ export async function loginWithBu(): Promise<void> {
     );
   }
 
+  // An explicit request to sign in clears the marker, so the gate resumes its
+  // normal behaviour for the rest of the tab's life.
+  clearSignedOutMarker();
+
   await signInWithRedirect({ provider: { custom: buIdentityProvider } });
 }
 
@@ -115,6 +151,7 @@ export async function loginWithBu(): Promise<void> {
  * what shows the Hosted UI.
  */
 export async function loginWithCognito(): Promise<void> {
+  clearSignedOutMarker();
   await signInWithRedirect();
 }
 
@@ -165,6 +202,11 @@ export async function logout(): Promise<void> {
   // global is declared `global: boolean` (required, not optional) on
   // AuthSignOutInput, so it is passed explicitly as false rather than omitted;
   // omitting it while keeping oauth.redirectUrl does not typecheck.
+  // Set before anything navigates, so it is already in place when the browser
+  // comes back to this origin - including if the user presses Back instead of
+  // waiting for the redirect chain to finish.
+  markSignedOut();
+
   await signOut({ global: false, oauth: { redirectUrl: redirects.signOut } });
 
   // Ends the Cognito session and hands the browser to redirects.signOut, which

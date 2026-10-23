@@ -2,11 +2,13 @@ import { CssBaseline, ThemeProvider } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import App from "./App";
 import { AuthGate } from "./AuthGate";
+import { SignedOutPage } from "./SignedOutPage";
 import { ApiRequestError } from "./api/client";
+import { SIGNED_OUT_PATH } from "./auth";
 import "./index.css";
 import { theme } from "./theme/theme";
 
@@ -40,11 +42,25 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <AuthGate>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </AuthGate>
+        {/*
+          The router is now OUTSIDE the auth gate so one public route can exist
+          beside the gated application. AuthGate used to wrap the router, which
+          meant every path - including the post-logout landing page - triggered
+          a sign-in redirect before any route matched.
+        */}
+        <BrowserRouter>
+          <Routes>
+            <Route path={SIGNED_OUT_PATH} element={<SignedOutPage />} />
+            <Route
+              path="*"
+              element={
+                <AuthGate>
+                  <App />
+                </AuthGate>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
       </ThemeProvider>
     </QueryClientProvider>
   </React.StrictMode>,
