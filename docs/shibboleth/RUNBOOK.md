@@ -383,7 +383,7 @@ User Pool:
 manage_cognito                  = true
 cognito_hosted_ui_domain_prefix = "<globally-unique-prefix>"   # becomes <prefix>.auth.<region>.amazoncognito.com
 cognito_callback_urls           = ["http://localhost:5173/"]
-cognito_logout_urls             = ["http://localhost:5173/", "https://shib-test.bu.edu/idp/profile/Logout"]
+cognito_logout_urls             = ["http://localhost:5173/", "https://shib-test.bu.edu/idp/logout.jsp"]
 ```
 
 The Hosted UI domain is required even though users will skip the
@@ -393,11 +393,21 @@ must match the UI's origin **exactly**, including the trailing slash,
 or Cognito rejects the redirect (`redirect_mismatch`).
 
 `cognito_logout_urls` is an allow-list: Cognito's `/logout` endpoint
-only redirects to a URL on it. It includes the IdP's logout page
-(`https://<idp-host>/idp/profile/Logout`, the standard Shibboleth
-path) so that Step 11 can end the user's **IdP** session on logout,
-not just the Cognito one. Listing it here changes nothing by itself;
+only redirects to a URL on it. It includes the IdP's logout page so
+that Step 11 can end the user's **IdP** session on logout, not just the
+Cognito one. Listing it here changes nothing by itself;
 `VITE_COGNITO_LOGOUT_URL` chooses which entry the UI actually uses.
+
+For BU's test IdP that page is `https://shib-test.bu.edu/idp/logout.jsp`,
+confirmed by Kevin Ruderman (INC21002534). Use it, **not**
+`/idp/profile/Logout`: that is the SAML single-logout *profile*
+endpoint, and BU's IdP metadata advertises no `SingleLogoutService`
+(verified: zero occurrences in both the shib-test and shib metadata), so
+there is no SLO for it to run. Sent there directly it answers 302 into a
+Spring WebFlow execution (`/idp/profile/Logout?execution=e1s1`) that
+cannot complete. `logout.jsp` answers 200 and ends the local IdP
+session, which is the most logout BU's IdP supports - true single logout
+across all BU services is not available.
 
 **Shibboleth** — setting the metadata URL is what causes the SAML
 identity provider to be created at all (the resource is count-gated on
@@ -569,7 +579,7 @@ In `ui/.env.local`, set these two together:
 
 ```
 VITE_COGNITO_IDENTITY_PROVIDER=BUShibboleth
-VITE_COGNITO_LOGOUT_URL=https://shib-test.bu.edu/idp/profile/Logout
+VITE_COGNITO_LOGOUT_URL=https://shib-test.bu.edu/idp/logout.jsp
 ```
 
 `login()` in [auth.ts](../../ui/src/auth.ts) then calls
