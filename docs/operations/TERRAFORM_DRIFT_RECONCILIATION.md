@@ -358,3 +358,88 @@ Success; full unrestricted plan `1 to add, 0 to change, 0 to destroy`; all seven
 resources `no-op`; zero delete actions; zero replacements; schedule `no-op` at
 revision 237. Live state unchanged throughout — schedule still 237, protected
 image still present (`sha256:5339636d…`), API service still ECS revision 81.
+
+---
+
+# Second episode — tfvars drift, 2026-10-23
+
+A different and more dangerous shape of the same class of problem. #53 fixed
+*configuration* missing from the repository. This was *variable values*
+missing from `terraform.tfvars`, which is git-ignored and therefore invisible
+to review.
+
+Found while preparing the logout change in #60. Nothing was lost: the
+reconciliation was applied first and the resulting plan was clean.
+
+## What an apply would have done
+
+Four declared variables whose effects were live in AWS were absent from
+`terraform/environments/dev/terraform.tfvars`:
+
+| Missing variable | Consequence of applying |
+|---|---|
+| `shibboleth_idp_metadata_url` | **DESTROY `aws_cognito_identity_provider.shibboleth`** — it is `count`-gated on this value — and strip `BUShibboleth` from the app client's `supported_identity_providers`. Every user loses BU Web Login |
+| `ui_identity_provider` | Remove `VITE_COGNITO_IDENTITY_PROVIDER` from Amplify, returning users to the Cognito Hosted UI picker |
+| `ui_canonical_origin` | Remove `VITE_CANONICAL_ORIGIN`, disabling the #59 redirect from the retired Amplify URL |
+| `shibboleth_require_signed_requests` | Unset |
+
+`cognito_logout_urls` was also short by two entries that were live
+(`…amplifyapp.com/signed-out` and `localhost:5173/signed-out`), which the
+apply would have deleted.
+
+Root cause: federation was applied out-of-band and never written back to
+`terraform.tfvars`. Because that file is git-ignored, no review could have
+caught it — only a plan read line by line.
+
+## Compounding trap
+
+The first plan of the day reported `2 to add, 5 to change, 9 to destroy`,
+including destroying both the Shibboleth IdP *and* the CloudShell resources
+that #53 had restored. That was **not** real drift: it was run from
+`/Users/mukadder/projects/research-archive-platform`, which sits on a QA
+branch that was **34 commits behind `main`** and whose `.tf` files contained
+neither resource.
+
+**Always plan from a worktree at `origin/main`**, with `terraform.tfvars` and
+`backend.hcl` copied in.
+
+## Reconciliation and result
+
+Values were read from live AWS and written back:
+
+```bash
+aws cognito-idp describe-identity-provider \
+  --user-pool-id us-east-1_VJ4ekQ27c --provider-name BUShibboleth
+aws cognito-idp describe-user-pool-client \
+  --user-pool-id us-east-1_VJ4ekQ27c --client-id <client-id>
+aws amplify get-app --app-id d288p9gmoteftb --query 'app.environmentVariables'
+```
+
+Added: `shibboleth_idp_metadata_url = "https://shib-test.bu.edu/idp/shibboleth"`,
+`shibboleth_require_signed_requests = true`, `ui_identity_provider = "BUShibboleth"`,
+`ui_canonical_origin = "https://nonprod.kuali-archive.bu.edu"`, and all six
+live logout URLs.
+
+| | Untargeted plan |
+|---|---|
+| Before reconciliation | `0 to add, 2 to change, 1 to destroy` — the destroy being the IdP |
+| **After reconciliation** | **`0 to add, 2 to change, 0 to destroy`** — 117 resources, 115 `no-op` |
+
+`aws_cognito_identity_provider.shibboleth[0]` came back a clean `no-op`,
+confirming the module's `lifecycle { ignore_changes }` correctly covers the
+`ActiveEncryptionCertificate` and `SSORedirectBindingURI` that Cognito derives
+from the metadata URL.
+
+## Standing lessons
+
+- `logout_urls`, `callback_urls` and Amplify `environment_variables` are
+  **replace-wholesale**. Anything live but absent from tfvars is deleted.
+- A count-gated resource whose variable is missing is **destroyed**, not
+  ignored.
+- Neither hazard is visible in the plan summary. Read the JSON.
+- Reconcile `terraform.tfvars` against live AWS before trusting it.
+
+The checklist derived from this is
+[`docs/runbooks/deployment/TERRAFORM_CHANGE_CHECKLIST.md`](../runbooks/deployment/TERRAFORM_CHANGE_CHECKLIST.md),
+which also assesses where environment-specific values should live so this
+cannot recur on another developer's machine.

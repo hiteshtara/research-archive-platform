@@ -30,9 +30,19 @@
 >   Ruderman, group *Identity and Access Management*. **Registration is not
 >   yet confirmed**, so `ui_identity_provider` stays unset and the deployed
 >   site keeps the Hosted UI picker and native login.
+> - **Logout: DEPLOYED AND VERIFIED in dev, 2026-10-23.** The endpoint is
+>   `https://shib-test.bu.edu/idp/profile/Logout` — Warren's original PR #47
+>   value. `/idp/logout.jsp` is **unsuitable** for this configuration: it
+>   answers `200` and claims success but leaves `__Host-shib_idp_session`
+>   intact. Full evidence, the acceptance test and the root cause are in
+>   [LOGOUT.md](LOGOUT.md).
 > - Single logout: verified that **neither** `shib-test.bu.edu` nor
->   `shib.bu.edu` advertises a `SingleLogoutService`, so the logout-redirect
->   approach applies to production too, not just test.
+>   `shib.bu.edu` advertises a `SingleLogoutService`. That means there is no
+>   cross-service SAML single logout; it does **not** mean the IdP cannot end
+>   its own browser session, which `/idp/profile/Logout` demonstrably does.
+> - **Production is NOT covered.** `shib.bu.edu/idp/profile/Logout` has never
+>   been tested against an authenticated session. Run the acceptance test in
+>   [LOGOUT.md](LOGOUT.md) before any production rollout.
 
 # Runbook: Deploying Cognito ↔ Shibboleth SAML Federation
 
@@ -783,9 +793,18 @@ together. `<!-- TODO -->`
 `<!-- TODO -->` At minimum:
 
 - Add the deployed UI origin to `cognito_callback_urls`.
-- Add the production IdP's logout page to `cognito_logout_urls`, and
+- Add the production IdP's logout endpoint to `cognito_logout_urls`, and
   set the `ui_logout_url` tfvar to it. That tfvar already feeds
   `VITE_COGNITO_LOGOUT_URL` into the Amplify build.
+
+  **Test it first, from a clean browser profile, against an authenticated
+  production session.** Do not carry the dev result across:
+  `shib.bu.edu` is separately operated from `shib-test.bu.edu`, and
+  `/idp/logout.jsp` already proved that a BU logout URL can return `200`,
+  display "You have successfully logged out", and leave the session fully
+  usable. Record the initial challenge as well as the post-logout one — a
+  profile that was not clean is what made an earlier dev test misleading.
+  The procedure is in [LOGOUT.md](LOGOUT.md).
 - Pass `VITE_COGNITO_IDENTITY_PROVIDER` into the Amplify build
   environment. Terraform's `module "amplify"` block doesn't do this yet.
 - Register against the production IdP (separate 🏛 request).
