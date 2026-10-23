@@ -25,11 +25,10 @@ const redirectSignOutUrl = import.meta.env.VITE_COGNITO_LOGOUT_URL;
 // more than one approved origin; when unset, behaviour is exactly as before
 // (the build-time redirect URL is used unconditionally).
 const allowedOriginsRaw = import.meta.env.VITE_COGNITO_ALLOWED_ORIGINS;
-// Optional. Name of a Cognito identity provider (e.g. "BUShibboleth") to send
-// users straight to, skipping Cognito's Hosted UI provider picker. Not a
-// secret - just an identifier. Empty or unset means show the picker, which is
-// what keeps native Cognito login reachable as a fallback. Terraform renders
-// this as "" when unconfigured, so the falsy check below covers both.
+// Optional. Name of a Cognito identity provider (e.g. "BUShibboleth") to offer
+// as an explicit "Sign in with BU" option. Not a secret - just an identifier.
+// Empty or unset means the sign-in screen behaves exactly as before: it
+// redirects straight to the Cognito Hosted UI without asking.
 const identityProviderName = import.meta.env.VITE_COGNITO_IDENTITY_PROVIDER;
 
 for (const [name, value] of Object.entries({
@@ -80,16 +79,52 @@ Amplify.configure({
   },
 });
 
-export async function login(): Promise<void> {
-  // The redirect target still comes from the origin-aware resolver via
-  // Amplify.configure above, so a user who starts at either approved origin
-  // returns to that same origin after authenticating at the IdP.
-  if (identityProviderName) {
-    await signInWithRedirect({ provider: { custom: identityProviderName } });
-    return;
+// Name of the identity provider the "Sign in with BU" option uses, or null
+// when BU login is not configured for this build (Terraform renders the
+// variable as "" when unset, so the falsy check covers both). Exported so the
+// sign-in screen can decide whether to offer a choice at all - when this is
+// null the UI must behave exactly as it did before BU login existed.
+export const buIdentityProvider: string | null = identityProviderName || null;
+
+/**
+ * Sign in through BU Web Login (Shibboleth).
+ *
+ * The redirect target still comes from the origin-aware resolver via
+ * Amplify.configure above, so a user who starts at either approved origin
+ * returns to that same origin after authenticating at the IdP.
+ */
+export async function loginWithBu(): Promise<void> {
+  if (!buIdentityProvider) {
+    throw new Error(
+      "BU login is not configured for this build - " +
+        "VITE_COGNITO_IDENTITY_PROVIDER is unset.",
+    );
   }
 
+  await signInWithRedirect({ provider: { custom: buIdentityProvider } });
+}
+
+/**
+ * Sign in through Cognito's own Hosted UI, where native archive accounts live.
+ *
+ * This is deliberately kept reachable whatever else is configured: it is the
+ * fallback that keeps the archive accessible if BU federation is misconfigured
+ * or BU's IdP is unavailable. Passing no provider is what shows the Hosted UI,
+ * which lists every enabled provider including native sign-in.
+ */
+export async function loginWithCognito(): Promise<void> {
   await signInWithRedirect();
+}
+
+/**
+ * The default sign-in path, used when the UI redirects without asking.
+ *
+ * Always the Cognito Hosted UI. When BU login is configured the sign-in screen
+ * offers an explicit choice instead of calling this, so a federated user is
+ * never silently forced down one path and native login never disappears.
+ */
+export async function login(): Promise<void> {
+  await loginWithCognito();
 }
 
 export async function logout(): Promise<void> {
