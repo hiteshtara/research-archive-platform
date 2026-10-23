@@ -672,6 +672,45 @@ reconciliation path) *and* the Subaward nightly sync's failure alerting
 `aws_sns_topic_policy.subaward_sync_alerts_events`). These exist in state
 but not in configuration. **Always scope dev applies with `-target`.**
 
+## BU Shibboleth sign-out — deployed and verified 2026-10-23 (dev only)
+
+Sign-out now ends the BU IdP session. Endpoint
+`https://shib-test.bu.edu/idp/profile/Logout` — Warren's original PR #47
+value. Shipped in **#60** (`dc24395`), Amplify build **137**, bundle
+`index-CcovNZ5H.js`.
+
+Terraform was two in-place updates, `0 add / 2 change / 0 destroy`: the
+endpoint added to `cognito_user_pool_client.logout_urls` (all six existing
+entries preserved) and `VITE_COGNITO_LOGOUT_URL` on the Amplify app.
+BUShibboleth, users, groups, callback URLs, OAuth scopes, ECS, RDS, DNS and
+the Subaward nightly sync were all `no-op` and were verified unchanged by
+reading live AWS state after the apply.
+
+Acceptance test from a clean browser profile: initial sign-in required **BU
+password + Duo**; sign-out cleared Cognito tokens and landed on BU's logout
+page; `__Host-shib_idp_session` was removed; returning to the application
+produced a **fresh BU password challenge**. PASS.
+
+**`/idp/logout.jsp` is unsuitable and must not be used here.** It answers
+`200` with "You have successfully logged out" but expires cookie names the
+IdP no longer sets (`shib_idp_session` at `Path=/idp`, not
+`__Host-shib_idp_session` at `Path=/`), leaving the session reusable.
+
+**Production is NOT covered.** `shib.bu.edu/idp/profile/Logout` has never been
+tested against an authenticated session and must not be assumed equivalent.
+
+Two prior conclusions recorded elsewhere are retracted: there is no surviving
+"upstream BU credential session" (that came from a browser profile that was
+not clean), and commit `7634922`, which switched the runbook to `logout.jsp`,
+was a mistake. Full record: [`docs/shibboleth/LOGOUT.md`](../shibboleth/LOGOUT.md).
+
+While preparing this, `terraform.tfvars` was found to be missing four declared
+variables whose effects were live, such that any apply would have **destroyed
+the BUShibboleth provider**. Reconciled before applying; see
+[`docs/operations/TERRAFORM_DRIFT_RECONCILIATION.md`](../operations/TERRAFORM_DRIFT_RECONCILIATION.md)
+and the new
+[`docs/runbooks/deployment/TERRAFORM_CHANGE_CHECKLIST.md`](../runbooks/deployment/TERRAFORM_CHANGE_CHECKLIST.md).
+
 ## Open items
 
 - The reconciliation in this file covers Award `204713-00117`/`204713-00088`

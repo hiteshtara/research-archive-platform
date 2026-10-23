@@ -1,7 +1,55 @@
 # Sign-out and the BU Shibboleth IdP session
 
+**Status: DEPLOYED AND VERIFIED in dev, 2026-10-23.** PR #60 merged as
+`dc24395`, Amplify build 137, bundle `index-CcovNZ5H.js`. Warren's five-step
+acceptance test passes end to end against the deployed application — see
+[Deployment verification](#deployment-verification-2026-10-23).
+
+**Dev logout endpoint: `https://shib-test.bu.edu/idp/profile/Logout`.**
+`/idp/logout.jsp` is unsuitable for this configuration and must not be used.
+Production is **not** covered — see [Production](#production-not-yet-verified).
+
 How sign-out is configured, the evidence behind it, and how to re-prove it.
 Companion to [RUNBOOK.md](RUNBOOK.md) Step 11.
+
+## What went wrong, and whose part was whose
+
+Two independent faults compounded. They are worth separating, because only one
+of them involved anyone outside this repository.
+
+**Fault 1 — ours, and the larger one. Sign-out never contacted BU at all.**
+Warren's PR #47 specified two settings together: `VITE_COGNITO_IDENTITY_PROVIDER`
+*and* `VITE_COGNITO_LOGOUT_URL` pointed at the IdP. Only the first was carried
+into the deployed configuration. `ui_logout_url` stayed on
+`https://main.d288p9gmoteftb.amplifyapp.com/` — one of our own origins — so
+`resolveOauthRedirects` rewrote it to `{origin}/signed-out` and Cognito
+returned the browser to us. **No endpoint recommendation could have mattered,
+because no IdP endpoint was ever reached.** `/signed-out` was then added to
+stop the resulting re-login loop being visible, which treated the symptom and
+made the underlying gap harder to see. This was entirely our own doing: a
+half-applied recipe, followed by a fix aimed at the wrong layer.
+
+**Fault 2 — an endpoint recommendation that did not hold.** Asked for the
+logout endpoint, Kevin Ruderman gave `/idp/logout.jsp` (INC21002534). It is a
+reasonable answer: it is BU-branded, answers `200`, and says "You have
+successfully logged out". It does not work for this configuration, because it
+expires cookies named `shib_idp_session`, `shib_idp_session_ss`, `_idp_session`
+and `JSESSIONID` at `Path=/idp`, while the live session cookie is
+`__Host-shib_idp_session` at `Path=/`. Different names; the deletions cannot
+match. It appears to predate the `__Host-` prefix.
+
+**But we compounded fault 2 ourselves.** Commit `7634922` rewrote the runbook
+away from Warren's `/idp/profile/Logout` on the strength of Kevin's reply plus
+our own *unauthenticated* probe, in which the logout flow looked inert — it
+looked inert only because there was no session for it to end. We then reported
+a failure of `logout.jsp` from a browser profile that was not clean, and drew a
+further wrong conclusion from it (a supposed "upstream BU credential session"
+that does not exist). Three of those four errors were ours.
+
+**Net:** the delay is substantially ours. Kevin gave one endpoint that turned
+out not to suit this setup; we never asked him to verify it against an
+authenticated session, and we overrode a working specification from Warren on
+weak evidence. Warren's original recipe was correct as written.
 
 ## The problem
 
@@ -143,6 +191,55 @@ Set `ui_logout_url` back to `https://main.d288p9gmoteftb.amplifyapp.com/`,
 apply, rebuild. The UI restores `/signed-out` and the marker by itself — no
 code change and no Cognito change, because every URL stays on
 `cognito_logout_urls`.
+
+## Deployment verification (2026-10-23)
+
+Applied and verified in **dev only**. Terraform apply was `0 to add, 2 to
+change, 0 to destroy` — 117 resources, 115 no-op — after the tfvars
+reconciliation described in
+[TERRAFORM_DRIFT_RECONCILIATION.md](../operations/TERRAFORM_DRIFT_RECONCILIATION.md).
+
+| Change | Result |
+|---|---|
+| `aws_cognito_user_pool_client.app.logout_urls` | 6 existing entries preserved, `…/idp/profile/Logout` added |
+| `aws_amplify_app.ui` → `VITE_COGNITO_LOGOUT_URL` | → `https://shib-test.bu.edu/idp/profile/Logout` |
+| PR #60 | merged as `dc24395`, all CI green |
+| Amplify job 137 | BUILD / DEPLOY / VERIFY all SUCCEED |
+| Bundle `index-CcovNZ5H.js` | contains `/idp/profile/Logout`, zero `logout.jsp` |
+
+Acceptance test, fresh `--user-data-dir` Chrome profile, interactive sign-in,
+profile destroyed afterwards. No passwords, tokens, cookie values or SAML
+assertions were captured — only URLs, cookie *names*, and token-key counts.
+
+| Step | Observed |
+|---|---|
+| Initial authentication | **BU password + Duo** (the clean-profile control) |
+| Dashboard reached | 7 `CognitoIdentityServiceProvider` keys; `__Host-shib_idp_session` present |
+| Sign Out clicked | Cognito token revocation succeeded; local keys 7 → 0; Cognito cookies gone |
+| Redirect target | browser came to rest on **`shib-test.bu.edu/idp/profile/Logout`** |
+| IdP session cookie | **`__Host-shib_idp_session` removed** |
+| Revisit in a new tab | `shib-test` SSO with a **password field**; not signed in |
+| **Verdict** | **PASS** |
+
+Confirmed unchanged by reading live AWS state after the apply: the
+`BUShibboleth` identity provider, the user pool, Cognito users and the
+`ArchiveAttachmentViewer` group and its membership, callback URLs, OAuth
+scopes, `VITE_COGNITO_IDENTITY_PROVIDER`, `VITE_CANONICAL_ORIGIN`, ECS, RDS,
+DNS and the Subaward nightly synchronisation.
+
+## Production — not yet verified
+
+`https://shib.bu.edu/idp/profile/Logout` is on the code allow-list so a
+production rollout needs no code change. **It has never been tested against an
+authenticated production session, and must not be assumed to behave like the
+test IdP.** The two IdPs are separately operated and separately configured;
+`logout.jsp` is itself proof that a plausible BU logout URL can return `200`,
+claim success, and leave the session usable.
+
+Before any production deployment, run the full acceptance test above against
+`shib.bu.edu` from a clean profile and record both the initial and the
+post-logout challenge. Treat a `200`, a confirmation message, or the dev
+result as evidence of nothing.
 
 ## Open with Kevin
 
