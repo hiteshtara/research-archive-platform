@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  APPROVED_IDP_LOGOUT_URLS,
   originOf,
   parseAllowedOrigins,
   resolveOauthRedirects,
@@ -113,11 +114,16 @@ test("an unset allow-list leaves a second origin unapproved", () => {
   assert.equal(signIn, `${AMPLIFY}/`);
 });
 
-test("an external identity-provider logout URL is preserved verbatim", () => {
+test("an approved identity-provider logout URL is preserved verbatim", () => {
   // PR #47 points VITE_COGNITO_LOGOUT_URL at Shibboleth's logout page on
   // purpose, to end the IdP session. Origin-aware sign-in must not override
   // it, or logout silently signs the user straight back in.
-  const idpLogout = "https://shib-test.bu.edu/idp/logout.jsp";
+  //
+  // The endpoint here was /idp/logout.jsp when this test was written. It is
+  // now the IdP's real logout flow: clean-browser testing showed logout.jsp
+  // leaves __Host-shib_idp_session intact, so it is no longer approved and no
+  // longer preserved.
+  const idpLogout = "https://shib-test.bu.edu/idp/profile/Logout";
 
   const { signIn, signOut } = resolveOauthRedirects({
     ...deployed,
@@ -204,10 +210,10 @@ test("the post-logout path still applies when the origin is not approved", () =>
   assert.equal(signOut, `${AMPLIFY}/signed-out`);
 });
 
-test("an external identity-provider logout URL ignores the post-logout path", () => {
+test("an approved identity-provider logout URL ignores the post-logout path", () => {
   // The path is ours; an IdP's logout page has its own. Appending to it would
   // produce a URL that does not exist at the provider.
-  const idpLogout = "https://shib-test.bu.edu/idp/logout.jsp";
+  const idpLogout = "https://shib-test.bu.edu/idp/profile/Logout";
 
   const { signOut } = resolveOauthRedirects({
     ...deployed,
@@ -226,4 +232,154 @@ test("omitting the post-logout path preserves the original root behaviour", () =
   });
 
   assert.equal(signOut, `${CUSTOM}/`);
+});
+
+// --- BU Shibboleth IdP logout (Warren's PR #47 Step 11) ---------------------
+//
+// Verified by clean-browser test on 2026-10-23, two independent fresh Chrome
+// profiles, interactive BU password + Duo on both:
+//
+//   /idp/profile/Logout  deleted __Host-shib_idp_session; revisiting the app
+//                        produced a fresh BU password challenge.  PASS
+//   /idp/logout.jsp      left __Host-shib_idp_session intact and the user was
+//                        silently signed back in, despite answering 200 with
+//                        "You have successfully logged out".           FAIL
+//
+// logout.jsp emits deletion cookies named shib_idp_session,
+// shib_idp_session_ss, _idp_session and JSESSIONID at Path=/idp - none of
+// which is the name the IdP actually sets. That is why these tests pin the
+// endpoint rather than merely "some external URL".
+
+const BU_LOGOUT = "https://shib-test.bu.edu/idp/profile/Logout";
+const BU_LOGOUT_JSP = "https://shib-test.bu.edu/idp/logout.jsp";
+
+test("the approved BU logout URL survives verbatim from every approved origin", () => {
+  // The fix depends on this: if the resolver rewrote the external URL to one
+  // of our own origins, Cognito would return the browser to us and BU would
+  // never be contacted - the original defect.
+  for (const currentOrigin of [CUSTOM, AMPLIFY, LOCAL]) {
+    const { signOut, signOutUsesIdpLogout } = resolveOauthRedirects({
+      ...deployed,
+      configuredSignOutUrl: BU_LOGOUT,
+      currentOrigin,
+      signOutPath: "/signed-out",
+    });
+
+    assert.equal(signOut, BU_LOGOUT, `rewritten while on ${currentOrigin}`);
+    assert.equal(signOutUsesIdpLogout, true);
+  }
+});
+
+test("an unapproved origin still signs out through BU, not through us", () => {
+  const { signOut, originAware, signOutUsesIdpLogout } = resolveOauthRedirects({
+    ...deployed,
+    configuredSignOutUrl: BU_LOGOUT,
+    currentOrigin: "https://not-approved.example.com",
+    signOutPath: "/signed-out",
+  });
+
+  assert.equal(originAware, false);
+  assert.equal(signOut, BU_LOGOUT);
+  assert.equal(signOutUsesIdpLogout, true);
+});
+
+test("logout.jsp is refused and falls back to the signed-out page", () => {
+  // It is external, it answers 200, and it says the user has logged out. None
+  // of that is true in the sense that matters, so it must not be trusted
+  // merely for being external. Measured: the session cookie survives it.
+  for (const currentOrigin of [CUSTOM, AMPLIFY]) {
+    const { signOut, signOutUsesIdpLogout } = resolveOauthRedirects({
+      ...deployed,
+      configuredSignOutUrl: BU_LOGOUT_JSP,
+      currentOrigin,
+      signOutPath: "/signed-out",
+    });
+
+    assert.equal(signOut, `${currentOrigin}/signed-out`);
+    assert.equal(signOutUsesIdpLogout, false);
+  }
+});
+
+test("an arbitrary external URL never becomes a sign-out redirect target", () => {
+  // Fail closed: a mistaken or hostile configuration value must not turn
+  // sign-out into an open redirect, and must not suppress the marker.
+  for (const hostile of [
+    "https://evil.example.org/",
+    "https://shib-test.bu.edu.evil.example.org/idp/profile/Logout",
+    "https://shib-test.bu.edu/idp/profile/Logout/../../evil",
+  ]) {
+    const { signOut, signOutUsesIdpLogout } = resolveOauthRedirects({
+      ...deployed,
+      configuredSignOutUrl: hostile,
+      currentOrigin: CUSTOM,
+      signOutPath: "/signed-out",
+    });
+
+    assert.equal(signOut, `${CUSTOM}/signed-out`, `accepted ${hostile}`);
+    assert.equal(signOutUsesIdpLogout, false, `trusted ${hostile}`);
+  }
+});
+
+test("the allow-list compares URLs, not strings", () => {
+  // A trailing slash or host capitalisation must not silently defeat it.
+  for (const variant of [
+    "https://shib-test.bu.edu/idp/profile/Logout/",
+    "https://SHIB-TEST.BU.EDU/idp/profile/Logout",
+  ]) {
+    const { signOutUsesIdpLogout } = resolveOauthRedirects({
+      ...deployed,
+      configuredSignOutUrl: variant,
+      currentOrigin: CUSTOM,
+      signOutPath: "/signed-out",
+    });
+
+    assert.equal(signOutUsesIdpLogout, true, `rejected ${variant}`);
+  }
+});
+
+test("the production IdP logout endpoint is on the allow-list", () => {
+  // So a production rollout needs no code change. UNVERIFIED against a live
+  // shib.bu.edu session - run the same clean-browser test before relying on it.
+  assert.ok(APPROVED_IDP_LOGOUT_URLS.includes("https://shib.bu.edu/idp/profile/Logout"));
+  assert.ok(!APPROVED_IDP_LOGOUT_URLS.some((u) => u.includes("logout.jsp")));
+});
+
+test("the rollback configuration still produces /signed-out and keeps the marker", () => {
+  // ui_logout_url pointed back at one of our own URLs. /signed-out and the
+  // deliberate-sign-out marker both stay in play, because in that
+  // configuration BU's session does outlive sign-out.
+  for (const currentOrigin of [CUSTOM, AMPLIFY]) {
+    const { signOut, signOutUsesIdpLogout } = resolveOauthRedirects({
+      ...deployed,
+      currentOrigin,
+      signOutPath: "/signed-out",
+    });
+
+    assert.equal(signOut, `${currentOrigin}/signed-out`);
+    assert.equal(signOutUsesIdpLogout, false);
+  }
+});
+
+test("a malformed logout URL does not claim to use IdP logout", () => {
+  const { signOutUsesIdpLogout } = resolveOauthRedirects({
+    ...deployed,
+    configuredSignOutUrl: "not a url",
+    currentOrigin: CUSTOM,
+    signOutPath: "/signed-out",
+  });
+
+  assert.equal(signOutUsesIdpLogout, false);
+});
+
+test("the BU logout origin is never added to the approved-origin list", () => {
+  // It is an allowed Cognito logout target, never an origin this application
+  // is served from.
+  const { allowedOrigins } = resolveOauthRedirects({
+    ...deployed,
+    configuredSignOutUrl: BU_LOGOUT,
+    currentOrigin: CUSTOM,
+    signOutPath: "/signed-out",
+  });
+
+  assert.ok(!allowedOrigins.includes("https://shib-test.bu.edu"));
 });

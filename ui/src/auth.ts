@@ -202,10 +202,32 @@ export async function logout(): Promise<void> {
   // global is declared `global: boolean` (required, not optional) on
   // AuthSignOutInput, so it is passed explicitly as false rather than omitted;
   // omitting it while keeping oauth.redirectUrl does not typecheck.
-  // Set before anything navigates, so it is already in place when the browser
-  // comes back to this origin - including if the user presses Back instead of
-  // waiting for the redirect chain to finish.
-  markSignedOut();
+
+  // The deliberate-sign-out marker is set ONLY when sign-out routes through
+  // an approved identity-provider logout endpoint.
+  //
+  // The marker is a workaround for an IdP session that outlives sign-out:
+  // without a way to end it, the next visit to a gated route is answered by
+  // the IdP with no prompt, so the marker holds the user on the signed-out
+  // page instead. When sign-out does end the IdP session, that workaround is
+  // not merely unnecessary - it is wrong. It would show our signed-out page
+  // where BU's login screen should appear, which is precisely the behaviour
+  // sign-out is being asked to demonstrate.
+  //
+  // So the two configurations stay coherent:
+  //   * ui_logout_url -> our own origin   -> /signed-out + marker (rollback)
+  //   * ui_logout_url -> approved BU IdP  -> IdP session ends, no marker
+  //
+  // "Approved" is an allow-list in source, not merely "an external URL" - see
+  // APPROVED_IDP_LOGOUT_URLS. An unapproved value never reaches this branch:
+  // the resolver degrades it to our own origin, so the marker stays set.
+  //
+  // Set before anything navigates, so when it IS set it is already in place
+  // when the browser comes back to this origin - including if the user
+  // presses Back instead of waiting for the redirect chain to finish.
+  if (!redirects.signOutUsesIdpLogout) {
+    markSignedOut();
+  }
 
   await signOut({ global: false, oauth: { redirectUrl: redirects.signOut } });
 

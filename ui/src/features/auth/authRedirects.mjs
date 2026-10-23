@@ -66,6 +66,57 @@ export function parseAllowedOrigins(raw) {
 }
 
 /**
+ * The identity-provider logout endpoints this application will hand the
+ * browser to on sign-out. An exhaustive allow-list, deliberately held in
+ * source rather than in configuration.
+ *
+ * Configuration cannot be its own safeguard: if the approved list lived in
+ * tfvars beside the value it validates, a typo or an unreviewed edit would
+ * defeat both at once. Here, changing where sign-out sends users requires a
+ * code change and a review.
+ *
+ * Only /idp/profile/Logout is listed. It is the IdP's real logout flow, and a
+ * clean-browser test on 2026-10-23 confirmed it deletes
+ * __Host-shib_idp_session and forces a fresh password challenge.
+ *
+ * /idp/logout.jsp is deliberately NOT listed, even though it answers 200 with
+ * "You have successfully logged out". The same test showed it leaves
+ * __Host-shib_idp_session intact and the user is silently signed back in: it
+ * emits deletion cookies for shib_idp_session, shib_idp_session_ss,
+ * _idp_session and JSESSIONID at Path=/idp, which are not the names the IdP
+ * actually sets. It is a legacy page predating the __Host- prefix.
+ *
+ * shib.bu.edu is listed so a production rollout needs no code change, but it
+ * is UNVERIFIED - run the same clean-browser test against it before relying
+ * on it in production.
+ */
+export const APPROVED_IDP_LOGOUT_URLS = [
+  "https://shib-test.bu.edu/idp/profile/Logout",
+  "https://shib.bu.edu/idp/profile/Logout",
+];
+
+/**
+ * Compare two URLs as URLs rather than as strings, so a trailing slash or
+ * host capitalisation does not silently defeat the allow-list. Returns null
+ * for anything unparseable, which never matches.
+ *
+ * @param {string | undefined | null} value
+ * @returns {string | null}
+ */
+function canonicalUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname.replace(/\/$/, "")}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Decide which sign-in and sign-out URLs to hand to Amplify.
  *
  * @param {{
@@ -74,12 +125,14 @@ export function parseAllowedOrigins(raw) {
  *   configuredSignInUrl: string,
  *   configuredSignOutUrl: string,
  *   signOutPath?: string,
+ *   approvedIdpLogoutUrls?: string[],
  * }} input
  * @returns {{
  *   signIn: string,
  *   signOut: string,
  *   allowedOrigins: string[],
  *   originAware: boolean,
+ *   signOutUsesIdpLogout: boolean,
  * }}
  */
 export function resolveOauthRedirects({
@@ -88,6 +141,7 @@ export function resolveOauthRedirects({
   configuredSignInUrl,
   configuredSignOutUrl,
   signOutPath = "/",
+  approvedIdpLogoutUrls = APPROVED_IDP_LOGOUT_URLS,
 }) {
   // The build-time sign-in origin is always approved: it is, by definition,
   // already a Cognito callback URL. The sign-out origin is deliberately NOT
@@ -106,37 +160,49 @@ export function resolveOauthRedirects({
     currentOrigin.length > 0 &&
     allowedOrigins.includes(currentOrigin);
 
-  // Sign-out only follows the current origin when the configured sign-out
-  // target is one of this application's own origins. When it points somewhere
-  // else - an identity provider's logout page - that is a deliberate choice
-  // about ending the IdP session, and overriding it would silently re-sign the
-  // user straight back in.
+  // Where sign-out sends the browser, decided in three cases.
+  //
+  //   1. One of our own origins   -> rewrite to signOutPath (/signed-out).
+  //   2. An APPROVED IdP logout   -> use verbatim; this is what ends the
+  //                                  IdP session.
+  //   3. Anything else            -> FAIL CLOSED to case 1.
+  //
+  // Case 3 matters. "Not one of our origins" is not the same as "an endpoint
+  // that logs the user out of BU" - /idp/logout.jsp is external, returns 200,
+  // says "You have successfully logged out", and leaves the session intact.
+  // Treating any external URL as an IdP logout would also let a mistaken or
+  // hostile configuration value become a redirect target on sign-out. So only
+  // the reviewed allow-list above is trusted, and everything else degrades to
+  // the behaviour we already know is safe.
   const configuredSignOutOrigin = originOf(configuredSignOutUrl);
   const signOutIsOwnOrigin =
     configuredSignOutOrigin !== null && allowedOrigins.includes(configuredSignOutOrigin);
 
-  // signOutPath is where Cognito drops the browser after ending its session.
-  // It defaults to "/" - the historical behaviour - but the application sends
-  // users to a public post-logout page instead. Landing back on "/" is what
-  // made sign-out appear to do nothing: that route is behind the auth gate, so
-  // it immediately started a fresh BU redirect and BU's still-valid SSO
-  // session signed the user straight back in. The path is applied only to our
-  // own origins, never to an external identity-provider logout URL.
-  if (!originAware) {
-    return {
-      signIn: configuredSignInUrl,
-      signOut: signOutIsOwnOrigin
-        ? `${configuredSignOutOrigin}${signOutPath}`
-        : configuredSignOutUrl,
-      allowedOrigins,
-      originAware: false,
-    };
-  }
+  const approved = (approvedIdpLogoutUrls || []).map(canonicalUrl).filter((u) => u !== null);
+  const candidate = canonicalUrl(configuredSignOutUrl);
+
+  // True only when sign-out hands the browser to a reviewed IdP logout
+  // endpoint. Named for what it is - which endpoint we are USING - not for
+  // what we hope BU does with it. Whether the IdP session actually ends is a
+  // fact about BU, established by testing, and no value in this process can
+  // assert it.
+  const signOutUsesIdpLogout =
+    !signOutIsOwnOrigin && candidate !== null && approved.includes(candidate);
+
+  // The origin to fall back to for cases 1 and 3.
+  const ownOrigin = originAware ? currentOrigin : configuredSignOutOrigin ?? configuredSignInOrigin;
+
+  const signOut = signOutUsesIdpLogout
+    ? configuredSignOutUrl
+    : ownOrigin !== null && ownOrigin !== undefined
+      ? `${ownOrigin}${signOutPath}`
+      : configuredSignOutUrl;
 
   return {
-    signIn: `${currentOrigin}/`,
-    signOut: signOutIsOwnOrigin ? `${currentOrigin}${signOutPath}` : configuredSignOutUrl,
+    signIn: originAware ? `${currentOrigin}/` : configuredSignInUrl,
+    signOut,
     allowedOrigins,
-    originAware: true,
+    originAware,
+    signOutUsesIdpLogout,
   };
 }
