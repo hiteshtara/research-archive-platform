@@ -78,6 +78,27 @@ resource "aws_cognito_identity_provider" "shibboleth" {
     # on the User Pool, which can only be added at creation time.
     # Deferred to Phase 2 (group sync) - see docs/shibboleth/SHIBBOLETH-PLAN-3.md.
   }
+
+  lifecycle {
+    # Cognito fetches MetadataURL and writes what it derives back into
+    # provider_details - the IdP's signing/encryption certificate and its SSO
+    # redirect binding. Neither is in this config, so without this block every
+    # later plan proposes stripping them, and any unrelated change to this
+    # module (adding a logout URL, say) drags that along as a dependency.
+    # Observed on the dev pool straight after creation:
+    #
+    #   ~ ActiveEncryptionCertificate: MIICvDCC... -> <absent>
+    #   ~ SSORedirectBindingURI: https://shib-test.bu.edu/idp/.../SSO -> <absent>
+    #
+    # They are AWS-managed values derived from the IdP's published metadata,
+    # not settings we own, and they are what makes the federation work. Ignore
+    # them so Terraform stops trying to remove a working configuration.
+    # MetadataURL stays declared, so a genuine metadata change is still a diff.
+    ignore_changes = [
+      provider_details["ActiveEncryptionCertificate"],
+      provider_details["SSORedirectBindingURI"],
+    ]
+  }
 }
 
 resource "aws_cognito_user_pool_client" "app" {
