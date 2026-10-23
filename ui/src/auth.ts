@@ -54,11 +54,19 @@ if (!userPoolId.startsWith(`${awsRegion}_`)) {
 // Resolved at module load, from window.location.origin only - never from a
 // query parameter, hash, or referrer - and only honoured when that origin is
 // on the approved list. See features/auth/authRedirects.mjs.
+/**
+ * Public post-logout route. Must stay in step with the route registered in
+ * main.tsx and with the Cognito app client's logout URL allow-list - Cognito
+ * only redirects to a URL on that list.
+ */
+export const SIGNED_OUT_PATH = "/signed-out";
+
 const redirects = resolveOauthRedirects({
   currentOrigin: typeof window === "undefined" ? null : window.location.origin,
   allowedOriginsRaw,
   configuredSignInUrl: redirectSignInUrl,
   configuredSignOutUrl: redirectSignOutUrl,
+  signOutPath: SIGNED_OUT_PATH,
 });
 
 Amplify.configure({

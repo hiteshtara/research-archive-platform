@@ -170,3 +170,60 @@ test("unparseable allow-list entries are skipped, not thrown", () => {
   assert.equal(originOf(undefined), null);
   assert.equal(originOf(`${CUSTOM}/some/path?x=1`), CUSTOM);
 });
+
+// --- post-logout landing path -------------------------------------------
+//
+// Returning to "/" after logout is what made sign-out appear to do nothing:
+// that route is behind the auth gate, so it started a fresh BU redirect and
+// BU's still-valid SSO session signed the user straight back in. The
+// application therefore sends Cognito to a public post-logout page.
+
+test("sign-out goes to the post-logout path on the origin the user is on", () => {
+  for (const origin of [AMPLIFY, CUSTOM, LOCAL]) {
+    const { signOut } = resolveOauthRedirects({
+      ...deployed,
+      currentOrigin: origin,
+      signOutPath: "/signed-out",
+    });
+
+    assert.equal(signOut, `${origin}/signed-out`);
+  }
+});
+
+test("the post-logout path still applies when the origin is not approved", () => {
+  // Falls back to the build-time origin, but must not fall back to "/" - that
+  // would reintroduce the re-login loop for exactly the users already on an
+  // unexpected origin.
+  const { signOut, originAware } = resolveOauthRedirects({
+    ...deployed,
+    currentOrigin: "https://not-approved.example.com",
+    signOutPath: "/signed-out",
+  });
+
+  assert.equal(originAware, false);
+  assert.equal(signOut, `${AMPLIFY}/signed-out`);
+});
+
+test("an external identity-provider logout URL ignores the post-logout path", () => {
+  // The path is ours; an IdP's logout page has its own. Appending to it would
+  // produce a URL that does not exist at the provider.
+  const idpLogout = "https://shib-test.bu.edu/idp/logout.jsp";
+
+  const { signOut } = resolveOauthRedirects({
+    ...deployed,
+    configuredSignOutUrl: idpLogout,
+    currentOrigin: CUSTOM,
+    signOutPath: "/signed-out",
+  });
+
+  assert.equal(signOut, idpLogout);
+});
+
+test("omitting the post-logout path preserves the original root behaviour", () => {
+  const { signOut } = resolveOauthRedirects({
+    ...deployed,
+    currentOrigin: CUSTOM,
+  });
+
+  assert.equal(signOut, `${CUSTOM}/`);
+});

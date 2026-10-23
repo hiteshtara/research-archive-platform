@@ -73,6 +73,7 @@ export function parseAllowedOrigins(raw) {
  *   allowedOriginsRaw?: string | null,
  *   configuredSignInUrl: string,
  *   configuredSignOutUrl: string,
+ *   signOutPath?: string,
  * }} input
  * @returns {{
  *   signIn: string,
@@ -86,6 +87,7 @@ export function resolveOauthRedirects({
   allowedOriginsRaw,
   configuredSignInUrl,
   configuredSignOutUrl,
+  signOutPath = "/",
 }) {
   // The build-time sign-in origin is always approved: it is, by definition,
   // already a Cognito callback URL. The sign-out origin is deliberately NOT
@@ -104,15 +106,6 @@ export function resolveOauthRedirects({
     currentOrigin.length > 0 &&
     allowedOrigins.includes(currentOrigin);
 
-  if (!originAware) {
-    return {
-      signIn: configuredSignInUrl,
-      signOut: configuredSignOutUrl,
-      allowedOrigins,
-      originAware: false,
-    };
-  }
-
   // Sign-out only follows the current origin when the configured sign-out
   // target is one of this application's own origins. When it points somewhere
   // else - an identity provider's logout page - that is a deliberate choice
@@ -122,9 +115,27 @@ export function resolveOauthRedirects({
   const signOutIsOwnOrigin =
     configuredSignOutOrigin !== null && allowedOrigins.includes(configuredSignOutOrigin);
 
+  // signOutPath is where Cognito drops the browser after ending its session.
+  // It defaults to "/" - the historical behaviour - but the application sends
+  // users to a public post-logout page instead. Landing back on "/" is what
+  // made sign-out appear to do nothing: that route is behind the auth gate, so
+  // it immediately started a fresh BU redirect and BU's still-valid SSO
+  // session signed the user straight back in. The path is applied only to our
+  // own origins, never to an external identity-provider logout URL.
+  if (!originAware) {
+    return {
+      signIn: configuredSignInUrl,
+      signOut: signOutIsOwnOrigin
+        ? `${configuredSignOutOrigin}${signOutPath}`
+        : configuredSignOutUrl,
+      allowedOrigins,
+      originAware: false,
+    };
+  }
+
   return {
     signIn: `${currentOrigin}/`,
-    signOut: signOutIsOwnOrigin ? `${currentOrigin}/` : configuredSignOutUrl,
+    signOut: signOutIsOwnOrigin ? `${currentOrigin}${signOutPath}` : configuredSignOutUrl,
     allowedOrigins,
     originAware: true,
   };

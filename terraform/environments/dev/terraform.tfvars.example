@@ -115,7 +115,17 @@ api_route53_zone_id  = null
 # tries to actually authenticate (see the incident referenced above).
 manage_cognito         = true
 cognito_callback_urls  = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
-cognito_logout_urls    = ["https://REPLACE_WITH_YOUR_UI_DOMAIN/"]
+# Cognito only redirects to a URL on this allow-list, so the UI's public
+# post-logout page has to be listed as well as the application root. The UI
+# sends Cognito to /signed-out (SIGNED_OUT_PATH in ui/src/auth.ts): returning
+# to "/" lands behind the auth gate, which immediately starts a fresh identity
+# provider redirect, and a still-valid SSO session signs the user straight back
+# in - sign-out then appears to do nothing. Keep the root entry as well; it is
+# still a valid logout target and removing it would break any older build.
+cognito_logout_urls = [
+  "https://REPLACE_WITH_YOUR_UI_DOMAIN/",
+  "https://REPLACE_WITH_YOUR_UI_DOMAIN/signed-out",
+]
 cognito_advanced_security_mode = "AUDIT"   # OFF, AUDIT, or ENFORCED
 cognito_deletion_protection    = "INACTIVE" # ACTIVE or INACTIVE
 cognito_mfa_configuration      = "OFF"     # OFF, ON, or OPTIONAL

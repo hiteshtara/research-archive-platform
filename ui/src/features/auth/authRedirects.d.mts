@@ -7,6 +7,8 @@ export function resolveOauthRedirects(input: {
   allowedOriginsRaw?: string | null;
   configuredSignInUrl: string;
   configuredSignOutUrl: string;
+  /** Post-logout path applied to our own origins only. Defaults to "/". */
+  signOutPath?: string;
 }): {
   signIn: string;
   signOut: string;
