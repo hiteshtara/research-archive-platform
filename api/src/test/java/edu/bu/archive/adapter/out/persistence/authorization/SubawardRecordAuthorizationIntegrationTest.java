@@ -265,11 +265,12 @@ class SubawardRecordAuthorizationIntegrationTest {
     void scenario19_permitAllKeepsTheWholeFundingListIncludingUnresolvableRows() {
         // The broken row is real archived data and must keep showing when
         // nobody is being scoped. Only a SCOPED caller has anything denied.
-        List<SubawardFundingResponse> funding =
-                service(SubawardRecordAccess.PERMIT_ALL).findFunding(SUB_BROKEN);
+        var view = service(SubawardRecordAccess.PERMIT_ALL).findFunding(SUB_BROKEN);
 
-        assertThat(funding).hasSize(1);
-        assertThat(funding.getFirst().exactLinkedAwardId()).isEqualTo(NO_SUCH_AWARD);
+        assertThat(view.funding()).hasSize(1);
+        assertThat(view.funding().getFirst().exactLinkedAwardId()).isEqualTo(NO_SUCH_AWARD);
+        // Nothing was withheld, so the UI keeps its exact count heading.
+        assertThat(view.restricted()).isFalse();
     }
 
     // --- 1-7. The funding shapes the rule names -------------------------
@@ -615,7 +616,8 @@ class SubawardRecordAuthorizationIntegrationTest {
          * every funding Award's number, title, sponsor, status, amount and
          * link. A 7777 caller gets CHEM and must not learn PHYS exists.
          */
-        List<SubawardFundingResponse> funding = service(departmentScope("7777")).findFunding(SUB_BOTH);
+        var view = service(departmentScope("7777")).findFunding(SUB_BOTH);
+        List<SubawardFundingResponse> funding = view.funding();
 
         assertThat(funding).hasSize(1);
         SubawardFundingResponse row = funding.getFirst();
@@ -624,6 +626,15 @@ class SubawardRecordAuthorizationIntegrationTest {
 
         assertThat(funding).noneMatch(each -> "PHYS-00001".equals(each.awardNumber()));
         assertThat(funding.toString()).doesNotContain("PHYS").doesNotContain("Physics");
+
+        /*
+         * And the caller is TOLD the list is partial. Without this the UI
+         * counts what it received and renders "Associated Award", singular -
+         * positively asserting this Subaward has one funding Award when it
+         * has two. A partial list is a correct answer; a complete-looking
+         * count over a partial list is a false one.
+         */
+        assertThat(view.restricted()).isTrue();
     }
 
     @Test
@@ -631,10 +642,26 @@ class SubawardRecordAuthorizationIntegrationTest {
         // Decision D5: no placeholder row. A stub saying "a funding Award
         // exists here that you may not see" still discloses the
         // relationship, which is most of what this card conveys.
-        List<SubawardFundingResponse> funding = service(departmentScope("1234")).findFunding(SUB_BOTH);
+        var view = service(departmentScope("1234")).findFunding(SUB_BOTH);
 
-        assertThat(funding).hasSize(1);
-        assertThat(funding.getFirst().awardNumber()).isEqualTo("PHYS-00001");
+        assertThat(view.funding()).hasSize(1);
+        assertThat(view.funding().getFirst().awardNumber()).isEqualTo("PHYS-00001");
+        assertThat(view.restricted()).isTrue();
+    }
+
+    @Test
+    void scenario17_aScopedCallerWhoSeesEveryFunderIsNotToldAnythingWasWithheld() {
+        /*
+         * `restricted` tracks what was actually removed, never merely "this
+         * caller is scoped". A department user who can see both funders of
+         * SUB-BOTH gets the exact count and learns nothing about
+         * authorization at all - so the flag discloses only to the callers
+         * for whom the alternative was a false count.
+         */
+        var view = service(departmentScope("7777", "1234")).findFunding(SUB_BOTH);
+
+        assertThat(view.funding()).hasSize(2);
+        assertThat(view.restricted()).isFalse();
     }
 
     @Test

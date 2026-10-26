@@ -257,17 +257,28 @@ public class SubawardArchiveService {
      * whose award_id resolves to nothing must keep showing, since it is real
      * archived data, and only a SCOPED caller has anything to be denied.
      */
-    public List<SubawardFundingResponse> findFunding(long subawardId) {
+    public edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingListResponse findFunding(
+            long subawardId
+    ) {
         recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         List<SubawardFundingResponse> funding = repository.findFunding(subawardId);
         if (recordAccess.unrestricted()) {
-            return funding;
+            return new edu.bu.archive.adapter.in.web.dto.subaward
+                    .SubawardFundingListResponse(funding, false);
         }
-        return funding.stream()
+        List<SubawardFundingResponse> visible = funding.stream()
                 .filter(row -> row.exactLinkedAwardId() != null
                         && recordAccess.canSeeAward(row.exactLinkedAwardId()))
                 .toList();
+        /*
+         * Flagged only when something was actually dropped. A scoped caller
+         * who can see every funder of this Subaward gets the exact count and
+         * learns nothing; one who cannot is told their view is partial
+         * rather than being handed a count that is simply wrong.
+         */
+        return new edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingListResponse(
+                visible, visible.size() != funding.size());
     }
 
     public List<SubawardAttachmentResponse> findAttachments(long subawardId) {

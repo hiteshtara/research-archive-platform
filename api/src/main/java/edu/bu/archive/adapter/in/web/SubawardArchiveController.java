@@ -167,7 +167,8 @@ public class SubawardArchiveController {
     }
 
     @GetMapping("/{subawardId}/funding")
-    public ResponseEntity<List<SubawardFundingResponse>> funding(
+    public ResponseEntity<edu.bu.archive.adapter.in.web.dto.subaward
+            .SubawardFundingListResponse> funding(
             @PathVariable
             long subawardId
     ) {

@@ -138,6 +138,47 @@ class GlobalSearchSemanticScopeTest {
         assertThat(response.results().getFirst().identifier()).isEqualTo("SUB-SECRET");
     }
 
+    @Test
+    void theSemanticLegRunsWithTheRequestsAccessDecisionReinstated() {
+        /*
+         * Regression. Every module leg goes through supplyLeg, which wraps
+         * it in visibility.propagate(); the semantic leg has its own timing
+         * instrumentation and did not. Off the request thread with nothing
+         * propagated, outcome() fails closed to Denied(EVALUATION_FAILED),
+         * so the enrichment's requireProvisioned() threw and the whole
+         * semantic leg was reported as a failed module for every scoped
+         * caller once enforcement was on. No leak - but silently empty.
+         *
+         * Modelled the way it actually breaks: the enrichment lookup
+         * refuses to answer unless the decision is active on its thread,
+         * exactly as RecordAuthorizationService does.
+         */
+        // Per THREAD, like the real PROPAGATED ThreadLocal - the five
+        // module legs run concurrently and would flap a shared flag.
+        ThreadLocal<Boolean> active = ThreadLocal.withInitial(() -> false);
+        java.util.concurrent.atomic.AtomicBoolean ranUnderPropagation =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        when(subawardArchiveService.findActiveSummariesForCodes(anyList()))
+                .thenAnswer(invocation -> {
+                    if (!active.get()) {
+                        throw new IllegalStateException(
+                                "no access decision on this thread - would fail closed");
+                    }
+                    ranUnderPropagation.set(true);
+                    return List.of(new SubawardSemanticSummaryRow(
+                            "SUB-SECRET", "A visible subaward", "Active", "NIH"));
+                });
+
+        GlobalSearchResponse response =
+                service(propagatingScope(active)).search("gene therapy consortium");
+
+        assertThat(ranUnderPropagation).isTrue();
+        assertThat(response.failedModules()).doesNotContain("SEMANTIC");
+        assertThat(response.results()).hasSize(1);
+        assertThat(response.results().getFirst().title()).isEqualTo("A visible subaward");
+    }
+
     // --- helpers ----------------------------------------------------------
 
     private GlobalSearchService service(RecordVisibility visibility) {
@@ -189,6 +230,53 @@ class GlobalSearchSemanticScopeTest {
             @Override public <T> java.util.function.Supplier<T> propagate(
                     java.util.function.Supplier<T> work) {
                 return work;
+            }
+        };
+    }
+
+    /** A scoped caller whose decision is only "active" inside propagate(). */
+    private static RecordVisibility propagatingScope(ThreadLocal<Boolean> active) {
+        RecordVisibility base = scoped();
+        return new RecordVisibility() {
+            @Override public boolean unrestricted() {
+                return base.unrestricted();
+            }
+
+            @Override public boolean canSeeAward(long awardId) {
+                return base.canSeeAward(awardId);
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return base.canSeeAwardNumber(awardNumber);
+            }
+
+            @Override public boolean canSeeProposalNumber(String proposalNumber) {
+                return base.canSeeProposalNumber(proposalNumber);
+            }
+
+            @Override public boolean canSeeProposal(long proposalId) {
+                return base.canSeeProposal(proposalId);
+            }
+
+            @Override public boolean canSeeEveryProposalVersion(String proposalNumber) {
+                return base.canSeeEveryProposalVersion(proposalNumber);
+            }
+
+            @Override public boolean canSeeEveryAwardVersion(String awardNumber) {
+                return base.canSeeEveryAwardVersion(awardNumber);
+            }
+
+            @Override public <T> java.util.function.Supplier<T> propagate(
+                    java.util.function.Supplier<T> work) {
+                return () -> {
+                    Boolean previous = active.get();
+                    active.set(true);
+                    try {
+                        return work.get();
+                    } finally {
+                        active.set(previous);
+                    }
+                };
             }
         };
     }

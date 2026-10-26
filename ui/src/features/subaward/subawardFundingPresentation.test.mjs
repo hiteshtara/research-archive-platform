@@ -176,3 +176,49 @@ test("resolveAssociatedAwardsSectionLabel counts only rows with a real Award lin
     "Associated Awards (0)",
   );
 });
+
+test("a filtered funding list never claims a complete count of Associated Awards", () => {
+  // The ANY-match authorization rule's disclosure trap. A Subaward funded
+  // by three Awards, only one of which the caller may see, must NOT render
+  // "Associated Award" in the singular - that positively asserts the record
+  // has exactly one funding Award, which is false. The heading reports what
+  // is shown and says the rest are restricted.
+  const visibleOnly = [fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 })];
+
+  assert.equal(
+    resolveAssociatedAwardsSectionLabel(visibleOnly, true),
+    "Associated Awards (1 shown; others restricted)",
+  );
+});
+
+test("the restricted heading never discloses how many funding Awards are hidden", () => {
+  // "some are not shown" is the smallest true statement that stops the
+  // count being a lie. The number of withheld Awards is itself information
+  // about records the caller may not see.
+  const label = resolveAssociatedAwardsSectionLabel(
+    [fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 })],
+    true,
+  );
+
+  for (const hiddenCount of ["2", "3", "of 3", "of 4"]) {
+    assert.equal(label.includes(hiddenCount), false, `leaked "${hiddenCount}"`);
+  }
+});
+
+test("an unfiltered list keeps the exact pre-authorization heading", () => {
+  // Enforcement off, and any scoped caller who can see every funder, must
+  // get byte-identical behaviour to before record authorization existed.
+  const rows = [
+    fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 }),
+    fundingRow({ subawardFundingSourceId: 2, exactLinkedAwardId: 222 }),
+  ];
+
+  assert.equal(resolveAssociatedAwardsSectionLabel(rows, false), "Associated Awards (2)");
+  assert.equal(resolveAssociatedAwardsSectionLabel(rows), "Associated Awards (2)");
+  assert.equal(
+    resolveAssociatedAwardsSectionLabel([
+      fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 }),
+    ]),
+    "Associated Award",
+  );
+});

@@ -90,7 +90,7 @@ Subaward also appears in three places outside its own controller:
 | Surface | Behaviour |
 | --- | --- |
 | Global Search, keyword leg | goes through `SubawardArchiveService.findPage`, so it inherits the predicate |
-| Global Search, semantic leg | `findActiveSummariesForCodes` is scoped in SQL; an unenriched SUBAWARD row is **dropped** for a scoped caller, gated on `!unrestricted()` |
+| Global Search, semantic leg | `findActiveSummariesForCodes` is scoped in SQL; an unenriched SUBAWARD row is **dropped** for a scoped caller, gated on `!unrestricted()`. The leg is now wrapped in `visibility.propagate(...)` — see below |
 | `GET /api/awards/{awardId}/funding-subawards` | already gated by `requireAward`; consistent with the rule, since a user authorized for an Award is authorized for every Subaward it funds |
 | Archived File Finder (`DocumentSearchService`) | fail-closed already — `requireUnrestrictedForCrossModuleSearch` refuses any scoped caller, for every module |
 | Dashboard (`DashboardService`) | the Subaward count and the SUBAWARD branch of the document tally are now scoped (closing part of D2's gap); Proposal, Negotiation and IRB figures there remain unscoped |
@@ -106,12 +106,57 @@ metadata through the very record A granted.
 Unauthorized funding rows are therefore **omitted entirely**, following
 decision D5 (no stubs): a placeholder saying "a funding Award exists here that
 you may not see" still discloses the relationship, and the relationship is
-most of what the card conveys. The visible consequence is a shorter funding
-list and, with it, incomplete funding totals on that card — a partial list is
-the correct answer to a partially authorized question.
+most of what the card conveys.
 
 Gated on `!unrestricted()`, so with enforcement off, or for Central, the list
 is byte-for-byte what it was, dangling rows included.
+
+### The count must not become a lie (found in review, 2026-10-26)
+
+Omitting rows is correct, but it was not sufficient. The Funding tab heading
+is built by `resolveAssociatedAwardsSectionLabel`, which counts the rows the
+API returned and renders `Associated Award` / `Associated Awards (N)` — a
+statement about the record, not about the caller's view. After filtering, a
+Subaward funded by three Awards with one visible rendered **"Associated
+Award", singular**: a positive assertion that the record has exactly one
+funding Award. That is not a partial answer, it is a false one, and it is
+precisely the implication the label was originally written to prevent.
+
+`GET /{id}/funding` therefore now returns an envelope,
+`SubawardFundingListResponse`:
+
+```json
+{ "funding": [ ... ], "restricted": true }
+```
+
+- `restricted` is true **only when rows were actually removed**, never merely
+  because the caller is scoped. A scoped caller who can see every funding
+  Award of this Subaward still gets the exact count and learns nothing.
+- With enforcement off it is always false and the heading is unchanged.
+- When true the heading reads `Associated Awards (1 shown; others
+  restricted)`, and the table's empty message stops claiming the archive
+  holds no funding associations.
+- It does **not** say how many rows were withheld. "Some are not shown" is the
+  smallest true statement that stops the count being a lie; the number of
+  hidden Awards is itself information about records the caller cannot see.
+  `theRestrictedHeadingNeverDisclosesHowManyFundingAwardsAreHidden` pins that.
+
+**This trade needs sign-off** — see D7 in `AUTHORIZATION_DECISIONS.md`. It
+discloses the *existence* of further funding Awards, which D5 refused to do
+for hierarchy relatives. The judgement here is that a caller who reached the
+Subaward already knows they did so through a funding Award, and that an
+affirmative falsehood about the record is the worse of the two. The
+alternative — dropping the count from the heading for everyone, always —
+leaks nothing but removes a deliberate feature from the enforcement-off UI
+that is live today.
+
+### Financial totals
+
+Checked, and no misleading total exists. Each Associated Award card shows its
+**own** Award's `awardAmount`; there is no cross-card sum. The Amendment
+History tab's `sumAmendmentTotals` aggregates `archive.subaward_amount`, which
+is Subaward-owned data and is never filtered, so that total stays complete and
+correct. The only misstatement was the count, fixed above.
 
 Access to a Subaward grants nothing on its Awards: the Award endpoints keep
 their own gates (`scenario17_reachingASubawardGrantsNothingOnItsOtherFundingAwards`).
@@ -136,8 +181,8 @@ their own gates (`scenario17_reachingASubawardGrantsNothingOnItsOtherFundingAwar
 | 14. Direct URL denial | `scenario14_*` (2 tests, all 13 endpoints) |
 | 15. Search/count/pagination parity | `scenario15_*` (4 tests) |
 | 16. Attachment dual authorization | `scenario16_theRecordGateRefusesTheDownloadBeforeAnyStorageLookup` |
-| 17. Related Award information disclosure | `scenario17_*` (3 tests) |
-| 18. Global Search and semantic isolation | `scenario18_*` (2 tests) + `GlobalSearchSemanticScopeTest` (3 tests) |
+| 17. Related Award information disclosure | `scenario17_*` (4 tests, incl. the `restricted` flag) + 3 label tests in `subawardFundingPresentation.test.mjs` |
+| 18. Global Search and semantic isolation | `scenario18_*` (2 tests) + `GlobalSearchSemanticScopeTest` (4 tests, incl. thread propagation) |
 | 19. Enforcement-disabled compatibility | `scenario19_*` (3 tests) |
 
 Plus, not in the requested list but required to trust the above:
@@ -148,10 +193,37 @@ Plus, not in the requested list but required to trust the above:
 `theDashboardSubawardCountIsScopedAndTheStatementIsValidSql`, and three
 predicate tests in `RecordScopeSqlBuilderTest`.
 
-`SubawardRecordAuthorizationIntegrationTest`: 40 tests, disposable PostgreSQL
+`SubawardRecordAuthorizationIntegrationTest`: 41 tests, disposable PostgreSQL
 (`pgvector/pgvector:pg17`) with every committed migration applied. Registered
 in BOTH `ci.yml` lists (the unit-test exclusion and the database-suite
 inclusion), as a new Testcontainers suite must be.
+
+## Found in review: the semantic leg had no access decision
+
+Every module leg of Global Search goes through `supplyLeg`, which wraps it in
+`visibility.propagate(...)` so the request's access decision is reinstated on
+the worker thread. The **semantic** leg has its own timing instrumentation and
+calls `CompletableFuture.supplyAsync` directly — so it was the one leg running
+with nothing propagated.
+
+Off the request thread `RecordAuthorizationService.outcome()` fails closed to
+`Denied(EVALUATION_FAILED)`, and the enrichment lookups call
+`requireProvisioned()`, which throws `IdentityAccessDeniedException` on that
+outcome. Once enforcement were enabled, **every semantic Global Search by a
+scoped caller would have thrown** and been reported as a failed `SEMANTIC`
+module.
+
+No disclosure — it fails closed in the safe direction — but a silently broken
+feature is its own kind of wrong answer, and "search returned nothing" is
+indistinguishable from "the archive has nothing". The leg is now propagated
+like the other five. With enforcement off `propagate()` returns the supplier
+unchanged, so nothing about today's behaviour moves.
+
+This predates the Subaward work (it arrived with the Award and Proposal
+wiring) and affected AWARD and PROPOSAL enrichment too; it is fixed here
+because this is where it was found.
+`theSemanticLegRunsWithTheRequestsAccessDecisionReinstated` reproduces the
+original failure — verified to fail with the fix reverted.
 
 ## What is NOT implemented, and why
 
@@ -166,18 +238,53 @@ inclusion), as a new Testcontainers suite must be.
   population turns out to be material, it is a business decision, not a code
   change — see below.
 
-## Open: the profiling run
+## Open: the profiling run (attempted 2026-10-26, BLOCKED)
 
 `docs/security/subaward-funding-profile.sql` answers all ten Phase 1
-questions and is read-only (every statement a `SELECT`). **It has not been
-run.** There is no supported Mac-to-RDS route and no CLI path into the VPC
-from this session; it needs a human at an AWS CloudShell VPC environment —
-see `docs/runbooks/CLOUDSHELL_DATABASE_ACCESS.md`. The counts in Phase 1 of
-the request are therefore still unanswered.
+questions and is read-only — every statement a `SELECT`, output limited to
+counts and de-identified shapes, identifiers hashed. **It has still not been
+run.** Reported rather than estimated: there are no profiling figures in this
+document, and none should be inferred from anything in it.
 
-The implementation does not depend on those answers — it is correct for every
-shape the data can take — but **one of them changes the impact**: Q2/Q3, the
-share of Subawards with no resolvable funding Award. Every one of those is
-invisible to every non-Central user once enforcement is on. If that share is
-large, that is a business conversation before enabling enforcement, not a
-reason to invent a fallback rule.
+What was checked, so the blocker is evidence and not an assumption:
+
+| Check | Result |
+| --- | --- |
+| `aws sts get-caller-identity` | works — account `770203350335`, role `Shibboleth-InfraMgt` |
+| SSM analyst credential | present: `/research-archive-platform/dev/postgres-analyst` |
+| `scripts/mac-show-analyst-password.sh` | present and executable |
+| CloudShell security group `sg-002be83bf1cf249fa` | intact — 0 ingress, 1 egress |
+| RDS instance | `available`, `PubliclyAccessible: false` |
+| EC2 instances in `vpc-0590614d7cfcdedf6` | **0** — no bastion, consistent with CLAUDE.md's hard stop |
+| ECS cluster `…-dev-etl` | 0 services, 0 running tasks |
+| ETL CLI | no arbitrary-SQL flag; `--migrate-only` and per-loader flags only |
+| `aws cloudshell …` | not a valid CLI command — CloudShell has no API/CLI execution surface |
+
+So the approved path is **fully intact and ready** — nothing is broken or
+missing. The blocker is that its final hop is browser-interactive by design:
+steps 2–5 of `docs/runbooks/CLOUDSHELL_DATABASE_ACCESS.md` require opening the
+AWS console, selecting the `research-archive-analysis` VPC environment, and
+pasting a clipboard-held password into `psql`. There is no non-interactive
+route into that VPC that does not mean provisioning a bastion or injecting a
+command into an ECS task definition — both outside the approved path and both
+explicitly out of scope.
+
+**A human needs to run it.** Follow the runbook, then `\i` the profiling file
+or paste it section by section.
+
+### Why one of the answers matters before enforcement is enabled
+
+The implementation does not depend on the profiling results — it is correct
+for every shape the data can take. But **Q2/Q3 size the blast radius**: the
+share of Subawards with no resolvable funding Award. Every one of those
+becomes invisible to every non-Central user the moment enforcement is turned
+on, because no explicit Subaward grant type exists to fall back to.
+
+If that share is small, enabling enforcement is uncontroversial. If it is
+large, it is a business conversation — and the honest options are to create a
+Subaward grant type, or to accept the loss deliberately, not to invent a
+`requisitioner_unit` fallback.
+
+Q6 (dangling references) and Q10 (funding varying across versions) are
+already handled correctly whatever the counts turn out to be — the INNER join
+and the per-version scoping respectively — so they are informational.

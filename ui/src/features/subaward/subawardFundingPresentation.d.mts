@@ -23,4 +23,5 @@ export function resolveFundingAssociationCards(
 
 export function resolveAssociatedAwardsSectionLabel(
   fundingRows: SubawardFunding[],
+  restricted?: boolean,
 ): string;

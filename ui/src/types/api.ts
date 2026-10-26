@@ -1546,6 +1546,15 @@ export interface SubawardFunding {
   sourceObjectId: string | null;
 }
 
+// The Funding tab's payload. `restricted` is true only when record
+// authorization actually removed funding rows, so the UI never presents a
+// filtered list as the Subaward's complete set of funding Awards. Always
+// false while enforcement is off.
+export interface SubawardFundingView {
+  funding: SubawardFunding[];
+  restricted: boolean;
+}
+
 export interface SubawardAttachment {
   attachmentId: number;
   subawardId: number;

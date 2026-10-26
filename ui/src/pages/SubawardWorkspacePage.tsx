@@ -503,10 +503,13 @@ function SubawardWorkspaceContent({
           {activeTab === 2 && (
             <Stack spacing={2}>
               <Typography variant="h6">
-                {resolveAssociatedAwardsSectionLabel(fundingQuery.data ?? [])}
+                {resolveAssociatedAwardsSectionLabel(
+                  fundingQuery.data?.funding ?? [],
+                  fundingQuery.data?.restricted ?? false,
+                )}
               </Typography>
 
-              {fundingQuery.data?.map((funding) => {
+              {fundingQuery.data?.funding.map((funding) => {
                 const cardState = resolveAssociatedAwardCardState(funding);
                 if (cardState.kind === "NONE") {
                   return null;
@@ -550,11 +553,24 @@ function SubawardWorkspaceContent({
                 );
               })}
               <TableSection
-                data={fundingQuery.data}
+                data={fundingQuery.data?.funding}
                 isLoading={fundingQuery.isLoading}
                 isError={fundingQuery.isError}
                 errorMessage="Unable to load Subaward funding."
-                emptyMessage="No funding associations are archived for this Subaward record."
+                emptyMessage={
+                  /*
+                   * Never assert the archive holds no funding when the
+                   * caller's view was filtered. Today this cannot fire from
+                   * filtering alone - reaching the Subaward requires an
+                   * accessible funding Award, and the filter keeps exactly
+                   * those - but the message is a claim about the archive,
+                   * and it must not become false if that invariant ever
+                   * shifts.
+                   */
+                  fundingQuery.data?.restricted
+                    ? "No funding associations are available to you for this Subaward record."
+                    : "No funding associations are archived for this Subaward record."
+                }
                 rowKey={(row) => row.subawardFundingSourceId}
                 columns={[
                   { label: "Funding Source ID", render: (row) => row.subawardFundingSourceId },

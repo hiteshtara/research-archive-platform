@@ -200,14 +200,30 @@ public class GlobalSearchService {
         // latency for no benefit.
         boolean semanticEligible = semanticSearchProperties.isEnabled()
                 && !LikelyIdentifierDetector.looksLikeIdentifier(normalizedQuery);
+        /*
+         * The semantic leg needs the SAME thread propagation as the five
+         * module legs, and did not have it. It does not go through
+         * supplyLeg (its timing instrumentation differs), so it was the one
+         * leg running on a worker with no access decision reinstated - and
+         * off the request thread RecordAuthorizationService.outcome() fails
+         * closed to Denied(EVALUATION_FAILED). Its enrichment lookups call
+         * requireProvisioned(), so once enforcement is on every semantic
+         * search by a scoped caller threw IdentityAccessDeniedException and
+         * was reported as a failed module. Fail-closed, so never a leak -
+         * but a silently broken feature, which is its own kind of wrong
+         * answer. With enforcement off propagate() returns the supplier
+         * unchanged and nothing moves.
+         */
+        java.util.function.Supplier<List<GlobalSearchItemResponse>> semanticWork =
+                visibility.propagate(() ->
+                        timed("SEMANTIC", () -> timingLog.time(
+                                cid,
+                                "SEMANTIC_TOTAL",
+                                () -> searchSemantic(normalizedQuery, cid),
+                                List::size)));
         CompletableFuture<List<GlobalSearchItemResponse>> semanticFuture =
                 semanticEligible
-                        ? CompletableFuture.supplyAsync(() ->
-                                timed("SEMANTIC", () -> timingLog.time(
-                                        cid,
-                                        "SEMANTIC_TOTAL",
-                                        () -> searchSemantic(normalizedQuery, cid),
-                                        List::size)))
+                        ? CompletableFuture.supplyAsync(semanticWork)
                         : null;
 
         List<String> failedModules = new ArrayList<>();

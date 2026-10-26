@@ -1338,7 +1338,7 @@ export function getSubawardCustomData(
 
 export function getSubawardFunding(
   subawardId: number,
-): Promise<import("../types/api").SubawardFunding[]> {
+): Promise<import("../types/api").SubawardFundingView> {
   return request(
     `/api/subawards/${encodeURIComponent(subawardId)}/funding`,
   );
