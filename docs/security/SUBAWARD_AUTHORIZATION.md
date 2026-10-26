@@ -322,8 +322,11 @@ route into that VPC that does not mean provisioning a bastion or injecting a
 command into an ECS task definition — both outside the approved path and both
 explicitly out of scope.
 
-**A human needs to run it.** Follow the runbook, then `\i` the profiling file
-or paste it section by section.
+**A human needs to run it.** There is now a step-by-step for exactly this
+task: [`SUBAWARD_PROFILING_PROCEDURE.md`](SUBAWARD_PROFILING_PROCEDURE.md).
+It accounts for the constraint that trips people up — the CloudShell security
+group allows egress only to RDS:5432, so that shell has no internet and
+cannot clone this repo; the SQL goes in by paste.
 
 ### Why one of the answers matters before enforcement is enabled
 
