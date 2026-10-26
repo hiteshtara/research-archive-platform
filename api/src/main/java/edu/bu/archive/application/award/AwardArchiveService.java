@@ -126,7 +126,41 @@ public class AwardArchiveService {
             org.springframework.beans.factory.ObjectProvider<
                     edu.bu.archive.application.service.SearchTimingLog> timingLogProvider
     ) {
-        this(repository, attachmentStorage, timingLogProvider, null);
+        this(repository, attachmentStorage, timingLogProvider, null, null);
+    }
+
+    /**
+     * Refuses to start when record authorization is ENABLED but the only
+     * available implementation is {@code PERMIT_ALL}.
+     *
+     * <p>Without this, a context in which the Phase 1 beans are missing,
+     * excluded, or failed to initialise would quietly serve every Award to
+     * every authenticated caller while configuration claimed enforcement was
+     * on. That is the one failure mode a security control must not have: an
+     * operator would see {@code enforcement-enabled=true} and believe the
+     * archive was protected. Failing startup is loud, immediate, and cannot
+     * be mistaken for working.
+     *
+     * <p>Enforcement OFF with {@code PERMIT_ALL} is the normal, supported
+     * configuration and is left alone.
+     */
+    private static void requireEnforceableWiring(
+            edu.bu.archive.application.authorization.AwardRecordAccess access,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties> properties
+    ) {
+        if (access != edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL) {
+            return;
+        }
+        edu.bu.archive.application.authorization.AuthorizationProperties settings =
+                properties == null ? null : properties.getIfAvailable();
+        if (settings != null && settings.isEnforcementEnabled()) {
+            throw new IllegalStateException(
+                    "app.authorization.enforcement-enabled is true but no AwardRecordAccess "
+                            + "implementation is available, so Award authorization would silently "
+                            + "permit every record. Refusing to start. Ensure the record "
+                            + "authorization beans (AuthorizationConfiguration) are present.");
+        }
     }
 
     /** Direct-injection form, for tests and for callers that already hold the port. */
@@ -157,7 +191,10 @@ public class AwardArchiveService {
             org.springframework.beans.factory.ObjectProvider<
                     edu.bu.archive.application.service.SearchTimingLog> timingLogProvider,
             org.springframework.beans.factory.ObjectProvider<
-                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
     ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
@@ -166,6 +203,7 @@ public class AwardArchiveService {
         this.recordAccess = access != null
                 ? access
                 : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
+        requireEnforceableWiring(this.recordAccess, authorizationProperties);
         edu.bu.archive.application.service.SearchTimingLog provided =
                 timingLogProvider == null ? null : timingLogProvider.getIfAvailable();
         this.timingLog = provided != null
@@ -665,6 +703,25 @@ public class AwardArchiveService {
                                 timingLog.correlationId(),
                                 "AWARD_EXACT_DOC",
                                 () -> repository.findExactWorkflowDocumentMatch(rawQuery)
+                                        /*
+                                         * This callout bypasses the scoped
+                                         * result set above - it is a separate
+                                         * statement, not part of the paged
+                                         * query - so it MUST be filtered
+                                         * independently. Unfiltered, anyone
+                                         * who knows or guesses a workflow
+                                         * document number learns the
+                                         * awardId, awardNumber, title and
+                                         * status of an Award outside their
+                                         * scope. It disappears rather than
+                                         * failing the response: an additive
+                                         * hint that is not shown is correct
+                                         * behaviour, whereas a 404 here
+                                         * would break an otherwise valid
+                                         * search.
+                                         */
+                                        .filter(match -> recordAccess
+                                                .canSeeAwardNumber(match.awardNumber()))
                                         .orElse(null));
 
         PageResponse<AwardSearchResultResponse> results = new PageResponse<>(

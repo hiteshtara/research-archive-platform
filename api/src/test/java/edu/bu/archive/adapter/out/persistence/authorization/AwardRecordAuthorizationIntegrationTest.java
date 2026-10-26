@@ -41,6 +41,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * Award record-level authorization, end to end against a real PostgreSQL
@@ -125,16 +126,16 @@ class AwardRecordAuthorizationIntegrationTest {
                         award_id, award_number, sequence_number, title,
                         status_description, sponsor_code, sponsor_name,
                         lead_unit_number, lead_unit_name, award_effective_date,
-                        is_primary_current
+                        is_primary_current, workflow_document_number
                     ) VALUES
                     (5001, 'CHEM-00001', 1, 'Chemistry one v1', 'Closed',
-                     '0200', 'NIH', '7777', 'CHEMISTRY', DATE '2019-01-01', FALSE),
+                     '0200', 'NIH', '7777', 'CHEMISTRY', DATE '2019-01-01', FALSE, 'DOC-CHEM-1'),
                     (5002, 'CHEM-00001', 2, 'Chemistry one v2', 'Active',
-                     '0200', 'NIH', '7777', 'CHEMISTRY', DATE '2020-01-01', TRUE),
+                     '0200', 'NIH', '7777', 'CHEMISTRY', DATE '2020-01-01', TRUE,  'DOC-CHEM-2'),
                     (6001, 'PHYS-00001', 1, 'Physics one',     'Active',
-                     '0100', 'NSF', '1234', 'PHYSICS',   DATE '2020-06-01', TRUE),
+                     '0100', 'NSF', '1234', 'PHYSICS',   DATE '2020-06-01', TRUE,  'DOC-PHYS-1'),
                     (7001, 'NULL-00001', 1, 'Unitless one',    'Active',
-                     NULL,   NULL,  NULL,   NULL,        NULL,              TRUE)
+                     NULL,   NULL,  NULL,   NULL,        NULL,              TRUE,  'DOC-NULL-1')
                     """);
             statement.execute("""
                     INSERT INTO archive.award_person (
@@ -318,6 +319,68 @@ class AwardRecordAuthorizationIntegrationTest {
         assertThat(afterRevocation.results().totalElements()).isZero();
     }
 
+    // --- The exact workflow-document-number callout ---------------------
+
+    @Test
+    void theExactDocumentCalloutIsWithheldForAnOutOfScopeAward() {
+        /*
+         * REGRESSION. This callout is a SEPARATE statement from the paged
+         * query, so the scope predicate on the page does not touch it. Left
+         * unfiltered it hands anyone who knows or guesses a workflow document
+         * number the awardId, awardNumber, title and status of an Award
+         * outside their scope - a disclosure that no amount of row filtering
+         * on the page would prevent.
+         */
+        AwardSearchResponse response = service(departmentScope("7777", false))
+                .search("DOC-PHYS-1", AwardSearchFilters.none(), 0, 50);
+
+        assertThat(response.exactDocumentMatch()).isNull();
+        assertThat(response.results().content()).isEmpty();
+        assertThat(response.results().totalElements()).isZero();
+    }
+
+    @Test
+    void theExactDocumentCalloutStillWorksForAnInScopeAward() {
+        AwardSearchResponse response = service(departmentScope("7777", false))
+                .search("DOC-CHEM-2", AwardSearchFilters.none(), 0, 50);
+
+        assertThat(response.exactDocumentMatch()).isNotNull();
+        assertThat(response.exactDocumentMatch().awardNumber()).isEqualTo("CHEM-00001");
+    }
+
+    @Test
+    void theExactDocumentCalloutIsUnchangedWhenEnforcementIsOff() {
+        AwardSearchResponse response = service(AwardRecordAccess.PERMIT_ALL)
+                .search("DOC-PHYS-1", AwardSearchFilters.none(), 0, 50);
+
+        assertThat(response.exactDocumentMatch()).isNotNull();
+        assertThat(response.exactDocumentMatch().awardNumber()).isEqualTo("PHYS-00001");
+    }
+
+    @Test
+    void aContactScopedCallerCannotProbeForDocumentNumbersOutsideTheirAwards() {
+        AwardSearchResponse response = service(contactScope(FARRER))
+                .search("DOC-NULL-1", AwardSearchFilters.none(), 0, 50);
+
+        assertThat(response.exactDocumentMatch()).isNull();
+    }
+
+    // --- Non-disclosure --------------------------------------------------
+
+    @Test
+    void anUnauthorizedRecordIsIndistinguishableFromOneThatDoesNotExist() {
+        AwardArchiveService denied = service(denyingAccess());
+
+        Throwable forReal = catchThrowable(() -> denied.findFamily("CHEM-00001"));
+        Throwable forImaginary = catchThrowable(() -> denied.findFamily("NO-SUCH-AWARD"));
+
+        // Same exception type, and nothing in the message distinguishes the
+        // two - a caller cannot use the error to confirm a record exists.
+        assertThat(forReal).isInstanceOf(java.util.NoSuchElementException.class);
+        assertThat(forImaginary).isInstanceOf(java.util.NoSuchElementException.class);
+        assertThat(forReal.getMessage()).isEqualTo(forImaginary.getMessage());
+    }
+
     // --- Count / page parity --------------------------------------------
 
     @Test
@@ -363,21 +426,35 @@ class AwardRecordAuthorizationIntegrationTest {
     }
 
     private static AwardRecordAccess departmentScope(String unit, boolean descendants) {
-        return fixedScope(scopeFor(
+        return scopedAccess(scopeFor(
                 new AccessScope(false, Set.of(new UnitGrant(unit, descendants)), Optional.empty(), Set.of()),
                 Set.of(unit),
-                AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT));
+                AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT),
+                "7777".equals(unit) ? Set.of("CHEM-00001")
+                        : "1234".equals(unit) ? Set.of("PHYS-00001") : Set.of());
     }
 
     private static AwardRecordAccess contactScope(KualiPersonId person) {
-        return fixedScope(scopeFor(
+        return scopedAccess(scopeFor(
                 new AccessScope(false, Set.of(), Optional.of(person), Set.of()),
                 Set.of(),
-                AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT));
+                AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT),
+                // FARRER is PI on CHEM-00001; their PHYS-00001 listing has an
+                // unapproved role, so it grants nothing.
+                FARRER.equals(person) ? Set.of("CHEM-00001") : Set.of());
     }
 
-    /** A port that applies one prepared predicate and allows every direct read. */
-    private static AwardRecordAccess fixedScope(SqlFragment fragment) {
+    /**
+     * A port that applies one prepared predicate to list queries AND answers
+     * the per-record question consistently with it.
+     *
+     * <p>The two are genuinely separate code paths in production - the SQL
+     * builder renders a predicate, the evaluator decides one record - and
+     * they must agree. Modelling only the predicate here would have let the
+     * unscoped exact-match callout pass its own regression test, which is
+     * exactly what happened on the first run.
+     */
+    private static AwardRecordAccess scopedAccess(SqlFragment fragment, Set<String> visible) {
         return new AwardRecordAccess() {
             @Override public SqlFragment awardScopeSql(String alias) {
                 return fragment;
@@ -385,8 +462,21 @@ class AwardRecordAuthorizationIntegrationTest {
 
             @Override public void requireAward(long awardId) { }
 
-            @Override public void requireAwardNumber(String awardNumber) { }
+            @Override public void requireAwardNumber(String awardNumber) {
+                if (!visible.contains(awardNumber)) {
+                    throw new RecordNotAccessibleException();
+                }
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return visible.contains(awardNumber);
+            }
         };
+    }
+
+    /** Predicate only; every record readable. For list-filtering assertions. */
+    private static AwardRecordAccess fixedScope(SqlFragment fragment) {
+        return scopedAccess(fragment, Set.of("CHEM-00001", "PHYS-00001", "NULL-00001"));
     }
 
     private static AwardRecordAccess denyingAccess() {
@@ -401,6 +491,10 @@ class AwardRecordAuthorizationIntegrationTest {
 
             @Override public void requireAwardNumber(String awardNumber) {
                 throw new RecordNotAccessibleException();
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return false;
             }
         };
     }
@@ -417,6 +511,10 @@ class AwardRecordAuthorizationIntegrationTest {
                 if (!allowed.equals(awardNumber)) {
                     throw new RecordNotAccessibleException();
                 }
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return allowed.equals(awardNumber);
             }
         };
     }

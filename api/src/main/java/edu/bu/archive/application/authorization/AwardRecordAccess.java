@@ -46,6 +46,13 @@ public interface AwardRecordAccess {
     /** Throws when the caller may not read the current version of this Award family. */
     void requireAwardNumber(String awardNumber);
 
+    /**
+     * Whether an Award may be shown, without throwing. For additive callouts
+     * that must simply disappear rather than fail the whole response - the
+     * exact workflow-document-number match being the one that exists today.
+     */
+    boolean canSeeAwardNumber(String awardNumber);
+
     /** No authorization: today's behaviour, and the default. */
     AwardRecordAccess PERMIT_ALL = new AwardRecordAccess() {
 
@@ -62,6 +69,11 @@ public interface AwardRecordAccess {
         @Override
         public void requireAwardNumber(String awardNumber) {
             // Intentionally nothing.
+        }
+
+        @Override
+        public boolean canSeeAwardNumber(String awardNumber) {
+            return true;
         }
     };
 }
