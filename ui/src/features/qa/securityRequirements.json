@@ -1,8 +1,70 @@
 {
   "source": "Kuali Archive Enhancements and Requirements, Security Requirements tab",
-  "sourceDated": "2026-10-01",
-  "reconciledOn": "2026-10-05",
-  "enforcementState": "Record-level access is switched OFF on the development website. Every signed-in user can still reach the whole archive, so none of these requirements can be verified yet.",
+  "sourceDated": "2026-10-20",
+  "reconciledOn": "2026-10-26",
+  "enforcementState": "Record-level authorization is OFF. Evidence, and its limits: app.authorization.enforcement-enabled is set in NO committed configuration file and defaults to false in Java, so any instance built from this repository starts with every gate inert. Terraform defines three environments - dev, test and prod - but only dev has a recorded deployment; test and prod are configuration scaffolding with no record of being stood up. No runtime check of a deployed instance was performed, because the API exposes no endpoint reporting its authorization state. So this is a statement about the code and configuration in this repository, not a reading taken from each running environment.",
+  "recommendationStatus": "The business decisions listed were approved on 2026-10-26. Implementation status is reported separately from them: an approved decision is not working software, and a passing test is not a released or verified one.",
+  "decisionsApproved": [
+    "PAFO Administrator is a department user restricted to assigned departments, not a Central user.",
+    "“IO number” means the SAP account number.",
+    "Research Staff contact access extends to the entire Award family.",
+    "ARCHIVE_ADMIN may grant and revoke permissions.",
+    "Holding ARCHIVE_ADMIN does not by itself grant access to archive records.",
+    "An authenticated BU user with no assigned archive permissions receives Access Not Provisioned.",
+    "Dashboard statistics reflect only the records the user is authorised to see.",
+    "Central Users may see archive-wide statistics.",
+    "Unauthorised Award hierarchy relatives are omitted entirely, never shown as stubs."
+  ],
+  "moduleProgress": [
+    {
+      "name": "Authentication",
+      "detail": "BU Shibboleth with Duo, through Cognito SAML federation.",
+      "state": "working",
+      "evidence": "Verified in dev 2026-10-23, clean-browser test"
+    },
+    {
+      "name": "Authorization engine",
+      "detail": "Policy, scope resolution, SQL predicate builder, evaluator, identity links, grants and the administrative service.",
+      "state": "implemented",
+      "evidence": "PR #56, merged and deployed, inert while enforcement is off"
+    },
+    {
+      "name": "Award authorization",
+      "detail": "All 45 Award endpoints gated; scoped search, counts, exports, hierarchy and attachments.",
+      "state": "in-review",
+      "evidence": "PR #62 - open and in draft, NOT merged"
+    },
+    {
+      "name": "Proposal authorization",
+      "detail": "The SQL predicate builder already supports Proposal; nothing is wired to it.",
+      "state": "pending",
+      "evidence": "Not started"
+    },
+    {
+      "name": "Negotiation authorization",
+      "detail": "No approved record rule. Negotiation has no unit column, so department scoping cannot apply as written.",
+      "state": "pending",
+      "evidence": "Not started"
+    },
+    {
+      "name": "Subaward authorization",
+      "detail": "No approved record rule.",
+      "state": "pending",
+      "evidence": "Not started"
+    },
+    {
+      "name": "IRB authorization",
+      "detail": "No approved record rule. IRB is a separate domain from the Proposal-Award chain.",
+      "state": "pending",
+      "evidence": "Not started"
+    },
+    {
+      "name": "Enforcement",
+      "detail": "app.authorization.enforcement-enabled is unset everywhere and defaults to false. Every gate is inert.",
+      "state": "off",
+      "evidence": "No environment has it enabled"
+    }
+  ],
   "requirements": [
     {
       "id": "SEC-001",
@@ -12,12 +74,21 @@
       "accessScope": "Entire system",
       "audience": "PAFO and OSP Administrators, and the Subaward, Contracting, Industry, Foundation Relations and Research Development teams.",
       "acceptance": "Verify a Central User can access all system objects and functionality.",
-      "implementation": "In draft, not merged",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "Who administers access grants, and whether granting Central access needs a second approver.",
-      "conflict": "Five of the seven listed Central teams are not Kuali user roles, so Central membership cannot be derived from record contacts and has to be assigned and maintained by hand. “All system objects” also has to be read against an implementation that starts with Award and adds other record types in later stages.",
-      "recommendation": "Central membership should require an explicit, auditable grant rather than being inferred. Five of the seven listed Central teams have no reliable Kuali role to map from, so membership for those cannot be derived from record contacts at all. Module coverage gaps should be shown, so “all system objects” is never read as wider than what is actually built."
+      "businessRule": "Central Users have unrestricted archive read access and may see archive-wide statistics. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "no",
+        "deployed": "no",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "A Central scope renders no SQL predicate, so Central sees every record and archive-wide dashboard totals. Covered by decision3_centralSeesArchiveWideTotals and centralSeesEverythingIncludingRecordsWithNoUnitOrContact.",
+      "blockers": "Implemented for Award only - a Central scope renders no predicate, so Central sees every Award and archive-wide Award totals, but the other four modules have no gate at all, so 'all system objects' is not demonstrated. Separately, membership cannot be derived: five of the seven Central teams named in the source document are not Kuali user roles, so Central membership has to be granted by hand, and no administrative surface exists to do that yet.",
+      "evidence": "PR #62 (open, draft - not merged)",
+      "decisions": "Who administers Central grants, and whether granting Central access needs a second approver.",
+      "conflict": "Five of the seven listed Central teams are not Kuali user roles, so Central membership cannot be derived from record contacts."
     },
     {
       "id": "SEC-002",
@@ -27,12 +98,21 @@
       "accessScope": "All objects within assigned department(s)",
       "audience": "Post-Award Department Administrators.",
       "acceptance": "Verify a Department User can access all objects within their assigned department and cannot access objects from unassigned departments.",
-      "implementation": "In draft, not merged",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "Whether “department” means the record's lead unit, and whether a unit's sub-units are included. Recorded direction is lead unit, honouring each grant's include-sub-units setting; a unit that led any version of an Award would then see that whole Award.",
-      "conflict": "The source document's own role table places PAFO Administrators in Central Users, but names a PAFO Administrator as the Department User test fixture. Which group that person belongs to has to be settled before this requirement can be tested, because the two readings give opposite expected results.",
-      "recommendation": "A department-only test identity is needed before this can be proven. A Central or PAFO user cannot demonstrate a department restriction, because unrestricted access would satisfy the test for the wrong reason."
+      "businessRule": "Department users see their assigned department and its authorised descendant units. PAFO Administrator is treated as a department user restricted to assigned departments, NOT as Central. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "no",
+        "deployed": "no",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "Lead-unit matching with descendant expansion only where both the policy and the grant allow it. Covered by decision4_departmentTotalsDescribeOnlyTheirOwnRecords, departmentScopeReturnsOnlyItsOwnUnitAndTheCountAgrees, parentUnitWithDescendantsReachesTheChildUnit and parentUnitWithoutDescendantsReachesNothing.",
+      "blockers": "Award only. Proposal, Negotiation, Subaward and IRB are not wired. Negotiation has no unit column at all, so department scoping cannot apply to it as written and needs its own rule before this requirement can be met across the archive.",
+      "evidence": "PR #62 (open, draft - not merged)",
+      "decisions": "",
+      "conflict": ""
     },
     {
       "id": "SEC-003",
@@ -42,73 +122,165 @@
       "accessScope": "Objects directly assigned to the user",
       "audience": "PD/PI Contact, PD/PI Multiple and Co-Investigator.",
       "acceptance": "Verify Research Staff can access assigned objects and cannot access unassigned objects.",
-      "implementation": "In draft, not merged",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "How a sign-in is tied to a Kuali person, and whether Key Persons count as research staff. Recorded direction is PI, multiple-PI and Co-Investigator, with Key Persons excluded.",
-      "conflict": "",
-      "recommendation": ""
+      "businessRule": "Approved contact access extends to the entire Award family, not only the version a person is listed on. Access requires an approved contact role; being named on a record with any other role grants nothing. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "no",
+        "deployed": "no",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "Contact matching against archived business data, restricted to approved role codes. Covered by contactScopeReachesTheAwardTheyAreListedOn, contactScopeIgnoresAListingWhoseRoleIsNotApproved and aPersonWhoIsNotAContactAnywhereSeesNothing.",
+      "blockers": "Award only; the Proposal contact tables exist and are supported by the predicate builder but nothing is wired to them, and Negotiation, Subaward and IRB have no contact rule. Separately, historical contact data is not evidence of current employment: a person listed on an archived record keeps that listing forever, so grants derived from it need a periodic review that does not exist yet.",
+      "evidence": "PR #62 (open, draft - not merged)",
+      "decisions": "",
+      "conflict": ""
     },
     {
       "id": "SEC-004",
       "csvId": 4,
-      "group": "Other Authorized Viewers",
+      "group": "Other Authorized Viewers / SAP Account Access",
       "requirement": "Other authorized users shall have access only to specifically authorized system objects identified by IO number.",
       "accessScope": "Specific IO number(s)",
       "audience": "Users authorised for named records only, typically to help a department with one task.",
       "acceptance": "Verify an Authorized Viewer can access only the specifically authorized IO number(s).",
-      "implementation": "Not started",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "Which field is the authoritative IO number, and whether Subaward account numbers count as IO numbers. Recorded direction is the Award account number; Subaward is unresolved.",
-      "conflict": "",
-      "recommendation": ""
+      "businessRule": "“IO number” means the SAP account number, and access granted that way is version-scoped. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "no",
+        "mergedToMain": "no",
+        "deployed": "no",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "No automated coverage yet. The resolver and the SQL clause exist; no test drives an end-to-end SAP-account grant.",
+      "blockers": "Implemented but untested. AwardAccountNumberIoResolver and the IO clause in the scope builder exist from Phase 1, and the terminology is now settled, but nothing exercises them and no grant of this kind has been created.",
+      "evidence": "PR #56 (merged into main) for the resolver; PR #62 (open, draft - not merged) for the scope clause",
+      "decisions": "",
+      "conflict": ""
     },
     {
       "id": "SEC-005",
       "csvId": 5,
-      "group": "All Users",
+      "group": "Grant Permissions",
       "requirement": "The system shall support adding a user's access at both the role level and the specific IO number level based on the user's authorized role, department assignment, object assignment, or specific IO authorization.",
       "accessScope": "Role or specific IO number(s)",
       "audience": "Whoever administers access for the archive.",
       "acceptance": "Verify an Administrator can add access by assigning a role and/or specific IO number(s).",
-      "implementation": "In draft, not merged",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "Who holds the administrator role once Kuali is retired, and whether a second approver is required.",
-      "conflict": "",
-      "recommendation": ""
+      "businessRule": "ARCHIVE_ADMIN may grant and revoke permissions. Holding ARCHIVE_ADMIN does NOT by itself grant access to archive records. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "yes",
+        "deployed": "yes",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "ArchiveAdminServiceTest and ArchiveAdminConcurrencyIntegrationTest cover granting, revoking, the last-administrator guard and concurrent membership changes against a real database.",
+      "blockers": "No API surface and no user interface: the service exists and is tested, but nothing exposes it, so no administrator can actually grant anything yet. No bootstrap administrator has been created, deliberately.",
+      "evidence": "PR #56 (merged into main)",
+      "decisions": "",
+      "conflict": ""
     },
     {
       "id": "SEC-006",
       "csvId": 6,
-      "group": "All Users",
+      "group": "Revoke Permissions",
       "requirement": "The system shall support removing a user's access at both the role level and the specific IO number level when the user's role, department assignment, object assignment, or authorization changes.",
       "accessScope": "Role or specific IO number(s)",
       "audience": "Whoever administers access for the archive.",
       "acceptance": "Verify an Administrator can remove a role and/or specific IO access and that access is revoked.",
-      "implementation": "In draft, not merged",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "Who owns department assignments after retirement, where changes are fed from, and how quickly access must be withdrawn when someone leaves.",
-      "conflict": "Being told that someone has left is not the same as their access being withdrawn, and a periodic review is not a withdrawal. Removal has to be an action taken in the archive, within an agreed time, or this requirement is only partly met.",
-      "recommendation": "Receiving an offboarding notification is not the same as revoking access in the archive, and should be tracked as two separate events. Behaviour for a session that is already signed in should be documented and tested explicitly. The required revocation interval is left pending rather than assumed."
+      "businessRule": "ARCHIVE_ADMIN may revoke permissions, and revocation takes effect on the caller's next request with no cache to clear. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "partial",
+        "deployed": "partial",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "Covered by ArchiveAdminServiceTest, and by revokingAGrantTakesEffectOnTheNextRequestWithNoCacheToClear, which proves the scope is rebuilt per request rather than memoised.",
+      "blockers": "Same as SEC-005: no API surface. The administrative service is merged (#56); the proof that revocation takes effect immediately is in #62, which is still an open draft. Also unresolved - nothing detects that a person's Kuali role or department assignment has changed upstream, so a grant stays active until someone revokes it by hand.",
+      "evidence": "PR #56 (merged into main) and PR #62 (open, draft - not merged)",
+      "decisions": "How a change of employment or department upstream becomes a revocation here.",
+      "conflict": ""
     },
     {
       "id": "SEC-007",
       "csvId": 7,
-      "group": "All Users",
+      "group": "Enforce Authorization",
       "requirement": "The system shall enforce access restrictions when a user attempts to access a system object for which they are not authorized.",
       "accessScope": "Role or specific IO number(s)",
       "audience": "Everyone who signs in.",
       "acceptance": "Attempt to access an unauthorized object and verify that access is denied",
-      "implementation": "In draft, not merged",
-      "deployment": "Not deployed",
-      "verification": "Not verified",
-      "decisions": "Whether a record outside your access answers “not found” or “not allowed”, and whether hidden related records are counted anywhere a user can see.",
-      "conflict": "",
-      "recommendation": ""
+      "businessRule": "Enforcement is server-side and fails closed. An authenticated BU user with no assigned archive permissions receives Access Not Provisioned and no research data. Unauthorised Award hierarchy relatives are omitted entirely, not shown as stubs. Approved 2026-10-26.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "no",
+        "deployed": "no",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "31 integration cases against a disposable PostgreSQL: scoped search and counts, direct-URL denial returning 404 rather than 403, Access Not Provisioned, family completeness, hierarchy omission, cross-module refusal and the enforcement-disabled baseline.",
+      "blockers": "Award only. Proposal, Negotiation, Subaward and IRB endpoints are unwired and can carry Award identifiers, so enabling enforcement today would protect Awards while other modules disclose them. Enforcement must stay OFF until those are covered.",
+      "evidence": "PR #62 (open, draft - not merged)",
+      "decisions": "",
+      "conflict": ""
+    },
+    {
+      "id": "SEC-008",
+      "csvId": 8,
+      "group": "Audit Logging",
+      "requirement": "The system shall maintain an auditable record of all archive activity, including the user, date and time, and action performed, to support security investigations when necessary.",
+      "accessScope": "Role or specific IO number(s)",
+      "audience": "Security investigators and archive administrators.",
+      "acceptance": "No test case was supplied in the source document. Acceptance cannot be agreed until the scope question below is answered.",
+      "businessRule": "NOT RESOLVED. An earlier decision against routine audit logging has not been reconciled with this requirement, which asks for an auditable record of all archive activity.",
+      "status": {
+        "decisionApproved": "open",
+        "codeImplemented": "partial",
+        "testsPassed": "yes",
+        "mergedToMain": "yes",
+        "deployed": "yes",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "AuthorizationSchemaAndAuditIntegrationTest covers the administrative audit table and its transaction behaviour. There is no coverage of read logging, because there is no read logging.",
+      "blockers": "The open question is scope: “all archive activity” in a read-only archive means logging reads, which is the expensive interpretation and the one previously decided against. Administrative actions are audited; reads are not. This needs Anthony's answer before it can be called done.",
+      "evidence": "PR #56 (merged into main) for authz.access_audit",
+      "decisions": "Does “all archive activity” include reads? The earlier decision said no; the requirement as written says yes. These have not been reconciled.",
+      "conflict": "An earlier project decision against routine audit logging conflicts with this requirement as written. Recorded as unresolved rather than closed."
+    },
+    {
+      "id": "SEC-009",
+      "csvId": 9,
+      "group": "Read-Only Access",
+      "requirement": "The system shall provide the archive in a read-only state to prevent historical records from being modified, updated, or deleted.",
+      "accessScope": "Role or specific IO number(s)",
+      "audience": "All users of the archive.",
+      "acceptance": "No test case was supplied in the source document. Proposed: evidence that no write path reaches the archive schema, plus the database grants the API role holds.",
+      "businessRule": "Read-only is ESTABLISHED PROJECT POLICY, not a decision taken on 2026-10-26. The archive is a read-only historical record by charter; the ETL is one-directional and never writes back to Oracle, and the API reads through JdbcClient with no write path to the archive schema. What has NOT been settled is the technical acceptance criterion - what would count as proof.",
+      "status": {
+        "decisionApproved": "approved",
+        "codeImplemented": "partial",
+        "testsPassed": "no",
+        "mergedToMain": "yes",
+        "deployed": "yes",
+        "enforcementEnabled": "off",
+        "acceptanceVerified": "no"
+      },
+      "tests": "No test asserts the absence of a write path, and no record exists of the database grants the API role actually holds. The read-only claim currently rests on design, charter and code review - which is reasonable evidence for a policy and is NOT acceptance verification.",
+      "blockers": "Needs a demonstrable control rather than an assertion: a test proving no write path reaches the archive schema, and a statement of the API database role's actual grants. Until both exist this stays unverified, however well established the policy is.",
+      "evidence": "Project charter and architecture (CLAUDE.md, docs/DECISIONS.md); no dedicated test evidence yet",
+      "decisions": "What counts as sufficient proof: a test, a database grant listing, or both. The policy itself is not in question.",
+      "conflict": ""
     }
-  ],
-  "recommendationStatus": "Recommended, not approved. These are proposals recorded for review; none has been accepted as policy, and none changes how the archive behaves today."
+  ]
 }
