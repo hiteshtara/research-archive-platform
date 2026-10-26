@@ -44,17 +44,31 @@ import java.util.Objects;
 public class ProposalArchiveV1Service {
 
     private final ProposalV1Repository repository;
+    private final edu.bu.archive.application.authorization.ProposalRecordAccess recordAccess;
     private final ProposalAttachmentStorage attachmentStorage;
 
     public ProposalArchiveV1Service(
             ProposalV1Repository repository,
-            ProposalAttachmentStorage attachmentStorage
+            ProposalAttachmentStorage attachmentStorage,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.ProposalRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
     ) {
+        edu.bu.archive.application.authorization.ProposalRecordAccess resolvedAccess =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = resolvedAccess != null
+                ? resolvedAccess
+                : edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.ProposalRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
     }
 
     public ProposalSummaryResponse findSummary(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         return repository.findSummary(proposalId)
                 .orElseThrow(() -> proposalNotFound(proposalId));
     }
@@ -64,6 +78,7 @@ public class ProposalArchiveV1Service {
             int page,
             int size
     ) {
+        recordAccess.requireProposal(proposalId);
         String proposalNumber = requireProposalNumberForId(proposalId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -91,11 +106,13 @@ public class ProposalArchiveV1Service {
     }
 
     public List<ProposalPersonResponse> findPeople(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         requireProposalNumberForId(proposalId);
         return repository.findPersonRows(proposalId);
     }
 
     public ProposalUnitsResponse findUnits(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         requireProposalNumberForId(proposalId);
 
         List<ProposalAssociatedUnitResponse> associatedUnits =
@@ -107,6 +124,7 @@ public class ProposalArchiveV1Service {
     }
 
     public ProposalAttachmentsResponse findAttachments(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         requireProposalNumberForId(proposalId);
 
         List<ProposalAttachmentResponse> attachments =
@@ -143,6 +161,7 @@ public class ProposalArchiveV1Service {
             long proposalId,
             long attachmentId
     ) {
+        recordAccess.requireProposal(proposalId);
         requireProposalNumberForId(proposalId);
 
         if (attachmentId <= 0) {
@@ -201,6 +220,7 @@ public class ProposalArchiveV1Service {
     }
 
     public ProposalCommentsResponse findComments(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         String proposalNumber = requireProposalNumberForId(proposalId);
 
         List<ProposalCommentRow> rows =
@@ -290,11 +310,13 @@ public class ProposalArchiveV1Service {
     }
 
     public List<ProposalFundedAwardResponse> findFundedAwards(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         String proposalNumber = requireProposalNumberForId(proposalId);
         return repository.findFundedAwardRows(proposalNumber);
     }
 
     public List<ProposalCustomDataResponse> findCustomData(long proposalId) {
+        recordAccess.requireProposal(proposalId);
         requireProposalNumberForId(proposalId);
         return repository.findCustomDataRows(proposalId);
     }

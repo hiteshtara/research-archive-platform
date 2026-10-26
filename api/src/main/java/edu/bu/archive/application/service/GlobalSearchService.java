@@ -100,11 +100,20 @@ public class GlobalSearchService {
     // Temporary TC-042 measurement instrumentation, off by default.
     private final SearchTimingLog timingLog;
     /**
-     * Carries the request's access decision onto the leg threads. Defaults
-     * to {@link edu.bu.archive.application.authorization.RecordVisibility#ALL},
+     * Carries the request's access decision onto the leg threads, and
+     * answers the module-agnostic "is this caller scoped at all" question.
+     * Defaults to {@link edu.bu.archive.application.authorization.RecordVisibility#ALL},
      * which propagates nothing - today's behaviour with enforcement off.
      */
     private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
+    /**
+     * Proposal record authorization, for the Proposal leg's SQL predicate
+     * and its per-row enrichment filter. Defaults to PERMIT_ALL, which adds
+     * no predicate. Award needs no equivalent here because its leg goes
+     * through AwardArchiveService, which carries its own port.
+     */
+    private final edu.bu.archive.application.authorization.ProposalRecordAccess proposalAccess;
 
     public GlobalSearchService(
             GlobalSearchRepository irbSearchRepository,
@@ -116,7 +125,9 @@ public class GlobalSearchService {
             SemanticSearchProperties semanticSearchProperties,
             ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider,
             SearchTimingLog timingLog,
-            ObjectProvider<edu.bu.archive.application.authorization.RecordVisibility> visibility
+            ObjectProvider<edu.bu.archive.application.authorization.RecordVisibility> visibility,
+            ObjectProvider<edu.bu.archive.application.authorization.ProposalRecordAccess>
+                    proposalAccessProvider
     ) {
         this.irbSearchRepository = irbSearchRepository;
         this.awardArchiveService = awardArchiveService;
@@ -127,11 +138,16 @@ public class GlobalSearchService {
         this.semanticSearchProperties = semanticSearchProperties;
         this.embeddingProviderObjectProvider = embeddingProviderObjectProvider;
         this.timingLog = timingLog;
-        edu.bu.archive.application.authorization.RecordVisibility resolved =
+        edu.bu.archive.application.authorization.RecordVisibility resolvedVisibility =
                 visibility == null ? null : visibility.getIfAvailable();
-        this.visibility = resolved != null
-                ? resolved
+        this.visibility = resolvedVisibility != null
+                ? resolvedVisibility
                 : edu.bu.archive.application.authorization.RecordVisibility.ALL;
+        edu.bu.archive.application.authorization.ProposalRecordAccess resolvedProposal =
+                proposalAccessProvider == null ? null : proposalAccessProvider.getIfAvailable();
+        this.proposalAccess = resolvedProposal != null
+                ? resolvedProposal
+                : edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL;
     }
 
     /**
@@ -756,7 +772,8 @@ public class GlobalSearchService {
 
     private List<GlobalSearchItemResponse> searchProposal(String query) {
         List<ProposalFamilySummaryResponse> results =
-                proposalArchiveRepository.findFamilies(query, PER_DOMAIN_LIMIT);
+                proposalArchiveRepository.findFamilies(
+                        query, proposalAccess.proposalScopeSql("ranked"), PER_DOMAIN_LIMIT);
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(results.size());
         for (ProposalFamilySummaryResponse result : results) {
@@ -972,6 +989,12 @@ public class GlobalSearchService {
                         "SEMANTIC_ENRICH_PROPOSAL",
                         () -> proposalArchiveRepository
                                 .findCurrentSummariesForNumbers(proposalNumbers).stream()
+                                // Per row: a semantic batch legitimately
+                                // spans Proposals the caller may only partly
+                                // see. The drop above removes rows left
+                                // unenriched by this filter.
+                                .filter(row -> proposalAccess
+                                        .canSeeProposalNumber(row.proposalNumber()))
                                 .collect(Collectors.toMap(
                                         ProposalSemanticSummaryRow::proposalNumber,
                                         summary -> summary,
@@ -1038,37 +1061,41 @@ public class GlobalSearchService {
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
             AwardSemanticSummaryRow awardSummary = awardSummaries.get(row.businessNumber());
+            ProposalSemanticSummaryRow proposalSummary =
+                    proposalSummaries.get(row.businessNumber());
 
             /*
-             * AwardArchiveService.findSummariesForAwardNumbers filters its
-             * result to Awards the caller may see, so an absent summary for
-             * an AWARD row means "not authorised", not "no data" - every
-             * semantic AWARD row was read from an Award that exists.
+             * A semantic AWARD or PROPOSAL row was read from a record that
+             * exists, and the enrichment lookups filter to what the caller
+             * may see. So an absent summary for a SCOPED caller means "not
+             * authorised", not "no data", and the row must be DROPPED rather
+             * than left unenriched: an unenriched row still carries the
+             * business number and a module link, which is the disclosure the
+             * enrichment filter existed to prevent.
              *
-             * The row must therefore be DROPPED, not merely left unenriched:
-             * an unenriched row still carries the award number as its
-             * businessNumber, an /awards/{id} link and the awardId, which is
-             * the disclosure. Only AWARD rows are treated this way; the
-             * other modules have no record rule yet, so an absent summary
-             * there genuinely means unenriched (see the comment above about
-             * NEGOTIATION and SUBAWARD being left unenriched by design).
+             * Only these two modules. Negotiation and Subaward have no record
+             * rule, so an absent summary there genuinely means unenriched -
+             * the existing documented design.
              *
              * Gated on NOT being unrestricted, which matters: with
-             * enforcement off (or for a Central caller) the summary list is
-             * unfiltered, so an absent summary means a genuine data gap -
-             * an Award with no current version row - and today's behaviour
-             * is to keep the unenriched row. Dropping it there would be a
-             * behaviour change with enforcement disabled, which this work
-             * must not make. A unit test covers exactly that case.
+             * enforcement off, or for a Central caller, the summary lists are
+             * unfiltered, so an absent summary means a real data gap and
+             * today's behaviour is to keep the row. Dropping it there would
+             * change enforcement-disabled behaviour, which this work must not
+             * do. Unit tests cover exactly that case for both modules.
              */
-            if (!visibility.unrestricted() && "AWARD".equals(row.module()) && awardSummary == null) {
+            boolean scoped = !visibility.unrestricted();
+            if (scoped && "AWARD".equals(row.module()) && awardSummary == null) {
+                continue;
+            }
+            if (scoped && "PROPOSAL".equals(row.module()) && proposalSummary == null) {
                 continue;
             }
 
             mapped.add(toGlobalSearchItem(
                     row,
                     awardSummary,
-                    proposalSummaries.get(row.businessNumber()),
+                    proposalSummary,
                     negotiationSummaries.get(row.businessNumber()),
                     subawardSummaries.get(row.businessNumber())
             ));

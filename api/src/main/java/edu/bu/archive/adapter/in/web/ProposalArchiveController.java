@@ -8,7 +8,6 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalWorkspaceResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
-import edu.bu.archive.adapter.out.persistence.ProposalArchiveRepository;
 import edu.bu.archive.application.proposal.ProposalArchiveService;
 import edu.bu.archive.application.proposal.ProposalSearchFilters;
 
@@ -27,14 +26,11 @@ import java.util.List;
 public class ProposalArchiveController {
 
     private final ProposalArchiveService service;
-    private final ProposalArchiveRepository repository;
 
     public ProposalArchiveController(
-            ProposalArchiveService service,
-            ProposalArchiveRepository repository
+            ProposalArchiveService service
     ) {
         this.service = service;
-        this.repository = repository;
     }
 
     @GetMapping("/families")
@@ -51,7 +47,7 @@ public class ProposalArchiveController {
                 200
         );
 
-        return repository.findFamilies(
+        return service.findFamilies(
                 query,
                 safeLimit
         );

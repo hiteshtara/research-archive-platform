@@ -33,9 +33,7 @@ class ProposalArchiveControllerTest {
         service = mock(ProposalArchiveService.class);
         repository = mock(ProposalArchiveRepository.class);
         controller = new ProposalArchiveController(
-                service,
-                repository
-        );
+                service);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(controller)
                 .build();
@@ -44,13 +42,16 @@ class ProposalArchiveControllerTest {
     @Test
     void familiesUsesTheLiteralRouteInsteadOfProposalNumber()
             throws Exception {
-        when(repository.findFamilies(null, 50))
+        // Routed through the SERVICE, not the repository: the controller no
+        // longer holds a repository, which is what applies the record-scope
+        // predicate to this endpoint.
+        when(service.findFamilies(null, 50))
                 .thenReturn(List.of());
 
         mockMvc.perform(get("/api/proposals/families"))
                 .andExpect(status().isOk());
 
-        verify(repository).findFamilies(null, 50);
+        verify(service).findFamilies(null, 50);
         verify(service, never()).findWorkspace("families");
     }
 
@@ -107,14 +108,14 @@ class ProposalArchiveControllerTest {
                         10L
                 );
 
-        when(repository.findFamilies("cancer", 200))
+        when(service.findFamilies("cancer", 200))
                 .thenReturn(List.of(family));
 
         List<ProposalFamilySummaryResponse> result =
                 controller.families("cancer", 500);
 
         assertThat(result).containsExactly(family);
-        verify(repository).findFamilies("cancer", 200);
+        verify(service).findFamilies("cancer", 200);
     }
 
     @Test

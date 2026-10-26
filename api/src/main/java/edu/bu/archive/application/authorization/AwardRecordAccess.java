@@ -19,7 +19,7 @@ package edu.bu.archive.application.authorization;
  * fails closed on a missing identity, a missing policy, or any failure while
  * resolving a scope.
  */
-public interface AwardRecordAccess {
+public interface AwardRecordAccess extends RecordAccess {
 
     /**
      * The scope predicate for Award rows under {@code alias}, to be appended
@@ -32,25 +32,6 @@ public interface AwardRecordAccess {
      * a failure denies.
      */
     SqlFragment awardScopeSql(String alias);
-
-    /**
-     * Throws when the caller has no archive access at all.
-     *
-     * <p>DECISION 1 (2026-10-26): an authenticated user with no assigned
-     * permissions receives Access Not Provisioned and no research data.
-     * A scope predicate alone would render an empty list, which is "no
-     * research data" but tells the user nothing and looks like an empty
-     * archive. List endpoints call this first so the caller gets the
-     * explicit problem instead.
-     *
-     * @throws AccessNotProvisionedException     no identity link, or no active grant
-     * @throws IdentityAccessDeniedException     ambiguous, revoked or suspended
-     * @throws ReauthenticationRequiredException the BU sign-in is too old
-     */
-    void requireProvisioned();
-
-    /** True when enforcement is off, or the caller is Central (unrestricted). */
-    boolean unrestricted();
 
     /**
      * Refuses a cross-module query that returns Award rows for which no
@@ -108,35 +89,15 @@ public interface AwardRecordAccess {
     boolean canSeeAwardNumber(String awardNumber);
 
     /**
-     * Refuses to start when record authorization is ENABLED but the only
-     * available implementation is {@link #PERMIT_ALL}.
-     *
-     * <p>Lives on the port so every service that resolves one is held to the
-     * same rule - AwardArchiveService, AwardContactService, ExplorerService
-     * and DashboardService all call it. Without it, a context where the
-     * Phase 1 beans are missing, excluded or failed to initialise would
-     * serve every Award to every authenticated caller while configuration
-     * claimed enforcement was on. An operator would have positive
-     * confirmation of a control that was not running.
-     *
-     * <p>Enforcement OFF with PERMIT_ALL is the normal, supported
-     * configuration and is left alone.
+     * Startup refusal for this port. Delegates to
+     * {@link RecordAccess#requireEnforceableWiring}; kept as a named entry
+     * point so call sites read as the module they protect.
      */
     static void requireEnforceableWiring(
             AwardRecordAccess access,
             org.springframework.beans.factory.ObjectProvider<AuthorizationProperties> properties
     ) {
-        if (access != PERMIT_ALL) {
-            return;
-        }
-        AuthorizationProperties settings = properties == null ? null : properties.getIfAvailable();
-        if (settings != null && settings.isEnforcementEnabled()) {
-            throw new IllegalStateException(
-                    "app.authorization.enforcement-enabled is true but no AwardRecordAccess "
-                            + "implementation is available, so Award authorization would silently "
-                            + "permit every record. Refusing to start. Ensure the record "
-                            + "authorization beans (AuthorizationConfiguration) are present.");
-        }
+        RecordAccess.requireEnforceableWiring(access, PERMIT_ALL, properties, "AwardRecordAccess");
     }
 
     /** No authorization: today's behaviour, and the default. */

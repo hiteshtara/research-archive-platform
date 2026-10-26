@@ -43,7 +43,8 @@ class ProposalArchiveV1ServiceTest {
     void setUp() {
         repository = mock(ProposalV1Repository.class);
         attachmentStorage = mock(ProposalAttachmentStorage.class);
-        service = new ProposalArchiveV1Service(repository, attachmentStorage);
+        service = new ProposalArchiveV1Service(repository, attachmentStorage,
+                null, null);
     }
 
     @Test
