@@ -199,43 +199,49 @@ script instead, `kill -INT <pid>` reaches bash but not the blocking `aws`
 child, so cleanup is deferred. Use `kill -INT -<pgid>` or just run
 `scripts/stop-db-tunnel.sh`.
 
-## SSM Agent vulnerability status — UNRESOLVED, read before normal use
+## SSM Agent vulnerability status — INDETERMINATE
 
-The Fargate-injected agent in a live tunnel task reports:
+Investigated inside a live tunnel task. The honest answer is that **the patch
+status cannot be determined from the task**, and an earlier draft of this
+document overstated it as confirmed-vulnerable. Evidence both ways:
 
-```
-SSM Agent version: 3.3.0.0
-```
+| Signal | Reading |
+|---|---|
+| `amazon-ssm-agent --version` | `3.3.0.0` — numerically **below** the fixed `3.3.4851.0` |
+| Binary mtime (`/managed-agents/execute-command/*`) | **2026-10-13** — over a month **after** the fix was published on 2026-09-10 |
+| `VERSION` file | absent |
+| Startup banner in `/var/log/amazon/ssm/amazon-ssm-agent.log` | no version line |
 
-CVE-2026-89049 is fixed in **3.3.4851.0**, and the bulletin lists impacted
-versions as **< 3.3.4851.0 (all versions supporting remote-host port
-forwarding)**. **The agent in use is below the fix.** This is no longer a
-theoretical residual risk; it is a confirmed unpatched component on the exact
-code path this tunnel uses.
+The binary date is the stronger signal: a build shipped in mid-October is
+very unlikely to omit a September fix, which suggests `3.3.0.0` is a
+placeholder in the Fargate-managed build rather than a real build number.
+But it is inference, not proof, and nothing inside the task resolves it.
 
-What an exploit would yield, concretely: a caller who can start a
-port-forwarding session bypasses the destination denylist, reaches
-`169.254.170.2`, and reads **the task role's** credentials.
+So treat CVE-2026-89049 as **unresolved-but-probably-patched**, and rely on
+containment rather than on the agent:
 
-Why that is survivable here, and why the design was built this way:
+- The task role holds **only** the four `ssmmessages` actions. If an SSRF
+  did read the task credentials via `169.254.170.2`, they can open an SSM
+  channel and nothing else — no database credential, no S3, no Secrets
+  Manager, no Bedrock.
+- The operator policy scopes `ssm:StartSession` to this one document and
+  this one cluster, which is AWS's own published workaround.
+- The policy is attached to nobody.
 
-- The task role holds **only** the four `ssmmessages` actions. Stolen, it can
-  open an SSM channel and do nothing else — no database credential, no S3,
-  no Secrets Manager, no Bedrock.
-- The operator policy scopes `ssm:StartSession` to this one document and this
-  one cluster, which is AWS's own published workaround.
-- Only named operators get that policy, and it is attached to nobody by
-  default.
-
-The agent version is AWS's to ship on Fargate; there is no action available
-to us beyond the above. Re-check it when AWS updates the platform:
+To re-check after a Fargate platform update:
 
 ```bash
-aws ecs execute-command --cluster research-archive-platform-dev-dbtunnel   --task <task> --container tunnel --interactive   --command "sh -c '/managed-agents/execute-command/amazon-ssm-agent --version'"
+aws ecs execute-command --cluster research-archive-platform-dev-dbtunnel \
+  --task <task> --container tunnel --interactive \
+  --command "sh -c '/managed-agents/execute-command/amazon-ssm-agent --version; \
+             ls -la /managed-agents/execute-command/'"
 ```
 
-**CloudShell does not use this code path and is unaffected.** For ad hoc SQL
-with no GUI requirement, it remains the lower-risk option.
+A definitive answer would have to come from AWS Support or a Fargate
+platform-version release note; the agent is AWS's to ship and there is no
+action available to us beyond the containment above.
+
+**CloudShell does not use this code path and is unaffected.**
 
 ## Security notes
 
