@@ -78,8 +78,8 @@ class DashboardControllerTest {
                         "COUNT(*) FROM archive.negotiation"
                 )
                 .contains(
-                        "COUNT(DISTINCT subaward_code) "
-                                + "FROM archive.subaward"
+                        "COUNT(DISTINCT sub.subaward_code) "
+                                + "FROM archive.subaward sub"
                 )
                 // Documents = the five-module Kuali document union, per
                 // docs/architecture/KUALI_DOCUMENT_METRIC_INVESTIGATION.md
@@ -92,7 +92,7 @@ class DashboardControllerTest {
                 .contains("'AWARD' AS module, workflow_document_number")
                 .contains("'PROPOSAL', document_number")
                 .contains("'NEGOTIATION', document_number")
-                .contains("'SUBAWARD', document_number")
+                .contains("'SUBAWARD', sub.document_number")
                 .contains(
                         "'IRB', document_number "
                                 + "FROM archive.irb_protocol_version"

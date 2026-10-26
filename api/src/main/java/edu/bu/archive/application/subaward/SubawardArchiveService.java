@@ -32,12 +32,53 @@ import java.util.NoSuchElementException;
 public class SubawardArchiveService {
 
     private final SubawardArchiveRepository repository;
+    private final edu.bu.archive.application.authorization.SubawardRecordAccess recordAccess;
     private final SubawardAttachmentStorage attachmentStorage;
 
+    /*
+     * Pre-Phase-2 signature, kept so the existing unit tests construct this
+     * service unchanged. It resolves to PERMIT_ALL, which is exactly what
+     * every caller got before record authorization existed, and it is never
+     * the constructor Spring uses - the @Autowired one below is, so a
+     * deployed context always goes through the startup refusal.
+     */
     public SubawardArchiveService(
             SubawardArchiveRepository repository,
             SubawardAttachmentStorage attachmentStorage
     ) {
+        this(repository, attachmentStorage, null, null);
+    }
+
+    /** Direct-injection form, for tests that already hold the port. */
+    public SubawardArchiveService(
+            SubawardArchiveRepository repository,
+            SubawardAttachmentStorage attachmentStorage,
+            edu.bu.archive.application.authorization.SubawardRecordAccess recordAccess
+    ) {
+        this.recordAccess = recordAccess == null
+                ? edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL
+                : recordAccess;
+        this.repository = repository;
+        this.attachmentStorage = attachmentStorage;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SubawardArchiveService(
+            SubawardArchiveRepository repository,
+            SubawardAttachmentStorage attachmentStorage,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.SubawardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ) {
+        edu.bu.archive.application.authorization.SubawardRecordAccess resolvedAccess =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = resolvedAccess != null
+                ? resolvedAccess
+                : edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.SubawardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
     }
@@ -63,7 +104,21 @@ public class SubawardArchiveService {
     ) {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
-        long totalElements = repository.countSubawards(query, filters);
+
+        /*
+         * Resolved ONCE and given to both statements. The predicate is a
+         * database-level EXISTS over the Subaward's funding Awards, so the
+         * count, the page metadata and the returned rows describe one row
+         * set. Filtering the fetched page in Java instead would publish the
+         * out-of-scope Subawards through totalElements and hand back short
+         * pages that look like the end of the result.
+         */
+        recordAccess.requireProvisioned();
+
+        edu.bu.archive.application.authorization.SqlFragment scope =
+                recordAccess.subawardScopeSql("s");
+
+        long totalElements = repository.countSubawards(query, filters, scope);
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
                         safePage,
@@ -76,6 +131,7 @@ public class SubawardArchiveService {
                 repository.findSubawards(
                         query,
                         filters,
+                        scope,
                         safeSize,
                         offset
                 );
@@ -92,6 +148,7 @@ public class SubawardArchiveService {
     }
 
     public SubawardWorkspaceResponse findWorkspace(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         SubawardRowResponse current = requireSubaward(subawardId);
         return new SubawardWorkspaceResponse(subawardId, current);
     }
@@ -110,13 +167,27 @@ public class SubawardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireSubaward(subawardId);
         SubawardRowResponse current = requireSubaward(subawardId);
         String subawardCode = current.subawardCode();
 
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
-        long totalElements = repository.countVersions(subawardCode);
+        /*
+         * Each version is decided on its own, not inherited from the one the
+         * caller opened. Versions of a Subaward family are separate
+         * subaward_id rows and archive.subaward_funding is keyed by
+         * subaward_id, so two versions of the same family can name different
+         * funding Awards - the version list must not become a way to reach a
+         * version whose funding the caller has no grant on. The predicate
+         * goes in the same WHERE as the count, so totalElements describes
+         * exactly the versions listed.
+         */
+        edu.bu.archive.application.authorization.SqlFragment scope =
+                recordAccess.subawardScopeSql("s");
+
+        long totalElements = repository.countVersions(subawardCode, scope);
 
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
@@ -130,6 +201,7 @@ public class SubawardArchiveService {
         List<SubawardVersionSummaryResponse> content =
                 repository.findVersionSummaries(
                         subawardCode,
+                        scope,
                         safeSize,
                         offset
                 );
@@ -146,26 +218,60 @@ public class SubawardArchiveService {
     }
 
     public List<SubawardAmountResponse> findAmounts(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findAmounts(subawardId);
     }
 
     public List<SubawardContactResponse> findContacts(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findContacts(subawardId);
     }
 
     public List<SubawardCustomDataResponse> findCustomData(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findCustomData(subawardId);
     }
 
+    /**
+     * The Subaward's funding relationships, with any Award the caller may
+     * not see OMITTED ENTIRELY.
+     *
+     * <p>This is the endpoint where the ANY-match rule would otherwise leak.
+     * Reaching the Subaward needs only ONE accessible funding Award; this
+     * list carries every funding Award's number, title, status, sponsor,
+     * amount and a navigable link, so returning it whole would hand the
+     * caller the metadata of Awards they cannot open - through the very
+     * record that inheriting access from one of them granted.
+     *
+     * <p>Omitted, not stubbed, following decision D5: a placeholder saying
+     * "a funding Award exists here that you may not see" still discloses the
+     * relationship, and the relationship is most of what this card conveys.
+     * The visible consequence is a shorter funding list; a partial list is
+     * the correct answer to a partially authorized question.
+     *
+     * <p>Gated on {@code !unrestricted()}: with enforcement off, or for a
+     * Central caller, the list is returned exactly as it always was - a row
+     * whose award_id resolves to nothing must keep showing, since it is real
+     * archived data, and only a SCOPED caller has anything to be denied.
+     */
     public List<SubawardFundingResponse> findFunding(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
-        return repository.findFunding(subawardId);
+        List<SubawardFundingResponse> funding = repository.findFunding(subawardId);
+        if (recordAccess.unrestricted()) {
+            return funding;
+        }
+        return funding.stream()
+                .filter(row -> row.exactLinkedAwardId() != null
+                        && recordAccess.canSeeAward(row.exactLinkedAwardId()))
+                .toList();
     }
 
     public List<SubawardAttachmentResponse> findAttachments(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findAttachments(subawardId);
     }
@@ -174,6 +280,7 @@ public class SubawardArchiveService {
             long subawardId,
             long attachmentId
     ) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         if (attachmentId <= 0) {
             throw new IllegalArgumentException(
@@ -230,6 +337,7 @@ public class SubawardArchiveService {
     }
 
     public SubawardTemplateInfoResponse findTemplateInfo(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findTemplateInfo(subawardId)
                 .orElseThrow(() ->
@@ -241,16 +349,19 @@ public class SubawardArchiveService {
     }
 
     public List<SubawardCloseoutResponse> findCloseout(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findCloseout(subawardId);
     }
 
     public List<SubawardReportResponse> findReports(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findReports(subawardId);
     }
 
     public List<SubawardNotepadResponse> findNotepad(long subawardId) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findNotepad(subawardId);
     }
@@ -258,6 +369,7 @@ public class SubawardArchiveService {
     public List<SubawardNotificationResponse> findNotifications(
             long subawardId
     ) {
+        recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         return repository.findNotifications(subawardId);
     }
@@ -282,10 +394,22 @@ public class SubawardArchiveService {
      * the identifier a semantic result carries (QA TC-041). One query
      * for the whole set; see the repository for why.
      */
+    /**
+     * Display fields for the Subaward semantic results on one Global Search
+     * page.
+     *
+     * <p>Scoped in SQL, not afterwards. Global Search calls this to turn a
+     * bare subaward_code into a title; a code the caller may not open must
+     * produce no row, because the caller of this method treats an absent
+     * summary as a row to drop. Returning it unenriched would still publish
+     * the code and its link, which is the disclosure the filter exists for.
+     */
     public List<SubawardSemanticSummaryRow> findActiveSummariesForCodes(
             List<String> subawardCodes
     ) {
-        return repository.findActiveSummariesForCodes(subawardCodes);
+        recordAccess.requireProvisioned();
+        return repository.findActiveSummariesForCodes(
+                subawardCodes, recordAccess.subawardScopeSql("s"));
     }
 
 }

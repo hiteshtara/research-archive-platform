@@ -21,7 +21,7 @@ import org.springframework.web.context.request.RequestContextHolder;
  * denies.
  */
 public class RecordAuthorizationService
-        implements RecordVisibility, AwardRecordAccess, ProposalRecordAccess {
+        implements RecordVisibility, AwardRecordAccess, ProposalRecordAccess, SubawardRecordAccess {
 
     private static final String OUTCOME_ATTRIBUTE = RecordAuthorizationService.class.getName() + ".outcome";
     private static final ThreadLocal<AccessOutcome> PROPAGATED = new ThreadLocal<>();
@@ -260,9 +260,63 @@ public class RecordAuthorizationService
      * {@inheritDoc}
      *
      * <p>Delegates to {@link #scopeSql(RecordModule, String)} for
-     * {@link RecordModule#PROPOSAL}; the Proposal services depend on the
-     * narrow {@link ProposalRecordAccess} port rather than this whole class.
+     * {@link RecordModule#SUBAWARD}; the Subaward services depend on the
+     * narrow {@link SubawardRecordAccess} port rather than this whole class.
      */
+    @Override
+    public SqlFragment subawardScopeSql(String alias) {
+        return scopeSql(RecordModule.SUBAWARD, alias);
+    }
+
+    /**
+     * A Subaward is accessible when ANY of its funding Awards is - the
+     * approved rule, 2026-10-26.
+     *
+     * <p>Each funding Award is decided by exactly the same code that decides
+     * the Award endpoints ({@link #canSeeAward}), so department grants,
+     * descendant units and Research Staff contact access need no Subaward
+     * equivalent. A Subaward with no resolvable funding Award has an empty
+     * list here and is denied, which is the approved behaviour for both the
+     * no-funding and the broken-reference cases - the repository filters
+     * unresolvable references out, so a dangling award_id cannot authorise.
+     *
+     * <p>Reaching a Subaward this way grants nothing on the Awards: the
+     * Award endpoints keep their own gates, so a user who gets here through
+     * Award A still cannot open Award B that also funds it.
+     */
+    @Override
+    public void requireSubaward(long subawardId) {
+        if (!enforced()) {
+            return;
+        }
+        requireProvisioned();
+        if (!canSeeSubaward(subawardId)) {
+            throw new RecordNotAccessibleException();
+        }
+    }
+
+    @Override
+    public boolean canSeeSubaward(long subawardId) {
+        if (unrestricted()) {
+            /*
+             * Central, or enforcement off. Not merely a shortcut: the SQL
+             * side renders SqlFragment.NONE for a Central caller, so every
+             * Subaward is listed - including one with no funding Award at
+             * all. Deciding this one through the funding inheritance would
+             * answer false for exactly those rows, and Central would see a
+             * Subaward on the page that 404s when opened. D3 gives Central
+             * the archive-wide view; the two paths have to say so together.
+             */
+            return true;
+        }
+        try {
+            return facts.subawardFundingAwardIds(subawardId).stream().anyMatch(this::canSeeAward);
+        } catch (RuntimeException failure) {
+            // Fail closed: an error resolving funding is not permission.
+            return false;
+        }
+    }
+
     @Override
     public SqlFragment proposalScopeSql(String alias) {
         return scopeSql(RecordModule.PROPOSAL, alias);

@@ -33,9 +33,16 @@ and it tells the user nothing about what to do. List endpoints therefore call
   controller used to hold. The Award count CTE and the `AWARD` branch of the
   document tally both take the scope predicate.
 - **Known gap, deliberate:** IRB, Proposal, Negotiation and Subaward counts
-  are **not** scoped, because no approved record rule exists for those
-  modules. Scoping Award alone makes the Award figures correct and leaves the
-  others as they were; it does not make the dashboard as a whole authorized.
+  are **not** scoped, because no approved record rule existed for those
+  modules when D2 was taken. Scoping Award alone makes the Award figures
+  correct and leaves the others as they were; it does not make the dashboard
+  as a whole authorized.
+- **Still open after D6 and after Proposal.** Proposal and Subaward now have
+  approved rules and scoped endpoints, but the **Dashboard counts for them
+  were not changed** by that work and remain unscoped. This is a real
+  remaining gap, named here rather than quietly closed: a scoped caller's
+  Dashboard would report archive-wide Proposal and Subaward figures. It must
+  be closed before enforcement is enabled.
 
 ## D3 — Central sees archive-wide totals
 
@@ -105,3 +112,39 @@ Refused loudly, not emptied: an empty page would look like an empty index.
   `AttachmentSearchService`, `DocumentSearchService`, `DocumentExplorerService`.
 - **Tests:** `crossModuleSearchIsRefusedForAScopedCallerRatherThanLeakingAwardRows`,
   `crossModuleSearchStillWorksForCentralAndWhenEnforcementIsOff`.
+
+## D6 — Subaward access is inherited from its funding Awards (2026-10-26)
+
+> A user may access a Subaward when they are authorized to view at least ONE
+> of its funding Awards. ANY-match, not ALL-match.
+
+No new rule: the Award rule, evaluated through `archive.subaward_funding`.
+Department grants, descendant units and Research Staff contact access need no
+Subaward equivalent because they are the Award clauses, applied to the funded
+Award row.
+
+Three consequences were accepted as part of the decision:
+
+- A Subaward with **no** funding Award is denied to every non-Central caller.
+  No explicit Subaward grant type exists in the `authz` schema, so there is
+  nothing to fall back to. The size of that population is unmeasured — see
+  the open profiling run in `SUBAWARD_AUTHORIZATION.md`.
+- A **broken** funding reference (`award_id` resolving to no Award) is not
+  authorization. `subaward_funding.award_id` has no foreign key, so this is a
+  real shape in the data.
+- Reaching a Subaward grants **nothing** on its Awards. The funding list
+  omits unauthorized Awards entirely, following D5 — a shorter list, not a
+  stubbed one, and therefore incomplete funding totals on that card.
+
+`requisitioner_unit` and contact-based fallbacks were explicitly excluded
+pending a separate business decision. The profiling SQL measures
+`requisitioner_unit` for evidence only; nothing reads it.
+
+- **Enforced:** `RecordScopeSqlBuilder.subawardRow` (lists, counts, version
+  lists, semantic enrichment), `RecordAuthorizationService.canSeeSubaward`
+  (single records), `SubawardArchiveService` (14 endpoints),
+  `DashboardService` (the Subaward count and the SUBAWARD document branch).
+- **Tests:** `SubawardRecordAuthorizationIntegrationTest` (40), three
+  predicate tests in `RecordScopeSqlBuilderTest`,
+  `GlobalSearchSemanticScopeTest` (3). The 19 named scenarios map to tests in
+  `docs/security/SUBAWARD_AUTHORIZATION.md`.

@@ -8,6 +8,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse
 import edu.bu.archive.adapter.out.persistence.SubawardArchiveRepository;
 import edu.bu.archive.adapter.out.persistence.SubawardArchivedAttachment;
 import edu.bu.archive.adapter.out.persistence.SubawardAttachmentStorage;
+import edu.bu.archive.application.authorization.SqlFragment;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,8 +46,8 @@ class SubawardArchiveServiceTest {
                 101L, "1004", 4, "DOC-101", "Title", 1L, "Active",
                 "ORG-1", "ACCOUNT-1", null, null, "ACTIVE", null
         );
-        when(repository.countSubawards("1004", SubawardSearchFilters.none())).thenReturn(205L);
-        when(repository.findSubawards("1004", SubawardSearchFilters.none(), 100, 0))
+        when(repository.countSubawards("1004", SubawardSearchFilters.none(), SqlFragment.NONE)).thenReturn(205L);
+        when(repository.findSubawards("1004", SubawardSearchFilters.none(), SqlFragment.NONE, 100, 0))
                 .thenReturn(List.of(summary));
 
         SubawardPageResponse result = service.findPage("1004", -1, 500);
@@ -58,7 +59,7 @@ class SubawardArchiveServiceTest {
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(result.first()).isTrue();
         assertThat(result.last()).isFalse();
-        verify(repository).findSubawards("1004", SubawardSearchFilters.none(), 100, 0);
+        verify(repository).findSubawards("1004", SubawardSearchFilters.none(), SqlFragment.NONE, 100, 0);
     }
 
     @Test
@@ -99,8 +100,8 @@ class SubawardArchiveServiceTest {
                         101L, "1004", 4, "DOC-101", "Active",
                         null, null, null, true
                 );
-        when(repository.countVersions("1004")).thenReturn(1L);
-        when(repository.findVersionSummaries("1004", 25, 0))
+        when(repository.countVersions("1004", SqlFragment.NONE)).thenReturn(1L);
+        when(repository.findVersionSummaries("1004", SqlFragment.NONE, 25, 0))
                 .thenReturn(List.of(version));
 
         PageResponse<SubawardVersionSummaryResponse> page =
@@ -108,16 +109,16 @@ class SubawardArchiveServiceTest {
 
         assertThat(page.content()).containsExactly(version);
         assertThat(page.totalElements()).isEqualTo(1L);
-        verify(repository).countVersions("1004");
-        verify(repository).findVersionSummaries("1004", 25, 0);
+        verify(repository).countVersions("1004", SqlFragment.NONE);
+        verify(repository).findVersionSummaries("1004", SqlFragment.NONE, 25, 0);
     }
 
     @Test
     void findVersionsAppliesTheSamePaginationClampingAsSearch() {
         when(repository.findById(101L))
                 .thenReturn(Optional.of(subawardRow()));
-        when(repository.countVersions("1004")).thenReturn(0L);
-        when(repository.findVersionSummaries("1004", 100, 0))
+        when(repository.countVersions("1004", SqlFragment.NONE)).thenReturn(0L);
+        when(repository.findVersionSummaries("1004", SqlFragment.NONE, 100, 0))
                 .thenReturn(List.of());
 
         PageResponse<SubawardVersionSummaryResponse> page =
@@ -125,7 +126,7 @@ class SubawardArchiveServiceTest {
 
         assertThat(page.page()).isZero();
         assertThat(page.size()).isEqualTo(100);
-        verify(repository).findVersionSummaries("1004", 100, 0);
+        verify(repository).findVersionSummaries("1004", SqlFragment.NONE, 100, 0);
     }
 
     /*
@@ -151,8 +152,8 @@ class SubawardArchiveServiceTest {
                                 sequence == 25
                         ))
                         .toList();
-        when(repository.countVersions("1004")).thenReturn(25L);
-        when(repository.findVersionSummaries("1004", 25, 0))
+        when(repository.countVersions("1004", SqlFragment.NONE)).thenReturn(25L);
+        when(repository.findVersionSummaries("1004", SqlFragment.NONE, 25, 0))
                 .thenReturn(twentyFiveVersions);
 
         PageResponse<SubawardVersionSummaryResponse> page =
@@ -194,18 +195,18 @@ class SubawardArchiveServiceTest {
                 1L, "OBJECT-2", null, null, 1L, "DOCUMENT-OBJECT-2"
         );
         when(repository.findById(202L)).thenReturn(Optional.of(otherCodeRow));
-        when(repository.countVersions("1004")).thenReturn(1L);
-        when(repository.countVersions("9999")).thenReturn(1L);
-        when(repository.findVersionSummaries("1004", 25, 0))
+        when(repository.countVersions("1004", SqlFragment.NONE)).thenReturn(1L);
+        when(repository.countVersions("9999", SqlFragment.NONE)).thenReturn(1L);
+        when(repository.findVersionSummaries("1004", SqlFragment.NONE, 25, 0))
                 .thenReturn(List.of());
-        when(repository.findVersionSummaries("9999", 25, 0))
+        when(repository.findVersionSummaries("9999", SqlFragment.NONE, 25, 0))
                 .thenReturn(List.of());
 
         service.findVersions(101L, 0, 25);
         service.findVersions(202L, 0, 25);
 
-        verify(repository).findVersionSummaries("1004", 25, 0);
-        verify(repository).findVersionSummaries("9999", 25, 0);
+        verify(repository).findVersionSummaries("1004", SqlFragment.NONE, 25, 0);
+        verify(repository).findVersionSummaries("9999", SqlFragment.NONE, 25, 0);
     }
 
     @Test

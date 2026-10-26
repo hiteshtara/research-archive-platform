@@ -127,4 +127,18 @@ public class JdbcRecordFactsRepository implements RecordFactsRepository {
                 ? new RecordContact(Optional.empty(), roleCode, false)
                 : new RecordContact(Optional.of(new KualiPersonId(personId)), roleCode, true);
     }
+
+    @Override
+    public java.util.List<Long> subawardFundingAwardIds(long subawardId) {
+        return jdbc.sql("""
+                SELECT sf.award_id
+                FROM archive.subaward_funding sf
+                JOIN archive.award_version av ON av.award_id = sf.award_id
+                WHERE sf.subaward_id = :subawardId
+                  AND sf.award_id IS NOT NULL
+                """)
+                .param("subawardId", subawardId)
+                .query(Long.class)
+                .list();
+    }
 }

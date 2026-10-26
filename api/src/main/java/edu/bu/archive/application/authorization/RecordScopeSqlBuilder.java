@@ -43,8 +43,9 @@ public final class RecordScopeSqlBuilder {
         String row = switch (module) {
             case AWARD -> familyWrap(module, alias, awardRow(scope, expandedUnits, params));
             case PROPOSAL -> familyWrap(module, alias, proposalRow(scope, expandedUnits, params));
+            case SUBAWARD -> subawardRow(scope, expandedUnits, params);
             // No approved non-Central rule is implemented for these yet (P8).
-            case NEGOTIATION, SUBAWARD, IRB -> null;
+            case NEGOTIATION, IRB -> null;
         };
         if (row == null) {
             return SqlFragment.DENY_ALL;
@@ -91,6 +92,58 @@ public final class RecordScopeSqlBuilder {
             });
         }
         return clauses.isEmpty() ? "FALSE" : "(" + String.join(" OR ", clauses) + ")";
+    }
+
+    /**
+     * Subaward access is INHERITED from the Awards that fund it: approved
+     * 2026-10-26, "a user may access a Subaward when they are authorized to
+     * view at least ONE of its funding Awards".
+     *
+     * <p>Rendered as an EXISTS over archive.subaward_funding joined to
+     * archive.award_version, with the ordinary Award predicate applied to the
+     * joined Award row. That reuse is the point: there is no Subaward rule to
+     * get wrong, only the Award rule evaluated somewhere else. Department
+     * grants, descendant units and Research Staff contact access all behave
+     * exactly as they do on an Award, because they ARE the Award clauses.
+     *
+     * <p>ANY-match falls out of EXISTS: one qualifying funding Award is
+     * enough, and the predicate stops looking. An ALL-match rule would need
+     * NOT EXISTS over the unauthorized ones and was explicitly not approved.
+     *
+     * <p>Three things this gets right by construction:
+     * <ul>
+     *   <li>No funding row at all -> EXISTS is false -> denied.</li>
+     *   <li>A funding row whose award_id resolves to nothing -> the INNER
+     *       join drops it, so a broken reference can never authorise. There
+     *       is no foreign key on subaward_funding.award_id, so dangling
+     *       references are possible and must not read as permission.</li>
+     *   <li>Revoking the last qualifying Award grant makes EXISTS false on
+     *       the very next request - the predicate is rebuilt per request and
+     *       nothing is memoised.</li>
+     * </ul>
+     *
+     * <p>The family wrap is applied to the FUNDED Award row, not to the
+     * outer one. familyWrap derives the family from whatever row it is
+     * given, and the outer row here is a Subaward with no award_number - so
+     * it is anchored on az_sa instead. That is not cosmetic: under
+     * FAMILY_WIDE, {@link RecordAuthorizationService#canSeeAward} grants the
+     * funded Award when ANY version of its family is in scope, and a
+     * predicate that only tested the funded version would deny in SQL what
+     * the evaluator permits in Java. The integration tests compare the two,
+     * so the disagreement is a test failure, not a silent one.
+     */
+    private String subawardRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
+        String fundedAward = awardRow(scope, units, params);
+        if (fundedAward == null || "FALSE".equals(fundedAward)) {
+            return "FALSE";
+        }
+        // Alias is unused by familyWrap - it emits {row}, resolved below.
+        String awardPredicate = familyWrap(RecordModule.AWARD, "{row}", fundedAward);
+        return "EXISTS (SELECT 1 FROM archive.subaward_funding az_sf"
+                + " JOIN archive.award_version az_sa ON az_sa.award_id = az_sf.award_id"
+                + " WHERE az_sf.subaward_id = {row}.subaward_id"
+                + " AND az_sf.award_id IS NOT NULL"
+                + " AND " + awardPredicate.replace("{row}", "az_sa") + ")";
     }
 
     private String proposalRow(AccessScope scope, Set<String> units, Map<String, Object> params) {

@@ -1073,9 +1073,17 @@ public class GlobalSearchService {
              * business number and a module link, which is the disclosure the
              * enrichment filter existed to prevent.
              *
-             * Only these two modules. Negotiation and Subaward have no record
-             * rule, so an absent summary there genuinely means unenriched -
-             * the existing documented design.
+             * SUBAWARD joined them once the approved funding-inheritance
+             * rule was wired: findActiveSummariesForCodes now filters by the
+             * same predicate, so a missing Subaward summary under a scoped
+             * caller means the same thing. It also covers the one case where
+             * a code has no ACTIVE version - dropping rather than publishing
+             * the code is the fail-closed answer, and the keyword leg still
+             * finds whatever the caller is entitled to.
+             *
+             * NEGOTIATION is excluded: it has no approved record rule yet,
+             * so an absent summary there genuinely means unenriched - the
+             * existing documented design.
              *
              * Gated on NOT being unrestricted, which matters: with
              * enforcement off, or for a Central caller, the summary lists are
@@ -1089,6 +1097,10 @@ public class GlobalSearchService {
                 continue;
             }
             if (scoped && "PROPOSAL".equals(row.module()) && proposalSummary == null) {
+                continue;
+            }
+            if (scoped && "SUBAWARD".equals(row.module())
+                    && subawardSummaries.get(row.businessNumber()) == null) {
                 continue;
             }
 

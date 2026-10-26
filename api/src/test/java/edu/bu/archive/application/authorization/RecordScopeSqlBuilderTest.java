@@ -65,11 +65,55 @@ class RecordScopeSqlBuilderTest {
 
     @Test
     void modulesWithoutAnApprovedNonCentralRuleDenyForNonCentralUsers() {
+        // SUBAWARD left this list on 2026-10-26, when the funding-
+        // inheritance rule was approved. NEGOTIATION and IRB still have no
+        // approved non-Central rule and must keep denying.
         var builder = new RecordScopeSqlBuilder(PER_VERSION, IoSqlStrategy.NONE);
         var scope = scoped(false, Set.of(new UnitGrant("U1", false)), "P1", Set.of());
-        for (RecordModule module : Set.of(RecordModule.NEGOTIATION, RecordModule.SUBAWARD, RecordModule.IRB)) {
+        for (RecordModule module : Set.of(RecordModule.NEGOTIATION, RecordModule.IRB)) {
             assertThat(builder.build(scope, module, "x", Set.of("U1"))).isEqualTo(SqlFragment.DENY_ALL);
         }
+    }
+
+    @Test
+    void subawardInheritsTheAwardPredicateThroughItsFundingRows() {
+        var fragment = new RecordScopeSqlBuilder(PER_VERSION, IoSqlStrategy.NONE).build(
+                scoped(false, Set.of(new UnitGrant("U1", false)), "P1", Set.of()),
+                RecordModule.SUBAWARD, "s", Set.of("U1"));
+
+        assertThat(fragment.sql())
+                .contains("archive.subaward_funding az_sf")
+                .contains("az_sf.subaward_id = s.subaward_id")
+                // INNER join: a funding row whose award_id resolves to
+                // nothing can never authorise.
+                .contains("JOIN archive.award_version az_sa ON az_sa.award_id = az_sf.award_id")
+                // The Award rule itself, applied to the FUNDED Award row.
+                .contains("az_sa.lead_unit_number IN (:az_units)");
+    }
+
+    @Test
+    void subawardWithNoUsableAwardClauseDeniesRatherThanMatchingEveryFundingRow() {
+        // The dangerous shape: an EXISTS whose inner predicate collapsed to
+        // nothing would authorise any Subaward that has ANY funding row.
+        var fragment = new RecordScopeSqlBuilder(PER_VERSION, IoSqlStrategy.NONE).build(
+                scoped(false, Set.of(), null, Set.of()), RecordModule.SUBAWARD, "s", Set.of());
+
+        assertThat(fragment).isEqualTo(SqlFragment.DENY_ALL);
+    }
+
+    @Test
+    void familyWideSubawardAnchorsTheFamilyWrapOnTheFundedAwardNotTheSubaward() {
+        /*
+         * A Subaward row has no award_number, so wrapping on the outer alias
+         * would be invalid SQL. Anchoring on az_sa is also what keeps the
+         * predicate agreeing with canSeeAward, which is family-wide here.
+         */
+        var fragment = new RecordScopeSqlBuilder(FAMILY_WIDE, IoSqlStrategy.NONE).build(
+                scoped(false, Set.of(), "P1", Set.of()), RecordModule.SUBAWARD, "s", Set.of());
+
+        assertThat(fragment.sql())
+                .contains("az_fv.award_number = az_sa.award_number")
+                .doesNotContain("s.award_number");
     }
 
     @Test

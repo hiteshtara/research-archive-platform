@@ -390,10 +390,10 @@ class SubawardArchiveRepositoryTest {
 
         String sql = firstSql(jdbc);
         assertThat(sql)
-                .contains("FROM archive.subaward")
-                .contains("WHERE subaward_code = :subawardCode")
+                .contains("FROM archive.subaward s")
+                .contains("WHERE s.subaward_code = :subawardCode")
                 .containsPattern(
-                        "ORDER BY\\s+sequence_number DESC,\\s+subaward_id DESC"
+                        "ORDER BY\\s+s\\.sequence_number DESC,\\s+s\\.subaward_id DESC"
                 )
                 // The parameterized WHERE - never a raw string-concatenated
                 // code - is what actually prevents another code's rows

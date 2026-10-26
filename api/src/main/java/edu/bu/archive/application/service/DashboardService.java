@@ -22,21 +22,37 @@ import org.springframework.stereotype.Service;
  * records. With enforcement off the predicate is empty and the statement is
  * the one that ran before.
  *
- * <p>Only the Award-derived figures are scoped here - the Award counts and
- * the AWARD branch of the document tally. IRB, Proposal, Negotiation and
- * Subaward counts are NOT yet scoped, because no approved record rule exists
- * for those modules. That is a known, deliberate gap, not an oversight: see
- * the PR for the list.
+ * <p>Scoped here: the Award counts and the AWARD branch of the document
+ * tally, and - since the funding-inheritance rule was approved (D6) - the
+ * Subaward count and the SUBAWARD branch.
+ *
+ * <p>NOT scoped: IRB, Proposal and Negotiation. Negotiation and IRB have no
+ * approved record rule at all. Proposal has one, and its endpoints are
+ * scoped, but these two figures were not changed when it landed - a real
+ * remaining gap, recorded in AUTHORIZATION_DECISIONS.md under D2 rather than
+ * left to be discovered. The dashboard as a whole is not yet authorized.
  */
 @Service
 public class DashboardService {
 
     private final JdbcClient jdbcClient;
     private final AwardRecordAccess recordAccess;
+    private final edu.bu.archive.application.authorization.SubawardRecordAccess subawardAccess;
 
     public DashboardService(
             JdbcClient jdbcClient,
             ObjectProvider<AwardRecordAccess> recordAccessProvider,
+            ObjectProvider<AuthorizationProperties> authorizationProperties
+    ) {
+        this(jdbcClient, recordAccessProvider, null, authorizationProperties);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DashboardService(
+            JdbcClient jdbcClient,
+            ObjectProvider<AwardRecordAccess> recordAccessProvider,
+            ObjectProvider<edu.bu.archive.application.authorization.SubawardRecordAccess>
+                    subawardAccessProvider,
             ObjectProvider<AuthorizationProperties> authorizationProperties
     ) {
         this.jdbcClient = jdbcClient;
@@ -44,6 +60,14 @@ public class DashboardService {
                 recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
         this.recordAccess = access != null ? access : AwardRecordAccess.PERMIT_ALL;
         AwardRecordAccess.requireEnforceableWiring(this.recordAccess, authorizationProperties);
+
+        edu.bu.archive.application.authorization.SubawardRecordAccess subaward =
+                subawardAccessProvider == null ? null : subawardAccessProvider.getIfAvailable();
+        this.subawardAccess = subaward != null
+                ? subaward
+                : edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.SubawardRecordAccess
+                .requireEnforceableWiring(this.subawardAccess, authorizationProperties);
     }
 
     public DashboardDto counts() {
@@ -52,6 +76,15 @@ public class DashboardService {
         recordAccess.requireProvisioned();
 
         SqlFragment scope = recordAccess.awardScopeSql("av");
+        /*
+         * Prefixed, because the Subaward predicate is the Award predicate
+         * applied to a joined Award row and so binds the same parameter
+         * names. Two fragments in one statement must not fight over them -
+         * today they would carry equal values, but relying on that is how a
+         * later change to either one silently corrupts the other.
+         */
+        SqlFragment subawardScope =
+                subawardAccess.subawardScopeSql("sub").withParameterPrefix("sub_");
 
         JdbcClient.StatementSpec statement = jdbcClient.sql("""
                 WITH award_counts AS (
@@ -86,9 +119,9 @@ public class DashboardService {
 
                     UNION ALL
 
-                    SELECT 'SUBAWARD', document_number
-                    FROM archive.subaward
-                    WHERE document_number IS NOT NULL
+                    SELECT 'SUBAWARD', sub.document_number
+                    FROM archive.subaward sub
+                    WHERE sub.document_number IS NOT NULL""" + subawardScope.sql() + """
 
                     UNION ALL
 
@@ -113,14 +146,19 @@ public class DashboardService {
                     proposal_counts.proposal_history_records,
                     (SELECT COUNT(*)
                      FROM archive.negotiation) AS negotiations,
-                    (SELECT COUNT(DISTINCT subaward_code)
-                     FROM archive.subaward) AS subawards,
+                    (SELECT COUNT(DISTINCT sub.subaward_code)
+                     FROM archive.subaward sub
+                     WHERE TRUE""" + subawardScope.sql() + """
+                    ) AS subawards,
                     (SELECT COUNT(DISTINCT (module, document_number))
                      FROM kuali_documents) AS documents
                 FROM award_counts
                 CROSS JOIN proposal_counts
                 """);
         for (var parameter : scope.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        for (var parameter : subawardScope.params().entrySet()) {
             statement = statement.param(parameter.getKey(), parameter.getValue());
         }
         return statement.query(DashboardDto.class).single();
