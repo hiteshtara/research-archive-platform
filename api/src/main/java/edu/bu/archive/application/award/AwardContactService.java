@@ -48,7 +48,8 @@ public class AwardContactService {
         this.recordAccess = access != null
                 ? access
                 : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
-        AwardArchiveService.requireEnforceableWiring(this.recordAccess, authorizationProperties);
+        edu.bu.archive.application.authorization.AwardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
     }
 
     public AwardUnitDetailsResponse findUnitDetails(long awardId) {

@@ -1,8 +1,8 @@
 package edu.bu.archive.adapter.in.web;
 
 import edu.bu.archive.adapter.in.web.dto.DashboardDto;
+import edu.bu.archive.application.service.DashboardService;
 
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,81 +13,14 @@ import org.springframework.web.bind.annotation.RestController;
 @Transactional(readOnly = true)
 public class DashboardController {
 
-    private final JdbcClient jdbcClient;
+    private final DashboardService service;
 
-    public DashboardController(JdbcClient jdbcClient) {
-        this.jdbcClient = jdbcClient;
+    public DashboardController(DashboardService service) {
+        this.service = service;
     }
 
     @GetMapping
     public DashboardDto dashboard() {
-        return jdbcClient.sql("""
-                WITH award_counts AS (
-                    SELECT
-                        COUNT(DISTINCT award_number) AS awards,
-                        COUNT(*) AS award_history_records
-                    FROM archive.award_version
-                ),
-                proposal_counts AS (
-                    SELECT
-                        COUNT(DISTINCT proposal_number) AS proposals,
-                        COUNT(*) AS proposal_history_records
-                    FROM archive.proposal_version
-                ),
-                kuali_documents AS (
-                    SELECT 'AWARD' AS module, workflow_document_number AS document_number
-                    FROM archive.award_version
-                    WHERE workflow_document_number IS NOT NULL
-
-                    UNION ALL
-
-                    SELECT 'PROPOSAL', document_number
-                    FROM archive.proposal_version
-                    WHERE document_number IS NOT NULL
-
-                    UNION ALL
-
-                    SELECT 'NEGOTIATION', document_number
-                    FROM archive.negotiation
-                    WHERE document_number IS NOT NULL
-
-                    UNION ALL
-
-                    SELECT 'SUBAWARD', document_number
-                    FROM archive.subaward
-                    WHERE document_number IS NOT NULL
-
-                    UNION ALL
-
-                    SELECT 'IRB', document_number
-                    FROM archive.irb_protocol_version
-                    WHERE document_number IS NOT NULL
-                )
-                SELECT
-                    (SELECT COUNT(*)
-                     FROM archive.irb_protocol) AS irb,
-                    (SELECT COUNT(*)
-                     FROM archive.irb_submission) AS submissions,
-                    (SELECT COUNT(*)
-                     FROM archive.irb_funding_source)
-                        AS funding_records,
-                    (SELECT COUNT(*)
-                     FROM archive.irb_timeline_event)
-                        AS timeline_events,
-                    award_counts.awards,
-                    award_counts.award_history_records,
-                    proposal_counts.proposals,
-                    proposal_counts.proposal_history_records,
-                    (SELECT COUNT(*)
-                     FROM archive.negotiation) AS negotiations,
-                    (SELECT COUNT(DISTINCT subaward_code)
-                     FROM archive.subaward) AS subawards,
-                    (SELECT COUNT(DISTINCT (module, document_number))
-                     FROM kuali_documents) AS documents
-                FROM award_counts
-                CROSS JOIN proposal_counts
-                """)
-                .query(DashboardDto.class)
-                .single();
+        return service.counts();
     }
 }

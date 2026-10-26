@@ -2,6 +2,9 @@ package edu.bu.archive.adapter.out.persistence.authorization;
 
 import edu.bu.archive.adapter.in.web.dto.award.AwardSearchResponse;
 import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
+import edu.bu.archive.application.authorization.AccessNotProvisionedException;
+import edu.bu.archive.application.authorization.IdentityAccessDeniedException;
+import edu.bu.archive.application.authorization.PartialFamilyAccessException;
 import edu.bu.archive.application.authorization.AccessOutcome;
 import edu.bu.archive.application.authorization.AccessScope;
 import edu.bu.archive.application.authorization.AuthorizationPolicy;
@@ -381,6 +384,123 @@ class AwardRecordAuthorizationIntegrationTest {
         assertThat(forReal.getMessage()).isEqualTo(forImaginary.getMessage());
     }
 
+    // --- Business decisions, 2026-10-26 ----------------------------------
+
+    @Test
+    void decision1_anUnprovisionedCallerGetsAnExplicitProblemNotAnEmptyArchive() {
+        // "Access Not Provisioned and no research data" - not a silently
+        // empty list, which looks like an archive with nothing in it.
+        AwardArchiveService service = service(unprovisionedAccess());
+
+        assertThatThrownBy(() -> service.search("", AwardSearchFilters.none(), 0, 50))
+                .isInstanceOf(AccessNotProvisionedException.class);
+        assertThatThrownBy(() -> service.findFamilies("", 50))
+                .isInstanceOf(AccessNotProvisionedException.class);
+        assertThatThrownBy(() -> service.searchVersions("", "", "", "", "all", "sequence", 0, 25))
+                .isInstanceOf(AccessNotProvisionedException.class);
+    }
+
+    @Test
+    void decision1_doesNotFireWhenEnforcementIsOff() {
+        assertThatCode(() -> service(AwardRecordAccess.PERMIT_ALL)
+                .search("", AwardSearchFilters.none(), 0, 50))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void decision3_centralSeesArchiveWideTotals() {
+        AwardSearchResponse page = search(fixedScope(
+                scopeFor(new AccessScope(true, Set.of(), Optional.empty(), Set.of()),
+                        Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT)));
+
+        assertThat(page.results().totalElements()).isEqualTo(3);
+    }
+
+    @Test
+    void decision4_departmentTotalsDescribeOnlyTheirOwnRecords() {
+        assertThat(search(departmentScope("7777", false)).results().totalElements()).isEqualTo(1);
+        assertThat(search(departmentScope("1234", false)).results().totalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void decision5_unauthorizedHierarchyRelativesAreOmittedNotStubbed() {
+        // A caller scoped to CHEM-00001 asking for its hierarchy must not
+        // receive PHYS-00001 in any form - not as a node, not as a
+        // placeholder, and not as a title or identifier.
+        var hierarchy = service(departmentScope("7777", false)).findHierarchy("CHEM-00001");
+        String rendered = String.valueOf(hierarchy);
+
+        assertThat(rendered).doesNotContain("PHYS-00001");
+        assertThat(rendered).doesNotContain("Physics one");
+    }
+
+    // --- Family completeness (AI and history) ----------------------------
+
+    @Test
+    void aFamilySpanningResponseRequiresEveryVersionToBeVisible() {
+        /*
+         * findFamily returns EVERY version, and requireAwardNumber only
+         * authorises the current one. The AI endpoints build their context
+         * from this call, so a partial family would be summarised and
+         * presented as the whole Award.
+         */
+        AwardRecordAccess currentOnly = new AwardRecordAccess() {
+            @Override public SqlFragment awardScopeSql(String alias) {
+                return SqlFragment.NONE;
+            }
+
+            @Override public void requireAward(long awardId) { }
+
+            @Override public void requireAwardNumber(String awardNumber) { }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return true;
+            }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public boolean unrestricted() {
+                return false;
+            }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) {
+                throw new PartialFamilyAccessException();
+            }
+        };
+
+        assertThatThrownBy(() -> service(currentOnly).findFamily("CHEM-00001"))
+                .isInstanceOf(PartialFamilyAccessException.class);
+        // The same rule covers the non-AI history endpoints.
+        assertThatThrownBy(() -> service(currentOnly).findSequencePage("CHEM-00001", 0, 25))
+                .isInstanceOf(PartialFamilyAccessException.class);
+    }
+
+    @Test
+    void familyCompletenessIsSatisfiedWhenEveryVersionIsVisible() {
+        assertThatCode(() -> service(AwardRecordAccess.PERMIT_ALL).findFamily("CHEM-00001"))
+                .doesNotThrowAnyException();
+    }
+
+    // --- Cross-module indexes --------------------------------------------
+
+    @Test
+    void crossModuleSearchIsRefusedForAScopedCallerRatherThanLeakingAwardRows() {
+        // Award rows are UNIONed with four modules that have no approved
+        // rule. Refused loudly; an empty page would look like an empty index.
+        AwardRecordAccess scoped = departmentScope("7777", false);
+
+        assertThatThrownBy(() -> scoped.requireUnrestrictedForCrossModuleSearch("Document search"))
+                .isInstanceOf(IdentityAccessDeniedException.class)
+                .hasMessageContaining("no approved authorization rule");
+    }
+
+    @Test
+    void crossModuleSearchStillWorksForCentralAndWhenEnforcementIsOff() {
+        assertThatCode(() -> AwardRecordAccess.PERMIT_ALL
+                .requireUnrestrictedForCrossModuleSearch("Document search"))
+                .doesNotThrowAnyException();
+    }
+
     // --- Drift-proof coverage -------------------------------------------
 
     @Test
@@ -552,12 +672,60 @@ class AwardRecordAuthorizationIntegrationTest {
             @Override public boolean canSeeAwardNumber(String awardNumber) {
                 return visible.contains(awardNumber);
             }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) {
+                requireAwardNumber(awardNumber);
+            }
+
+            /**
+             * A scoped caller is NOT unrestricted - only "enforcement off"
+             * or Central is. Returning true here would have let the
+             * cross-module refusal pass without being exercised.
+             */
+            @Override public boolean unrestricted() {
+                return fragment == SqlFragment.NONE;
+            }
         };
     }
 
     /** Predicate only; every record readable. For list-filtering assertions. */
     private static AwardRecordAccess fixedScope(SqlFragment fragment) {
         return scopedAccess(fragment, Set.of("CHEM-00001", "PHYS-00001", "NULL-00001"));
+    }
+
+    /** Authenticated, but provisioned with nothing at all. */
+    private static AwardRecordAccess unprovisionedAccess() {
+        return new AwardRecordAccess() {
+            @Override public SqlFragment awardScopeSql(String alias) {
+                return SqlFragment.DENY_ALL;
+            }
+
+            @Override public void requireAward(long awardId) {
+                throw new AccessNotProvisionedException();
+            }
+
+            @Override public void requireAwardNumber(String awardNumber) {
+                throw new AccessNotProvisionedException();
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return false;
+            }
+
+            @Override public void requireProvisioned() {
+                throw new AccessNotProvisionedException();
+            }
+
+            @Override public boolean unrestricted() {
+                return false;
+            }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) {
+                throw new AccessNotProvisionedException();
+            }
+        };
     }
 
     private static AwardRecordAccess denyingAccess() {
@@ -577,6 +745,14 @@ class AwardRecordAuthorizationIntegrationTest {
             @Override public boolean canSeeAwardNumber(String awardNumber) {
                 return false;
             }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) {
+                requireAwardNumber(awardNumber);
+            }
+
+            @Override public boolean unrestricted() { return false; }
         };
     }
 
@@ -597,6 +773,14 @@ class AwardRecordAuthorizationIntegrationTest {
             @Override public boolean canSeeAwardNumber(String awardNumber) {
                 return allowed.equals(awardNumber);
             }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) {
+                requireAwardNumber(awardNumber);
+            }
+
+            @Override public boolean unrestricted() { return false; }
         };
     }
 

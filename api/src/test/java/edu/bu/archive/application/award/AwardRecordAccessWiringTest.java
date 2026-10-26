@@ -133,6 +133,14 @@ class AwardRecordAccessWiringTest {
             @Override public boolean canSeeAwardNumber(String awardNumber) {
                 return false;
             }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) {
+                requireAwardNumber(awardNumber);
+            }
+
+            @Override public boolean unrestricted() { return false; }
         };
     }
 

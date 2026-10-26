@@ -129,40 +129,6 @@ public class AwardArchiveService {
         this(repository, attachmentStorage, timingLogProvider, null, null);
     }
 
-    /**
-     * Refuses to start when record authorization is ENABLED but the only
-     * available implementation is {@code PERMIT_ALL}.
-     *
-     * <p>Without this, a context in which the Phase 1 beans are missing,
-     * excluded, or failed to initialise would quietly serve every Award to
-     * every authenticated caller while configuration claimed enforcement was
-     * on. That is the one failure mode a security control must not have: an
-     * operator would see {@code enforcement-enabled=true} and believe the
-     * archive was protected. Failing startup is loud, immediate, and cannot
-     * be mistaken for working.
-     *
-     * <p>Enforcement OFF with {@code PERMIT_ALL} is the normal, supported
-     * configuration and is left alone.
-     */
-    static void requireEnforceableWiring(
-            edu.bu.archive.application.authorization.AwardRecordAccess access,
-            org.springframework.beans.factory.ObjectProvider<
-                    edu.bu.archive.application.authorization.AuthorizationProperties> properties
-    ) {
-        if (access != edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL) {
-            return;
-        }
-        edu.bu.archive.application.authorization.AuthorizationProperties settings =
-                properties == null ? null : properties.getIfAvailable();
-        if (settings != null && settings.isEnforcementEnabled()) {
-            throw new IllegalStateException(
-                    "app.authorization.enforcement-enabled is true but no AwardRecordAccess "
-                            + "implementation is available, so Award authorization would silently "
-                            + "permit every record. Refusing to start. Ensure the record "
-                            + "authorization beans (AuthorizationConfiguration) are present.");
-        }
-    }
-
     /** Direct-injection form, for tests and for callers that already hold the port. */
     public AwardArchiveService(
             AwardArchiveRepository repository,
@@ -204,7 +170,8 @@ public class AwardArchiveService {
         this.recordAccess = access != null
                 ? access
                 : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
-        requireEnforceableWiring(this.recordAccess, authorizationProperties);
+        edu.bu.archive.application.authorization.AwardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
         edu.bu.archive.application.service.SearchTimingLog provided =
                 timingLogProvider == null ? null : timingLogProvider.getIfAvailable();
         this.timingLog = provided != null
@@ -219,6 +186,9 @@ public class AwardArchiveService {
      * every Award gate.
      */
     public List<AwardFamilySummaryResponse> findFamilies(String query, int limit) {
+        // DECISION 1: a caller with no archive access gets Access Not
+        // Provisioned, not a silently empty list.
+        recordAccess.requireProvisioned();
         return repository.findFamilies(query, recordAccess.awardScopeSql("av"), limit);
     }
 
@@ -339,6 +309,24 @@ public class AwardArchiveService {
                 normalizeAwardNumber(awardNumber);
 
         recordAccess.requireAwardNumber(normalizedAwardNumber);
+        /*
+         * FAMILY-COMPLETENESS RULE (2026-10-26).
+         *
+         * This response spans EVERY version of the Award family, and
+         * requireAwardNumber only authorises the CURRENT one. A caller
+         * cleared for the current version but not an earlier one would
+         * otherwise read that earlier version here - and, through the AI
+         * endpoints, be handed a summary synthesised from it and presented
+         * as the whole Award.
+         *
+         * So the whole family must be visible, decided per version. Under
+         * FAMILY_WIDE version scope that is satisfied whenever any version
+         * is in scope, so this costs nothing today; under PER_VERSION it
+         * denies, which is the point. Applied here rather than in each AI
+         * service so the non-AI history endpoint is covered by the same
+         * rule and cannot drift away from it.
+         */
+        recordAccess.requireEveryAwardVersion(normalizedAwardNumber);
 
         if (repository.findCurrent(normalizedAwardNumber).isEmpty()) {
             throw new NoSuchElementException(
@@ -391,6 +379,24 @@ public class AwardArchiveService {
                 normalizeAwardNumber(awardNumber);
 
         recordAccess.requireAwardNumber(normalizedAwardNumber);
+        /*
+         * FAMILY-COMPLETENESS RULE (2026-10-26).
+         *
+         * This response spans EVERY version of the Award family, and
+         * requireAwardNumber only authorises the CURRENT one. A caller
+         * cleared for the current version but not an earlier one would
+         * otherwise read that earlier version here - and, through the AI
+         * endpoints, be handed a summary synthesised from it and presented
+         * as the whole Award.
+         *
+         * So the whole family must be visible, decided per version. Under
+         * FAMILY_WIDE version scope that is satisfied whenever any version
+         * is in scope, so this costs nothing today; under PER_VERSION it
+         * denies, which is the point. Applied here rather than in each AI
+         * service so the non-AI history endpoint is covered by the same
+         * rule and cannot drift away from it.
+         */
+        recordAccess.requireEveryAwardVersion(normalizedAwardNumber);
 
         List<AwardRowResponse> rows =
                 repository.findSequenceRows(
@@ -437,6 +443,24 @@ public class AwardArchiveService {
         // a NoSuchElementException, so an unauthorized Award is answered 404
         // exactly like a missing one - a 403 would confirm it exists.
         recordAccess.requireAwardNumber(normalizedAwardNumber);
+        /*
+         * FAMILY-COMPLETENESS RULE (2026-10-26).
+         *
+         * This response spans EVERY version of the Award family, and
+         * requireAwardNumber only authorises the CURRENT one. A caller
+         * cleared for the current version but not an earlier one would
+         * otherwise read that earlier version here - and, through the AI
+         * endpoints, be handed a summary synthesised from it and presented
+         * as the whole Award.
+         *
+         * So the whole family must be visible, decided per version. Under
+         * FAMILY_WIDE version scope that is satisfied whenever any version
+         * is in scope, so this costs nothing today; under PER_VERSION it
+         * denies, which is the point. Applied here rather than in each AI
+         * service so the non-AI history endpoint is covered by the same
+         * rule and cannot drift away from it.
+         */
+        recordAccess.requireEveryAwardVersion(normalizedAwardNumber);
 
         List<AwardRowResponse> rows =
                 repository.findHistoryRows(
@@ -684,6 +708,8 @@ public class AwardArchiveService {
          * Filtering the page in Java afterwards would leak the existence of
          * out-of-scope Awards through totalElements and through short pages.
          */
+        recordAccess.requireProvisioned();
+
         edu.bu.archive.application.authorization.SqlFragment scope =
                 recordAccess.awardScopeSql("av");
 
@@ -1077,6 +1103,8 @@ public class AwardArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
+        recordAccess.requireProvisioned();
+
         edu.bu.archive.application.authorization.SqlFragment versionScope =
                 recordAccess.awardScopeSql("av");
 
@@ -1195,6 +1223,8 @@ public class AwardArchiveService {
 
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
+
+        recordAccess.requireProvisioned();
 
         edu.bu.archive.application.authorization.SqlFragment attachmentScope =
                 recordAccess.awardScopeSql("av");
