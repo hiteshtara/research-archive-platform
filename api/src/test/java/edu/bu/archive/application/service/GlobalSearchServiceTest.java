@@ -1,5 +1,6 @@
 package edu.bu.archive.application.service;
 
+import edu.bu.archive.application.authorization.SqlFragment;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchItemResponse;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
@@ -106,7 +107,8 @@ class GlobalSearchServiceTest {
                 // TC-042 timing instrumentation, disabled - these tests
                 // are about search behaviour, not measurement.
                 new SearchTimingLog(false)
-        );
+        ,
+                null);
 
         // Default: empty results for every domain unless a test
         // overrides them - avoids every test needing to stub every
@@ -120,7 +122,7 @@ class GlobalSearchServiceTest {
                 .thenReturn(new PageResponse<>(List.of(), 0, 25, 0, 0, true, true));
         when(subawardArchiveService.findPage(anyString(), eq(0), anyInt()))
                 .thenReturn(new SubawardPageResponse(List.of(), 0, 25, 0, 0, true, true));
-        when(proposalArchiveRepository.findFamilies(anyString(), anyInt()))
+        when(proposalArchiveRepository.findFamilies(anyString(), any(), anyInt()))
                 .thenReturn(List.of());
     }
 
@@ -411,7 +413,7 @@ class GlobalSearchServiceTest {
 
     @Test
     void mapsAProposalResultWithARouteToTheCurrentProposalId() {
-        when(proposalArchiveRepository.findFamilies("01157400", 25)).thenReturn(
+        when(proposalArchiveRepository.findFamilies("01157400", SqlFragment.NONE, 25)).thenReturn(
                 List.of(new ProposalFamilySummaryResponse(
                         "01157400", "Autism Research", "Funded", "NIH",
                         "Medicine", "Dr. Smacher", 4, 998877L
@@ -437,7 +439,7 @@ class GlobalSearchServiceTest {
 
     @Test
     void aProposalFamilyWithNoCurrentlyArchivedVersionHasANullRoute() {
-        when(proposalArchiveRepository.findFamilies("01157400", 25)).thenReturn(
+        when(proposalArchiveRepository.findFamilies("01157400", SqlFragment.NONE, 25)).thenReturn(
                 List.of(new ProposalFamilySummaryResponse(
                         "01157400", "Autism Research", "Funded", "NIH",
                         "Medicine", "Dr. Smacher", 4, null
@@ -529,7 +531,7 @@ class GlobalSearchServiceTest {
 
     @Test
     void namesProposalAsFailedWithoutFailingTheWholeRequest() {
-        when(proposalArchiveRepository.findFamilies("campbell", 25))
+        when(proposalArchiveRepository.findFamilies("campbell", SqlFragment.NONE, 25))
                 .thenThrow(new RuntimeException("Proposal search unavailable"));
 
         GlobalSearchResponse response = service.search("campbell");
@@ -767,7 +769,7 @@ class GlobalSearchServiceTest {
                 .thenReturn(List.of(
                         semanticRow("SUBAWARD", 900L, 900L, "unrelated-01")
                 ));
-        when(proposalArchiveRepository.findFamilies("smacher", 25)).thenReturn(
+        when(proposalArchiveRepository.findFamilies("smacher", SqlFragment.NONE, 25)).thenReturn(
                 List.of(new ProposalFamilySummaryResponse(
                         "smacher-01", "Some Title", "Funded", "NIH",
                         "Medicine", "Dr. Other", 4, 998877L
@@ -1107,7 +1109,7 @@ class GlobalSearchServiceTest {
         verify(awardArchiveService).search("campbell", 0, 25);
         verify(subawardArchiveService).findPage("campbell", 0, 25);
         verifyNoInteractions(negotiationArchiveService);
-        verify(proposalArchiveRepository, never()).findFamilies(anyString(), anyInt());
+        verify(proposalArchiveRepository, never()).findFamilies(anyString(), any(), anyInt());
         verifyNoInteractions(irbSearchRepository);
     }
 
@@ -1118,7 +1120,7 @@ class GlobalSearchServiceTest {
         verify(awardArchiveService).search("campbell", 0, 25);
         verify(negotiationArchiveService).findPage("campbell", 0, 25);
         verify(subawardArchiveService).findPage("campbell", 0, 25);
-        verify(proposalArchiveRepository).findFamilies("campbell", 25);
+        verify(proposalArchiveRepository).findFamilies("campbell", SqlFragment.NONE, 25);
     }
 
     @Test

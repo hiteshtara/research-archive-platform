@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.application.authorization.SqlFragment;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
@@ -26,6 +27,20 @@ public class ProposalArchiveRepository {
             String query,
             int limit
     ) {
+        return findFamilies(query, SqlFragment.NONE, limit);
+    }
+
+    /**
+     * @param scope record-authorization predicate for the {@code ranked} CTE.
+     *              This method also backs Global Search's Proposal leg, so
+     *              scoping it covers that surface too.
+     */
+    public List<ProposalFamilySummaryResponse> findFamilies(
+            String query,
+            SqlFragment scope,
+            int limit
+    ) {
+        SqlFragment familyScope = scope == null ? SqlFragment.NONE : scope;
         String normalizedQuery =
                 query == null
                         ? ""
@@ -53,6 +68,9 @@ public class ProposalArchiveRepository {
                         proposal_sequence_status,
                         sponsor_name,
                         lead_unit_name,
+                        -- Carried for the record-authorization predicate
+                        -- below; not selected into the response.
+                        lead_unit_number,
                         principal_investigator_name,
                         ROW_NUMBER() OVER (
                             PARTITION BY proposal_number
@@ -75,10 +93,11 @@ public class ProposalArchiveRepository {
                     proposal_id AS current_proposal_id
                 FROM ranked
                 WHERE row_rank = 1
-                """ + filter + """
+                """ + filter + familyScope.sql() + """
                 ORDER BY proposal_number
                 LIMIT :limit
                 """);
+        statement = bindScope(statement, familyScope);
         if (!normalizedQuery.isEmpty()) {
             statement = statement.param("query", normalizedQuery);
         }
@@ -144,6 +163,23 @@ public class ProposalArchiveRepository {
      * fallback returns today, including name-format differences between
      * principal_investigator_name and proposal_person.full_name.
      */
+    /**
+     * Binds a record-authorization predicate's named parameters. Collections
+     * bind as-is; Spring expands them for {@code IN (:name)}. A
+     * {@link SqlFragment#NONE} binds nothing, so the statement is identical
+     * to the unscoped one.
+     */
+    private static JdbcClient.StatementSpec bindScope(
+            JdbcClient.StatementSpec statement,
+            SqlFragment scope
+    ) {
+        JdbcClient.StatementSpec bound = statement;
+        for (var parameter : scope.params().entrySet()) {
+            bound = bound.param(parameter.getKey(), parameter.getValue());
+        }
+        return bound;
+    }
+
     private static final String FAMILY_PAGE_WHERE = """
             WHERE row_rank = 1
               AND (CAST(:query AS TEXT) IS NULL OR (
@@ -193,7 +229,24 @@ public class ProposalArchiveRepository {
             int limit,
             int offset
     ) {
-        return bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
+        return findFamilyPage(query, filters, SqlFragment.NONE, limit, offset);
+    }
+
+    /**
+     * @param scope record-authorization predicate for the {@code ranked} CTE,
+     *              which exposes proposal_id, proposal_number and
+     *              lead_unit_number - exactly what the scope builder needs.
+     *              {@link SqlFragment#NONE} reproduces the unscoped statement.
+     */
+    public List<ProposalFamilySummaryResponse> findFamilyPage(
+            String query,
+            ProposalSearchFilters filters,
+            SqlFragment scope,
+            int limit,
+            int offset
+    ) {
+        SqlFragment pageScope = scope == null ? SqlFragment.NONE : scope;
+        return bindScope(bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
                 SELECT
                     proposal_number,
                     title,
@@ -205,10 +258,10 @@ public class ProposalArchiveRepository {
                     version_number AS latest_version_number,
                     proposal_id AS current_proposal_id
                 FROM ranked
-                """ + FAMILY_PAGE_WHERE + """
+                """ + FAMILY_PAGE_WHERE + pageScope.sql() + """
                 ORDER BY proposal_number
                 LIMIT :limit OFFSET :offset
-                """), query, filters)
+                """), query, filters), pageScope)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(ProposalFamilySummaryResponse.class)
@@ -216,10 +269,20 @@ public class ProposalArchiveRepository {
     }
 
     public long countFamilyPage(String query, ProposalSearchFilters filters) {
-        Long count = bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
+        return countFamilyPage(query, filters, SqlFragment.NONE);
+    }
+
+    /**
+     * Must take the same scope as {@link #findFamilyPage}: a total computed
+     * over rows the caller cannot see discloses their existence through the
+     * page metadata even though no row is returned.
+     */
+    public long countFamilyPage(String query, ProposalSearchFilters filters, SqlFragment scope) {
+        SqlFragment pageScope = scope == null ? SqlFragment.NONE : scope;
+        Long count = bindScope(bindFamilyPage(jdbc.sql(FAMILY_PAGE_RANKED + """
                 SELECT COUNT(*)
                 FROM ranked
-                """ + FAMILY_PAGE_WHERE), query, filters)
+                """ + FAMILY_PAGE_WHERE + pageScope.sql()), query, filters), pageScope)
                 .query(Long.class)
                 .single();
         return count == null ? 0L : count;

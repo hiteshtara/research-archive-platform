@@ -27,7 +27,8 @@ class ProposalArchiveServiceTest {
     @BeforeEach
     void setUp() {
         repository = mock(ProposalArchiveRepository.class);
-        service = new ProposalArchiveService(repository);
+        service = new ProposalArchiveService(repository,
+                null, null);
     }
 
     @Test

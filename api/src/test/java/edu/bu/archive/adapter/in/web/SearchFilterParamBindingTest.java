@@ -144,7 +144,7 @@ class SearchFilterParamBindingTest {
         when(service.findFamilyPage("cancer", expected, 3, 25))
                 .thenReturn(new PageResponse<>(List.of(), 3, 25, 0, 0, false, true));
 
-        mvc(new ProposalArchiveController(service, mock(ProposalArchiveRepository.class)))
+        mvc(new ProposalArchiveController(service))
                 .perform(get("/api/proposals/search")
                         .param("query", "cancer")
                         .param("sponsor", "NIH")

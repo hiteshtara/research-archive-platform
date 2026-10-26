@@ -20,7 +20,7 @@ import org.springframework.web.context.request.RequestContextHolder;
  * With enforcement ON, a missing identity, policy or store, or any failure,
  * denies.
  */
-public class RecordAuthorizationService implements RecordVisibility {
+public class RecordAuthorizationService implements RecordVisibility, ProposalRecordAccess {
 
     private static final String OUTCOME_ATTRIBUTE = RecordAuthorizationService.class.getName() + ".outcome";
     private static final ThreadLocal<AccessOutcome> PROPAGATED = new ThreadLocal<>();
@@ -241,6 +241,35 @@ public class RecordAuthorizationService implements RecordVisibility {
         requireVersion(facts.awardFamily(awardNumber), versionKey);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Delegates to {@link #scopeSql(RecordModule, String)} for
+     * {@link RecordModule#PROPOSAL}; the Proposal services depend on the
+     * narrow {@link ProposalRecordAccess} port rather than this whole class.
+     */
+    @Override
+    public SqlFragment proposalScopeSql(String alias) {
+        return scopeSql(RecordModule.PROPOSAL, alias);
+    }
+
+    /**
+     * Family-wide Proposal responses require every version to be visible -
+     * the same rule the Award family uses, and for the same reason: a subset
+     * presented as the whole family is a wrong answer, not a partial one.
+     */
+    @Override
+    public void requireEveryProposalVersion(String proposalNumber) {
+        if (!enforced()) {
+            return;
+        }
+        requireProposalNumber(proposalNumber);
+        if (!canSeeEveryProposalVersion(proposalNumber)) {
+            throw new PartialFamilyAccessException();
+        }
+    }
+
+    @Override
     public void requireProposal(long proposalId) {
         if (!enforced()) {
             return;
@@ -250,6 +279,7 @@ public class RecordAuthorizationService implements RecordVisibility {
         requireVersion(facts.proposalFamily(proposalNumber), String.valueOf(proposalId));
     }
 
+    @Override
     public void requireProposalNumber(String proposalNumber) {
         if (!enforced()) {
             return;

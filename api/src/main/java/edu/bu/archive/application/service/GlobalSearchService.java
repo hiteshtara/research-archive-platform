@@ -99,6 +99,11 @@ public class GlobalSearchService {
     private final ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider;
     // Temporary TC-042 measurement instrumentation, off by default.
     private final SearchTimingLog timingLog;
+    /**
+     * Proposal record authorization for the legs that read Proposal rows.
+     * Defaults to PERMIT_ALL, which adds no predicate - today's behaviour.
+     */
+    private final edu.bu.archive.application.authorization.ProposalRecordAccess proposalAccess;
 
     public GlobalSearchService(
             GlobalSearchRepository irbSearchRepository,
@@ -109,7 +114,9 @@ public class GlobalSearchService {
             SemanticSearchRepository semanticSearchRepository,
             SemanticSearchProperties semanticSearchProperties,
             ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider,
-            SearchTimingLog timingLog
+            SearchTimingLog timingLog,
+            ObjectProvider<edu.bu.archive.application.authorization.ProposalRecordAccess>
+                    proposalAccessProvider
     ) {
         this.irbSearchRepository = irbSearchRepository;
         this.awardArchiveService = awardArchiveService;
@@ -120,6 +127,11 @@ public class GlobalSearchService {
         this.semanticSearchProperties = semanticSearchProperties;
         this.embeddingProviderObjectProvider = embeddingProviderObjectProvider;
         this.timingLog = timingLog;
+        edu.bu.archive.application.authorization.ProposalRecordAccess resolved =
+                proposalAccessProvider == null ? null : proposalAccessProvider.getIfAvailable();
+        this.proposalAccess = resolved != null
+                ? resolved
+                : edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL;
     }
 
     /**
@@ -727,7 +739,8 @@ public class GlobalSearchService {
 
     private List<GlobalSearchItemResponse> searchProposal(String query) {
         List<ProposalFamilySummaryResponse> results =
-                proposalArchiveRepository.findFamilies(query, PER_DOMAIN_LIMIT);
+                proposalArchiveRepository.findFamilies(
+                        query, proposalAccess.proposalScopeSql("ranked"), PER_DOMAIN_LIMIT);
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(results.size());
         for (ProposalFamilySummaryResponse result : results) {
@@ -943,6 +956,12 @@ public class GlobalSearchService {
                         "SEMANTIC_ENRICH_PROPOSAL",
                         () -> proposalArchiveRepository
                                 .findCurrentSummariesForNumbers(proposalNumbers).stream()
+                                // Per row: a semantic batch legitimately
+                                // spans Proposals the caller may only partly
+                                // see. The drop above removes rows left
+                                // unenriched by this filter.
+                                .filter(row -> proposalAccess
+                                        .canSeeProposalNumber(row.proposalNumber()))
                                 .collect(Collectors.toMap(
                                         ProposalSemanticSummaryRow::proposalNumber,
                                         summary -> summary,
@@ -1008,10 +1027,32 @@ public class GlobalSearchService {
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
+            ProposalSemanticSummaryRow proposalSummary =
+                    proposalSummaries.get(row.businessNumber());
+
+            /*
+             * A semantic PROPOSAL row was read from a Proposal that exists,
+             * so an absent summary for a SCOPED caller means "not
+             * authorised", not "no data". The row must be dropped, not left
+             * unenriched: an unenriched row still carries the proposal
+             * number as its businessNumber and a /proposals link, which is
+             * the disclosure the enrichment filter exists to prevent.
+             *
+             * Gated on the caller not being unrestricted. With enforcement
+             * off, or for Central, an absent summary means a genuine data
+             * gap and today's behaviour is to keep the row - this must not
+             * change deployed behaviour.
+             */
+            if (!proposalAccess.unrestricted()
+                    && "PROPOSAL".equals(row.module())
+                    && proposalSummary == null) {
+                continue;
+            }
+
             mapped.add(toGlobalSearchItem(
                     row,
                     awardSummaries.get(row.businessNumber()),
-                    proposalSummaries.get(row.businessNumber()),
+                    proposalSummary,
                     negotiationSummaries.get(row.businessNumber()),
                     subawardSummaries.get(row.businessNumber())
             ));
