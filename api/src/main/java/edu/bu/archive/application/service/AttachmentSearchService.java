@@ -43,12 +43,26 @@ public class AttachmentSearchService {
             "ORDER BY parent_number, sequence_number, record_type, attachment_id\n";
 
     private final AwardArchiveService awardArchiveService;
+    private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
     private final AttachmentSearchRepository repository;
 
     public AttachmentSearchService(
             AwardArchiveService awardArchiveService,
             AttachmentSearchRepository repository
+    ,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
     ) {
+        edu.bu.archive.application.authorization.AwardRecordAccess resolvedAccess =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = resolvedAccess != null
+                ? resolvedAccess
+                : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.AwardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
         this.awardArchiveService = awardArchiveService;
         this.repository = repository;
     }
@@ -66,6 +80,11 @@ public class AttachmentSearchService {
             int page,
             int size
     ) {
+        // Cross-module index: Award rows are UNIONed with four modules that
+        // have no approved record rule, so this is refused for a scoped
+        // caller rather than returning Award rows outside their scope.
+        recordAccess.requireUnrestrictedForCrossModuleSearch("Attachment search");
+
         String safeRecordType = normalizeRecordType(recordType);
         String safeRecordNumber = resolveAliasedParam(recordNumber, awardNumberAlias, "recordNumber/awardNumber");
         String safeRecordId = resolveAliasedParam(recordId, awardIdAlias, "recordId/awardId");

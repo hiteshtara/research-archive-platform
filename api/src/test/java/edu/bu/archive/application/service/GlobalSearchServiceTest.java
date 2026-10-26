@@ -106,7 +106,8 @@ class GlobalSearchServiceTest {
                 // TC-042 timing instrumentation, disabled - these tests
                 // are about search behaviour, not measurement.
                 new SearchTimingLog(false)
-        );
+        ,
+                null);
 
         // Default: empty results for every domain unless a test
         // overrides them - avoids every test needing to stub every

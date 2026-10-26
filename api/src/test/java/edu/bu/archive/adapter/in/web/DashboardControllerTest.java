@@ -30,7 +30,9 @@ class DashboardControllerTest {
         when(statement.query(DashboardDto.class)).thenReturn(query);
         when(query.single()).thenReturn(expected);
 
-        assertThat(new DashboardController(jdbc).dashboard())
+        assertThat(new DashboardController(
+                new edu.bu.archive.application.service.DashboardService(jdbc, null, null))
+                .dashboard())
                 .isEqualTo(expected);
 
         String sql = org.mockito.Mockito

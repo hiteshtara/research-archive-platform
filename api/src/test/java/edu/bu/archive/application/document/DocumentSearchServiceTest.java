@@ -23,7 +23,8 @@ class DocumentSearchServiceTest {
     private final DocumentSearchRepository repository =
             mock(DocumentSearchRepository.class);
     private final DocumentSearchService service =
-            new DocumentSearchService(repository);
+            new DocumentSearchService(repository,
+                null, null);
 
     // --- Real CARB-X fixtures from
     // docs/architecture/KUALI_DOCUMENT_METRIC_INVESTIGATION.md ---
