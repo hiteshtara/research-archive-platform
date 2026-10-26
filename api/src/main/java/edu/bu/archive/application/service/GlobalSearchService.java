@@ -1037,9 +1037,37 @@ public class GlobalSearchService {
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
+            AwardSemanticSummaryRow awardSummary = awardSummaries.get(row.businessNumber());
+
+            /*
+             * AwardArchiveService.findSummariesForAwardNumbers filters its
+             * result to Awards the caller may see, so an absent summary for
+             * an AWARD row means "not authorised", not "no data" - every
+             * semantic AWARD row was read from an Award that exists.
+             *
+             * The row must therefore be DROPPED, not merely left unenriched:
+             * an unenriched row still carries the award number as its
+             * businessNumber, an /awards/{id} link and the awardId, which is
+             * the disclosure. Only AWARD rows are treated this way; the
+             * other modules have no record rule yet, so an absent summary
+             * there genuinely means unenriched (see the comment above about
+             * NEGOTIATION and SUBAWARD being left unenriched by design).
+             *
+             * Gated on NOT being unrestricted, which matters: with
+             * enforcement off (or for a Central caller) the summary list is
+             * unfiltered, so an absent summary means a genuine data gap -
+             * an Award with no current version row - and today's behaviour
+             * is to keep the unenriched row. Dropping it there would be a
+             * behaviour change with enforcement disabled, which this work
+             * must not make. A unit test covers exactly that case.
+             */
+            if (!visibility.unrestricted() && "AWARD".equals(row.module()) && awardSummary == null) {
+                continue;
+            }
+
             mapped.add(toGlobalSearchItem(
                     row,
-                    awardSummaries.get(row.businessNumber()),
+                    awardSummary,
                     proposalSummaries.get(row.businessNumber()),
                     negotiationSummaries.get(row.businessNumber()),
                     subawardSummaries.get(row.businessNumber())
