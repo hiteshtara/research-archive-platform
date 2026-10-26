@@ -169,6 +169,74 @@ Cleanup was tested, not just read — with a stubbed AWS CLI:
 | Exec agent never reaches RUNNING | task stopped, exit 1 |
 | `run-task` itself fails | **no** spurious `stop-task`, exit 1 |
 
+## Deployed and verified 2026-10-26
+
+Applied to dev from merge commit `7d6e982`: 9 resources created, 0 changed,
+0 destroyed; a follow-up plan reports no changes. End-to-end run:
+
+| Check | Result |
+|---|---|
+| Task start, exec agent, SSM session | tunnel opened on `localhost:15432` |
+| `SELECT current_user, current_database()` | `archive_analyst`, `research_archive` |
+| `SHOW transaction_read_only` | `on` |
+| Write attempt (`CREATE TABLE`) | refused: *cannot execute CREATE TABLE in a read-only transaction* |
+| Data through the tunnel | 93,735 `archive.subaward` rows |
+| Ctrl-C teardown | session exited, task stopped (`stoppedReason: tunnel session ended`), port released |
+| Stray tasks afterwards | none |
+| Local Homebrew Postgres on 5432 | untouched, same PID, still reachable as `mukadder` |
+
+Two things the live run taught us, both now fixed or documented:
+
+**`TargetNotConnected` on first attempt.** `ExecuteCommandAgent` reporting
+RUNNING in the ECS API is necessary but not sufficient — SSM registers the
+channel a few seconds later. The first live run failed on a perfectly good
+tunnel. `start-db-tunnel.sh` now retries that specific error (12 × 5s) and
+nothing else.
+
+**Signalling a backgrounded script.** In a terminal, Ctrl-C signals the whole
+foreground process group and cleanup runs immediately. If you background the
+script instead, `kill -INT <pid>` reaches bash but not the blocking `aws`
+child, so cleanup is deferred. Use `kill -INT -<pgid>` or just run
+`scripts/stop-db-tunnel.sh`.
+
+## SSM Agent vulnerability status — UNRESOLVED, read before normal use
+
+The Fargate-injected agent in a live tunnel task reports:
+
+```
+SSM Agent version: 3.3.0.0
+```
+
+CVE-2026-89049 is fixed in **3.3.4851.0**, and the bulletin lists impacted
+versions as **< 3.3.4851.0 (all versions supporting remote-host port
+forwarding)**. **The agent in use is below the fix.** This is no longer a
+theoretical residual risk; it is a confirmed unpatched component on the exact
+code path this tunnel uses.
+
+What an exploit would yield, concretely: a caller who can start a
+port-forwarding session bypasses the destination denylist, reaches
+`169.254.170.2`, and reads **the task role's** credentials.
+
+Why that is survivable here, and why the design was built this way:
+
+- The task role holds **only** the four `ssmmessages` actions. Stolen, it can
+  open an SSM channel and do nothing else — no database credential, no S3,
+  no Secrets Manager, no Bedrock.
+- The operator policy scopes `ssm:StartSession` to this one document and this
+  one cluster, which is AWS's own published workaround.
+- Only named operators get that policy, and it is attached to nobody by
+  default.
+
+The agent version is AWS's to ship on Fargate; there is no action available
+to us beyond the above. Re-check it when AWS updates the platform:
+
+```bash
+aws ecs execute-command --cluster research-archive-platform-dev-dbtunnel   --task <task> --container tunnel --interactive   --command "sh -c '/managed-agents/execute-command/amazon-ssm-agent --version'"
+```
+
+**CloudShell does not use this code path and is unaffected.** For ad hoc SQL
+with no GUI requirement, it remains the lower-risk option.
+
 ## Security notes
 
 - **RDS stays private.** `PubliclyAccessible` is untouched. The ingress rule
