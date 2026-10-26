@@ -154,7 +154,7 @@ export function scopesPresent(cases) {
  */
 export function securitySummary(requirements) {
   const verified = requirements.filter(
-    (requirement) => requirement.verification === "Verified",
+    (requirement) => requirement.status && requirement.status.acceptanceVerified === "yes",
   ).length;
   const conflicts = requirements.filter((requirement) => requirement.conflict).length;
 
@@ -351,4 +351,116 @@ export function casesWithUnevidencedVerification(cases) {
 
 export function trackedCases(cases) {
   return cases.filter((item) => item.progress);
+}
+
+/*
+ * --- Security implementation stages ------------------------------------
+ *
+ * Seven distinct facts about one requirement, deliberately NOT collapsed
+ * into a single "status". They are independent and routinely disagree: a
+ * decision can be approved with no code, code can pass tests and sit
+ * unmerged for weeks, merged code can be deployed and still be inert
+ * because enforcement is off, and none of that is acceptance verification.
+ *
+ * Collapsing them is how "the tests pass" becomes "it works in dev" on a
+ * status page, which is the specific failure this page exists to avoid.
+ */
+export const SECURITY_STAGES = [
+  {
+    key: "decisionApproved",
+    label: "Decision approved",
+    detail: "The business rule has been agreed. Says nothing about code.",
+  },
+  {
+    key: "codeImplemented",
+    label: "Code implemented",
+    detail: "The rule exists in source. Says nothing about whether it runs.",
+  },
+  {
+    key: "testsPassed",
+    label: "Tests passed",
+    detail: "Automated coverage exercises the rule and passes.",
+  },
+  {
+    key: "mergedToMain",
+    label: "Merged to main",
+    detail: "On the branch that builds. An open pull request is not merged.",
+  },
+  {
+    key: "deployed",
+    label: "Deployed",
+    detail: "Running in the development environment.",
+  },
+  {
+    key: "enforcementEnabled",
+    label: "Enforcement on",
+    detail: "The gate is actually deciding requests, rather than present and inert.",
+  },
+  {
+    key: "acceptanceVerified",
+    label: "Acceptance verified",
+    detail: "Checked against the written acceptance criteria, with evidence.",
+  },
+];
+
+/** How one stage value is shown. Anything unrecognised reads as unknown, never as done. */
+export function securityStageState(value) {
+  if (value === "yes" || value === true) {
+    return { tone: "done", text: "Yes" };
+  }
+  if (value === "partial") {
+    return { tone: "partial", text: "Partial" };
+  }
+  if (value === "approved") {
+    return { tone: "done", text: "Approved" };
+  }
+  if (value === "open") {
+    return { tone: "open", text: "Open" };
+  }
+  if (value === "off") {
+    return { tone: "off", text: "Off" };
+  }
+  return { tone: "no", text: "No" };
+}
+
+/** The seven stages of one requirement, resolved for display. */
+export function securityStages(requirement) {
+  const status = (requirement && requirement.status) || {};
+  return SECURITY_STAGES.map((stage) => ({
+    ...stage,
+    ...securityStageState(status[stage.key]),
+  }));
+}
+
+/**
+ * Headline counts. "Verified" means acceptance-verified and nothing less -
+ * deliberately not "merged", not "tests pass".
+ */
+export function securityProgress(requirements) {
+  const list = requirements || [];
+  const count = (key, wanted) =>
+    list.filter((item) => item.status && wanted.includes(item.status[key])).length;
+
+  return {
+    total: list.length,
+    decided: count("decisionApproved", ["approved", "yes", true]),
+    implemented: count("codeImplemented", ["yes", true]),
+    merged: count("mergedToMain", ["yes", true]),
+    verified: count("acceptanceVerified", ["yes", true]),
+    open: list.filter((item) => item.status && item.status.decisionApproved === "open").length,
+  };
+}
+
+/** True when no requirement anywhere reports enforcement as on. */
+export function enforcementIsOffEverywhere(requirements) {
+  return (requirements || []).every(
+    (item) => !item.status || item.status.enforcementEnabled !== "yes",
+  );
+}
+
+/** Module rows whose state is not yet "working" or "implemented". */
+export function pendingModules(modules) {
+  return (modules || []).filter(
+    (module) => module.state !== "working" && module.state !== "implemented",
+  );
 }

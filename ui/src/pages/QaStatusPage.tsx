@@ -9,9 +9,18 @@ import {
   Button,
   Chip,
   Divider,
+  List,
+  ListItem,
+  ListItemText,
   MenuItem,
   Paper,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from "@mui/material";
@@ -19,6 +28,7 @@ import { useState } from "react";
 
 import snapshot from "../features/qa/qaSnapshot.json";
 import securityData from "../features/qa/securityRequirements.json";
+import type { SecurityModule } from "../features/qa/qaStatusPresentation.d.mts";
 import type {
   QaCase,
   QaStatusKey,
@@ -32,6 +42,9 @@ import {
   openCaseCount,
   progressStage,
   requirementsWithConflicts,
+  securityProgress,
+  securityStages,
+  enforcementIsOffEverywhere,
   resultsLabel,
   securitySummary,
   statusMeta,
@@ -52,6 +65,10 @@ const areas = caseAreas(cases);
 const statusCounts = countByStatus(cases);
 const security = securitySummary(requirements);
 const conflicts = requirementsWithConflicts(requirements);
+const progress = securityProgress(requirements);
+const modules = (securityData.moduleProgress ?? []) as SecurityModule[];
+const approvedDecisions = (securityData.decisionsApproved ?? []) as string[];
+const enforcementOff = enforcementIsOffEverywhere(requirements);
 
 type FieldProps = {
   label: string;
@@ -338,8 +355,18 @@ export function QaStatusPage() {
                         Earlier findings
                       </Typography>
                       <Stack spacing={1} sx={{ mt: 0.5 }}>
+                        {/*
+                          Keyed by date AND summary: two findings recorded on
+                          the same day are common, and a duplicate React key
+                          lets one of them be dropped from the render - on an
+                          evidence list, silently losing evidence.
+                        */}
                         {item.history.map((entry) => (
-                          <Typography key={entry.on} variant="body2" color="text.secondary">
+                          <Typography
+                            key={`${entry.on}-${entry.summary}`}
+                            variant="body2"
+                            color="text.secondary"
+                          >
                             {entry.on}: {entry.summary}
                           </Typography>
                         ))}
@@ -372,11 +399,105 @@ export function QaStatusPage() {
       </Box>
 
       <Alert severity="warning">
-        <AlertTitle>Nothing here is switched on yet</AlertTitle>
+        <AlertTitle>
+          Record-level authorization is OFF in every environment
+        </AlertTitle>
         {securityData.enforcementState} Please do not test these as though they
         were live, and do not treat a passing functional case above as evidence
         for any of them. {securityData.recommendationStatus}
       </Alert>
+
+      {/*
+        Security implementation progress. Separate from the case totals and
+        from the requirement list: this is "which parts of the archive have
+        authorization at all", which is a different question from "is each
+        written requirement satisfied".
+      */}
+      <Box>
+        <Typography component="h3" variant="h6">
+          Security implementation progress
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: "80ch" }}>
+          {progress.decided} of {progress.total} requirements have an approved
+          business decision, {progress.implemented} are fully implemented in code,{" "}
+          {progress.merged} are merged into main, and{" "}
+          <strong>{progress.verified} have been verified against their acceptance
+          criteria</strong>. Those are four different facts and are reported
+          separately on purpose.
+        </Typography>
+
+        <TableContainer component={Paper} variant="outlined" sx={{ mt: 2 }}>
+          <Table size="small" aria-label="Security implementation progress by area">
+            <TableHead>
+              <TableRow>
+                <TableCell>Area</TableCell>
+                <TableCell>State</TableCell>
+                <TableCell>Evidence</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {modules.map((module) => (
+                <TableRow key={module.name}>
+                  <TableCell>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {module.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {module.detail}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={module.state}
+                      color={
+                        module.state === "working"
+                          ? "success"
+                          : module.state === "implemented"
+                            ? "info"
+                            : module.state === "off"
+                              ? "warning"
+                              : "default"
+                      }
+                      variant={module.state === "off" ? "filled" : "outlined"}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {module.evidence}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {enforcementOff && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+            No requirement on this page reports enforcement as enabled.
+          </Typography>
+        )}
+      </Box>
+
+      {approvedDecisions.length > 0 && (
+        <Box>
+          <Typography component="h3" variant="h6">
+            Approved business decisions
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: "80ch" }}>
+            Agreed {securityData.reconciledOn}. An approved decision is not
+            working software; see each requirement for how far it has actually
+            travelled.
+          </Typography>
+          <List dense>
+            {approvedDecisions.map((decision) => (
+              <ListItem key={decision} sx={{ pl: 0 }}>
+                <ListItemText primary={decision} />
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      )}
 
       {conflicts.length > 0 && (
         <Alert severity="info">
@@ -412,7 +533,18 @@ export function QaStatusPage() {
                   {requirement.id} &middot; {requirement.group}
                 </Typography>
                 <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                  <Chip label={requirement.verification} size="small" variant="outlined" />
+                  <Chip
+                    label={
+                      requirement.status?.acceptanceVerified === "yes"
+                        ? "Verified"
+                        : "Not verified"
+                    }
+                    size="small"
+                    variant="outlined"
+                    color={
+                      requirement.status?.acceptanceVerified === "yes" ? "success" : "default"
+                    }
+                  />
                   <Typography variant="caption" color="text.secondary">
                     {requirement.accessScope}
                   </Typography>
@@ -432,21 +564,39 @@ export function QaStatusPage() {
                 <Field label="Requirement, as written" value={requirement.requirement} />
                 <Field label="Who it applies to" value={requirement.audience} />
                 <Field label="How it will be accepted" value={requirement.acceptance} />
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                  <Field label="Built" value={requirement.implementation} muted />
-                  <Field label="Released" value={requirement.deployment} muted />
-                  <Field label="Verified" value={requirement.verification} muted />
-                </Stack>
-                <Field label="Still to be decided" value={requirement.decisions} muted />
-                {requirement.recommendation && (
-                  <Box>
-                    <Typography component="h4" variant="subtitle2">
-                      Recommended, not approved
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {requirement.recommendation}
-                    </Typography>
-                  </Box>
+                <Field label="Approved business rule" value={requirement.businessRule} />
+
+                <Box>
+                  <Typography component="h4" variant="subtitle2" gutterBottom>
+                    How far this has travelled
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
+                    {securityStages(requirement).map((stage) => (
+                      <Chip
+                        key={stage.key}
+                        size="small"
+                        label={`${stage.label}: ${stage.text}`}
+                        title={stage.detail}
+                        color={
+                          stage.tone === "done"
+                            ? "success"
+                            : stage.tone === "partial"
+                              ? "warning"
+                              : stage.tone === "open"
+                                ? "info"
+                                : "default"
+                        }
+                        variant={stage.tone === "done" ? "filled" : "outlined"}
+                      />
+                    ))}
+                  </Stack>
+                </Box>
+
+                <Field label="Test coverage" value={requirement.tests} muted />
+                <Field label="Remaining blockers" value={requirement.blockers} muted />
+                <Field label="Related work" value={requirement.evidence} muted />
+                {requirement.decisions && (
+                  <Field label="Still to be decided" value={requirement.decisions} muted />
                 )}
                 {requirement.conflict && (
                   <Alert severity="info">
