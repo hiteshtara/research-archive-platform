@@ -503,7 +503,7 @@ function SubawardWorkspaceContent({
           {activeTab === 2 && (
             <Stack spacing={2}>
               <Typography variant="h6">
-                {resolveAssociatedAwardsSectionLabel(fundingQuery.data ?? [])}
+                {resolveAssociatedAwardsSectionLabel()}
               </Typography>
 
               {fundingQuery.data?.map((funding) => {
@@ -554,7 +554,15 @@ function SubawardWorkspaceContent({
                 isLoading={fundingQuery.isLoading}
                 isError={fundingQuery.isError}
                 errorMessage="Unable to load Subaward funding."
-                emptyMessage="No funding associations are archived for this Subaward record."
+                /*
+                 * Phrased about the caller's view, never about the archive.
+                 * "No funding associations are archived" would be a claim
+                 * about the record, and under D7 the caller cannot be told
+                 * whether their view was filtered - so the message must read
+                 * identically whether the archive truly holds none or the
+                 * rows were withheld.
+                 */
+                emptyMessage="No funding associations are available for this Subaward record."
                 rowKey={(row) => row.subawardFundingSourceId}
                 columns={[
                   { label: "Funding Source ID", render: (row) => row.subawardFundingSourceId },

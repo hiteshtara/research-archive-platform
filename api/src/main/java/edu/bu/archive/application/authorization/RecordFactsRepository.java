@@ -20,4 +20,15 @@ public interface RecordFactsRepository {
     Optional<String> currentAwardVersionKey(String awardNumber);
 
     Optional<String> latestProposalVersionKey(String proposalNumber);
+
+    /**
+     * The award_id of every funding Award of a Subaward, excluding rows whose
+     * award_id resolves to no archived Award.
+     *
+     * <p>Resolvability is filtered HERE, not by the caller:
+     * archive.subaward_funding.award_id has no foreign key, so a dangling
+     * reference is possible, and a reference that points at nothing must
+     * never be able to authorise anything.
+     */
+    List<Long> subawardFamilyFundingAwardIds(long subawardId);
 }

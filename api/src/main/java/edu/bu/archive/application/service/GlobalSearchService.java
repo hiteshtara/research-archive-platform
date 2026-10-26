@@ -200,14 +200,30 @@ public class GlobalSearchService {
         // latency for no benefit.
         boolean semanticEligible = semanticSearchProperties.isEnabled()
                 && !LikelyIdentifierDetector.looksLikeIdentifier(normalizedQuery);
+        /*
+         * The semantic leg needs the SAME thread propagation as the five
+         * module legs, and did not have it. It does not go through
+         * supplyLeg (its timing instrumentation differs), so it was the one
+         * leg running on a worker with no access decision reinstated - and
+         * off the request thread RecordAuthorizationService.outcome() fails
+         * closed to Denied(EVALUATION_FAILED). Its enrichment lookups call
+         * requireProvisioned(), so once enforcement is on every semantic
+         * search by a scoped caller threw IdentityAccessDeniedException and
+         * was reported as a failed module. Fail-closed, so never a leak -
+         * but a silently broken feature, which is its own kind of wrong
+         * answer. With enforcement off propagate() returns the supplier
+         * unchanged and nothing moves.
+         */
+        java.util.function.Supplier<List<GlobalSearchItemResponse>> semanticWork =
+                visibility.propagate(() ->
+                        timed("SEMANTIC", () -> timingLog.time(
+                                cid,
+                                "SEMANTIC_TOTAL",
+                                () -> searchSemantic(normalizedQuery, cid),
+                                List::size)));
         CompletableFuture<List<GlobalSearchItemResponse>> semanticFuture =
                 semanticEligible
-                        ? CompletableFuture.supplyAsync(() ->
-                                timed("SEMANTIC", () -> timingLog.time(
-                                        cid,
-                                        "SEMANTIC_TOTAL",
-                                        () -> searchSemantic(normalizedQuery, cid),
-                                        List::size)))
+                        ? CompletableFuture.supplyAsync(semanticWork)
                         : null;
 
         List<String> failedModules = new ArrayList<>();
@@ -1073,9 +1089,17 @@ public class GlobalSearchService {
              * business number and a module link, which is the disclosure the
              * enrichment filter existed to prevent.
              *
-             * Only these two modules. Negotiation and Subaward have no record
-             * rule, so an absent summary there genuinely means unenriched -
-             * the existing documented design.
+             * SUBAWARD joined them once the approved funding-inheritance
+             * rule was wired: findActiveSummariesForCodes now filters by the
+             * same predicate, so a missing Subaward summary under a scoped
+             * caller means the same thing. It also covers the one case where
+             * a code has no ACTIVE version - dropping rather than publishing
+             * the code is the fail-closed answer, and the keyword leg still
+             * finds whatever the caller is entitled to.
+             *
+             * NEGOTIATION is excluded: it has no approved record rule yet,
+             * so an absent summary there genuinely means unenriched - the
+             * existing documented design.
              *
              * Gated on NOT being unrestricted, which matters: with
              * enforcement off, or for a Central caller, the summary lists are
@@ -1089,6 +1113,10 @@ public class GlobalSearchService {
                 continue;
             }
             if (scoped && "PROPOSAL".equals(row.module()) && proposalSummary == null) {
+                continue;
+            }
+            if (scoped && "SUBAWARD".equals(row.module())
+                    && subawardSummaries.get(row.businessNumber()) == null) {
                 continue;
             }
 

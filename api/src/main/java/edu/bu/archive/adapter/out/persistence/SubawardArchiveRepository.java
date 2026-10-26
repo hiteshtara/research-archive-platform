@@ -17,6 +17,7 @@ import edu.bu.archive.adapter.in.web.dto.subaward.SubawardVersionSummaryResponse
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import edu.bu.archive.application.authorization.SqlFragment;
 import edu.bu.archive.application.subaward.SubawardSearchFilters;
 import java.util.List;
 import java.util.Optional;
@@ -37,15 +38,34 @@ public class SubawardArchiveRepository {
     }
 
     public long countSubawards(String query, SubawardSearchFilters filters) {
+        return countSubawards(query, filters, SqlFragment.NONE);
+    }
+
+    /**
+     * The count MUST take the same scope predicate as
+     * {@link #findSubawards}: a total computed over Subawards the caller
+     * cannot open would report their existence through {@code totalElements}
+     * even though not one of their rows is returned.
+     *
+     * @param scope record-authorization predicate for alias {@code s}.
+     *              {@link SqlFragment#NONE} reproduces the unscoped
+     *              statement exactly - same SQL text, same bound parameters.
+     */
+    public long countSubawards(
+            String query,
+            SubawardSearchFilters filters,
+            SqlFragment scope
+    ) {
         String normalizedQuery = normalizeQuery(query);
         SubawardSearchFilters safeFilters =
                 filters == null ? SubawardSearchFilters.none() : filters;
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
 
         JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.subaward s
-                """ + whereClause(normalizedQuery, safeFilters));
-        Long count = bind(statement, normalizedQuery, safeFilters)
+                """ + whereClause(normalizedQuery, safeFilters, safeScope));
+        Long count = bindScope(bind(statement, normalizedQuery, safeFilters), safeScope)
                 .query(Long.class)
                 .single();
 
@@ -98,10 +118,28 @@ public class SubawardArchiveRepository {
             int limit,
             int offset
     ) {
+        return findSubawards(query, filters, SqlFragment.NONE, limit, offset);
+    }
+
+    /**
+     * @param scope record-authorization predicate for alias {@code s}, in the
+     *              SAME WHERE as the filters so LIMIT/OFFSET and
+     *              {@link #countSubawards} describe one row set.
+     *              {@link SqlFragment#NONE} reproduces the unscoped
+     *              statement exactly - same SQL text, same bound parameters.
+     */
+    public List<SubawardSummaryResponse> findSubawards(
+            String query,
+            SubawardSearchFilters filters,
+            SqlFragment scope,
+            int limit,
+            int offset
+    ) {
         String normalizedQuery = normalizeQuery(query);
         SubawardSearchFilters safeFilters =
                 filters == null ? SubawardSearchFilters.none() : filters;
-        String filter = whereClause(normalizedQuery, safeFilters);
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        String filter = whereClause(normalizedQuery, safeFilters, safeScope);
         String orderBy = normalizedQuery.isEmpty()
                 ? """
                 ORDER BY subaward_id DESC
@@ -138,7 +176,7 @@ public class SubawardArchiveRepository {
                 LIMIT :limit
                 OFFSET :offset
                 """.formatted(filter, orderBy);
-        return bind(jdbc.sql(sql), normalizedQuery, safeFilters)
+        return bindScope(bind(jdbc.sql(sql), normalizedQuery, safeFilters), safeScope)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(SubawardSummaryResponse.class)
@@ -246,6 +284,46 @@ public class SubawardArchiveRepository {
         return clauses.isEmpty()
                 ? ""
                 : "WHERE " + String.join("\n  AND ", clauses) + "\n";
+    }
+
+    /*
+     * The same WHERE with the record-authorization predicate ANDed on.
+     *
+     * The predicate goes HERE, in the one WHERE shared by the page and the
+     * count, rather than being applied to the fetched rows: filtering after
+     * LIMIT/OFFSET would silently shorten pages, and a count taken without
+     * it would publish, through totalElements, exactly how many Subawards
+     * the caller is not allowed to see.
+     *
+     * SqlFragment.sql() already starts with " AND ", so a search that
+     * carries no query and no filter - and therefore emits no WHERE at all -
+     * needs a clause for it to attach to; WHERE TRUE is that clause, and
+     * Postgres folds it away. An empty fragment appends nothing, so the
+     * unscoped statement stays byte-for-byte what it was.
+     */
+    private String whereClause(
+            String normalizedQuery,
+            SubawardSearchFilters filters,
+            SqlFragment scope
+    ) {
+        String base = whereClause(normalizedQuery, filters);
+        if (scope == null || scope.sql().isEmpty()) {
+            return base;
+        }
+        return (base.isEmpty() ? "WHERE TRUE\n" : base) + scope.sql() + "\n";
+    }
+
+    private static JdbcClient.StatementSpec bindScope(
+            JdbcClient.StatementSpec statement,
+            SqlFragment scope
+    ) {
+        if (scope == null) {
+            return statement;
+        }
+        for (var parameter : scope.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        return statement;
     }
 
     private static JdbcClient.StatementSpec bind(
@@ -815,11 +893,17 @@ public class SubawardArchiveRepository {
      * scope by), so no equivalent lookup is needed on this side.
      */
     public long countVersions(String subawardCode) {
-        Long count = jdbc.sql("""
+        return countVersions(subawardCode, SqlFragment.NONE);
+    }
+
+    /** Must take the same scope as {@link #findVersionSummaries}. */
+    public long countVersions(String subawardCode, SqlFragment scope) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        Long count = bindScope(jdbc.sql("""
                 SELECT COUNT(*)
-                FROM archive.subaward
-                WHERE subaward_code = :subawardCode
-                """)
+                FROM archive.subaward s
+                WHERE s.subaward_code = :subawardCode
+                """ + safeScope.sql()), safeScope)
                 .param("subawardCode", subawardCode)
                 .query(Long.class)
                 .single();
@@ -832,26 +916,47 @@ public class SubawardArchiveRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        return findVersionSummaries(subawardCode, SqlFragment.NONE, limit, offset);
+    }
+
+    /**
+     * @param scope record-authorization predicate for alias {@code s}.
+     *              A Subaward family's versions are separate subaward_id
+     *              rows and may name different funding Awards, so each
+     *              version is decided on its own rather than inheriting the
+     *              one the caller arrived through. Applied in the same WHERE
+     *              as {@link #countVersions} so the page and its total
+     *              agree. {@link SqlFragment#NONE} reproduces the unscoped
+     *              statement.
+     */
+    public List<SubawardVersionSummaryResponse> findVersionSummaries(
+            String subawardCode,
+            SqlFragment scope,
+            int limit,
+            int offset
+    ) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        return bindScope(jdbc.sql("""
                 SELECT
-                    subaward_id,
-                    subaward_code,
-                    sequence_number,
-                    document_number,
-                    status_description AS status,
-                    start_date,
-                    end_date,
-                    source_update_timestamp AS update_timestamp,
+                    s.subaward_id,
+                    s.subaward_code,
+                    s.sequence_number,
+                    s.document_number,
+                    s.status_description AS status,
+                    s.start_date,
+                    s.end_date,
+                    s.source_update_timestamp AS update_timestamp,
                     ROW_NUMBER() OVER (
-                        ORDER BY sequence_number DESC, subaward_id DESC
+                        ORDER BY s.sequence_number DESC, s.subaward_id DESC
                     ) = 1 AS latest_version
-                FROM archive.subaward
-                WHERE subaward_code = :subawardCode
+                FROM archive.subaward s
+                WHERE s.subaward_code = :subawardCode
+                """ + safeScope.sql() + """
                 ORDER BY
-                    sequence_number DESC,
-                    subaward_id DESC
+                    s.sequence_number DESC,
+                    s.subaward_id DESC
                 LIMIT :limit OFFSET :offset
-                """)
+                """), safeScope)
                 .param("subawardCode", subawardCode)
                 .param("limit", limit)
                 .param("offset", offset)
@@ -876,11 +981,27 @@ public class SubawardArchiveRepository {
     public List<SubawardSemanticSummaryRow> findActiveSummariesForCodes(
             List<String> subawardCodes
     ) {
+        return findActiveSummariesForCodes(subawardCodes, SqlFragment.NONE);
+    }
+
+    /**
+     * @param scope record-authorization predicate for alias {@code s}, applied
+     *              INSIDE the ranking CTE so an out-of-scope Subaward produces
+     *              no summary row at all. The semantic leg treats a missing
+     *              summary as "do not show", so the predicate has to filter
+     *              the lookup rather than the output.
+     *              {@link SqlFragment#NONE} reproduces the unscoped statement.
+     */
+    public List<SubawardSemanticSummaryRow> findActiveSummariesForCodes(
+            List<String> subawardCodes,
+            SqlFragment scope
+    ) {
         if (subawardCodes.isEmpty()) {
             return List.of();
         }
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
 
-        return jdbc.sql("""
+        return bindScope(jdbc.sql("""
                 WITH ranked AS (
                     SELECT
                         s.subaward_code,
@@ -894,11 +1015,12 @@ public class SubawardArchiveRepository {
                     FROM archive.subaward s
                     WHERE s.subaward_code IN (:subawardCodes)
                       AND s.subaward_sequence_status = 'ACTIVE'
+                """ + safeScope.sql() + """
                 )
                 SELECT subaward_code, title, status, sponsor
                 FROM ranked
                 WHERE row_rank = 1
-                """)
+                """), safeScope)
                 .param("subawardCodes", subawardCodes)
                 .query((resultSet, rowNumber) -> new SubawardSemanticSummaryRow(
                         resultSet.getString("subaward_code"),

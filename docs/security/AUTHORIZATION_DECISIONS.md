@@ -33,9 +33,21 @@ and it tells the user nothing about what to do. List endpoints therefore call
   controller used to hold. The Award count CTE and the `AWARD` branch of the
   document tally both take the scope predicate.
 - **Known gap, deliberate:** IRB, Proposal, Negotiation and Subaward counts
-  are **not** scoped, because no approved record rule exists for those
-  modules. Scoping Award alone makes the Award figures correct and leaves the
-  others as they were; it does not make the dashboard as a whole authorized.
+  are **not** scoped, because no approved record rule existed for those
+  modules when D2 was taken. Scoping Award alone makes the Award figures
+  correct and leaves the others as they were; it does not make the dashboard
+  as a whole authorized.
+- **Partly closed by D6.** The Subaward count and the SUBAWARD branch of the
+  document tally are now scoped, because Subaward has an approved rule.
+- **STILL OPEN: Proposal Dashboard counts.** Proposal has an approved record
+  rule and its endpoints are scoped, but `proposal_counts` (both
+  `proposals` and `proposal_history_records`) and the `PROPOSAL` branch of
+  the document tally in `DashboardService` were **not** changed when that
+  landed and remain archive-wide. A scoped caller's Dashboard therefore
+  reports Proposal figures covering records they cannot open. This is a real
+  remaining gap, recorded rather than quietly closed, and it must be closed
+  before enforcement is enabled. Negotiation and IRB stay unscoped because
+  neither has an approved rule yet.
 
 ## D3 — Central sees archive-wide totals
 
@@ -105,3 +117,167 @@ Refused loudly, not emptied: an empty page would look like an empty index.
   `AttachmentSearchService`, `DocumentSearchService`, `DocumentExplorerService`.
 - **Tests:** `crossModuleSearchIsRefusedForAScopedCallerRatherThanLeakingAwardRows`,
   `crossModuleSearchStillWorksForCentralAndWhenEnforcementIsOff`.
+
+## D6 — Subaward access is inherited from its funding Awards (2026-10-26)
+
+> A user may access a Subaward when they are authorized to view at least ONE
+> of its funding Awards. ANY-match, not ALL-match.
+
+No new rule: the Award rule, evaluated through `archive.subaward_funding`.
+Department grants, descendant units and Research Staff contact access need no
+Subaward equivalent because they are the Award clauses, applied to the funded
+Award row.
+
+Three consequences were accepted as part of the decision:
+
+- A Subaward with **no** funding Award is denied to every non-Central caller.
+  No explicit Subaward grant type exists in the `authz` schema, so there is
+  nothing to fall back to. The size of that population is unmeasured — see
+  the open profiling run in `SUBAWARD_AUTHORIZATION.md`.
+- A **broken** funding reference (`award_id` resolving to no Award) is not
+  authorization. `subaward_funding.award_id` has no foreign key, so this is a
+  real shape in the data.
+- Reaching a Subaward grants **nothing** on its Awards. The funding list
+  omits unauthorized Awards entirely, following D5 — a shorter list, not a
+  stubbed one, and therefore incomplete funding totals on that card.
+
+`requisitioner_unit` and contact-based fallbacks were explicitly excluded
+pending a separate business decision. The profiling SQL measures
+`requisitioner_unit` for evidence only; nothing reads it.
+
+- **Enforced:** `RecordScopeSqlBuilder.subawardRow` (lists, counts, version
+  lists, semantic enrichment), `RecordAuthorizationService.canSeeSubaward`
+  (single records), `SubawardArchiveService` (14 endpoints),
+  `DashboardService` (the Subaward count and the SUBAWARD document branch).
+- **Tests:** `SubawardRecordAuthorizationIntegrationTest` (40), three
+  predicate tests in `RecordScopeSqlBuilderTest`,
+  `GlobalSearchSemanticScopeTest` (3). The 19 named scenarios map to tests in
+  `docs/security/SUBAWARD_AUTHORIZATION.md`.
+
+## D6a — Funding inheritance is evaluated at FAMILY level (APPROVED, supersedes part of D6)
+
+> A user may view all versions of a Subaward family when they are authorized
+> to view at least one valid funding Award linked to any version of that
+> family. ANY-match semantics unchanged.
+
+Approved 2026-10-26 **after profiling the real dev archive**, which is the
+only reason the defect was found. D6 as first implemented evaluated funding
+per `subaward_id`. On real data that was unusable:
+
+| | Per version (D6) | Family (D6a) |
+|---|---|---|
+| Subaward version rows reachable | 3,807 / 93,735 — **4.06%** | 91,945 / 93,735 — **98.09%** |
+| Families reachable | 3,241 / 3,511 — 92.31% | 3,241 / 3,511 — 92.31% |
+| Of a reachable family's own history | **4.14%** | 100% |
+
+The cause: only **4,033 of 93,735** version rows carry any
+`subaward_funding` row at all. Funding is attached almost entirely to a
+family's newest version, so every older version authorised against nothing.
+The archive's historical record — the point of the archive — would have been
+invisible.
+
+**`subaward_code` was verified as a family key before being relied on**, not
+assumed:
+
+- never null, never blank, 3,511 distinct values over 93,735 rows;
+- no `subaward_id` spans more than one code, so a version belongs to exactly
+  one family;
+- families are plausible objects: 1–484 versions, mean 26.7.
+
+Two caveats the verification surfaced, both load-bearing:
+
+1. **`(subaward_code, sequence_number)` is NOT unique** — 2,577 pairs repeat,
+   up to 5 rows deep. It is a family key, never a version key; `subaward_id`
+   remains the only version identifier.
+2. **`subaward_funding.subaward_code` disagrees with its parent row for 8
+   rows**, naming genuinely different families (3046 vs 1970, 3203 vs 4094).
+   The family is therefore derived by joining `archive.subaward` on
+   `subaward_id`; reading the denormalised column would grant the wrong
+   family. Pinned by
+   `familyRule_isDerivedThroughSubawardIdNotTheDenormalisedFundingCode`.
+
+Unchanged by this revision: ANY-match, D7's omission rule, no access to
+unrelated Awards (the funding list still filters per authorized Award),
+immediate revocation, deny for families with no resolvable funding Award
+except Central.
+
+Performance measured, not assumed: the family-wide `EXISTS` runs in **6.4 ms**
+across all 93,735 rows, using the existing `ix_subaward_code_sequence`
+index. No migration required.
+
+- **Enforced:** `RecordScopeSqlBuilder.subawardRow` (correlates on
+  `subaward_code`), `JdbcRecordFactsRepository.subawardFamilyFundingAwardIds`,
+  `RecordAuthorizationService.canSeeSubaward`.
+- **Tests:** `familyRule_*` (4) plus the revised
+  `scenario15_theVersionListShowsTheWHOLEFamilyOnceAnyVersionIsFunded`, which
+  previously asserted the opposite.
+
+## D7 — Restricted funding Awards are omitted, and leave no trace (APPROVED)
+
+> Display only authorized funding Awards. Never reveal the existence or
+> number of restricted funding Awards.
+
+Approved 2026-10-26. This is the same rule as D5, applied to a different
+relationship: unauthorized records are omitted **entirely**, with no stub, no
+count, no flag and no placeholder. Where D5 omits Award hierarchy relatives,
+D7 omits funding Awards from a Subaward's funding list.
+
+Review of PR #66 found that omission alone was not sufficient, because the
+Funding tab heading counted the rows it received and stated them as the
+record's Associated Awards. After filtering, a Subaward funded by three
+Awards with one visible rendered **"Associated Award", singular** — a false
+statement about the record.
+
+Two candidate fixes were considered:
+
+1. Return a `restricted` flag so the heading could say "1 shown; others
+   restricted". True, but it discloses that more exist. **Rejected** — that
+   is precisely the existence disclosure D7 forbids.
+2. Drop the count from the heading entirely. Neither false nor disclosing.
+   **Approved and implemented.**
+
+The heading is now the constant string `Associated Awards` for every caller,
+and `resolveAssociatedAwardsSectionLabel` takes no arguments so there is
+nothing to count. The empty-state message is phrased about the caller's view
+("are available"), never about the archive, so it reads identically whether
+the archive holds none or the rows were withheld. The real number remains
+visible to anyone entitled to it: one card per authorized funding row.
+
+**The property this buys** is indistinguishability, which is stronger than
+"the restricted Award's fields are absent": two Subawards whose authorized
+funding is identical must be observably identical, even when one has further
+funding Awards the caller cannot see. That is tested by comparing whole
+serialized responses, not field by field, so a leak through a field nobody
+thought to assert on still fails.
+
+ANY-match is unchanged — one authorized funding Award still permits the
+Subaward — and reaching a Subaward still grants nothing on its other funding
+Awards.
+
+- **Enforced:** `SubawardArchiveService.findFunding` (returns the authorized
+  rows and nothing else); `resolveAssociatedAwardsSectionLabel`.
+- **Tests:** eleven `d7_*` tests in
+  `SubawardRecordAuthorizationIntegrationTest`, including the twin-Subaward
+  indistinguishability pair and the whole-response-surface comparison, plus
+  three heading tests in `subawardFundingPresentation.test.mjs`. The
+  indistinguishability tests were verified to fail with the filter removed.
+
+## Derived rule — every async search leg carries the access decision
+
+Found in the same review. Global Search fans out onto worker threads, and
+the per-request access decision does not follow them: off the request thread
+`outcome()` fails closed to `Denied(EVALUATION_FAILED)`.
+
+The five module legs go through `supplyLeg`, which wraps them in
+`visibility.propagate(...)`. The **semantic** leg did not — it has its own
+timing instrumentation and called `supplyAsync` directly — so once
+enforcement were enabled every semantic search by a scoped caller would have
+thrown `IdentityAccessDeniedException` and been reported as a failed module.
+Fail-closed, never a leak, but silently broken, and an empty result is
+indistinguishable from an empty archive.
+
+Any new asynchronous leg must be wrapped the same way.
+
+- **Enforced:** `GlobalSearchService.supplyLeg` and the semantic future.
+- **Test:** `theSemanticLegRunsWithTheRequestsAccessDecisionReinstated`,
+  verified to fail with the fix reverted.

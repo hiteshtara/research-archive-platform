@@ -145,34 +145,54 @@ test("resolveFundingAssociationCards returns an empty list (an honest empty stat
   assert.deepEqual(cards, []);
 });
 
-test("resolveAssociatedAwardsSectionLabel is singular for exactly one real Award link", () => {
-  assert.equal(
-    resolveAssociatedAwardsSectionLabel([fundingRow()]),
-    "Associated Award",
-  );
-});
+// --- D7: the heading must never count, and never vary -------------------
 
-test("resolveAssociatedAwardsSectionLabel is plural with a real count for multiple concurrent Award relationships", () => {
-  // Real live data: subaward_id 33247 has 3 distinct concurrent Award
-  // relationships (proven via SubAwardDocumentRule's duplicate-
-  // award-number business rule + confirmed in the archived data).
-  const rows = [
+test("the Associated Awards heading is the same string no matter how many rows arrive", () => {
+  // D7: never reveal the existence or number of restricted funding Awards.
+  // A count derived from the returned rows describes the caller's view, not
+  // the record, so there is no count that is both true and non-disclosing.
+  const none = [];
+  const one = [fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 })];
+  const three = [
     fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 }),
     fundingRow({ subawardFundingSourceId: 2, exactLinkedAwardId: 222 }),
     fundingRow({ subawardFundingSourceId: 3, exactLinkedAwardId: 333 }),
   ];
 
+  assert.equal(resolveAssociatedAwardsSectionLabel(), "Associated Awards");
+  assert.equal(resolveAssociatedAwardsSectionLabel(none), "Associated Awards");
+  assert.equal(resolveAssociatedAwardsSectionLabel(one), "Associated Awards");
+  assert.equal(resolveAssociatedAwardsSectionLabel(three), "Associated Awards");
+});
+
+test("a partially authorized Subaward renders the same heading as a fully authorized one", () => {
+  // The indistinguishability property. Caller sees one funding Award. The
+  // heading must not betray whether that is all there is, or all they are
+  // allowed to see.
+  const fullyAuthorized = [fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 })];
+  const filteredToOneOfThree = [
+    fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 }),
+  ];
+
   assert.equal(
-    resolveAssociatedAwardsSectionLabel(rows),
-    "Associated Awards (3)",
+    resolveAssociatedAwardsSectionLabel(fullyAuthorized),
+    resolveAssociatedAwardsSectionLabel(filteredToOneOfThree),
   );
 });
 
-test("resolveAssociatedAwardsSectionLabel counts only rows with a real Award link, and is plural for zero", () => {
-  assert.equal(
-    resolveAssociatedAwardsSectionLabel([
-      fundingRow({ exactLinkedAwardId: null, awardNumber: null }),
-    ]),
-    "Associated Awards (0)",
-  );
+test("the heading never contains a digit or a restriction word", () => {
+  // Guards the regression directly: any reintroduced count, "shown",
+  // "restricted", "hidden" or "of N" phrasing fails here.
+  const label = resolveAssociatedAwardsSectionLabel([
+    fundingRow({ subawardFundingSourceId: 1, exactLinkedAwardId: 111 }),
+  ]);
+
+  assert.equal(/\d/.test(label), false, `heading carries a count: "${label}"`);
+  for (const word of ["shown", "restricted", "hidden", "more", "additional", "of"]) {
+    assert.equal(
+      new RegExp(`\\b${word}\\b`, "i").test(label),
+      false,
+      `heading carries "${word}": "${label}"`,
+    );
+  }
 });

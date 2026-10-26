@@ -127,4 +127,30 @@ public class JdbcRecordFactsRepository implements RecordFactsRepository {
                 ? new RecordContact(Optional.empty(), roleCode, false)
                 : new RecordContact(Optional.of(new KualiPersonId(personId)), roleCode, true);
     }
+
+    @Override
+    public java.util.List<Long> subawardFamilyFundingAwardIds(long subawardId) {
+        /*
+         * FAMILY-wide, and the family is reached through subaward_id ->
+         * archive.subaward.subaward_code, never through
+         * subaward_funding.subaward_code. That denormalised column
+         * disagrees with its parent row for 8 rows in dev, naming different
+         * families; trusting it would hand back another family's Awards.
+         *
+         * Must agree exactly with RecordScopeSqlBuilder.subawardRow - the
+         * integration suite compares the two decision paths row by row.
+         */
+        return jdbc.sql("""
+                SELECT sf.award_id
+                FROM archive.subaward s
+                JOIN archive.subaward fam ON fam.subaward_code = s.subaward_code
+                JOIN archive.subaward_funding sf ON sf.subaward_id = fam.subaward_id
+                JOIN archive.award_version av ON av.award_id = sf.award_id
+                WHERE s.subaward_id = :subawardId
+                  AND sf.award_id IS NOT NULL
+                """)
+                .param("subawardId", subawardId)
+                .query(Long.class)
+                .list();
+    }
 }

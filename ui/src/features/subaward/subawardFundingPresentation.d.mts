@@ -21,6 +21,5 @@ export function resolveFundingAssociationCards(
   fundingRows: SubawardFunding[],
 ): { subawardFundingSourceId: number; card: AssociatedAwardCardState }[];
 
-export function resolveAssociatedAwardsSectionLabel(
-  fundingRows: SubawardFunding[],
-): string;
+// Takes no arguments by design - see the implementation's note on D7.
+export function resolveAssociatedAwardsSectionLabel(): string;

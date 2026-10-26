@@ -66,15 +66,30 @@ export function resolveFundingAssociationCards(fundingRows) {
   }));
 }
 
-// "Associated Award" for exactly one real link, "Associated Awards
-// (N)" for zero or multiple - the plural signals the real count up
-// front rather than implying a single relationship exists.
-export function resolveAssociatedAwardsSectionLabel(fundingRows) {
-  const linkedCount = fundingRows.filter(
-    (funding) => funding.exactLinkedAwardId != null,
-  ).length;
-
-  return linkedCount === 1
-    ? "Associated Award"
-    : `Associated Awards (${linkedCount})`;
+// The Funding tab heading. Always exactly "Associated Awards" - no
+// count, no singular form, no indication that anything was withheld.
+//
+// DO NOT reintroduce a count here. This deliberately ignores its
+// argument, and the reason is a security decision, not a style choice.
+//
+// Business decision D7 (approved 2026-10-26): display only authorized
+// funding Awards, and never reveal the existence or number of restricted
+// ones. Record authorization omits funding rows the caller may not see, so
+// any count derived from the rows that arrived describes the caller's view,
+// not the record. Printing it as the record's number of Associated Awards
+// would be false - a Subaward funded by three Awards with one visible would
+// read "Associated Award", singular. Printing "1 shown; others restricted"
+// instead would be true but would disclose that more exist, which D7
+// forbids. Dropping the count is the only option that is neither false nor
+// disclosing.
+//
+// It also carries the indistinguishability property D7 is really about:
+// two Subawards whose authorized funding is identical render an identical
+// heading, even when one has further funding Awards the caller cannot see.
+// A count - of any kind, in either direction - would break that.
+//
+// The real count remains visible to anyone entitled to it: the cards below
+// are rendered one per authorized funding row.
+export function resolveAssociatedAwardsSectionLabel() {
+  return "Associated Awards";
 }
