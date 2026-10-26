@@ -454,36 +454,70 @@ test("no requirement claims to be verified while enforcement is off", () => {
   assert.ok(enforcementIsOffEverywhere(requirements));
 });
 
-test("an open draft pull request is never reported as merged or deployed", () => {
+test("the merged authorization work cites its real merge SHAs", () => {
   /*
-   * PR #62 is open and in draft. A status page that shows it as merged is
-   * worse than one that shows nothing, because somebody will test against
-   * a protection that is not on the branch. Any requirement citing it must
-   * say so in all three of the stages that depend on it.
+   * Replaces the earlier guard that PR #62 must never be shown as merged.
+   * It is merged now - b77f03f for Award, f1b8115 for Proposal - so the
+   * check inverts: anything claiming mergedToMain must name the commit that
+   * carries it, because "merged" with no SHA is unfalsifiable.
    */
-  for (const requirement of requirements) {
-    if (!/#62/.test(requirement.evidence)) {
-      continue;
-    }
-    assert.match(
-      requirement.evidence,
-      /draft|not merged/i,
-      `${requirement.id}: cites #62 without saying it is unmerged`,
-    );
-    // "partial" is allowed only where the evidence also cites a merged PR,
-    // which is SEC-005/006: the admin service shipped in #56, its
-    // revocation-immediacy proof is in #62. "yes" is never allowed.
-    const allowed = /#56/.test(requirement.evidence) ? ["no", "partial"] : ["no"];
-    assert.ok(
-      allowed.includes(requirement.status.mergedToMain),
-      `${requirement.id}: cites the draft #62 but reports mergedToMain=${requirement.status.mergedToMain}`,
-    );
-    assert.ok(
-      allowed.includes(requirement.status.deployed),
-      `${requirement.id}: cites the draft #62 but reports deployed=${requirement.status.deployed}`,
-    );
+  const merged = requirements.filter((item) => item.status.mergedToMain === "yes");
+  assert.ok(merged.length > 0, "the Award and Proposal work is merged");
+
+  const awardProposal = ["SEC-001", "SEC-002", "SEC-003", "SEC-007"];
+  for (const id of awardProposal) {
+    const requirement = requirements.find((item) => item.id === id);
+    assert.equal(requirement.status.mergedToMain, "yes", `${id}: merged`);
+    assert.match(requirement.evidence, /b77f03f/, `${id}: must cite the Award merge SHA`);
+    assert.match(requirement.evidence, /f1b8115/, `${id}: must cite the Proposal merge SHA`);
+    // The old "draft / not merged" wording must be gone.
+    assert.doesNotMatch(requirement.evidence, /draft|not merged/i, `${id}: stale draft wording`);
   }
 });
+
+test("a merge is never reported as a deployment of the backend", () => {
+  /*
+   * The trap this page exists to avoid. Amplify rebuilds the UI on every
+   * merge to main and did so for both authorization merges, but the API is
+   * deployed separately and still runs task definition revision 81. Anything
+   * whose evidence names the Award or Proposal merge must say deployed: no.
+   */
+  for (const id of ["SEC-001", "SEC-002", "SEC-003", "SEC-007"]) {
+    const requirement = requirements.find((item) => item.id === id);
+    assert.equal(
+      requirement.status.deployed,
+      "no",
+      `${id}: merged backend code is not in the running API`,
+    );
+    assert.match(
+      requirement.evidence,
+      /[Nn]ot in the running API/,
+      `${id}: must say the merged code is not running`,
+    );
+  }
+
+  // And the page must state the distinction where nobody can miss it.
+  assert.match(security.apiDeploymentState, /MERGED INTO MAIN but are NOT\s+running/);
+  assert.match(security.apiDeploymentState, /revision 81/);
+  assert.match(security.apiDeploymentState, /not a backend deployment/i);
+});
+
+test("Phase 1 statuses for SEC-005, SEC-006, SEC-008 and SEC-009 are preserved", () => {
+  const byId = Object.fromEntries(requirements.map((item) => [item.id, item]));
+
+  // The administrative service shipped in #56 and IS in the running API.
+  assert.equal(byId["SEC-005"].status.mergedToMain, "yes");
+  assert.equal(byId["SEC-005"].status.deployed, "yes");
+  // SEC-006 spans a merged PR and work proven later; partial is the honest value.
+  assert.equal(byId["SEC-006"].status.mergedToMain, "partial");
+  assert.equal(byId["SEC-006"].status.deployed, "partial");
+  // SEC-008 stays open; SEC-009 keeps policy-approved / acceptance-unverified.
+  assert.equal(byId["SEC-008"].status.decisionApproved, "open");
+  assert.equal(byId["SEC-009"].status.decisionApproved, "approved");
+  assert.equal(byId["SEC-009"].status.acceptanceVerified, "no");
+  assert.equal(byId["SEC-009"].status.testsPassed, "no");
+});
+
 
 test("the seven implementation stages are reported separately, never collapsed", () => {
   // The whole point: an approved decision, passing tests, a merge, a
@@ -496,14 +530,20 @@ test("the seven implementation stages are reported separately, never collapsed",
       );
     }
   }
-  // At least one requirement must demonstrate the stages disagreeing,
-  // otherwise the distinction is decorative.
+  /*
+   * At least one requirement must demonstrate the stages disagreeing,
+   * otherwise the distinction is decorative. Today the live example is
+   * merged-but-not-deployed: the Award and Proposal code is on main and is
+   * not in the running API. (It used to be tests-passing-but-unmerged,
+   * which stopped being true when #62 and #64 merged - the assertion
+   * follows reality rather than pinning a moment.)
+   */
   assert.ok(
     requirements.some(
       (requirement) =>
-        requirement.status.testsPassed === "yes" && requirement.status.mergedToMain === "no",
+        requirement.status.mergedToMain === "yes" && requirement.status.deployed === "no",
     ),
-    "tests passing without a merge must be representable and represented",
+    "a merge without a backend deployment must be representable and represented",
   );
 });
 
@@ -526,10 +566,16 @@ test("a rule implemented for Award only is never reported as fully implemented",
       "yes",
       `${id}: implemented for Award only while ${stillPending.length} modules are pending`,
     );
+    /*
+     * The blocker must NAME the modules that are still uncovered. Which
+     * ones they are changes as modules land - Award only, then Award and
+     * Proposal - so the check is that at least one uncovered module is
+     * named, not that a particular phrase appears.
+     */
     assert.match(
       requirement.blockers,
-      /Award only|all system objects|not wired/i,
-      `${id}: the cross-module limit must be stated, not implied`,
+      /Negotiation|Subaward|IRB|not wired|all system objects/i,
+      `${id}: the uncovered modules must be named, not implied`,
     );
   }
 });
@@ -622,6 +668,9 @@ test("the page renders the stages, the module table and the decision list", () =
   // strongly than the evidence in securityRequirements.json supports.
   assert.match(source, /Record-level authorization is OFF</);
   assert.doesNotMatch(source, /OFF in every environment/i);
+  // And the merged-but-not-running distinction must be on the page.
+  assert.match(source, /Merged, but not running/);
+  assert.match(source, /apiDeploymentState/);
 });
 
 test("the enforcement state is stated so no one reads these as live controls", () => {
