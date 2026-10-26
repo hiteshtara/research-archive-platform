@@ -86,6 +86,15 @@ import java.util.Set;
 public class AwardArchiveService {
 
     private final AwardArchiveRepository repository;
+    /**
+     * Record authorization for Award. Defaults to
+     * {@link edu.bu.archive.application.authorization.AwardRecordAccess#PERMIT_ALL},
+     * which adds no predicate and performs no check - today's behaviour. The
+     * real implementation is injected only when the Phase 1 authorization
+     * beans are present, and is itself inert until
+     * {@code app.authorization.enforcement-enabled} is true.
+     */
+    private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
     private final AwardAttachmentStorage attachmentStorage;
     private final edu.bu.archive.application.service.SearchTimingLog timingLog;
 
@@ -100,6 +109,7 @@ public class AwardArchiveService {
     ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
+        this.recordAccess = edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
         this.timingLog =
                 new edu.bu.archive.application.service.SearchTimingLog(false);
     }
@@ -116,8 +126,46 @@ public class AwardArchiveService {
             org.springframework.beans.factory.ObjectProvider<
                     edu.bu.archive.application.service.SearchTimingLog> timingLogProvider
     ) {
+        this(repository, attachmentStorage, timingLogProvider, null);
+    }
+
+    /** Direct-injection form, for tests and for callers that already hold the port. */
+    public AwardArchiveService(
+            AwardArchiveRepository repository,
+            AwardAttachmentStorage attachmentStorage,
+            edu.bu.archive.application.authorization.AwardRecordAccess recordAccess
+    ) {
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
+        this.recordAccess = recordAccess == null
+                ? edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL
+                : recordAccess;
+        this.timingLog =
+                new edu.bu.archive.application.service.SearchTimingLog(false);
+    }
+
+    /**
+     * @param recordAccessProvider absent - a slice test, or a context without
+     *                             the Phase 1 authorization beans - means
+     *                             {@code PERMIT_ALL}, i.e. no authorization,
+     *                             which is what every caller got before
+     *                             Phase 2.
+     */
+    public AwardArchiveService(
+            AwardArchiveRepository repository,
+            AwardAttachmentStorage attachmentStorage,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.service.SearchTimingLog> timingLogProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider
+    ) {
+        this.repository = repository;
+        this.attachmentStorage = attachmentStorage;
+        edu.bu.archive.application.authorization.AwardRecordAccess access =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = access != null
+                ? access
+                : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
         edu.bu.archive.application.service.SearchTimingLog provided =
                 timingLogProvider == null ? null : timingLogProvider.getIfAvailable();
         this.timingLog = provided != null
@@ -130,6 +178,11 @@ public class AwardArchiveService {
     ) {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        // Record authorization. Denial raises RecordNotAccessibleException,
+        // a NoSuchElementException, so an unauthorized Award is answered 404
+        // exactly like a missing one - a 403 would confirm it exists.
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         AwardRowResponse current =
                 repository.findCurrent(normalizedAwardNumber)
@@ -156,6 +209,11 @@ public class AwardArchiveService {
     public AwardIdentifierResponse resolveIdentifier(String awardNumber) {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        // Record authorization. Denial raises RecordNotAccessibleException,
+        // a NoSuchElementException, so an unauthorized Award is answered 404
+        // exactly like a missing one - a 403 would confirm it exists.
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         AwardRowResponse current =
                 repository.findCurrent(normalizedAwardNumber)
@@ -316,6 +374,11 @@ public class AwardArchiveService {
     ) {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        // Record authorization. Denial raises RecordNotAccessibleException,
+        // a NoSuchElementException, so an unauthorized Award is answered 404
+        // exactly like a missing one - a 403 would confirm it exists.
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         List<AwardRowResponse> rows =
                 repository.findHistoryRows(
@@ -548,10 +611,20 @@ public class AwardArchiveService {
          * separately gated. Stated here so a reader does not mistake a
          * call duration for a query plan's cost.
          */
+        /*
+         * Resolved ONCE and used by both statements. Filtering in SQL, in
+         * the same WHERE as the search filters, is what makes the count,
+         * the page metadata and the returned rows describe the same set.
+         * Filtering the page in Java afterwards would leak the existence of
+         * out-of-scope Awards through totalElements and through short pages.
+         */
+        edu.bu.archive.application.authorization.SqlFragment scope =
+                recordAccess.awardScopeSql("av");
+
         long totalElements = timingLog.time(
                 timingLog.correlationId(),
                 "AWARD_COUNT",
-                () -> repository.countSearchAwards(pattern, rawQuery, safeFilters));
+                () -> repository.countSearchAwards(pattern, rawQuery, safeFilters, scope));
 
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
@@ -569,6 +642,7 @@ public class AwardArchiveService {
                         pattern,
                         rawQuery,
                         safeFilters,
+                        scope,
                         safeSize,
                         offset
                 ),
@@ -627,6 +701,11 @@ public class AwardArchiveService {
      */
     public AwardHierarchyResponse findHierarchy(String awardNumber) {
         String normalizedAwardNumber = normalizeAwardNumber(awardNumber);
+
+        // Record authorization. Denial raises RecordNotAccessibleException,
+        // a NoSuchElementException, so an unauthorized Award is answered 404
+        // exactly like a missing one - a 403 would confirm it exists.
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         java.util.Optional<String> hierarchyRoot =
                 repository.findHierarchyRoot(normalizedAwardNumber);
@@ -773,6 +852,8 @@ public class AwardArchiveService {
     }
 
     public AwardSummaryResponse findSummary(long awardId) {
+        recordAccess.requireAward(awardId);
+
         return repository.findSummaryByAwardId(awardId)
                 .orElseThrow(() ->
                         new NoSuchElementException(
@@ -786,6 +867,8 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
+
         String awardNumber = repository.findAwardNumberForId(awardId)
                 .orElseThrow(() ->
                         new NoSuchElementException(

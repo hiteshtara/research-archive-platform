@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.application.authorization.SqlFragment;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
@@ -713,6 +714,23 @@ public class AwardArchiveRepository {
                 .param("projectStartDateTo", f.projectStartDateTo());
     }
 
+    /**
+     * Binds a record-authorization predicate's named parameters. Collections
+     * are bound as-is; Spring expands them for {@code IN (:name)}. A
+     * {@link SqlFragment#NONE} binds nothing, so the statement is identical
+     * to the unscoped one.
+     */
+    private static JdbcClient.StatementSpec bindScope(
+            JdbcClient.StatementSpec statement,
+            SqlFragment scope
+    ) {
+        JdbcClient.StatementSpec bound = statement;
+        for (var parameter : scope.params().entrySet()) {
+            bound = bound.param(parameter.getKey(), parameter.getValue());
+        }
+        return bound;
+    }
+
     /*
      * Current-Award (family) free-text WHERE, shared verbatim by
      * searchAwards and countSearchAwards.
@@ -778,7 +796,26 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return bindAwardFilters(jdbc.sql("""
+        return searchAwards(pattern, rawQuery, filters, SqlFragment.NONE, limit, offset);
+    }
+
+    /**
+     * @param scope record-authorization predicate for alias {@code av}, in the
+     *              SAME WHERE as the filters so LIMIT/OFFSET and
+     *              {@link #countSearchAwards} describe the same row set.
+     *              {@link SqlFragment#NONE} reproduces the unscoped statement
+     *              exactly - same SQL text, same bound parameters.
+     */
+    public List<AwardSearchResultResponse> searchAwards(
+            String pattern,
+            String rawQuery,
+            AwardSearchFilters filters,
+            SqlFragment scope,
+            int limit,
+            int offset
+    ) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        return bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT
                     av.award_id,
                     av.award_number,
@@ -836,10 +873,10 @@ public class AwardArchiveRepository {
                         h.award_hierarchy_id DESC
                     LIMIT 1
                 ) ah ON TRUE
-                """ + AWARD_FAMILY_SEARCH_WHERE + """
+                """ + AWARD_FAMILY_SEARCH_WHERE + safeScope.sql() + """
                 ORDER BY av.award_number, av.award_id
                 LIMIT :limit OFFSET :offset
-                """), filters)
+                """), filters), safeScope)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
                 .param("limit", limit)
@@ -857,10 +894,26 @@ public class AwardArchiveRepository {
             String rawQuery,
             AwardSearchFilters filters
     ) {
-        Long count = bindAwardFilters(jdbc.sql("""
+        return countSearchAwards(pattern, rawQuery, filters, SqlFragment.NONE);
+    }
+
+    /**
+     * The count MUST take the same scope predicate as
+     * {@link #searchAwards}: a total computed over rows the caller cannot
+     * see would leak their existence through pagination metadata even though
+     * no row is returned.
+     */
+    public long countSearchAwards(
+            String pattern,
+            String rawQuery,
+            AwardSearchFilters filters,
+            SqlFragment scope
+    ) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        Long count = bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_version av
-                """ + AWARD_FAMILY_SEARCH_WHERE), filters)
+                """ + AWARD_FAMILY_SEARCH_WHERE + safeScope.sql()), filters), safeScope)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
                 .query(Long.class)

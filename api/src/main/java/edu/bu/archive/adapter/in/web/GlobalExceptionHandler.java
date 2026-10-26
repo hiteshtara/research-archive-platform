@@ -1,5 +1,10 @@
 package edu.bu.archive.adapter.in.web;
 
+import edu.bu.archive.application.authorization.AccessNotProvisionedException;
+import edu.bu.archive.application.authorization.AccessNotProvisionedProblem;
+import edu.bu.archive.application.authorization.IdentityAccessDeniedException;
+import edu.bu.archive.application.authorization.PartialFamilyAccessException;
+import edu.bu.archive.application.authorization.ReauthenticationRequiredException;
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
 import edu.bu.archive.exception.InvalidRequestParameterException;
 
@@ -102,6 +107,96 @@ public class GlobalExceptionHandler {
                                 HttpStatus.FORBIDDEN,
                                 "ATTACHMENT_ACCESS_DENIED",
                                 exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * --- Record authorization (Phase 2) ----------------------------------
+     *
+     * RecordNotAccessibleException is deliberately NOT handled here. It
+     * extends NoSuchElementException and is answered 404 by the handler
+     * below, so an Award the caller may not see is indistinguishable from
+     * one that does not exist. A 403 would confirm the record exists, which
+     * is itself a disclosure.
+     *
+     * The three below are about the CALLER, not about a record, so naming
+     * them is safe and is what lets the UI tell a user what to do.
+     */
+
+    /** Authenticated, but no archive access has been provisioned. */
+    @ExceptionHandler(AccessNotProvisionedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessNotProvisioned(
+            AccessNotProvisionedException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                AccessNotProvisionedProblem.CODE,
+                                "No archive access has been provisioned for this account.",
+                                request
+                        )
+                );
+    }
+
+    /** Ambiguous, revoked or suspended identity, or an evaluation failure. */
+    @ExceptionHandler(IdentityAccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleIdentityAccessDenied(
+            IdentityAccessDeniedException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                "ACCESS_DENIED",
+                                "Access to the archive is denied for this account.",
+                                request
+                        )
+                );
+    }
+
+    /** The BU sign-in is too old for the configured maximum: sign in again. */
+    @ExceptionHandler(ReauthenticationRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleReauthenticationRequired(
+            ReauthenticationRequiredException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(
+                        body(
+                                HttpStatus.UNAUTHORIZED,
+                                ReauthenticationRequiredException.CODE,
+                                "Please sign in again to continue.",
+                                request
+                        )
+                );
+    }
+
+    /**
+     * A family-wide response (AI) was requested by a caller who can see some
+     * but not all versions. Answered 403 rather than silently returning a
+     * partial family, which would be a wrong answer presented as a complete
+     * one.
+     */
+    @ExceptionHandler(PartialFamilyAccessException.class)
+    public ResponseEntity<Map<String, Object>> handlePartialFamilyAccess(
+            PartialFamilyAccessException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                PartialFamilyAccessException.CODE,
+                                "This response needs access to every version of the Award.",
                                 request
                         )
                 );
