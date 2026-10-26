@@ -269,8 +269,12 @@ public class RecordAuthorizationService
     }
 
     /**
-     * A Subaward is accessible when ANY of its funding Awards is - the
-     * approved rule, 2026-10-26.
+     * A Subaward is accessible when ANY funding Award of ANY version in its
+     * FAMILY is - the revised rule, approved 2026-10-26 after profiling.
+     *
+     * <p>The first rule was per version. Real data killed it: funding rows
+     * sit almost only on a family's latest version, so a non-Central caller
+     * could reach 4.06% of version rows. Family-level takes that to 98.09%.
      *
      * <p>Each funding Award is decided by exactly the same code that decides
      * the Award endpoints ({@link #canSeeAward}), so department grants,
@@ -310,7 +314,7 @@ public class RecordAuthorizationService
             return true;
         }
         try {
-            return facts.subawardFundingAwardIds(subawardId).stream().anyMatch(this::canSeeAward);
+            return facts.subawardFamilyFundingAwardIds(subawardId).stream().anyMatch(this::canSeeAward);
         } catch (RuntimeException failure) {
             // Fail closed: an error resolving funding is not permission.
             return false;

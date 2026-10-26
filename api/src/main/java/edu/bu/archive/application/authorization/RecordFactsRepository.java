@@ -30,5 +30,5 @@ public interface RecordFactsRepository {
      * reference is possible, and a reference that points at nothing must
      * never be able to authorise anything.
      */
-    List<Long> subawardFundingAwardIds(long subawardId);
+    List<Long> subawardFamilyFundingAwardIds(long subawardId);
 }

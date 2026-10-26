@@ -110,9 +110,30 @@ public final class RecordScopeSqlBuilder {
      * enough, and the predicate stops looking. An ALL-match rule would need
      * NOT EXISTS over the unauthorized ones and was explicitly not approved.
      *
+     * <p><strong>FAMILY-level, revised 2026-10-26 on real data.</strong> The
+     * first version of this predicate correlated on {@code subaward_id}, so
+     * each version was decided by its own funding rows. Profiling the dev
+     * archive showed why that cannot work: only 4,033 of 93,735 version rows
+     * carry ANY funding row at all, because {@code subaward_funding} is
+     * populated almost entirely on the latest version of a family. Per
+     * version, a non-Central caller could reach <strong>4.06%</strong> of
+     * version rows and 4.14% of a reachable family's own history - the
+     * archive's historical record, which is the point of the archive, would
+     * have been almost entirely invisible. Correlating on
+     * {@code subaward_code} instead takes that to <strong>98.09%</strong>.
+     *
+     * <p>The family is derived by joining {@code archive.subaward} on
+     * {@code subaward_id}, NEVER by reading
+     * {@code subaward_funding.subaward_code}. That column is denormalised
+     * and disagrees with its parent row for 8 funding rows in dev - pointing
+     * at genuinely different families (3046 vs 1970, 3203 vs 4094) - so
+     * trusting it would attribute those funding links to the wrong family
+     * and grant access to it.
+     *
      * <p>Three things this gets right by construction:
      * <ul>
-     *   <li>No funding row at all -> EXISTS is false -> denied.</li>
+     *   <li>No funding row anywhere in the family -> EXISTS is false ->
+     *       denied.</li>
      *   <li>A funding row whose award_id resolves to nothing -> the INNER
      *       join drops it, so a broken reference can never authorise. There
      *       is no foreign key on subaward_funding.award_id, so dangling
@@ -139,9 +160,10 @@ public final class RecordScopeSqlBuilder {
         }
         // Alias is unused by familyWrap - it emits {row}, resolved below.
         String awardPredicate = familyWrap(RecordModule.AWARD, "{row}", fundedAward);
-        return "EXISTS (SELECT 1 FROM archive.subaward_funding az_sf"
+        return "EXISTS (SELECT 1 FROM archive.subaward az_fam"
+                + " JOIN archive.subaward_funding az_sf ON az_sf.subaward_id = az_fam.subaward_id"
                 + " JOIN archive.award_version az_sa ON az_sa.award_id = az_sf.award_id"
-                + " WHERE az_sf.subaward_id = {row}.subaward_id"
+                + " WHERE az_fam.subaward_code = {row}.subaward_code"
                 + " AND az_sf.award_id IS NOT NULL"
                 + " AND " + awardPredicate.replace("{row}", "az_sa") + ")";
     }

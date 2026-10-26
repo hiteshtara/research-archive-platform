@@ -76,14 +76,22 @@ class RecordScopeSqlBuilderTest {
     }
 
     @Test
-    void subawardInheritsTheAwardPredicateThroughItsFundingRows() {
+    void subawardInheritsTheAwardPredicateThroughItsFAMILYsFundingRows() {
         var fragment = new RecordScopeSqlBuilder(PER_VERSION, IoSqlStrategy.NONE).build(
                 scoped(false, Set.of(new UnitGrant("U1", false)), "P1", Set.of()),
                 RecordModule.SUBAWARD, "s", Set.of("U1"));
 
         assertThat(fragment.sql())
                 .contains("archive.subaward_funding az_sf")
-                .contains("az_sf.subaward_id = s.subaward_id")
+                // FAMILY-level: correlates on subaward_code, not subaward_id.
+                // Per version, only 4.06% of real dev version rows were
+                // reachable, because funding sits on the newest version only.
+                .contains("az_fam.subaward_code = s.subaward_code")
+                // The family is reached through subaward_id. Reading
+                // subaward_funding's own denormalised subaward_code would
+                // attribute 8 real dev rows to the WRONG family.
+                .contains("az_sf.subaward_id = az_fam.subaward_id")
+                .doesNotContain("az_sf.subaward_code")
                 // INNER join: a funding row whose award_id resolves to
                 // nothing can never authorise.
                 .contains("JOIN archive.award_version az_sa ON az_sa.award_id = az_sf.award_id")

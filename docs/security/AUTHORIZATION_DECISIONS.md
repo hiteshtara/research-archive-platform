@@ -154,6 +154,64 @@ pending a separate business decision. The profiling SQL measures
   `GlobalSearchSemanticScopeTest` (3). The 19 named scenarios map to tests in
   `docs/security/SUBAWARD_AUTHORIZATION.md`.
 
+## D6a — Funding inheritance is evaluated at FAMILY level (APPROVED, supersedes part of D6)
+
+> A user may view all versions of a Subaward family when they are authorized
+> to view at least one valid funding Award linked to any version of that
+> family. ANY-match semantics unchanged.
+
+Approved 2026-10-26 **after profiling the real dev archive**, which is the
+only reason the defect was found. D6 as first implemented evaluated funding
+per `subaward_id`. On real data that was unusable:
+
+| | Per version (D6) | Family (D6a) |
+|---|---|---|
+| Subaward version rows reachable | 3,807 / 93,735 — **4.06%** | 91,945 / 93,735 — **98.09%** |
+| Families reachable | 3,241 / 3,511 — 92.31% | 3,241 / 3,511 — 92.31% |
+| Of a reachable family's own history | **4.14%** | 100% |
+
+The cause: only **4,033 of 93,735** version rows carry any
+`subaward_funding` row at all. Funding is attached almost entirely to a
+family's newest version, so every older version authorised against nothing.
+The archive's historical record — the point of the archive — would have been
+invisible.
+
+**`subaward_code` was verified as a family key before being relied on**, not
+assumed:
+
+- never null, never blank, 3,511 distinct values over 93,735 rows;
+- no `subaward_id` spans more than one code, so a version belongs to exactly
+  one family;
+- families are plausible objects: 1–484 versions, mean 26.7.
+
+Two caveats the verification surfaced, both load-bearing:
+
+1. **`(subaward_code, sequence_number)` is NOT unique** — 2,577 pairs repeat,
+   up to 5 rows deep. It is a family key, never a version key; `subaward_id`
+   remains the only version identifier.
+2. **`subaward_funding.subaward_code` disagrees with its parent row for 8
+   rows**, naming genuinely different families (3046 vs 1970, 3203 vs 4094).
+   The family is therefore derived by joining `archive.subaward` on
+   `subaward_id`; reading the denormalised column would grant the wrong
+   family. Pinned by
+   `familyRule_isDerivedThroughSubawardIdNotTheDenormalisedFundingCode`.
+
+Unchanged by this revision: ANY-match, D7's omission rule, no access to
+unrelated Awards (the funding list still filters per authorized Award),
+immediate revocation, deny for families with no resolvable funding Award
+except Central.
+
+Performance measured, not assumed: the family-wide `EXISTS` runs in **6.4 ms**
+across all 93,735 rows, using the existing `ix_subaward_code_sequence`
+index. No migration required.
+
+- **Enforced:** `RecordScopeSqlBuilder.subawardRow` (correlates on
+  `subaward_code`), `JdbcRecordFactsRepository.subawardFamilyFundingAwardIds`,
+  `RecordAuthorizationService.canSeeSubaward`.
+- **Tests:** `familyRule_*` (4) plus the revised
+  `scenario15_theVersionListShowsTheWHOLEFamilyOnceAnyVersionIsFunded`, which
+  previously asserted the opposite.
+
 ## D7 — Restricted funding Awards are omitted, and leave no trace (APPROVED)
 
 > Display only authorized funding Awards. Never reveal the existence or

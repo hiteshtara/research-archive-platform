@@ -116,6 +116,16 @@ class SubawardRecordAuthorizationIntegrationTest {
     // extra funding Award that caller may not see. See the D7 tests.
     private static final long SUB_TWIN_A = 9101L;
     private static final long SUB_TWIN_B = 9102L;
+    /*
+     * The shape the dev archive actually has, and the reason the rule moved
+     * to family level: three older versions with NO funding row at all, and
+     * only the newest carrying one. 89,928 of 93,735 real version rows look
+     * like the first three.
+     */
+    private static final long SUB_HIST_V1 = 9201L;
+    private static final long SUB_HIST_V2 = 9202L;
+    private static final long SUB_HIST_V3 = 9203L;
+    private static final long SUB_HIST_V4_FUNDED = 9204L;
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
@@ -217,7 +227,11 @@ class SubawardRecordAuthorizationIntegrationTest {
                     (9008, 'SUB-CHEMV1', 1, 'SDOC-9008', 'Funded by old version','Active', 'ACTIVE',  'ORG1', 'ACC7', '7777'),
                     (9009, 'SUB-TRIPLE', 1, 'SDOC-9009', 'Three funders',        'Active', 'ACTIVE',  'ORG1', 'ACC8', '7777'),
                     (9101, 'SUB-TWINA',  1, 'SDOC-TWIN', 'Twin subaward',        'Active', 'ACTIVE',  'ORG9', 'ACC9', '7777'),
-                    (9102, 'SUB-TWINB',  1, 'SDOC-TWIN', 'Twin subaward',        'Active', 'ACTIVE',  'ORG9', 'ACC9', '7777')
+                    (9102, 'SUB-TWINB',  1, 'SDOC-TWIN', 'Twin subaward',        'Active', 'ACTIVE',  'ORG9', 'ACC9', '7777'),
+                    (9201, 'SUB-HIST',   1, 'SDOC-H1',   'Historical v1',        'Active', 'HISTORY', 'ORG1', 'ACCH', '7777'),
+                    (9202, 'SUB-HIST',   2, 'SDOC-H2',   'Historical v2',        'Active', 'HISTORY', 'ORG1', 'ACCH', '7777'),
+                    (9203, 'SUB-HIST',   3, 'SDOC-H3',   'Historical v3',        'Active', 'HISTORY', 'ORG1', 'ACCH', '7777'),
+                    (9204, 'SUB-HIST',   4, 'SDOC-H4',   'Historical v4',        'Active', 'ACTIVE',  'ORG1', 'ACCH', '7777')
                     """);
 
             /*
@@ -251,7 +265,16 @@ class SubawardRecordAuthorizationIntegrationTest {
                     -- funding Award.
                     (320, 9101, 'SUB-TWINA',  1, 5002,   'CHEM-00001'),
                     (321, 9102, 'SUB-TWINB',  1, 5002,   'CHEM-00001'),
-                    (322, 9102, 'SUB-TWINB',  1, 6001,   'PHYS-00001')
+                    (322, 9102, 'SUB-TWINB',  1, 6001,   'PHYS-00001'),
+                    -- ONLY the newest version carries funding. Versions
+                    -- 9201-9203 have no row here at all.
+                    (330, 9204, 'SUB-HIST',   4, 5002,   'CHEM-00001'),
+                    -- Denormalised subaward_code DELIBERATELY WRONG: this
+                    -- row belongs to SUB-OTHERS by subaward_id but claims
+                    -- SUB-CHEM. Mirrors the 8 real rows in dev. The family
+                    -- must be derived from subaward_id, so this must NOT
+                    -- let a CHEM-authorized caller reach SUB-OTHERS.
+                    (331, 9005, 'SUB-CHEM',   1, NULL,   NULL)
                     """);
         }
 
@@ -269,8 +292,9 @@ class SubawardRecordAuthorizationIntegrationTest {
         assertThat(codes(page)).containsExactlyInAnyOrder(
                 "SUB-CHEM", "SUB-BOTH", "SUB-NONE", "SUB-BROKEN",
                 "SUB-OTHERS", "SUB-FAM", "SUB-FAM", "SUB-CHEMV1",
-                "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
-        assertThat(page.totalElements()).isEqualTo(11);
+                "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB",
+                "SUB-HIST", "SUB-HIST", "SUB-HIST", "SUB-HIST");
+        assertThat(page.totalElements()).isEqualTo(15);
     }
 
     @Test
@@ -345,7 +369,7 @@ class SubawardRecordAuthorizationIntegrationTest {
         assertThat(codes(search(departmentScope("7777")))).doesNotContain("SUB-NONE");
         assertThatThrownBy(() -> service(departmentScope("7777")).findWorkspace(SUB_NONE))
                 .isInstanceOf(RecordNotAccessibleException.class);
-        assertThat(facts.subawardFundingAwardIds(SUB_NONE)).isEmpty();
+        assertThat(facts.subawardFamilyFundingAwardIds(SUB_NONE)).isEmpty();
     }
 
     @Test
@@ -355,7 +379,7 @@ class SubawardRecordAuthorizationIntegrationTest {
         // permission - in BOTH evaluations.
         assertThat(codes(search(departmentScope("7777")))).doesNotContain("SUB-BROKEN");
         assertThat(codes(search(centralScope()))).contains("SUB-BROKEN");
-        assertThat(facts.subawardFundingAwardIds(SUB_BROKEN)).isEmpty();
+        assertThat(facts.subawardFamilyFundingAwardIds(SUB_BROKEN)).isEmpty();
         assertThatThrownBy(() -> service(departmentScope("7777")).findWorkspace(SUB_BROKEN))
                 .isInstanceOf(RecordNotAccessibleException.class);
     }
@@ -366,10 +390,17 @@ class SubawardRecordAuthorizationIntegrationTest {
     void scenario8_aDepartmentGrantReachesOnlyItsOwnUnitsSubawards() {
         SubawardPageResponse page = search(departmentScope("7777"));
 
+        /*
+         * SUB-FAM contributes BOTH versions now, not one: version 1 is
+         * funded by CHEM, and under the family rule that reaches version 2
+         * as well even though version 2's own funding is PHYS. SUB-HIST
+         * contributes all four versions off a single funded newest version.
+         */
         assertThat(codes(page)).containsExactlyInAnyOrder(
-                "SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1",
-                "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
-        assertThat(page.totalElements()).isEqualTo(7);
+                "SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-FAM", "SUB-CHEMV1",
+                "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB",
+                "SUB-HIST", "SUB-HIST", "SUB-HIST", "SUB-HIST");
+        assertThat(page.totalElements()).isEqualTo(12);
     }
 
     @Test
@@ -380,8 +411,9 @@ class SubawardRecordAuthorizationIntegrationTest {
                 AuthorizationPolicy.DepartmentMatch.LEAD_UNIT_WITH_DESCENDANTS);
 
         assertThat(codes(search(scoped(scope, Set.of(CHEM_V1, CHEM_V2)))))
-                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1",
-                        "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
+                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-FAM",
+                        "SUB-CHEMV1", "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB",
+                        "SUB-HIST", "SUB-HIST", "SUB-HIST", "SUB-HIST");
     }
 
     @Test
@@ -398,8 +430,9 @@ class SubawardRecordAuthorizationIntegrationTest {
     @Test
     void scenario9_aResearchStaffContactReachesTheSubawardsOfTheirAward() {
         assertThat(codes(search(contactScope(FARRER))))
-                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1",
-                        "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
+                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-FAM",
+                        "SUB-CHEMV1", "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB",
+                        "SUB-HIST", "SUB-HIST", "SUB-HIST", "SUB-HIST");
     }
 
     @Test
@@ -491,7 +524,7 @@ class SubawardRecordAuthorizationIntegrationTest {
     void centralSeesEverySubawardIncludingUnfundedAndBrokenOnes() {
         SubawardPageResponse page = search(centralScope());
 
-        assertThat(page.totalElements()).isEqualTo(11);
+        assertThat(page.totalElements()).isEqualTo(15);
         assertThat(codes(page)).contains("SUB-NONE", "SUB-BROKEN", "SUB-OTHERS");
     }
 
@@ -572,11 +605,14 @@ class SubawardRecordAuthorizationIntegrationTest {
         SubawardPageResponse first = service.findPage("", SubawardSearchFilters.none(), 0, 2);
         SubawardPageResponse second = service.findPage("", SubawardSearchFilters.none(), 1, 2);
 
-        assertThat(first.totalElements()).isEqualTo(7);
-        assertThat(second.totalElements()).isEqualTo(7);
+        assertThat(first.totalElements()).isEqualTo(12);
+        assertThat(second.totalElements()).isEqualTo(12);
         assertThat(first.content()).hasSize(2);
         assertThat(second.content()).hasSize(2);
-        assertThat(codes(first)).doesNotContainAnyElementsOf(codes(second));
+        // Compared by subaward_id, not code: SUB-HIST has four versions, so
+        // two pages legitimately share a CODE while holding different rows.
+        // Under the family rule that overlap is expected, not a paging bug.
+        assertThat(ids(first)).doesNotContainAnyElementsOf(ids(second));
     }
 
     @Test
@@ -591,22 +627,80 @@ class SubawardRecordAuthorizationIntegrationTest {
     }
 
     @Test
-    void scenario15_theVersionListAndItsTotalAreBothScoped() {
+    void scenario15_theVersionListShowsTheWHOLEFamilyOnceAnyVersionIsFunded() {
         /*
-         * SUB-FAM's two versions name different funding Awards: version 1
-         * is funded by CHEM, version 2 by PHYS. A 7777 caller opens version
-         * 1 and must not reach version 2 through the version list.
+         * This test previously asserted the OPPOSITE - that a 7777 caller
+         * opening SUB-FAM version 1 saw only that version, because version
+         * 2 is funded by PHYS. Profiling the dev archive showed that rule
+         * made 95.94% of real version rows unreachable, so the approved
+         * rule moved to family level and this assertion inverted with it.
+         *
+         * Both versions now, from one authorized funding Award anywhere in
+         * the family.
          */
         PageResponse<SubawardVersionSummaryResponse> versions =
                 service(departmentScope("7777")).findVersions(SUB_FAM_HISTORY, 0, 20);
 
         assertThat(versions.content().stream().map(SubawardVersionSummaryResponse::subawardId))
-                .containsExactly(SUB_FAM_HISTORY);
-        assertThat(versions.totalElements()).isEqualTo(1);
+                .containsExactlyInAnyOrder(SUB_FAM_HISTORY, SUB_FAM_ACTIVE);
+        assertThat(versions.totalElements()).isEqualTo(2);
+    }
 
-        PageResponse<SubawardVersionSummaryResponse> unrestricted =
-                service(SubawardRecordAccess.PERMIT_ALL).findVersions(SUB_FAM_HISTORY, 0, 20);
-        assertThat(unrestricted.totalElements()).isEqualTo(2);
+    @Test
+    void familyRule_olderVersionsWithNoFundingAreReachableViaTheNewestFundedVersion() {
+        /*
+         * Requirement 9, and the whole reason the rule changed. SUB-HIST
+         * has four versions; only version 4 carries a funding row. In the
+         * dev archive 89,928 of 93,735 version rows look like versions 1-3.
+         *
+         * Every one of them must be reachable, and openable, for a caller
+         * authorized on the Award funding version 4.
+         */
+        SubawardRecordAccess chem = departmentScope("7777");
+
+        for (long id : List.of(SUB_HIST_V1, SUB_HIST_V2, SUB_HIST_V3, SUB_HIST_V4_FUNDED)) {
+            assertThatCode(() -> service(chem).findWorkspace(id))
+                    .as("version %d must open", id)
+                    .doesNotThrowAnyException();
+            assertThat(chem.canSeeSubaward(id)).as("canSeeSubaward(%d)", id).isTrue();
+        }
+
+        // And the history page shows all four, not just the funded one.
+        PageResponse<SubawardVersionSummaryResponse> versions =
+                service(chem).findVersions(SUB_HIST_V1, 0, 20);
+        assertThat(versions.totalElements()).isEqualTo(4);
+    }
+
+    @Test
+    void familyRule_anUnfundedVersionIsStillDeniedToACallerWithNoClaimOnTheFamily() {
+        // The rule widens reach WITHIN a family; it does not weaken the
+        // boundary between families. A 1234 caller has no funding Award
+        // anywhere in SUB-HIST and reaches none of its versions.
+        SubawardRecordAccess phys = departmentScope("1234");
+
+        for (long id : List.of(SUB_HIST_V1, SUB_HIST_V4_FUNDED)) {
+            assertThatThrownBy(() -> service(phys).findWorkspace(id))
+                    .isInstanceOf(RecordNotAccessibleException.class);
+        }
+        assertThat(codes(search(phys))).doesNotContain("SUB-HIST");
+    }
+
+    @Test
+    void familyRule_isDerivedThroughSubawardIdNotTheDenormalisedFundingCode() {
+        /*
+         * archive.subaward_funding carries its OWN subaward_code, and in
+         * the dev archive it disagrees with its parent row for 8 rows,
+         * naming genuinely different families (3046 vs 1970, 3203 vs 4094).
+         * Reading the family from that column would attribute those funding
+         * links to the wrong family and grant access to it.
+         *
+         * Modelled here: a funding row whose denormalised code says
+         * SUB-CHEM while its subaward_id belongs to SUB-OTHERS. A 7777
+         * caller holds CHEM and must NOT thereby reach SUB-OTHERS.
+         */
+        assertThat(codes(search(departmentScope("7777")))).doesNotContain("SUB-OTHERS");
+        assertThatThrownBy(() -> service(departmentScope("7777")).findWorkspace(SUB_OTHERS))
+                .isInstanceOf(RecordNotAccessibleException.class);
     }
 
     // --- 16. Attachment dual authorization --------------------------------
@@ -961,12 +1055,12 @@ class SubawardRecordAuthorizationIntegrationTest {
 
     @Test
     void theFactsQueryReturnsOnlyResolvableFundingAwards() {
-        assertThat(facts.subawardFundingAwardIds(SUB_BOTH))
+        assertThat(facts.subawardFamilyFundingAwardIds(SUB_BOTH))
                 .containsExactlyInAnyOrder(CHEM_V2, PHYS_V1);
-        assertThat(facts.subawardFundingAwardIds(SUB_OTHERS))
+        assertThat(facts.subawardFamilyFundingAwardIds(SUB_OTHERS))
                 .containsExactlyInAnyOrder(PHYS_V1, NULL_V1);
-        assertThat(facts.subawardFundingAwardIds(SUB_BROKEN)).isEmpty();
-        assertThat(facts.subawardFundingAwardIds(SUB_NONE)).isEmpty();
+        assertThat(facts.subawardFamilyFundingAwardIds(SUB_BROKEN)).isEmpty();
+        assertThat(facts.subawardFamilyFundingAwardIds(SUB_NONE)).isEmpty();
     }
 
     // --- Dashboard counts --------------------------------------------------
@@ -981,11 +1075,11 @@ class SubawardRecordAuthorizationIntegrationTest {
          * a collision, a bad alias inside the scalar subquery, or an
          * unbound parameter would all pass a text assertion and fail here.
          */
-        assertThat(dashboard(SubawardRecordAccess.PERMIT_ALL).subawards()).isEqualTo(10);
-        assertThat(dashboard(centralScope()).subawards()).isEqualTo(10);
+        assertThat(dashboard(SubawardRecordAccess.PERMIT_ALL).subawards()).isEqualTo(11);
+        assertThat(dashboard(centralScope()).subawards()).isEqualTo(11);
 
-        // Seven codes for 7777 and five for 1234, not the archive-wide ten.
-        assertThat(dashboard(departmentScope("7777")).subawards()).isEqualTo(7);
+        // Eight codes for 7777 and five for 1234, not the archive-wide 11.
+        assertThat(dashboard(departmentScope("7777")).subawards()).isEqualTo(8);
         assertThat(dashboard(departmentScope("1234")).subawards()).isEqualTo(5);
         assertThat(dashboard(contactScope(STRANGER)).subawards()).isZero();
     }
@@ -1158,6 +1252,10 @@ class SubawardRecordAuthorizationIntegrationTest {
                 .replaceAll("\\b(320|321|322)\\b", "<funding-row-id>");
     }
 
+    private static List<Long> ids(SubawardPageResponse page) {
+        return page.content().stream().map(SubawardSummaryResponse::subawardId).toList();
+    }
+
     private static List<String> codes(SubawardPageResponse page) {
         return page.content().stream().map(SubawardSummaryResponse::subawardCode).toList();
     }
@@ -1262,7 +1360,7 @@ class SubawardRecordAuthorizationIntegrationTest {
                 // Mirrors RecordAuthorizationService: Central short-circuits,
                 // because its predicate is NONE and lists every Subaward.
                 return unrestricted()
-                        || facts.subawardFundingAwardIds(subawardId).stream()
+                        || facts.subawardFamilyFundingAwardIds(subawardId).stream()
                                 .anyMatch(this::canSeeAward);
             }
 
