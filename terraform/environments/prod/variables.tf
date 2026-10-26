@@ -75,7 +75,7 @@ variable "use_private_subnets_for_api" {
 }
 
 variable "database_allowed_cidrs" {
-  description = "CIDR blocks allowed to connect to PostgreSQL directly (in addition to the API/loader security groups, which are always allowed). Leave empty unless you have a specific need (e.g. a bastion host or an office IP range) - prefer the SSM port-forwarding tunnel documented in the README instead."
+  description = "CIDR blocks allowed to connect to PostgreSQL directly (in addition to the API/loader security groups, which are always allowed). Leave empty unless you have a specific need (e.g. a bastion host or an office IP range) - prefer an SSM port-forwarding tunnel instead - for dev see docs/runbooks/SSM_DB_TUNNEL.md, which needs no CIDR here at all."
   type        = list(string)
   default     = []
 }
