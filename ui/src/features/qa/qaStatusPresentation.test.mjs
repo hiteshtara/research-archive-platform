@@ -16,6 +16,8 @@ import {
   resultsLabel,
   scopesPresent,
   securitySummary,
+  SECURITY_STAGES,
+  enforcementIsOffEverywhere,
   isKnownProgressStage,
   isPlaceholderEvidence,
   isRealIsoDate,
@@ -385,14 +387,17 @@ test("blocked cases stay blocked and say what is needed", () => {
 
 // --- Security requirements ------------------------------------------------
 
-test("all seven requirements are present with stable SEC ids", () => {
+test("all nine requirements are present with stable SEC ids", () => {
   assert.deepEqual(
     requirements.map((requirement) => requirement.id),
-    ["SEC-001", "SEC-002", "SEC-003", "SEC-004", "SEC-005", "SEC-006", "SEC-007"],
+    [
+      "SEC-001", "SEC-002", "SEC-003", "SEC-004", "SEC-005",
+      "SEC-006", "SEC-007", "SEC-008", "SEC-009",
+    ],
   );
   assert.deepEqual(
     requirements.map((requirement) => requirement.csvId),
-    [1, 2, 3, 4, 5, 6, 7],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
   );
 });
 
@@ -412,6 +417,14 @@ test("each requirement preserves the source document's own wording", () => {
     byId["SEC-007"].requirement,
     "The system shall enforce access restrictions when a user attempts to access a system object for which they are not authorized.",
   );
+  assert.equal(
+    byId["SEC-008"].requirement,
+    "The system shall maintain an auditable record of all archive activity, including the user, date and time, and action performed, to support security investigations when necessary.",
+  );
+  assert.equal(
+    byId["SEC-009"].requirement,
+    "The system shall provide the archive in a read-only state to prevent historical records from being modified, updated, or deleted.",
+  );
   for (const requirement of requirements) {
     assert.ok(requirement.requirement.length > 40, `${requirement.id}: wording looks truncated`);
     assert.ok(requirement.acceptance, `${requirement.id}: acceptance criteria must be set`);
@@ -421,67 +434,199 @@ test("each requirement preserves the source document's own wording", () => {
 
 test("no requirement claims to be verified while enforcement is off", () => {
   const summary = securitySummary(requirements);
+  assert.equal(summary.total, 9);
   assert.equal(summary.verified, 0);
-  assert.equal(summary.total, 7);
-  assert.equal(summary.headline, "0 of 7 requirements verified");
+  assert.equal(summary.headline, "0 of 9 requirements verified");
+
+  // The two facts that must never drift apart from reality.
   for (const requirement of requirements) {
-    assert.equal(requirement.deployment, "Not deployed");
-    assert.equal(requirement.verification, "Not verified");
+    assert.notEqual(
+      requirement.status.enforcementEnabled,
+      "yes",
+      `${requirement.id}: enforcement is off in every environment`,
+    );
+    assert.notEqual(
+      requirement.status.acceptanceVerified,
+      "yes",
+      `${requirement.id}: nothing has been accepted yet`,
+    );
   }
+  assert.ok(enforcementIsOffEverywhere(requirements));
 });
 
-test("draft pull requests are never described as implemented and deployed", () => {
+test("an open draft pull request is never reported as merged or deployed", () => {
+  /*
+   * PR #62 is open and in draft. A status page that shows it as merged is
+   * worse than one that shows nothing, because somebody will test against
+   * a protection that is not on the branch. Any requirement citing it must
+   * say so in all three of the stages that depend on it.
+   */
   for (const requirement of requirements) {
+    if (!/#62/.test(requirement.evidence)) {
+      continue;
+    }
     assert.match(
-      requirement.implementation,
-      /^(In draft, not merged|Not started)$/,
-      `${requirement.id}: implementation status overstates the work`,
+      requirement.evidence,
+      /draft|not merged/i,
+      `${requirement.id}: cites #62 without saying it is unmerged`,
+    );
+    // "partial" is allowed only where the evidence also cites a merged PR,
+    // which is SEC-005/006: the admin service shipped in #56, its
+    // revocation-immediacy proof is in #62. "yes" is never allowed.
+    const allowed = /#56/.test(requirement.evidence) ? ["no", "partial"] : ["no"];
+    assert.ok(
+      allowed.includes(requirement.status.mergedToMain),
+      `${requirement.id}: cites the draft #62 but reports mergedToMain=${requirement.status.mergedToMain}`,
+    );
+    assert.ok(
+      allowed.includes(requirement.status.deployed),
+      `${requirement.id}: cites the draft #62 but reports deployed=${requirement.status.deployed}`,
     );
   }
 });
 
-test("the known conflicts are recorded rather than quietly resolved", () => {
-  const conflicted = requirementsWithConflicts(requirements);
-  const ids = conflicted.map((requirement) => requirement.id);
-  // The department fixture ambiguity and the "all system objects" scope
-  // limit must both be surfaced.
-  assert.ok(ids.includes("SEC-002"), "the PAFO Administrator group ambiguity must be flagged");
-  assert.ok(ids.includes("SEC-001"), "the scope of “all system objects” must be flagged");
-  assert.match(
-    conflicted.find((requirement) => requirement.id === "SEC-002").conflict,
-    /PAFO/,
+test("the seven implementation stages are reported separately, never collapsed", () => {
+  // The whole point: an approved decision, passing tests, a merge, a
+  // deployment and an acceptance verification are five different facts.
+  for (const requirement of requirements) {
+    for (const stage of SECURITY_STAGES) {
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(requirement.status, stage.key),
+        `${requirement.id}: missing stage ${stage.key}`,
+      );
+    }
+  }
+  // At least one requirement must demonstrate the stages disagreeing,
+  // otherwise the distinction is decorative.
+  assert.ok(
+    requirements.some(
+      (requirement) =>
+        requirement.status.testsPassed === "yes" && requirement.status.mergedToMain === "no",
+    ),
+    "tests passing without a merge must be representable and represented",
   );
 });
 
-test("recommendations are recorded but never presented as approved policy", () => {
-  // Recorded for review on 2026-10-05. They must stay visibly
-  // unapproved: nothing here has been accepted as policy, and none of
-  // it changes how the archive behaves.
-  assert.match(security.recommendationStatus, /not approved/i);
-  const byId = Object.fromEntries(requirements.map((item) => [item.id, item]));
-  for (const id of ["SEC-001", "SEC-002", "SEC-006"]) {
-    assert.ok(byId[id].recommendation, `${id}: recommendation must be recorded`);
-  }
-  assert.match(byId["SEC-001"].recommendation, /explicit, auditable grant/);
-  assert.match(byId["SEC-002"].recommendation, /department-only test identity/);
-  assert.match(byId["SEC-006"].recommendation, /not the same as revoking/);
-  // Still pending, not assumed.
-  assert.match(byId["SEC-006"].recommendation, /pending/);
-  // A recommendation must never read as a decision already taken.
-  for (const requirement of requirements) {
-    assert.doesNotMatch(requirement.recommendation, /\bapproved\b(?! policy)/i);
+test("a rule implemented for Award only is never reported as fully implemented", () => {
+  /*
+   * SEC-001, SEC-002 and SEC-003 are written against "all system objects".
+   * They are implemented for Award and nothing else, so "yes" would claim a
+   * cross-module guarantee that does not exist. They may only say "yes" once
+   * every module listed as pending in moduleProgress has gone.
+   */
+  const stillPending = (security.moduleProgress || []).filter(
+    (module) => module.state === "pending",
+  );
+  assert.ok(stillPending.length > 0, "modules are still pending; this guard must apply");
+
+  for (const id of ["SEC-001", "SEC-002", "SEC-003"]) {
+    const requirement = requirements.find((item) => item.id === id);
+    assert.notEqual(
+      requirement.status.codeImplemented,
+      "yes",
+      `${id}: implemented for Award only while ${stillPending.length} modules are pending`,
+    );
+    assert.match(
+      requirement.blockers,
+      /Award only|all system objects|not wired/i,
+      `${id}: the cross-module limit must be stated, not implied`,
+    );
   }
 });
 
-test("the page shows a recommendation under an explicitly unapproved heading", () => {
+test("an established policy is not the same as a verified acceptance criterion", () => {
+  // SEC-009: read-only is long-standing project policy, so the decision is
+  // settled - but no test proves the absence of a write path, so acceptance
+  // is NOT verified. The page must hold those two apart.
+  const nine = requirements.find((item) => item.id === "SEC-009");
+  assert.equal(nine.status.decisionApproved, "approved");
+  assert.equal(nine.status.acceptanceVerified, "no");
+  assert.equal(nine.status.testsPassed, "no");
+  assert.match(nine.businessRule, /ESTABLISHED PROJECT POLICY/);
+  assert.match(nine.tests, /NOT acceptance verification/i);
+  // And it is not one of the nine decisions taken on 2026-10-26.
+  assert.ok(
+    !security.decisionsApproved.some((decision) => /read-only/i.test(decision)),
+    "read-only policy predates the 2026-10-26 decisions and must not be listed among them",
+  );
+});
+
+test("the enforcement claim states its evidence and its limits", () => {
+  /*
+   * "OFF in every environment" is a stronger claim than the evidence
+   * supports: three environments are defined in Terraform, only dev has a
+   * recorded deployment, and no running instance was queried. The statement
+   * must say what was actually checked.
+   */
+  assert.match(security.enforcementState, /OFF/);
+  assert.match(security.enforcementState, /NO committed configuration file/);
+  assert.match(security.enforcementState, /defaults to false/);
+  assert.match(security.enforcementState, /dev, test and prod/);
+  assert.match(security.enforcementState, /only\s+dev has a recorded deployment/);
+  assert.match(security.enforcementState, /No runtime check/);
+  // The overclaim this replaced must not come back.
+  assert.doesNotMatch(security.enforcementState, /OFF in every environment/i);
+});
+
+test("genuinely unresolved questions survive, and settled ones are cleared", () => {
+  const conflicted = requirementsWithConflicts(requirements).map((item) => item.id);
+
+  // SEC-008 is the one that must NOT be closed: an earlier decision
+  // against routine audit logging has not been reconciled with the
+  // requirement as written.
+  assert.ok(conflicted.includes("SEC-008"), "the audit-logging conflict must stay open");
+  assert.equal(
+    requirements.find((item) => item.id === "SEC-008").status.decisionApproved,
+    "open",
+  );
+
+  // SEC-002's PAFO Administrator ambiguity was decided on 2026-10-26, so
+  // it must no longer be presented as an open question.
+  assert.ok(
+    !conflicted.includes("SEC-002"),
+    "the PAFO Administrator question was decided and must not still be flagged",
+  );
+  assert.match(
+    requirements.find((item) => item.id === "SEC-002").businessRule,
+    /PAFO Administrator/,
+  );
+});
+
+test("approved decisions are listed, and separated from implementation status", () => {
+  assert.ok(Array.isArray(security.decisionsApproved));
+  assert.equal(security.decisionsApproved.length, 9);
+  const joined = security.decisionsApproved.join(" ");
+  for (const phrase of [
+    "PAFO Administrator",
+    "SAP account number",
+    "entire Award family",
+    "ARCHIVE_ADMIN",
+    "Access Not Provisioned",
+    "archive-wide statistics",
+    "omitted entirely",
+  ]) {
+    assert.ok(joined.includes(phrase), `missing approved decision: ${phrase}`);
+  }
+  // An approved decision must never imply the code is done.
+  assert.match(security.recommendationStatus, /not working software/i);
+});
+
+test("the page renders the stages, the module table and the decision list", () => {
   const source = readSource("../../pages/QaStatusPage.tsx");
-  assert.match(source, /Recommended, not approved/);
-  assert.match(source, /requirement\.recommendation/);
+  assert.match(source, /Security implementation progress/);
+  assert.match(source, /Approved business decisions/);
+  assert.match(source, /securityStages\(requirement\)/);
+  assert.match(source, /Remaining blockers/);
+  assert.match(source, /Test coverage/);
+  // Enforcement-off must be impossible to miss - but stated no more
+  // strongly than the evidence in securityRequirements.json supports.
+  assert.match(source, /Record-level authorization is OFF</);
+  assert.doesNotMatch(source, /OFF in every environment/i);
 });
 
 test("the enforcement state is stated so no one reads these as live controls", () => {
-  assert.match(security.enforcementState, /OFF|off/);
-  assert.match(security.enforcementState, /cannot be verified|whole archive/);
+  assert.match(security.enforcementState, /OFF/);
+  assert.match(security.enforcementState, /inert|not currently running/i);
 });
 
 // --- What must not reach a browser-delivered asset ------------------------

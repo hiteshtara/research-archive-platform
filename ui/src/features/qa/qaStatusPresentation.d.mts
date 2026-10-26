@@ -67,6 +67,16 @@ export interface QaCase {
   history?: CaseHistoryEntry[];
 }
 
+export interface SecurityStatus {
+  decisionApproved: string;
+  codeImplemented: string;
+  testsPassed: string;
+  mergedToMain: string;
+  deployed: string;
+  enforcementEnabled: string;
+  acceptanceVerified: string;
+}
+
 export interface SecurityRequirement {
   id: string;
   csvId: number;
@@ -75,13 +85,45 @@ export interface SecurityRequirement {
   accessScope: string;
   audience: string;
   acceptance: string;
-  implementation: string;
-  deployment: string;
-  verification: string;
+  businessRule: string;
+  status: SecurityStatus;
+  tests: string;
+  blockers: string;
+  evidence: string;
   decisions: string;
   conflict: string;
-  recommendation: string;
 }
+
+export interface SecurityModule {
+  name: string;
+  detail: string;
+  state: string;
+  evidence: string;
+}
+
+export interface SecurityStage {
+  key: string;
+  label: string;
+  detail: string;
+  tone: string;
+  text: string;
+}
+
+export interface SecurityProgress {
+  total: number;
+  decided: number;
+  implemented: number;
+  merged: number;
+  verified: number;
+  open: number;
+}
+
+export const SECURITY_STAGES: { key: string; label: string; detail: string }[];
+export function securityStageState(value: unknown): { tone: string; text: string };
+export function securityStages(requirement: SecurityRequirement): SecurityStage[];
+export function securityProgress(requirements: SecurityRequirement[]): SecurityProgress;
+export function enforcementIsOffEverywhere(requirements: SecurityRequirement[]): boolean;
+export function pendingModules(modules: SecurityModule[]): SecurityModule[];
 
 export interface SecuritySummary {
   total: number;
