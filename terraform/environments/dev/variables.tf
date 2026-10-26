@@ -75,7 +75,7 @@ variable "use_private_subnets_for_api" {
 }
 
 variable "database_allowed_cidrs" {
-  description = "CIDR blocks allowed to connect to PostgreSQL directly (in addition to the API/loader security groups, which are always allowed). Leave empty unless you have a specific need (e.g. a bastion host or an office IP range) - prefer the SSM port-forwarding tunnel documented in the README instead."
+  description = "CIDR blocks allowed to connect to PostgreSQL directly (in addition to the API/loader security groups, which are always allowed). Leave empty unless you have a specific need (e.g. a bastion host or an office IP range) - prefer an SSM port-forwarding tunnel instead - for dev see docs/runbooks/SSM_DB_TUNNEL.md, which needs no CIDR here at all."
   type        = list(string)
   default     = []
 }
@@ -464,6 +464,18 @@ variable "manage_cloudshell_analyst_access" {
   description = "Create the CloudShell-analyst security group and its RDS ingress/egress rules, so a CloudShell VPC environment session can reach RDS on 5432 for human/read-only analysis. Zero additional AWS resource cost (no EC2, no interface endpoints, no NAT) - see docs/runbooks/CLOUDSHELL_ANALYSIS.md. Defaults to false."
   type        = bool
   default     = false
+}
+
+variable "manage_db_tunnel_access" {
+  description = "Create the ephemeral-Fargate SSM port-forwarding path so an operator can reach dev RDS from a Mac with psql/DBeaver/DataGrip (see docs/runbooks/SSM_DB_TUNNEL.md). Adds ONE always-on billable resource, a single-AZ ssmmessages interface endpoint at about $7.30/month; the Fargate task itself is started and stopped per session and costs about $0.015/hour while running. Defaults to false."
+  type        = bool
+  default     = false
+}
+
+variable "db_tunnel_max_session_seconds" {
+  description = "Hard ceiling on one tunnel task, enforced by the container's own sleep command. Independent of the operator's Mac: if the laptop sleeps or the shell dies before the stop call, the task still exits by itself. Defaults to 3600 (one hour), which matches the account-wide Session Manager idleSessionTimeout."
+  type        = number
+  default     = 3600
 }
 
 variable "ui_route53_zone_id" {
