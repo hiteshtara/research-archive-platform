@@ -406,6 +406,21 @@ export function QaStatusPage() {
       </Alert>
 
       {/*
+        Backend vs UI deployment. The single most misleading thing this page
+        could do right now is let a green Amplify build read as "the
+        authorization code is live". It is not: Amplify ships the user
+        interface, the API ships separately, and the API has not been rebuilt.
+      */}
+      {securityData.apiDeploymentState && (
+        <Alert severity="info">
+          <AlertTitle>
+            Merged, but not running: the API has not been redeployed
+          </AlertTitle>
+          {securityData.apiDeploymentState}
+        </Alert>
+      )}
+
+      {/*
         Security implementation progress. Separate from the case totals and
         from the requirement list: this is "which parts of the archive have
         authorization at all", which is a different question from "is each
@@ -418,9 +433,10 @@ export function QaStatusPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: "80ch" }}>
           {progress.decided} of {progress.total} requirements have a settled
           business decision. {progress.implemented} are implemented in code
-          across their whole stated scope &mdash; the rest are built for Award
-          and nothing else, which is why they read &ldquo;partial&rdquo; rather
-          than done. {progress.merged} are merged into main, and{" "}
+          across their whole stated scope &mdash; the rest cover Award and
+          Proposal only, of five modules, which is why they read
+          &ldquo;partial&rdquo; rather than done. {progress.merged} are merged
+          into main; none of that backend code is in the running API. And{" "}
           <strong>{progress.verified} have been verified against their acceptance
           criteria</strong>. Those are four different facts and are reported
           separately on purpose.
@@ -455,9 +471,11 @@ export function QaStatusPage() {
                           ? "success"
                           : module.state === "implemented"
                             ? "info"
-                            : module.state === "off"
+                            : module.state === "merged-not-deployed"
                               ? "warning"
-                              : "default"
+                              : module.state === "off"
+                                ? "warning"
+                                : "default"
                       }
                       variant={module.state === "off" ? "filled" : "outlined"}
                     />

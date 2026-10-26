@@ -26,19 +26,19 @@
       "name": "Authorization engine",
       "detail": "Policy, scope resolution, SQL predicate builder, evaluator, identity links, grants and the administrative service.",
       "state": "implemented",
-      "evidence": "PR #56, merged and deployed, inert while enforcement is off"
+      "evidence": "PR #56, merged and in the running API, inert while enforcement is off"
     },
     {
       "name": "Award authorization",
       "detail": "All 45 Award endpoints gated; scoped search, counts, exports, hierarchy and attachments.",
-      "state": "in-review",
-      "evidence": "PR #62 - open and in draft, NOT merged"
+      "state": "merged-not-deployed",
+      "evidence": "PR #62 merged as b77f03f. Implemented in source - NOT in the running API."
     },
     {
       "name": "Proposal authorization",
-      "detail": "The SQL predicate builder already supports Proposal; nothing is wired to it.",
-      "state": "pending",
-      "evidence": "Not started"
+      "detail": "All 14 Proposal endpoints gated; scoped search, counts, version history and attachments.",
+      "state": "merged-not-deployed",
+      "evidence": "PR #64 merged as f1b8115. Implemented in source - NOT in the running API."
     },
     {
       "name": "Negotiation authorization",
@@ -79,14 +79,14 @@
         "decisionApproved": "approved",
         "codeImplemented": "partial",
         "testsPassed": "yes",
-        "mergedToMain": "no",
+        "mergedToMain": "yes",
         "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
       "tests": "A Central scope renders no SQL predicate, so Central sees every record and archive-wide dashboard totals. Covered by decision3_centralSeesArchiveWideTotals and centralSeesEverythingIncludingRecordsWithNoUnitOrContact.",
-      "blockers": "Implemented for Award only - a Central scope renders no predicate, so Central sees every Award and archive-wide Award totals, but the other four modules have no gate at all, so 'all system objects' is not demonstrated. Separately, membership cannot be derived: five of the seven Central teams named in the source document are not Kuali user roles, so Central membership has to be granted by hand, and no administrative surface exists to do that yet.",
-      "evidence": "PR #62 (open, draft - not merged)",
+      "blockers": "Merged for Award and Proposal only - three of five modules (Negotiation, Subaward, IRB) have no gate, so 'all system objects' is not demonstrated. The merged code is also not running: the API image has not been rebuilt. Separately, Central membership cannot be derived - five of the seven Central teams named in the source document are not Kuali user roles - and no administrative surface exists to grant it by hand.",
+      "evidence": "PR #62 merged as b77f03f; PR #64 merged as f1b8115. Not in the running API.",
       "decisions": "Who administers Central grants, and whether granting Central access needs a second approver.",
       "conflict": "Five of the seven listed Central teams are not Kuali user roles, so Central membership cannot be derived from record contacts."
     },
@@ -103,14 +103,14 @@
         "decisionApproved": "approved",
         "codeImplemented": "partial",
         "testsPassed": "yes",
-        "mergedToMain": "no",
+        "mergedToMain": "yes",
         "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
-      "tests": "Lead-unit matching with descendant expansion only where both the policy and the grant allow it. Covered by decision4_departmentTotalsDescribeOnlyTheirOwnRecords, departmentScopeReturnsOnlyItsOwnUnitAndTheCountAgrees, parentUnitWithDescendantsReachesTheChildUnit and parentUnitWithoutDescendantsReachesNothing.",
-      "blockers": "Award only. Proposal, Negotiation, Subaward and IRB are not wired. Negotiation has no unit column at all, so department scoping cannot apply to it as written and needs its own rule before this requirement can be met across the archive.",
-      "evidence": "PR #62 (open, draft - not merged)",
+      "tests": "Lead-unit matching with descendant expansion only where policy and grant both allow it, for Award and Proposal. Covered by the department and descendant cases in both AwardRecordAuthorizationIntegrationTest and ProposalRecordAuthorizationIntegrationTest.",
+      "blockers": "Merged for Award and Proposal. Negotiation, Subaward and IRB are not wired, and Negotiation has no unit column at all, so department scoping cannot apply to it as written. The merged code is not in the running API.",
+      "evidence": "PR #62 merged as b77f03f; PR #64 merged as f1b8115. Not in the running API.",
       "decisions": "",
       "conflict": ""
     },
@@ -127,14 +127,14 @@
         "decisionApproved": "approved",
         "codeImplemented": "partial",
         "testsPassed": "yes",
-        "mergedToMain": "no",
+        "mergedToMain": "yes",
         "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
-      "tests": "Contact matching against archived business data, restricted to approved role codes. Covered by contactScopeReachesTheAwardTheyAreListedOn, contactScopeIgnoresAListingWhoseRoleIsNotApproved and aPersonWhoIsNotAContactAnywhereSeesNothing.",
-      "blockers": "Award only; the Proposal contact tables exist and are supported by the predicate builder but nothing is wired to them, and Negotiation, Subaward and IRB have no contact rule. Separately, historical contact data is not evidence of current employment: a person listed on an archived record keeps that listing forever, so grants derived from it need a periodic review that does not exist yet.",
-      "evidence": "PR #62 (open, draft - not merged)",
+      "tests": "Contact matching restricted to approved role codes, for Award and Proposal. Both suites assert that a listing whose role is NOT approved grants nothing.",
+      "blockers": "Merged for Award and Proposal, both using approved contact roles only. Negotiation, Subaward and IRB have no contact rule. Historical contact data is still not evidence of current employment, and no periodic review exists. The merged code is not in the running API.",
+      "evidence": "PR #62 merged as b77f03f; PR #64 merged as f1b8115. Not in the running API.",
       "decisions": "",
       "conflict": ""
     },
@@ -223,14 +223,14 @@
         "decisionApproved": "approved",
         "codeImplemented": "partial",
         "testsPassed": "yes",
-        "mergedToMain": "no",
+        "mergedToMain": "yes",
         "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
-      "tests": "31 integration cases against a disposable PostgreSQL: scoped search and counts, direct-URL denial returning 404 rather than 403, Access Not Provisioned, family completeness, hierarchy omission, cross-module refusal and the enforcement-disabled baseline.",
-      "blockers": "Award only. Proposal, Negotiation, Subaward and IRB endpoints are unwired and can carry Award identifiers, so enabling enforcement today would protect Awards while other modules disclose them. Enforcement must stay OFF until those are covered.",
-      "evidence": "PR #62 (open, draft - not merged)",
+      "tests": "49 integration cases across the two suites against a disposable PostgreSQL: scoped search and counts, direct-URL denial returning 404 rather than 403, Access Not Provisioned, family completeness, hierarchy omission, cross-module refusal, an ARCHIVE_ADMIN with no data grants seeing nothing, and the enforcement-disabled baseline.",
+      "blockers": "Merged for Award (45 endpoints) and Proposal (14 endpoints). Negotiation, Subaward and IRB remain unwired and can carry Award and Proposal identifiers, so enabling enforcement would protect two modules while three disclose them. The merged code is not in the running API, and enforcement is off regardless.",
+      "evidence": "PR #62 merged as b77f03f; PR #64 merged as f1b8115. Not in the running API.",
       "decisions": "",
       "conflict": ""
     },
@@ -282,5 +282,6 @@
       "decisions": "What counts as sufficient proof: a test, a database grant listing, or both. The policy itself is not in question.",
       "conflict": ""
     }
-  ]
+  ],
+  "apiDeploymentState": "The Award and Proposal authorization changes are MERGED INTO MAIN but are NOT running. Amplify rebuilds the user interface automatically on every merge to main and did so for both (builds 140 and 141), but these are BACKEND changes and the API is deployed separately: the ECS service still runs task definition revision 81, which predates them. So the website you are testing contains none of this authorization code. A green Amplify build is not a backend deployment."
 }

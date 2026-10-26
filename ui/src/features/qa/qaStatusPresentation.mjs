@@ -384,12 +384,17 @@ export const SECURITY_STAGES = [
   {
     key: "mergedToMain",
     label: "Merged to main",
-    detail: "On the branch that builds. An open pull request is not merged.",
+    detail:
+      "On the branch that builds. An open pull request is not merged - and a "
+      + "merge is not a deployment.",
   },
   {
     key: "deployed",
-    label: "Deployed",
-    detail: "Running in the development environment.",
+    label: "Deployed to the running API",
+    detail:
+      "Present in the API image the ECS service is actually running. NOT the "
+      + "same as an Amplify build: Amplify rebuilds the user interface on every "
+      + "merge to main, which says nothing about backend code.",
   },
   {
     key: "enforcementEnabled",
