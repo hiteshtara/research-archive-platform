@@ -246,39 +246,46 @@ public class SubawardArchiveService {
      * caller the metadata of Awards they cannot open - through the very
      * record that inheriting access from one of them granted.
      *
-     * <p>Omitted, not stubbed, following decision D5: a placeholder saying
-     * "a funding Award exists here that you may not see" still discloses the
-     * relationship, and the relationship is most of what this card conveys.
-     * The visible consequence is a shorter funding list; a partial list is
-     * the correct answer to a partially authorized question.
+     * <p>Omitted, not stubbed, following decisions D5 and D7: a placeholder
+     * saying "a funding Award exists here that you may not see" still
+     * discloses the relationship, and the relationship is most of what this
+     * card conveys. The visible consequence is a shorter funding list, and
+     * the heading does not count it - see
+     * {@code resolveAssociatedAwardsSectionLabel}, which would otherwise
+     * turn the shorter list into a false claim about the record.
      *
      * <p>Gated on {@code !unrestricted()}: with enforcement off, or for a
      * Central caller, the list is returned exactly as it always was - a row
      * whose award_id resolves to nothing must keep showing, since it is real
      * archived data, and only a SCOPED caller has anything to be denied.
      */
-    public edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingListResponse findFunding(
-            long subawardId
-    ) {
+    public List<SubawardFundingResponse> findFunding(long subawardId) {
         recordAccess.requireSubaward(subawardId);
         requireSubaward(subawardId);
         List<SubawardFundingResponse> funding = repository.findFunding(subawardId);
         if (recordAccess.unrestricted()) {
-            return new edu.bu.archive.adapter.in.web.dto.subaward
-                    .SubawardFundingListResponse(funding, false);
+            return funding;
         }
-        List<SubawardFundingResponse> visible = funding.stream()
+        /*
+         * D7, approved 2026-10-26: display only authorized funding Awards,
+         * and never reveal the existence or number of restricted ones.
+         *
+         * So the response is the authorized rows and NOTHING else - no count
+         * of what was removed, no flag saying removal happened, no
+         * placeholder row. An earlier revision returned a `restricted`
+         * boolean so the UI could avoid printing a false count; that was
+         * rejected, because "some funding Awards are not shown to you" is
+         * itself an existence disclosure. The heading drops the count
+         * instead - see resolveAssociatedAwardsSectionLabel.
+         *
+         * The consequence is deliberate and is the point: two Subawards
+         * whose authorized funding is identical must be indistinguishable,
+         * even when one has further funding Awards the caller cannot see.
+         */
+        return funding.stream()
                 .filter(row -> row.exactLinkedAwardId() != null
                         && recordAccess.canSeeAward(row.exactLinkedAwardId()))
                 .toList();
-        /*
-         * Flagged only when something was actually dropped. A scoped caller
-         * who can see every funder of this Subaward gets the exact count and
-         * learns nothing; one who cannot is told their view is partial
-         * rather than being handed a count that is simply wrong.
-         */
-        return new edu.bu.archive.adapter.in.web.dto.subaward.SubawardFundingListResponse(
-                visible, visible.size() != funding.size());
     }
 
     public List<SubawardAttachmentResponse> findAttachments(long subawardId) {

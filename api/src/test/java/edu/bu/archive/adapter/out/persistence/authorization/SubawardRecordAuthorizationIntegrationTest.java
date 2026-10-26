@@ -50,6 +50,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * Subaward record-level authorization, against a real PostgreSQL with every
@@ -110,6 +111,11 @@ class SubawardRecordAuthorizationIntegrationTest {
     private static final long SUB_FAM_HISTORY = 9006L;
     private static final long SUB_FAM_ACTIVE = 9007L;
     private static final long SUB_CHEM_V1_ONLY = 9008L;
+    private static final long SUB_TRIPLE = 9009L;
+    // Identical in every visible respect for a CHEM-only caller; B has one
+    // extra funding Award that caller may not see. See the D7 tests.
+    private static final long SUB_TWIN_A = 9101L;
+    private static final long SUB_TWIN_B = 9102L;
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
@@ -208,7 +214,10 @@ class SubawardRecordAuthorizationIntegrationTest {
                     (9005, 'SUB-OTHERS', 1, 'SDOC-9005', 'Other funders',        'Active', 'ACTIVE',  'ORG2', 'ACC5', '1234'),
                     (9006, 'SUB-FAM',    1, 'SDOC-9006', 'Family v1',            'Active', 'HISTORY', 'ORG1', 'ACC6', '7777'),
                     (9007, 'SUB-FAM',    2, 'SDOC-9007', 'Family v2',            'Active', 'ACTIVE',  'ORG1', 'ACC6', '7777'),
-                    (9008, 'SUB-CHEMV1', 1, 'SDOC-9008', 'Funded by old version','Active', 'ACTIVE',  'ORG1', 'ACC7', '7777')
+                    (9008, 'SUB-CHEMV1', 1, 'SDOC-9008', 'Funded by old version','Active', 'ACTIVE',  'ORG1', 'ACC7', '7777'),
+                    (9009, 'SUB-TRIPLE', 1, 'SDOC-9009', 'Three funders',        'Active', 'ACTIVE',  'ORG1', 'ACC8', '7777'),
+                    (9101, 'SUB-TWINA',  1, 'SDOC-TWIN', 'Twin subaward',        'Active', 'ACTIVE',  'ORG9', 'ACC9', '7777'),
+                    (9102, 'SUB-TWINB',  1, 'SDOC-TWIN', 'Twin subaward',        'Active', 'ACTIVE',  'ORG9', 'ACC9', '7777')
                     """);
 
             /*
@@ -231,7 +240,18 @@ class SubawardRecordAuthorizationIntegrationTest {
                     (306, 9005, 'SUB-OTHERS', 1, 7001,   'NULL-00001'),
                     (307, 9006, 'SUB-FAM',    1, 5002,   'CHEM-00001'),
                     (308, 9007, 'SUB-FAM',    2, 6001,   'PHYS-00001'),
-                    (309, 9008, 'SUB-CHEMV1', 1, 5001,   'CHEM-00001')
+                    (309, 9008, 'SUB-CHEMV1', 1, 5001,   'CHEM-00001'),
+                    -- One authorized (CHEM) and two restricted (PHYS, NULL)
+                    -- for a 7777 caller: the shape D7 is written about.
+                    (310, 9009, 'SUB-TRIPLE', 1, 5002,   'CHEM-00001'),
+                    (311, 9009, 'SUB-TRIPLE', 1, 6001,   'PHYS-00001'),
+                    (312, 9009, 'SUB-TRIPLE', 1, 7001,   'NULL-00001'),
+                    -- The indistinguishability pair. Same authorized funder,
+                    -- same everything else; B alone has a second, restricted
+                    -- funding Award.
+                    (320, 9101, 'SUB-TWINA',  1, 5002,   'CHEM-00001'),
+                    (321, 9102, 'SUB-TWINB',  1, 5002,   'CHEM-00001'),
+                    (322, 9102, 'SUB-TWINB',  1, 6001,   'PHYS-00001')
                     """);
         }
 
@@ -248,8 +268,9 @@ class SubawardRecordAuthorizationIntegrationTest {
 
         assertThat(codes(page)).containsExactlyInAnyOrder(
                 "SUB-CHEM", "SUB-BOTH", "SUB-NONE", "SUB-BROKEN",
-                "SUB-OTHERS", "SUB-FAM", "SUB-FAM", "SUB-CHEMV1");
-        assertThat(page.totalElements()).isEqualTo(8);
+                "SUB-OTHERS", "SUB-FAM", "SUB-FAM", "SUB-CHEMV1",
+                "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
+        assertThat(page.totalElements()).isEqualTo(11);
     }
 
     @Test
@@ -265,12 +286,11 @@ class SubawardRecordAuthorizationIntegrationTest {
     void scenario19_permitAllKeepsTheWholeFundingListIncludingUnresolvableRows() {
         // The broken row is real archived data and must keep showing when
         // nobody is being scoped. Only a SCOPED caller has anything denied.
-        var view = service(SubawardRecordAccess.PERMIT_ALL).findFunding(SUB_BROKEN);
+        List<SubawardFundingResponse> funding =
+                service(SubawardRecordAccess.PERMIT_ALL).findFunding(SUB_BROKEN);
 
-        assertThat(view.funding()).hasSize(1);
-        assertThat(view.funding().getFirst().exactLinkedAwardId()).isEqualTo(NO_SUCH_AWARD);
-        // Nothing was withheld, so the UI keeps its exact count heading.
-        assertThat(view.restricted()).isFalse();
+        assertThat(funding).hasSize(1);
+        assertThat(funding.getFirst().exactLinkedAwardId()).isEqualTo(NO_SUCH_AWARD);
     }
 
     // --- 1-7. The funding shapes the rule names -------------------------
@@ -347,8 +367,9 @@ class SubawardRecordAuthorizationIntegrationTest {
         SubawardPageResponse page = search(departmentScope("7777"));
 
         assertThat(codes(page)).containsExactlyInAnyOrder(
-                "SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1");
-        assertThat(page.totalElements()).isEqualTo(4);
+                "SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1",
+                "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
+        assertThat(page.totalElements()).isEqualTo(7);
     }
 
     @Test
@@ -359,7 +380,8 @@ class SubawardRecordAuthorizationIntegrationTest {
                 AuthorizationPolicy.DepartmentMatch.LEAD_UNIT_WITH_DESCENDANTS);
 
         assertThat(codes(search(scoped(scope, Set.of(CHEM_V1, CHEM_V2)))))
-                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1");
+                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1",
+                        "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
     }
 
     @Test
@@ -376,7 +398,8 @@ class SubawardRecordAuthorizationIntegrationTest {
     @Test
     void scenario9_aResearchStaffContactReachesTheSubawardsOfTheirAward() {
         assertThat(codes(search(contactScope(FARRER))))
-                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1");
+                .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-CHEMV1",
+                        "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB");
     }
 
     @Test
@@ -468,7 +491,7 @@ class SubawardRecordAuthorizationIntegrationTest {
     void centralSeesEverySubawardIncludingUnfundedAndBrokenOnes() {
         SubawardPageResponse page = search(centralScope());
 
-        assertThat(page.totalElements()).isEqualTo(8);
+        assertThat(page.totalElements()).isEqualTo(11);
         assertThat(codes(page)).contains("SUB-NONE", "SUB-BROKEN", "SUB-OTHERS");
     }
 
@@ -549,8 +572,8 @@ class SubawardRecordAuthorizationIntegrationTest {
         SubawardPageResponse first = service.findPage("", SubawardSearchFilters.none(), 0, 2);
         SubawardPageResponse second = service.findPage("", SubawardSearchFilters.none(), 1, 2);
 
-        assertThat(first.totalElements()).isEqualTo(4);
-        assertThat(second.totalElements()).isEqualTo(4);
+        assertThat(first.totalElements()).isEqualTo(7);
+        assertThat(second.totalElements()).isEqualTo(7);
         assertThat(first.content()).hasSize(2);
         assertThat(second.content()).hasSize(2);
         assertThat(codes(first)).doesNotContainAnyElementsOf(codes(second));
@@ -616,8 +639,7 @@ class SubawardRecordAuthorizationIntegrationTest {
          * every funding Award's number, title, sponsor, status, amount and
          * link. A 7777 caller gets CHEM and must not learn PHYS exists.
          */
-        var view = service(departmentScope("7777")).findFunding(SUB_BOTH);
-        List<SubawardFundingResponse> funding = view.funding();
+        List<SubawardFundingResponse> funding = service(departmentScope("7777")).findFunding(SUB_BOTH);
 
         assertThat(funding).hasSize(1);
         SubawardFundingResponse row = funding.getFirst();
@@ -626,15 +648,6 @@ class SubawardRecordAuthorizationIntegrationTest {
 
         assertThat(funding).noneMatch(each -> "PHYS-00001".equals(each.awardNumber()));
         assertThat(funding.toString()).doesNotContain("PHYS").doesNotContain("Physics");
-
-        /*
-         * And the caller is TOLD the list is partial. Without this the UI
-         * counts what it received and renders "Associated Award", singular -
-         * positively asserting this Subaward has one funding Award when it
-         * has two. A partial list is a correct answer; a complete-looking
-         * count over a partial list is a false one.
-         */
-        assertThat(view.restricted()).isTrue();
     }
 
     @Test
@@ -642,26 +655,20 @@ class SubawardRecordAuthorizationIntegrationTest {
         // Decision D5: no placeholder row. A stub saying "a funding Award
         // exists here that you may not see" still discloses the
         // relationship, which is most of what this card conveys.
-        var view = service(departmentScope("1234")).findFunding(SUB_BOTH);
+        List<SubawardFundingResponse> funding = service(departmentScope("1234")).findFunding(SUB_BOTH);
 
-        assertThat(view.funding()).hasSize(1);
-        assertThat(view.funding().getFirst().awardNumber()).isEqualTo("PHYS-00001");
-        assertThat(view.restricted()).isTrue();
+        assertThat(funding).hasSize(1);
+        assertThat(funding.getFirst().awardNumber()).isEqualTo("PHYS-00001");
     }
 
     @Test
-    void scenario17_aScopedCallerWhoSeesEveryFunderIsNotToldAnythingWasWithheld() {
-        /*
-         * `restricted` tracks what was actually removed, never merely "this
-         * caller is scoped". A department user who can see both funders of
-         * SUB-BOTH gets the exact count and learns nothing about
-         * authorization at all - so the flag discloses only to the callers
-         * for whom the alternative was a false count.
-         */
-        var view = service(departmentScope("7777", "1234")).findFunding(SUB_BOTH);
+    void scenario17_aCallerWhoSeesEveryFunderGetsThemAll() {
+        List<SubawardFundingResponse> funding =
+                service(departmentScope("7777", "1234")).findFunding(SUB_BOTH);
 
-        assertThat(view.funding()).hasSize(2);
-        assertThat(view.restricted()).isFalse();
+        assertThat(funding).hasSize(2);
+        assertThat(funding).extracting(SubawardFundingResponse::awardNumber)
+                .containsExactlyInAnyOrder("CHEM-00001", "PHYS-00001");
     }
 
     @Test
@@ -672,6 +679,222 @@ class SubawardRecordAuthorizationIntegrationTest {
         assertThatCode(() -> service(chemOnly).findWorkspace(SUB_BOTH)).doesNotThrowAnyException();
         assertThat(chemOnly.canSeeAward(PHYS_V1)).isFalse();
         assertThat(chemOnly.canSeeAward(CHEM_V2)).isTrue();
+    }
+
+    // --- D7: restricted funding Awards leave no trace ---------------------
+
+    @Test
+    void d7_oneAuthorizedAwardAndTwoRestrictedOnesYieldsExactlyOneRowAndNoHint() {
+        /*
+         * D7, approved 2026-10-26: display only authorized funding Awards,
+         * and never reveal the existence or number of restricted ones.
+         *
+         * SUB-TRIPLE is funded by CHEM, PHYS and the unitless Award. A 7777
+         * caller holds only CHEM. The response must be the CHEM row and
+         * nothing else - no count of what was removed, no flag, no
+         * placeholder, and nothing anywhere in the serialized payload that
+         * names or implies the other two.
+         */
+        List<SubawardFundingResponse> funding =
+                service(departmentScope("7777")).findFunding(SUB_TRIPLE);
+
+        assertThat(funding).hasSize(1);
+        assertThat(funding.getFirst().awardNumber()).isEqualTo("CHEM-00001");
+
+        String payload = json(funding);
+        assertThat(payload).doesNotContain("PHYS", "Physics", "NSF", "NULL-00001", "Unitless");
+        // The raw version ids of the restricted Awards must not appear either.
+        assertThat(payload).doesNotContain(String.valueOf(PHYS_V1));
+        assertThat(payload).doesNotContain(String.valueOf(NULL_V1));
+        // Nor any residue of the withdrawn `restricted` signal.
+        assertThat(payload.toLowerCase(java.util.Locale.ROOT))
+                .doesNotContain("restricted", "hidden", "withheld", "omitted");
+    }
+
+    @Test
+    void d7_everyFundingAwardAuthorizedReturnsAllOfThem() {
+        List<SubawardFundingResponse> funding =
+                service(departmentScope("7777", "1234")).findFunding(SUB_BOTH);
+
+        assertThat(funding).extracting(SubawardFundingResponse::awardNumber)
+                .containsExactlyInAnyOrder("CHEM-00001", "PHYS-00001");
+    }
+
+    @Test
+    void d7_noFundingAwardAuthorizedMeansTheSubawardIsUnreachableAtAll() {
+        // There is no "reachable Subaward with an empty funding list" state
+        // for a scoped caller: the gate and the filter use the same keys, so
+        // denial happens before any funding is read.
+        assertThatThrownBy(() -> service(departmentScope("1234")).findFunding(SUB_CHEM))
+                .isInstanceOf(RecordNotAccessibleException.class);
+    }
+
+    @Test
+    void d7_aSubawardWithNoFundingRelationshipAtAllIsDeniedNotEmptied() {
+        assertThatThrownBy(() -> service(departmentScope("7777")).findFunding(SUB_NONE))
+                .isInstanceOf(RecordNotAccessibleException.class);
+    }
+
+    @Test
+    void d7_revokingTheFundingAwardGrantRemovesTheRowOnTheNextCall() {
+        assertThat(service(departmentScope("7777")).findFunding(SUB_TRIPLE)).hasSize(1);
+        // Same Subaward, grant gone: no rows, and no record either.
+        assertThatThrownBy(() -> service(departmentScope("9999")).findFunding(SUB_TRIPLE))
+                .isInstanceOf(RecordNotAccessibleException.class);
+    }
+
+    @Test
+    void d7_aSuspendedIdentityIsRefusedBeforeAnyFundingIsRead() {
+        assertThatThrownBy(() -> service(suspended()).findFunding(SUB_TRIPLE))
+                .isInstanceOf(RecordNotAccessibleException.class);
+    }
+
+    @Test
+    void d7_centralSeesEveryFundingAwardIncludingUnresolvableOnes() {
+        assertThat(service(centralScope()).findFunding(SUB_TRIPLE)).hasSize(3);
+        assertThat(service(centralScope()).findFunding(SUB_BROKEN)).hasSize(1);
+    }
+
+    @Test
+    void d7_archiveAdminWithoutDataGrantsReachesNoFundingAtAll() {
+        SqlFragment scope = scopeFor(
+                new AccessScope(false, Set.of(), Optional.empty(), Set.of()),
+                Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
+
+        assertThatThrownBy(() -> service(scoped(scope, Set.of())).findFunding(SUB_TRIPLE))
+                .isInstanceOf(RecordNotAccessibleException.class);
+    }
+
+    @Test
+    void d7_enforcementOffReturnsEveryFundingRowUnchanged() {
+        assertThat(service(SubawardRecordAccess.PERMIT_ALL).findFunding(SUB_TRIPLE)).hasSize(3);
+        assertThat(service(SubawardRecordAccess.PERMIT_ALL).findFunding(SUB_TWIN_B)).hasSize(2);
+    }
+
+    @Test
+    void d7_twoSubawardsWithIdenticalAuthorizedFundingAreIndistinguishable() {
+        /*
+         * The property D7 is really about, and the one a field-by-field
+         * assertion would miss.
+         *
+         * SUB-TWINA is funded by CHEM alone. SUB-TWINB is funded by CHEM and
+         * PHYS. They are otherwise identical rows. To a caller who holds
+         * only CHEM, the two must be the SAME - not merely "PHYS is absent",
+         * but no observable difference of any kind: not a row count, not a
+         * field value, not a byte of the serialized payload once their own
+         * identifiers are accounted for.
+         *
+         * Compared as whole JSON rather than field by field, so a leak
+         * through a field nobody thought to assert on still fails this.
+         */
+        SubawardRecordAccess chemOnly = departmentScope("7777");
+
+        String a = identityNeutralJson(service(chemOnly).findFunding(SUB_TWIN_A));
+        String b = identityNeutralJson(service(chemOnly).findFunding(SUB_TWIN_B));
+
+        assertThat(b).isEqualTo(a);
+    }
+
+    @Test
+    void d7_theTwinsDifferForACallerEntitledToSeeTheDifference() {
+        // The previous test would also pass if the twins were accidentally
+        // identical in the fixture. They are not: a caller holding both
+        // grants sees two funders on B and one on A.
+        SubawardRecordAccess both = departmentScope("7777", "1234");
+
+        assertThat(service(both).findFunding(SUB_TWIN_A)).hasSize(1);
+        assertThat(service(both).findFunding(SUB_TWIN_B)).hasSize(2);
+        assertThat(identityNeutralJson(service(both).findFunding(SUB_TWIN_B)))
+                .isNotEqualTo(identityNeutralJson(service(both).findFunding(SUB_TWIN_A)));
+    }
+
+    @Test
+    void d7_theWholeSubawardResponseSurfaceIsIndistinguishableForTheTwins() {
+        /*
+         * Not just the funding endpoint. Every Subaward-keyed response the
+         * caller can reach must be identical for the twins too, or the
+         * restricted Award leaks sideways - through amounts, contacts,
+         * attachments, the version list, or the paged search row.
+         */
+        SubawardRecordAccess chemOnly = departmentScope("7777");
+        SubawardArchiveService service = service(chemOnly);
+
+        assertThat(identityNeutralJson(service.findAmounts(SUB_TWIN_B)))
+                .isEqualTo(identityNeutralJson(service.findAmounts(SUB_TWIN_A)));
+        assertThat(identityNeutralJson(service.findContacts(SUB_TWIN_B)))
+                .isEqualTo(identityNeutralJson(service.findContacts(SUB_TWIN_A)));
+        assertThat(identityNeutralJson(service.findAttachments(SUB_TWIN_B)))
+                .isEqualTo(identityNeutralJson(service.findAttachments(SUB_TWIN_A)));
+        assertThat(identityNeutralJson(service.findCustomData(SUB_TWIN_B)))
+                .isEqualTo(identityNeutralJson(service.findCustomData(SUB_TWIN_A)));
+        assertThat(identityNeutralJson(service.findCloseout(SUB_TWIN_B)))
+                .isEqualTo(identityNeutralJson(service.findCloseout(SUB_TWIN_A)));
+        assertThat(identityNeutralJson(service.findWorkspace(SUB_TWIN_B)))
+                .isEqualTo(identityNeutralJson(service.findWorkspace(SUB_TWIN_A)));
+        assertThat(identityNeutralJson(service.findVersions(SUB_TWIN_B, 0, 20)))
+                .isEqualTo(identityNeutralJson(service.findVersions(SUB_TWIN_A, 0, 20)));
+    }
+
+    @Test
+    void d7_theTwinsAreIndistinguishableInSearchResultsAndCounts() {
+        // Both twins are visible to this caller, so the page must show both
+        // and the total must be the page - a restricted funder must not make
+        // one of them count differently or sort differently.
+        SubawardPageResponse page = service(departmentScope("7777"))
+                .findPage("SUB-TWIN", SubawardSearchFilters.none(), 0, 50);
+
+        assertThat(codes(page)).containsExactlyInAnyOrder("SUB-TWINA", "SUB-TWINB");
+        assertThat(page.totalElements()).isEqualTo(2);
+        assertThat(page.content()).hasSize((int) page.totalElements());
+    }
+
+    @Test
+    void d7_aDeniedSubawardAndANonexistentOneProduceTheIDENTICAL404Body() {
+        /*
+         * The 404 body echoes exception.getMessage(), so "same status code"
+         * is not enough - the MESSAGE has to match too, or a caller can
+         * enumerate ids and learn which Subawards exist but are denied.
+         *
+         * It does match, and not by luck. For a scoped caller the
+         * authorization gate runs first and answers "Record not found" for
+         * both cases, because canSeeSubaward finds no funding rows in
+         * either. The detailed "Subaward not found: <id>" message sits
+         * behind that gate and is unreachable while scoped.
+         *
+         * That rests on archive.subaward_funding.subaward_id having a
+         * FOREIGN KEY to archive.subaward (V018): without it a funding row
+         * could name a nonexistent Subaward, authorization could pass, and
+         * the detailed message would surface and distinguish the two. If
+         * that constraint is ever dropped, this test is the one that should
+         * fail.
+         */
+        SubawardArchiveService scoped = service(departmentScope("1234"));
+
+        Throwable denied = catchThrowable(() -> scoped.findWorkspace(SUB_CHEM));
+        Throwable missing = catchThrowable(() -> scoped.findWorkspace(404_404L));
+
+        assertThat(denied).isInstanceOf(NoSuchElementException.class);
+        assertThat(missing).isInstanceOf(NoSuchElementException.class);
+        assertThat(missing.getMessage()).isEqualTo(denied.getMessage());
+        // And neither names the record.
+        assertThat(denied.getMessage()).doesNotContain(String.valueOf(SUB_CHEM));
+        assertThat(missing.getMessage()).doesNotContain("404404");
+    }
+
+    @Test
+    void d7_theSameHoldsForEverySubawardKeyedEndpointNotJustTheWorkspace() {
+        SubawardArchiveService scoped = service(departmentScope("1234"));
+
+        for (var call : List.<java.util.function.Function<Long, Throwable>>of(
+                id -> catchThrowable(() -> scoped.findFunding(id)),
+                id -> catchThrowable(() -> scoped.findAmounts(id)),
+                id -> catchThrowable(() -> scoped.findAttachments(id)),
+                id -> catchThrowable(() -> scoped.findContacts(id)),
+                id -> catchThrowable(() -> scoped.findVersions(id, 0, 20)))) {
+
+            assertThat(call.apply(404_404L).getMessage())
+                    .isEqualTo(call.apply(SUB_CHEM).getMessage());
+        }
     }
 
     // --- 18. Global Search and semantic isolation -------------------------
@@ -758,13 +981,12 @@ class SubawardRecordAuthorizationIntegrationTest {
          * a collision, a bad alias inside the scalar subquery, or an
          * unbound parameter would all pass a text assertion and fail here.
          */
-        assertThat(dashboard(SubawardRecordAccess.PERMIT_ALL).subawards()).isEqualTo(7);
-        assertThat(dashboard(centralScope()).subawards()).isEqualTo(7);
+        assertThat(dashboard(SubawardRecordAccess.PERMIT_ALL).subawards()).isEqualTo(10);
+        assertThat(dashboard(centralScope()).subawards()).isEqualTo(10);
 
-        // SUB-CHEM, SUB-BOTH, SUB-FAM, SUB-CHEMV1 - four codes, not the
-        // archive-wide seven.
-        assertThat(dashboard(departmentScope("7777")).subawards()).isEqualTo(4);
-        assertThat(dashboard(departmentScope("1234")).subawards()).isEqualTo(3);
+        // Seven codes for 7777 and five for 1234, not the archive-wide ten.
+        assertThat(dashboard(departmentScope("7777")).subawards()).isEqualTo(7);
+        assertThat(dashboard(departmentScope("1234")).subawards()).isEqualTo(5);
         assertThat(dashboard(contactScope(STRANGER)).subawards()).isZero();
     }
 
@@ -905,6 +1127,35 @@ class SubawardRecordAuthorizationIntegrationTest {
                 return value == null ? Stream.empty() : Stream.of(value);
             }
         };
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper()
+                    .findAndRegisterModules();
+
+    private static String json(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    /**
+     * The payload with the record's OWN identifiers blanked, so two
+     * different Subawards can be compared for any other difference.
+     *
+     * <p>Only the identifiers that must legitimately differ between two
+     * distinct records are neutralised - the Subaward id, its code, its
+     * document number and the funding-source row ids. Everything else is
+     * compared verbatim, which is the point: a leak through a field nobody
+     * thought to name still shows up as a difference.
+     */
+    private static String identityNeutralJson(Object value) {
+        return json(value)
+                .replaceAll("\\b(9101|9102)\\b", "<subaward-id>")
+                .replaceAll("SUB-TWIN[AB]", "<subaward-code>")
+                .replaceAll("\\b(320|321|322)\\b", "<funding-row-id>");
     }
 
     private static List<String> codes(SubawardPageResponse page) {

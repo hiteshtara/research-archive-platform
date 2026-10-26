@@ -154,41 +154,55 @@ pending a separate business decision. The profiling SQL measures
   `GlobalSearchSemanticScopeTest` (3). The 19 named scenarios map to tests in
   `docs/security/SUBAWARD_AUTHORIZATION.md`.
 
-## D7 — A filtered funding list says so, rather than reporting a false count
+## D7 — Restricted funding Awards are omitted, and leave no trace (APPROVED)
 
-**Status: implemented, NEEDS SIGN-OFF.** Raised in the PR #66 review,
-2026-10-26.
+> Display only authorized funding Awards. Never reveal the existence or
+> number of restricted funding Awards.
 
-D6 omits unauthorized funding Awards from `GET /subawards/{id}/funding`,
-following D5's no-stubs rule. Review found that omission alone was not
-enough: the Funding tab heading counts the rows it receives and states them
-as the record's Associated Awards, so a Subaward funded by three Awards with
-one visible rendered **"Associated Award", singular** — an affirmative
-falsehood about the record, and the exact implication that label was written
-to prevent.
+Approved 2026-10-26. This is the same rule as D5, applied to a different
+relationship: unauthorized records are omitted **entirely**, with no stub, no
+count, no flag and no placeholder. Where D5 omits Award hierarchy relatives,
+D7 omits funding Awards from a Subaward's funding list.
 
-The response now carries `restricted`, true **only when rows were actually
-removed**. The heading then reads `Associated Awards (1 shown; others
-restricted)` and never claims a total. It does not say how many are hidden.
+Review of PR #66 found that omission alone was not sufficient, because the
+Funding tab heading counted the rows it received and stated them as the
+record's Associated Awards. After filtering, a Subaward funded by three
+Awards with one visible rendered **"Associated Award", singular** — a false
+statement about the record.
 
-**The trade that needs sign-off:** this discloses the *existence* of further
-funding Awards, which D5 declined to do for hierarchy relatives. The
-reasoning for accepting it here is that a caller who reached the Subaward
-necessarily did so through one of its funding Awards, so "there are others"
-is a far weaker signal than a hierarchy's shape — and the alternative is
-telling them something untrue about the record.
+Two candidate fixes were considered:
 
-The leak-free alternative, if that is preferred: drop the parenthetical count
-from the heading for **all** callers, always. It discloses nothing and states
-nothing false, at the cost of removing a deliberate feature from the
-enforcement-off UI that is live today. Say the word and it is a two-line
-change.
+1. Return a `restricted` flag so the heading could say "1 shown; others
+   restricted". True, but it discloses that more exist. **Rejected** — that
+   is precisely the existence disclosure D7 forbids.
+2. Drop the count from the heading entirely. Neither false nor disclosing.
+   **Approved and implemented.**
 
-- **Enforced:** `SubawardArchiveService.findFunding` →
-  `SubawardFundingListResponse`; `resolveAssociatedAwardsSectionLabel`.
-- **Tests:** `scenario17_anUnauthorizedFundingAwardIsOmittedFromTheFundingList`,
-  `scenario17_aScopedCallerWhoSeesEveryFunderIsNotToldAnythingWasWithheld`,
-  and three label tests in `subawardFundingPresentation.test.mjs`.
+The heading is now the constant string `Associated Awards` for every caller,
+and `resolveAssociatedAwardsSectionLabel` takes no arguments so there is
+nothing to count. The empty-state message is phrased about the caller's view
+("are available"), never about the archive, so it reads identically whether
+the archive holds none or the rows were withheld. The real number remains
+visible to anyone entitled to it: one card per authorized funding row.
+
+**The property this buys** is indistinguishability, which is stronger than
+"the restricted Award's fields are absent": two Subawards whose authorized
+funding is identical must be observably identical, even when one has further
+funding Awards the caller cannot see. That is tested by comparing whole
+serialized responses, not field by field, so a leak through a field nobody
+thought to assert on still fails.
+
+ANY-match is unchanged — one authorized funding Award still permits the
+Subaward — and reaching a Subaward still grants nothing on its other funding
+Awards.
+
+- **Enforced:** `SubawardArchiveService.findFunding` (returns the authorized
+  rows and nothing else); `resolveAssociatedAwardsSectionLabel`.
+- **Tests:** eleven `d7_*` tests in
+  `SubawardRecordAuthorizationIntegrationTest`, including the twin-Subaward
+  indistinguishability pair and the whole-response-surface comparison, plus
+  three heading tests in `subawardFundingPresentation.test.mjs`. The
+  indistinguishability tests were verified to fail with the filter removed.
 
 ## Derived rule — every async search leg carries the access decision
 

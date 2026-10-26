@@ -111,44 +111,42 @@ most of what the card conveys.
 Gated on `!unrestricted()`, so with enforcement off, or for Central, the list
 is byte-for-byte what it was, dangling rows included.
 
-### The count must not become a lie (found in review, 2026-10-26)
+### D7: the omission must leave no trace (APPROVED 2026-10-26)
 
-Omitting rows is correct, but it was not sufficient. The Funding tab heading
-is built by `resolveAssociatedAwardsSectionLabel`, which counts the rows the
-API returned and renders `Associated Award` / `Associated Awards (N)` — a
-statement about the record, not about the caller's view. After filtering, a
-Subaward funded by three Awards with one visible rendered **"Associated
-Award", singular**: a positive assertion that the record has exactly one
-funding Award. That is not a partial answer, it is a false one, and it is
-precisely the implication the label was originally written to prevent.
+> Display only authorized funding Awards. Never reveal the existence or
+> number of restricted funding Awards.
 
-`GET /{id}/funding` therefore now returns an envelope,
-`SubawardFundingListResponse`:
+The same rule as D5, applied to a different relationship. Review found that
+omitting the rows was not sufficient on its own: the Funding tab heading
+counted the rows it received and stated them as the record's Associated
+Awards, so a Subaward funded by three Awards with one visible rendered
+**"Associated Award", singular** — a false statement about the record.
 
-```json
-{ "funding": [ ... ], "restricted": true }
-```
+A `restricted` flag ("1 shown; others restricted") was considered and
+**rejected**: true, but it discloses that more exist. The approved answer is
+to drop the count:
 
-- `restricted` is true **only when rows were actually removed**, never merely
-  because the caller is scoped. A scoped caller who can see every funding
-  Award of this Subaward still gets the exact count and learns nothing.
-- With enforcement off it is always false and the heading is unchanged.
-- When true the heading reads `Associated Awards (1 shown; others
-  restricted)`, and the table's empty message stops claiming the archive
-  holds no funding associations.
-- It does **not** say how many rows were withheld. "Some are not shown" is the
-  smallest true statement that stops the count being a lie; the number of
-  hidden Awards is itself information about records the caller cannot see.
-  `theRestrictedHeadingNeverDisclosesHowManyFundingAwardsAreHidden` pins that.
+- `GET /{id}/funding` returns the authorized rows and **nothing else** — no
+  count of what was removed, no flag, no placeholder row, no header.
+- The heading is the constant `Associated Awards` for every caller.
+  `resolveAssociatedAwardsSectionLabel` takes no arguments, so there is
+  nothing to count; its implementation carries a do-not-reintroduce note.
+- The empty-state message is phrased about the caller's view ("are
+  available"), never about the archive, so it reads the same whether the
+  archive holds none or the rows were withheld.
+- The real number stays visible to anyone entitled to it: one card per
+  authorized funding row.
 
-**This trade needs sign-off** — see D7 in `AUTHORIZATION_DECISIONS.md`. It
-discloses the *existence* of further funding Awards, which D5 refused to do
-for hierarchy relatives. The judgement here is that a caller who reached the
-Subaward already knows they did so through a funding Award, and that an
-affirmative falsehood about the record is the worse of the two. The
-alternative — dropping the count from the heading for everyone, always —
-leaks nothing but removes a deliberate feature from the enforcement-off UI
-that is live today.
+**The property, stated properly.** Not "the restricted Award's fields are
+absent" but *indistinguishability*: two Subawards whose authorized funding
+is identical must be observably identical, even when one has further funding
+Awards the caller cannot see. `SUB-TWINA` (funded by CHEM) and `SUB-TWINB`
+(CHEM + PHYS) are compared as **whole serialized JSON** with only their own
+identifiers neutralised — so a leak through a field nobody thought to assert
+on still fails the test — across the funding list, workspace, amounts,
+contacts, attachments, custom data, closeout, the version list, and the
+paged search row. Both indistinguishability tests were verified to fail with
+the filter removed.
 
 ### Financial totals
 
@@ -181,7 +179,7 @@ their own gates (`scenario17_reachingASubawardGrantsNothingOnItsOtherFundingAwar
 | 14. Direct URL denial | `scenario14_*` (2 tests, all 13 endpoints) |
 | 15. Search/count/pagination parity | `scenario15_*` (4 tests) |
 | 16. Attachment dual authorization | `scenario16_theRecordGateRefusesTheDownloadBeforeAnyStorageLookup` |
-| 17. Related Award information disclosure | `scenario17_*` (4 tests, incl. the `restricted` flag) + 3 label tests in `subawardFundingPresentation.test.mjs` |
+| 17. Related Award information disclosure | `scenario17_*` (4) + `d7_*` (13, incl. twin indistinguishability and 404-body equality) + 3 heading tests in `subawardFundingPresentation.test.mjs` |
 | 18. Global Search and semantic isolation | `scenario18_*` (2 tests) + `GlobalSearchSemanticScopeTest` (4 tests, incl. thread propagation) |
 | 19. Enforcement-disabled compatibility | `scenario19_*` (3 tests) |
 
@@ -193,7 +191,7 @@ Plus, not in the requested list but required to trust the above:
 `theDashboardSubawardCountIsScopedAndTheStatementIsValidSql`, and three
 predicate tests in `RecordScopeSqlBuilderTest`.
 
-`SubawardRecordAuthorizationIntegrationTest`: 41 tests, disposable PostgreSQL
+`SubawardRecordAuthorizationIntegrationTest`: 56 tests, disposable PostgreSQL
 (`pgvector/pgvector:pg17`) with every committed migration applied. Registered
 in BOTH `ci.yml` lists (the unit-test exclusion and the database-suite
 inclusion), as a new Testcontainers suite must be.
@@ -224,6 +222,61 @@ wiring) and affected AWARD and PROPOSAL enrichment too; it is fixed here
 because this is where it was found.
 `theSemanticLegRunsWithTheRequestsAccessDecisionReinstated` reproduces the
 original failure — verified to fail with the fix reverted.
+
+## Metadata-leak audit (2026-10-26)
+
+Every Subaward response surface inspected for indirect disclosure of a
+restricted funding Award. The decisive structural fact:
+
+> **`findFunding` is the only query in `SubawardArchiveRepository` that
+> touches an Award table at all.** Lines 625–634 join `archive.award_version`
+> and `archive.award_amount_info`; no other Subaward query reads Award data.
+
+So restricted Award metadata cannot reach any other Subaward response,
+because no other response ever loads it.
+
+| Surface | Finding |
+| --- | --- |
+| Funding Award list | filtered; the only Award-reading query |
+| Subaward details (`SubawardRowResponse`) | carries `awardPrimeSponsorName`, `awardSponsorName`, `fedAwardProjDesc` — **not a leak**: `oracle/subaward/export_subawards.sql` selects all three from the SubAward row itself (`s.`), so they are Subaward-owned attributes that merely read "award_*", not per-funding-Award data |
+| Template info | `mpiAward` comes from `sti.mpi_award`, the Subaward Template Info table — Subaward-owned |
+| Version history | scoped per version, page and count together |
+| Search results, counts, pagination totals | one predicate in one `WHERE`; `totalElements` always equals what paging can reach |
+| Global Search (keyword) | inherits the predicate via `findPage` |
+| Global Search (semantic) | enrichment scoped in SQL; unenriched SUBAWARD rows dropped for scoped callers |
+| Dashboard aggregates | Subaward count and SUBAWARD document branch scoped |
+| Attachment metadata | no Award fields in `SubawardAttachmentResponse` |
+| Attachment downloads | dual gate; `Content-Disposition` carries the Subaward's own filename |
+| Reports / closeout / notepad / notifications / custom data | Subaward-owned tables, no Award join |
+| Related Award links | `navigableCurrentAwardId` only ever present on an authorized funding row |
+| **Error messages** | checked specifically, see below |
+
+### Error-message indistinguishability
+
+The 404 body echoes `exception.getMessage()`, so matching status codes are
+not enough. A denied record raises `RecordNotAccessibleException` ("Record
+not found") while a missing one raises `NoSuchElementException` ("Subaward
+not found: &lt;id&gt;") — different strings, which would let a caller
+enumerate ids and learn which Subawards exist but are denied.
+
+**It does not happen, and not by luck.** For a scoped caller the
+authorization gate runs first and answers "Record not found" in both cases,
+because `canSeeSubaward` finds no funding rows either way; the detailed
+message sits behind that gate and is unreachable while scoped. This depends
+on `archive.subaward_funding.subaward_id` having a **foreign key** to
+`archive.subaward` (V018) — without it a funding row could name a
+nonexistent Subaward, authorization could pass, and the detailed message
+would surface. `d7_aDeniedSubawardAndANonexistentOneProduceTheIDENTICAL404Body`
+pins the invariant and names that constraint as its dependency.
+
+### Residual, accepted
+
+- **Timing.** The predicate runs a correlated `EXISTS`; a denied lookup and a
+  missing one do different amounts of work. Not addressed — the archive has
+  no timing-attack threat model, and addressing it would mean constant-time
+  query execution.
+- **Enforcement OFF.** None of the above applies today. Every statement here
+  describes behaviour once the flag is turned on.
 
 ## What is NOT implemented, and why
 

@@ -503,13 +503,10 @@ function SubawardWorkspaceContent({
           {activeTab === 2 && (
             <Stack spacing={2}>
               <Typography variant="h6">
-                {resolveAssociatedAwardsSectionLabel(
-                  fundingQuery.data?.funding ?? [],
-                  fundingQuery.data?.restricted ?? false,
-                )}
+                {resolveAssociatedAwardsSectionLabel()}
               </Typography>
 
-              {fundingQuery.data?.funding.map((funding) => {
+              {fundingQuery.data?.map((funding) => {
                 const cardState = resolveAssociatedAwardCardState(funding);
                 if (cardState.kind === "NONE") {
                   return null;
@@ -553,24 +550,19 @@ function SubawardWorkspaceContent({
                 );
               })}
               <TableSection
-                data={fundingQuery.data?.funding}
+                data={fundingQuery.data}
                 isLoading={fundingQuery.isLoading}
                 isError={fundingQuery.isError}
                 errorMessage="Unable to load Subaward funding."
-                emptyMessage={
-                  /*
-                   * Never assert the archive holds no funding when the
-                   * caller's view was filtered. Today this cannot fire from
-                   * filtering alone - reaching the Subaward requires an
-                   * accessible funding Award, and the filter keeps exactly
-                   * those - but the message is a claim about the archive,
-                   * and it must not become false if that invariant ever
-                   * shifts.
-                   */
-                  fundingQuery.data?.restricted
-                    ? "No funding associations are available to you for this Subaward record."
-                    : "No funding associations are archived for this Subaward record."
-                }
+                /*
+                 * Phrased about the caller's view, never about the archive.
+                 * "No funding associations are archived" would be a claim
+                 * about the record, and under D7 the caller cannot be told
+                 * whether their view was filtered - so the message must read
+                 * identically whether the archive truly holds none or the
+                 * rows were withheld.
+                 */
+                emptyMessage="No funding associations are available for this Subaward record."
                 rowKey={(row) => row.subawardFundingSourceId}
                 columns={[
                   { label: "Funding Source ID", render: (row) => row.subawardFundingSourceId },
