@@ -144,6 +144,31 @@ role, the policy, the security group and the RDS ingress rule. There is no
 instance to decommission and nothing to patch, which is the main operational
 argument for this shape over a bastion.
 
+## Pre-approval review (2026-10-26)
+
+Plan run against live dev state with the live `terraform.tfvars`:
+**9 to add, 0 to change, 0 to destroy** — 126 resources tracked, 117 no-op.
+Cognito, Route 53, Amplify, the API ECS service, the RDS instance and all
+three CloudShell-analyst resources are **no-op**. No delete or replace
+anywhere in the plan.
+
+Three defects were found and fixed during that review:
+
+| Found | Why it mattered |
+|---|---|
+| Operator policy used `${aws:username}` for session ARNs | AWS states this form "doesn't work for accounts that grant access using federated IDs" — every principal here is SAML-federated, so `TerminateSession`/`ResumeSession` would silently never match. Now `${aws:userid}`. |
+| Task image resolved to the `:latest` tag | **`latest` does not exist** in the loader ECR repo (only `20260923T163946Z-443e507`). The plan would have succeeded and the first `run-task` would have failed to pull. Now read from the live loader task definition. |
+| Operator policy was `(known after apply)` | The most security-sensitive document in the change could not be read during review. Cluster and role ARNs are now constructed locals, so the full policy renders in the plan. |
+
+Cleanup was tested, not just read — with a stubbed AWS CLI:
+
+| Path | Result |
+|---|---|
+| Ctrl-C mid-tunnel | task stopped, 1 × `stop-task` |
+| Session fails after the task exists | task stopped, exit 254 |
+| Exec agent never reaches RUNNING | task stopped, exit 1 |
+| `run-task` itself fails | **no** spurious `stop-task`, exit 1 |
+
 ## Security notes
 
 - **RDS stays private.** `PubliclyAccessible` is untouched. The ingress rule

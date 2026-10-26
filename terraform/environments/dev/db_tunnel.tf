@@ -214,6 +214,29 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_db_tunnel" {
 # no route for. The container runs `sleep` and nothing else - the ETL code
 # in the image is never invoked, and the task holds no credential that could
 # invoke it against anything.
+#
+# The image is read from the LIVE loader task definition rather than
+# composed from the loader ECR repository URL plus var.loader_image_tag.
+# That expression resolves to the "latest" tag, because terraform.tfvars
+# does not set loader_image_tag - and "latest" DOES NOT EXIST in this
+# repository; the only tagged image is 20260923T163946Z-443e507. The plan
+# would still have succeeded and the first run-task would have failed with
+# CannotPullContainerError. Reading the live definition is self-maintaining
+# and can only ever name an image that is actually deployed. Mirrors the
+# api_live pattern in main.tf.
+data "aws_ecs_task_definition" "loader_live" {
+  count = var.manage_db_tunnel_access ? 1 : 0
+
+  task_definition = module.loader_ecs.task_definition_family
+}
+
+data "aws_ecs_container_definition" "loader_live" {
+  count = var.manage_db_tunnel_access ? 1 : 0
+
+  task_definition = data.aws_ecs_task_definition.loader_live[0].id
+  container_name  = "loader"
+}
+
 resource "aws_ecs_task_definition" "db_tunnel" {
   count = var.manage_db_tunnel_access ? 1 : 0
 
@@ -231,7 +254,7 @@ resource "aws_ecs_task_definition" "db_tunnel" {
 
   container_definitions = jsonencode([{
     name      = "tunnel"
-    image     = "${module.loader_ecr.repository_url}:${var.loader_image_tag}"
+    image     = data.aws_ecs_container_definition.loader_live[0].image
     essential = true
 
     # A hard ceiling on a forgotten task, independent of the Mac. If the
@@ -275,8 +298,25 @@ resource "aws_cloudwatch_log_group" "db_tunnel" {
 # This policy is also the CVE-2026-89049 mitigation AWS recommends: "scoping
 # ssm:StartSession IAM permissions and SSM document permissions so that
 # untrusted principals cannot start remote-host port-forwarding sessions."
+locals {
+  # Constructed rather than referenced as aws_ecs_cluster.db_tunnel[0].arn,
+  # so the operator policy below renders fully in `terraform plan`. Taking
+  # the reference left every statement "known after apply", which meant the
+  # single most security-sensitive document in this file could not be read
+  # during review. The ARN format is fixed, and depends_on preserves the
+  # ordering the reference used to imply.
+  db_tunnel_cluster_name = "${var.project_name}-${var.environment}-dbtunnel"
+  db_tunnel_cluster_arn  = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.project_name}-${var.environment}-dbtunnel"
+
+  # Same reasoning as the cluster ARN: referencing the role resource made
+  # the whole policy unreadable in a plan.
+  db_tunnel_task_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-${var.environment}-dbtunnel-task-role"
+}
+
 resource "aws_iam_policy" "db_tunnel_operator" {
   count = var.manage_db_tunnel_access ? 1 : 0
+
+  depends_on = [aws_ecs_cluster.db_tunnel, aws_iam_role.db_tunnel_task]
 
   name        = "${var.project_name}-${var.environment}-dbtunnel-operator"
   description = "Start, use and stop an ephemeral SSM port-forwarding task to dev RDS. Attach to named operators only."
@@ -290,7 +330,7 @@ resource "aws_iam_policy" "db_tunnel_operator" {
         Action   = "ecs:RunTask"
         Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${var.project_name}-${var.environment}-dbtunnel:*"
         Condition = {
-          ArnEquals = { "ecs:cluster" = aws_ecs_cluster.db_tunnel[0].arn }
+          ArnEquals = { "ecs:cluster" = local.db_tunnel_cluster_arn }
         }
       },
       {
@@ -299,7 +339,7 @@ resource "aws_iam_policy" "db_tunnel_operator" {
         Action   = ["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"]
         Resource = "*"
         Condition = {
-          ArnEquals = { "ecs:cluster" = aws_ecs_cluster.db_tunnel[0].arn }
+          ArnEquals = { "ecs:cluster" = local.db_tunnel_cluster_arn }
         }
       },
       {
@@ -309,7 +349,7 @@ resource "aws_iam_policy" "db_tunnel_operator" {
         Effect = "Allow"
         Action = "iam:PassRole"
         Resource = [
-          aws_iam_role.db_tunnel_task[0].arn,
+          local.db_tunnel_task_role_arn,
           module.loader_ecs.execution_role_arn,
         ]
         Condition = {
@@ -332,10 +372,26 @@ resource "aws_iam_policy" "db_tunnel_operator" {
         ]
       },
       {
-        Sid      = "EndOwnSessions"
+        # aws:userid, NOT aws:username. AWS states plainly that the
+        # aws:username form "doesn't work for accounts that grant access to
+        # AWS using federated IDs" - and every principal here is SAML
+        # federated (Shibboleth-InfraMgt/<user>@bu.edu). With aws:username
+        # these two actions would simply never match, and an operator could
+        # not end their own session; the draft had exactly that bug.
+        Sid      = "EndOwnSessionsOnly"
         Effect   = "Allow"
         Action   = ["ssm:TerminateSession", "ssm:ResumeSession"]
-        Resource = "arn:aws:ssm:*:*:session/$${aws:username}-*"
+        Resource = "arn:aws:ssm:*:*:session/$${aws:userid}-*"
+      },
+      {
+        # Present in AWS's own quickstart end-user policy for Session
+        # Manager. The local session-manager-plugin opens the data channel
+        # for the session it just started; scoped to this caller's own
+        # sessions, so it cannot attach to anyone else's.
+        Sid      = "OpenOwnSessionDataChannel"
+        Effect   = "Allow"
+        Action   = "ssmmessages:OpenDataChannel"
+        Resource = "arn:aws:ssm:*:*:session/$${aws:userid}-*"
       },
     ]
   })
