@@ -20,6 +20,7 @@ import edu.bu.archive.adapter.in.web.dto.award.AwardCreditSplitResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyPositionRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFamilyResponse;
+import edu.bu.archive.adapter.in.web.dto.award.AwardFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingProposalResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardFundingSubawardResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardHierarchyEdgeRow;
@@ -116,7 +117,6 @@ public class AwardArchiveService {
 
     // Two constructors, so Spring is told which one to use - without
     // this it looks for a no-arg constructor and fails to start.
-    @org.springframework.beans.factory.annotation.Autowired
     public AwardArchiveService(
             AwardArchiveRepository repository,
             AwardAttachmentStorage attachmentStorage,
@@ -144,7 +144,7 @@ public class AwardArchiveService {
      * <p>Enforcement OFF with {@code PERMIT_ALL} is the normal, supported
      * configuration and is left alone.
      */
-    private static void requireEnforceableWiring(
+    static void requireEnforceableWiring(
             edu.bu.archive.application.authorization.AwardRecordAccess access,
             org.springframework.beans.factory.ObjectProvider<
                     edu.bu.archive.application.authorization.AuthorizationProperties> properties
@@ -185,6 +185,7 @@ public class AwardArchiveService {
      *                             which is what every caller got before
      *                             Phase 2.
      */
+    @org.springframework.beans.factory.annotation.Autowired
     public AwardArchiveService(
             AwardArchiveRepository repository,
             AwardAttachmentStorage attachmentStorage,
@@ -209,6 +210,16 @@ public class AwardArchiveService {
         this.timingLog = provided != null
                 ? provided
                 : new edu.bu.archive.application.service.SearchTimingLog(false);
+    }
+
+    /**
+     * Family list for the Award browse screen. Lives here rather than in the
+     * controller so the scope predicate is applied: this endpoint previously
+     * called the repository directly and was the one documented bypass of
+     * every Award gate.
+     */
+    public List<AwardFamilySummaryResponse> findFamilies(String query, int limit) {
+        return repository.findFamilies(query, recordAccess.awardScopeSql("av"), limit);
     }
 
     public AwardWorkspaceResponse findWorkspace(
@@ -283,6 +294,7 @@ public class AwardArchiveService {
     public List<AwardFundingProposalResponse> findFundingProposals(
             long awardId
     ) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
         return repository.findFundingProposalRows(awardNumber);
     }
@@ -297,6 +309,7 @@ public class AwardArchiveService {
     public List<AwardFundingSubawardResponse> findFundingSubawards(
             long awardId
     ) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
         return repository.findFundingSubawardRows(awardNumber);
     }
@@ -311,6 +324,7 @@ public class AwardArchiveService {
     public List<AwardAssociatedNegotiationResponse> findAssociatedNegotiations(
             long awardId
     ) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
         return repository.findAssociatedNegotiationRows(awardNumber);
     }
@@ -320,8 +334,11 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAwardNumber(normalizeAwardNumber(awardNumber));
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         if (repository.findCurrent(normalizedAwardNumber).isEmpty()) {
             throw new NoSuchElementException(
@@ -369,8 +386,11 @@ public class AwardArchiveService {
             String awardNumber,
             int sequenceNumber
     ) {
+        recordAccess.requireAwardNumber(normalizeAwardNumber(awardNumber));
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         List<AwardRowResponse> rows =
                 repository.findSequenceRows(
@@ -487,6 +507,8 @@ public class AwardArchiveService {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
 
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
+
         if (repository.findCurrent(normalizedAwardNumber).isEmpty()) {
             throw new NoSuchElementException(
                     "Award not found: "
@@ -508,6 +530,8 @@ public class AwardArchiveService {
             ) {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         if (repository.findCurrent(
                 normalizedAwardNumber
@@ -532,6 +556,8 @@ public class AwardArchiveService {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
 
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
+
         if (repository.findCurrent(
                 normalizedAwardNumber
         ).isEmpty()) {
@@ -552,6 +578,8 @@ public class AwardArchiveService {
             ) {
         String normalizedAwardNumber =
                 normalizeAwardNumber(awardNumber);
+
+        recordAccess.requireAwardNumber(normalizedAwardNumber);
 
         AwardRowResponse current =
                 repository.findCurrent(
@@ -745,7 +773,14 @@ public class AwardArchiveService {
     public List<AwardSemanticSummaryRow> findSummariesForAwardNumbers(
             List<String> awardNumbers
     ) {
-        return repository.findCurrentSummariesForNumbers(awardNumbers);
+        /*
+         * Batch lookup used by Global Search and the hierarchy card builder.
+         * Filtered per row rather than denied wholesale: the caller supplies
+         * a list it assembled elsewhere and legitimately may see part of it.
+         */
+        return repository.findCurrentSummariesForNumbers(awardNumbers).stream()
+                .filter(row -> recordAccess.canSeeAwardNumber(row.awardNumber()))
+                .toList();
     }
 
     /*
@@ -793,7 +828,30 @@ public class AwardArchiveService {
         String rootAwardNumber = hierarchyRoot.get();
 
         List<AwardHierarchyEdgeRow> edges =
-                repository.findHierarchyEdges(rootAwardNumber);
+                repository.findHierarchyEdges(rootAwardNumber).stream()
+                        /*
+                         * A hierarchy spans award_numbers OTHER than the one
+                         * requested, and the gate at the top of this method
+                         * only authorised that one. Unauthorised relatives
+                         * are dropped here, before the edge map and before
+                         * the summary-card lookup, so no title, identifier,
+                         * sponsor, status or amount for them is read from
+                         * the database at all.
+                         *
+                         * Deliberately NOT a stub node: "an Award exists
+                         * here that you may not see" is itself a disclosure
+                         * of the family's shape, and the shape is what a
+                         * hierarchy reveals.
+                         *
+                         * Consequence to be aware of: a tree can come back
+                         * with gaps, and a child whose parent is omitted is
+                         * re-parented or dropped by the existing
+                         * dangling-reference handling below. A partial tree
+                         * is the correct answer to a partially authorised
+                         * question.
+                         */
+                        .filter(edge -> recordAccess.canSeeAwardNumber(edge.awardNumber()))
+                        .toList();
 
         Map<String, AwardHierarchyEdgeRow> edgeByAwardNumber =
                 new LinkedHashMap<>();
@@ -1019,9 +1077,12 @@ public class AwardArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
+        edu.bu.archive.application.authorization.SqlFragment versionScope =
+                recordAccess.awardScopeSql("av");
+
         long totalElements = repository.countSearchAwardVersions(
                 pattern, rawQuery, safeAwardNumber, safeDocumentNumber, safeAwardId, safeVersionFilter,
-                safeFilters
+                safeFilters, versionScope
         );
 
         PaginationSupport.PageMetadata pageMetadata =
@@ -1038,6 +1099,7 @@ public class AwardArchiveService {
                         safeAwardId,
                         safeVersionFilter,
                         safeFilters,
+                        versionScope,
                         sortSql,
                         safeSize,
                         offset
@@ -1134,9 +1196,12 @@ public class AwardArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
+        edu.bu.archive.application.authorization.SqlFragment attachmentScope =
+                recordAccess.awardScopeSql("av");
+
         long totalElements = repository.countSearchAwardAttachments(
                 safeAwardNumber, safeDocumentNumber, safeAwardId,
-                safeAttachmentId, safeFileId, safeVersionFilter
+                safeAttachmentId, safeFileId, safeVersionFilter, attachmentScope
         );
 
         PaginationSupport.PageMetadata pageMetadata =
@@ -1147,7 +1212,7 @@ public class AwardArchiveService {
         List<AttachmentSearchResultResponse> content =
                 repository.searchAwardAttachments(
                         safeAwardNumber, safeDocumentNumber, safeAwardId,
-                        safeAttachmentId, safeFileId, safeVersionFilter,
+                        safeAttachmentId, safeFileId, safeVersionFilter, attachmentScope,
                         ATTACHMENT_SEARCH_SORT, safeSize, offset
                 ).stream()
                         .map(AwardArchiveService::toAttachmentSearchResult)
@@ -1227,6 +1292,7 @@ public class AwardArchiveService {
     }
 
     public List<AwardPersonDetailResponse> findPeople(long awardId) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         List<AwardPersonRow> personRows = repository.findPersonRows(awardId);
@@ -1316,6 +1382,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -1356,6 +1423,7 @@ public class AwardArchiveService {
      */
 
     public TimeAndMoneySummaryResponse findTimeAndMoneySummary(long awardId) {
+        recordAccess.requireAward(awardId);
         return repository.findTimeAndMoneySummary(awardId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Award not found: " + awardId
@@ -1367,6 +1435,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -1402,6 +1471,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -1439,6 +1509,7 @@ public class AwardArchiveService {
             long awardId,
             long pendingTransactionId
     ) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         Optional<TimeAndMoneyTransactionHeaderRow> header =
@@ -1502,6 +1573,7 @@ public class AwardArchiveService {
             long awardId,
             String timeAndMoneyDocumentNumber
     ) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         return repository.findTimeAndMoneyDocument(timeAndMoneyDocumentNumber)
@@ -1512,6 +1584,7 @@ public class AwardArchiveService {
     }
 
     public AwardTermsResponse findTerms(long awardId) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         List<AwardSponsorTermResponse> sponsorTerms =
@@ -1574,11 +1647,13 @@ public class AwardArchiveService {
     // Scoped to this exact award_id (version-scoped, see
     // AwardArchiveRepository.findCustomData's header comment).
     public List<AwardCustomDataResponse> findCustomData(long awardId) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
         return repository.findCustomData(awardId);
     }
 
     public AwardCommentsResponse findComments(long awardId) {
+        recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
 
         List<AwardCommentRow> rows = repository.findComments(awardNumber);
@@ -1688,6 +1763,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -1776,6 +1852,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -1810,6 +1887,7 @@ public class AwardArchiveService {
             long awardId,
             long attachmentId
     ) {
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
 
         if (attachmentId <= 0) {
@@ -2045,6 +2123,7 @@ public class AwardArchiveService {
      */
 
     public AwardBudgetSummaryResponse findBudgetSummary(long awardId) {
+        recordAccess.requireAward(awardId);
         AwardFamilyPositionRow position = requireFamilyPosition(awardId);
 
         List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
@@ -2085,6 +2164,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         AwardFamilyPositionRow position = requireFamilyPosition(awardId);
 
         List<AwardBudgetRow> budgetsInScope = repository.findBudgetsInScope(
@@ -2136,6 +2216,7 @@ public class AwardArchiveService {
     }
 
     public List<AwardBudgetPeriodResponse> findBudgetPeriods(long awardId) {
+        recordAccess.requireAward(awardId);
         Long selectedBudgetId = requireSelectedBudgetId(awardId);
 
         if (selectedBudgetId == null) {
@@ -2150,6 +2231,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         Long selectedBudgetId = requireSelectedBudgetId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -2190,6 +2272,7 @@ public class AwardArchiveService {
             int page,
             int size
     ) {
+        recordAccess.requireAward(awardId);
         Long selectedBudgetId = requireSelectedBudgetId(awardId);
 
         int safePage = PaginationSupport.clampPage(page);
@@ -2279,6 +2362,11 @@ public class AwardArchiveService {
      */
     public java.util.List<edu.bu.archive.application.award.report.AwardReportAttachment>
             findReportAttachments(long awardId) {
+        // Reached from the report assembler, not a controller - which is
+        // exactly why it needs its own gate. The PDF-with-attachments export
+        // would otherwise embed attachment bytes for an Award the caller
+        // cannot read, and no endpoint-level check would see it.
+        recordAccess.requireAward(awardId);
         requireAwardNumberForId(awardId);
         return repository.findAttachmentsForReport(awardId);
     }

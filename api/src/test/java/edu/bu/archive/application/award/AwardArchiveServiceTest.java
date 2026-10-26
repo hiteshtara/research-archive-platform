@@ -757,9 +757,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none())
-        )).thenReturn(2L);
+        , any())).thenReturn(2L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none()),
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none()), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(current, historical));
 
@@ -787,9 +787,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), eq(3561589L), eq("all"), eq(AwardSearchFilters.none())
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq(3561589L), eq("all"), eq(AwardSearchFilters.none()),
+                anyString(), anyString(), anyString(), anyString(), eq(3561589L), eq("all"), eq(AwardSearchFilters.none()), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of(historical));
 
@@ -809,9 +809,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), eq(3561610L), eq("all"), eq(AwardSearchFilters.none())
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq(3561610L), eq("all"), eq(AwardSearchFilters.none()),
+                anyString(), anyString(), anyString(), anyString(), eq(3561610L), eq("all"), eq(AwardSearchFilters.none()), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of(current));
 
@@ -827,9 +827,9 @@ class AwardArchiveServiceTest {
     void searchVersionsByAnUnknownButValidAwardIdReturnsAnEmptyPageNotAnError() {
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), eq(999999999L), eq("all"), eq(AwardSearchFilters.none())
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), eq(999999999L), eq("all"), eq(AwardSearchFilters.none()),
+                anyString(), anyString(), anyString(), anyString(), eq(999999999L), eq("all"), eq(AwardSearchFilters.none()), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
 
@@ -844,9 +844,9 @@ class AwardArchiveServiceTest {
     void searchVersionsTreatsABlankAwardIdAsNoFilterNotAnError() {
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none())
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none()),
+                anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none()), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
 
@@ -854,7 +854,7 @@ class AwardArchiveServiceTest {
 
         verify(repository).countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), isNull(), eq("all"), eq(AwardSearchFilters.none())
-        );
+        , any());
     }
 
     @Test
@@ -872,9 +872,9 @@ class AwardArchiveServiceTest {
     void searchVersionsNormalizesAnUnrecognizedVersionFilterToAll() {
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), any(), eq("all"), eq(AwardSearchFilters.none())
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), any(), eq("all"), eq(AwardSearchFilters.none()),
+                anyString(), anyString(), anyString(), anyString(), any(), eq("all"), eq(AwardSearchFilters.none()), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
 
@@ -882,16 +882,16 @@ class AwardArchiveServiceTest {
 
         verify(repository).countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), any(), eq("all"), eq(AwardSearchFilters.none())
-        );
+        , any());
     }
 
     @Test
     void searchVersionsSelectsTheDateSortOnlyWhenExplicitlyRequested() {
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), any(), anyString(), any()
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
         ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
@@ -899,7 +899,7 @@ class AwardArchiveServiceTest {
         service.searchVersions("", "", "", "", "all", "date", 0, 25);
 
         verify(repository).searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any(),
                 sortSqlCaptor.capture(), anyInt(), anyInt()
         );
         assertThat(sortSqlCaptor.getValue())
@@ -911,9 +911,9 @@ class AwardArchiveServiceTest {
     void searchVersionsDefaultsToTheSequenceSort() {
         when(repository.countSearchAwardVersions(
                 anyString(), anyString(), anyString(), anyString(), any(), anyString(), any()
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
         ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
@@ -921,7 +921,7 @@ class AwardArchiveServiceTest {
         service.searchVersions("", "", "", "", "all", "sequence", 0, 25);
 
         verify(repository).searchAwardVersions(
-                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any(),
                 sortSqlCaptor.capture(), anyInt(), anyInt()
         );
         assertThat(sortSqlCaptor.getValue()).contains("av.sequence_number DESC");
@@ -946,9 +946,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsByExactAwardNumberPassesItThroughUnchanged() {
         when(repository.countSearchAwardAttachments(
                 eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all"),
+                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all"), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(AVAILABLE_ROW));
 
@@ -965,9 +965,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsByExactWorkflowDocumentNumberPassesItThroughUnchanged() {
         when(repository.countSearchAwardAttachments(
                 anyString(), eq("879423"), isNull(), isNull(), isNull(), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                anyString(), eq("879423"), isNull(), isNull(), isNull(), eq("all"),
+                anyString(), eq("879423"), isNull(), isNull(), isNull(), eq("all"), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(AVAILABLE_ROW));
 
@@ -983,9 +983,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsByExactAwardIdParsesAndPassesItThrough() {
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(AVAILABLE_ROW));
 
@@ -1001,9 +1001,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsByExactAttachmentIdParsesAndPassesItThrough() {
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), isNull(), eq(9001L), isNull(), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), isNull(), eq(9001L), isNull(), eq("all"),
+                anyString(), anyString(), isNull(), eq(9001L), isNull(), eq("all"), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(AVAILABLE_ROW));
 
@@ -1019,9 +1019,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsByExactFileIdParsesAndPassesItThrough() {
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), isNull(), isNull(), eq(5001L), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), isNull(), isNull(), eq(5001L), eq("all"),
+                anyString(), anyString(), isNull(), isNull(), eq(5001L), eq("all"), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(AVAILABLE_ROW));
 
@@ -1037,9 +1037,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsCombinesMultipleFiltersAndPassesAllThroughTogether() {
         when(repository.countSearchAwardAttachments(
                 eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current"),
+                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current"), any(),
                 anyString(), eq(25), eq(0)
         )).thenReturn(List.of(AVAILABLE_ROW));
 
@@ -1049,9 +1049,9 @@ class AwardArchiveServiceTest {
 
         verify(repository).countSearchAwardAttachments(
                 eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current")
-        );
+        , any());
         verify(repository).searchAwardAttachments(
-                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current"),
+                eq("200086-00001"), eq("879423"), eq(3047454L), isNull(), isNull(), eq("current"), any(),
                 anyString(), eq(25), eq(0)
         );
     }
@@ -1060,9 +1060,9 @@ class AwardArchiveServiceTest {
     void searchAttachmentsNormalizesAnUnrecognizedVersionFilterToAll() {
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
 
@@ -1072,16 +1072,16 @@ class AwardArchiveServiceTest {
 
         verify(repository).countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        );
+        , any());
     }
 
     @Test
     void searchAttachmentsHistoricalFilterIsPassedThroughAsGiven() {
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical")
-        )).thenReturn(0L);
+        , any())).thenReturn(0L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical"), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of());
 
@@ -1091,16 +1091,16 @@ class AwardArchiveServiceTest {
 
         verify(repository).countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("historical")
-        );
+        , any());
     }
 
     @Test
     void searchAttachmentsPaginationIsStableAndDeterministic() {
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        )).thenReturn(60L);
+        , any())).thenReturn(60L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 anyString(), eq(25), eq(50)
         )).thenReturn(List.of());
         ArgumentCaptor<String> sortSqlCaptor = ArgumentCaptor.forClass(String.class);
@@ -1110,7 +1110,7 @@ class AwardArchiveServiceTest {
         );
 
         verify(repository).searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 sortSqlCaptor.capture(), eq(25), eq(50)
         );
         assertThat(sortSqlCaptor.getValue())
@@ -1186,9 +1186,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of(pending));
 
@@ -1210,9 +1210,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        )).thenReturn(1L);
+        , any())).thenReturn(1L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of(failed));
 
@@ -1237,9 +1237,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardAttachments(
                 anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all")
-        )).thenReturn(2L);
+        , any())).thenReturn(2L);
         when(repository.searchAwardAttachments(
-                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"),
+                anyString(), anyString(), eq(3047454L), isNull(), isNull(), eq("all"), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of(skipped, noFileAtAll));
 
@@ -1291,9 +1291,9 @@ class AwardArchiveServiceTest {
         );
         when(repository.countSearchAwardAttachments(
                 eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all")
-        )).thenReturn(2L);
+        , any())).thenReturn(2L);
         when(repository.searchAwardAttachments(
-                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all"),
+                eq("200086-00001"), anyString(), isNull(), isNull(), isNull(), eq("all"), any(),
                 anyString(), anyInt(), anyInt()
         )).thenReturn(List.of(onOlderVersion, onCurrentVersion));
 

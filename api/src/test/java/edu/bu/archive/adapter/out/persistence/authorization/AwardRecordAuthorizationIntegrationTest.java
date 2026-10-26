@@ -381,6 +381,87 @@ class AwardRecordAuthorizationIntegrationTest {
         assertThat(forReal.getMessage()).isEqualTo(forImaginary.getMessage());
     }
 
+    // --- Drift-proof coverage -------------------------------------------
+
+    @Test
+    void everyAwardKeyedServiceMethodRefusesADeniedCaller() throws Exception {
+        /*
+         * The coverage guarantee, enforced by reflection rather than by a
+         * list someone must remember to update. Any public method on
+         * AwardArchiveService that takes an award_id or award_number must
+         * refuse a caller with no access. Add an unguarded one and this
+         * test fails on the next run - which is the only way a 45-endpoint
+         * surface stays covered as it grows.
+         *
+         * List-shaped methods are excluded BY NAME and tested separately
+         * above: they filter rows to nothing rather than throwing, which is
+         * correct for a search and wrong for a record read.
+         */
+        Set<String> listShaped = Set.of(
+                "search", "searchVersions", "searchAttachments",
+                "findFamilies", "findSummariesForAwardNumbers");
+
+        AwardArchiveService denied = service(denyingAccess());
+        List<String> unguarded = new java.util.ArrayList<>();
+
+        for (java.lang.reflect.Method method : AwardArchiveService.class.getDeclaredMethods()) {
+            if (!java.lang.reflect.Modifier.isPublic(method.getModifiers())
+                    || method.isSynthetic()
+                    || listShaped.contains(method.getName())) {
+                continue;
+            }
+            Object[] args = awardKeyedArguments(method);
+            if (args == null) {
+                continue;
+            }
+            try {
+                method.invoke(denied, args);
+                unguarded.add(method.getName() + " returned normally");
+            } catch (java.lang.reflect.InvocationTargetException invoked) {
+                Throwable cause = invoked.getCause();
+                if (!(cause instanceof java.util.NoSuchElementException)) {
+                    unguarded.add(method.getName() + " threw " + cause.getClass().getSimpleName());
+                }
+            }
+        }
+
+        assertThat(unguarded)
+                .as("public AwardArchiveService methods taking an award key that do not "
+                        + "refuse a denied caller with NoSuchElementException")
+                .isEmpty();
+    }
+
+    /** Dummy arguments for a method keyed by award id/number, or null if it is not. */
+    private static Object[] awardKeyedArguments(java.lang.reflect.Method method) {
+        java.lang.reflect.Parameter[] parameters = method.getParameters();
+        if (parameters.length == 0) {
+            return null;
+        }
+        Class<?> first = parameters[0].getType();
+        boolean keyed = first == long.class || first == Long.class || first == String.class;
+        if (!keyed) {
+            return null;
+        }
+        Object[] args = new Object[parameters.length];
+        for (int i = 0; i < parameters.length; i++) {
+            Class<?> type = parameters[i].getType();
+            if (type == long.class || type == Long.class) {
+                args[i] = 5002L;
+            } else if (type == int.class || type == Integer.class) {
+                args[i] = i == 0 ? 0 : 25;
+            } else if (type == String.class) {
+                args[i] = i == 0 ? "CHEM-00001" : "";
+            } else if (type == boolean.class) {
+                args[i] = false;
+            } else {
+                // A parameter shape this harness does not model; skip the
+                // method rather than assert something meaningless.
+                return null;
+            }
+        }
+        return args;
+    }
+
     // --- Count / page parity --------------------------------------------
 
     @Test

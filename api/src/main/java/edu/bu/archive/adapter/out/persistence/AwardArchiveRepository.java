@@ -77,12 +77,22 @@ public class AwardArchiveRepository {
             String query,
             int limit
     ) {
+        return findFamilies(query, SqlFragment.NONE, limit);
+    }
+
+    /** @param scope record-authorization predicate for alias {@code av}. */
+    public List<AwardFamilySummaryResponse> findFamilies(
+            String query,
+            SqlFragment scope,
+            int limit
+    ) {
+        SqlFragment familyScope = scope == null ? SqlFragment.NONE : scope;
         String normalizedQuery =
                 query == null
                         ? ""
                         : query.trim();
 
-        return jdbc.sql("""
+        return bindScope(jdbc.sql("""
                 SELECT
                     award_number,
                     title,
@@ -93,7 +103,7 @@ public class AwardArchiveRepository {
                     account_number,
                     sequence_number AS latest_sequence_number,
                     award_id AS primary_award_id
-                FROM archive.award_version
+                FROM archive.award_version av
                 WHERE is_primary_current = TRUE
                   AND (
                         :query = ''
@@ -103,9 +113,10 @@ public class AwardArchiveRepository {
                         OR lead_unit_name ILIKE '%' || :query || '%'
                         OR account_number ILIKE '%' || :query || '%'
                   )
+                """ + familyScope.sql() + """
                 ORDER BY award_number
                 LIMIT :limit
-                """)
+                """), familyScope)
                 .param("query", normalizedQuery)
                 .param("limit", limit)
                 .query(AwardFamilySummaryResponse.class)
@@ -1269,7 +1280,26 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return bindAwardFilters(jdbc.sql("""
+        return searchAwardVersions(pattern, rawQuery, awardNumber, documentNumber, awardId,
+                versionFilter, filters, SqlFragment.NONE, sortSql, limit, offset);
+    }
+
+    /** @param versionScope record-authorization predicate for alias {@code av}. */
+    public List<AwardVersionSearchResultResponse> searchAwardVersions(
+            String pattern,
+            String rawQuery,
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            String versionFilter,
+            AwardSearchFilters filters,
+            SqlFragment scope,
+            String sortSql,
+            int limit,
+            int offset
+    ) {
+        SqlFragment versionScope = scope == null ? SqlFragment.NONE : scope;
+        return bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT
                     av.award_id,
                     av.award_number,
@@ -1298,9 +1328,9 @@ public class AwardArchiveRepository {
                         ap.award_person_id
                     LIMIT 1
                 ) pi ON TRUE
-                """ + AWARD_VERSION_SEARCH_WHERE + sortSql + """
+                """ + AWARD_VERSION_SEARCH_WHERE + versionScope.sql() + sortSql + """
                 LIMIT :limit OFFSET :offset
-                """), filters)
+                """), filters), versionScope)
                 .param("pattern", pattern)
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)
@@ -1334,10 +1364,26 @@ public class AwardArchiveRepository {
             String versionFilter,
             AwardSearchFilters filters
     ) {
-        Long count = bindAwardFilters(jdbc.sql("""
+        return countSearchAwardVersions(pattern, rawQuery, awardNumber, documentNumber,
+                awardId, versionFilter, filters, SqlFragment.NONE);
+    }
+
+    /** Must take the same scope as {@link #searchAwardVersions}; see that method. */
+    public long countSearchAwardVersions(
+            String pattern,
+            String rawQuery,
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            String versionFilter,
+            AwardSearchFilters filters,
+            SqlFragment scope
+    ) {
+        SqlFragment versionScope = scope == null ? SqlFragment.NONE : scope;
+        Long count = bindScope(bindAwardFilters(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_version av
-                """ + AWARD_VERSION_SEARCH_WHERE), filters)
+                """ + AWARD_VERSION_SEARCH_WHERE + versionScope.sql()), filters), versionScope)
                 .param("pattern", pattern)
                 .param("rawQuery", rawQuery)
                 .param("awardNumber", awardNumber)
@@ -2249,7 +2295,25 @@ public class AwardArchiveRepository {
             int limit,
             int offset
     ) {
-        return jdbc.sql("""
+        return searchAwardAttachments(awardNumber, documentNumber, awardId, attachmentId, fileId,
+                versionFilter, SqlFragment.NONE, sortSql, limit, offset);
+    }
+
+    /** @param scope record-authorization predicate for the Award alias {@code av}. */
+    public List<AttachmentSearchRow> searchAwardAttachments(
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            Long attachmentId,
+            Long fileId,
+            String versionFilter,
+            SqlFragment scope,
+            String sortSql,
+            int limit,
+            int offset
+    ) {
+        SqlFragment attachmentScope = scope == null ? SqlFragment.NONE : scope;
+        return bindScope(jdbc.sql("""
                 SELECT
                     av.award_id AS parent_id,
                     av.award_number AS parent_number,
@@ -2299,9 +2363,9 @@ public class AwardArchiveRepository {
                         OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
                         OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
                   )
-                """ + sortSql + """
+                """ + attachmentScope.sql() + sortSql + """
                 LIMIT :limit OFFSET :offset
-                """)
+                """), attachmentScope)
                 .param("awardNumber", awardNumber)
                 .param("documentNumber", documentNumber)
                 .param("awardId", awardId)
@@ -2322,7 +2386,22 @@ public class AwardArchiveRepository {
             Long fileId,
             String versionFilter
     ) {
-        Long count = jdbc.sql("""
+        return countSearchAwardAttachments(awardNumber, documentNumber, awardId, attachmentId,
+                fileId, versionFilter, SqlFragment.NONE);
+    }
+
+    /** Must take the same scope as {@link #searchAwardAttachments}. */
+    public long countSearchAwardAttachments(
+            String awardNumber,
+            String documentNumber,
+            Long awardId,
+            Long attachmentId,
+            Long fileId,
+            String versionFilter,
+            SqlFragment scope
+    ) {
+        SqlFragment attachmentScope = scope == null ? SqlFragment.NONE : scope;
+        Long count = bindScope(jdbc.sql("""
                 SELECT COUNT(*)
                 FROM archive.award_attachment aa
                 JOIN archive.award_version av ON av.award_id = aa.award_id
@@ -2338,7 +2417,7 @@ public class AwardArchiveRepository {
                         OR (:versionFilter = 'current' AND av.is_primary_current = TRUE)
                         OR (:versionFilter = 'historical' AND av.is_primary_current = FALSE)
                   )
-                """)
+                """ + attachmentScope.sql()), attachmentScope)
                 .param("awardNumber", awardNumber)
                 .param("documentNumber", documentNumber)
                 .param("awardId", awardId)
