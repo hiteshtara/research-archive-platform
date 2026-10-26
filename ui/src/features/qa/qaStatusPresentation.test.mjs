@@ -507,6 +507,67 @@ test("the seven implementation stages are reported separately, never collapsed",
   );
 });
 
+test("a rule implemented for Award only is never reported as fully implemented", () => {
+  /*
+   * SEC-001, SEC-002 and SEC-003 are written against "all system objects".
+   * They are implemented for Award and nothing else, so "yes" would claim a
+   * cross-module guarantee that does not exist. They may only say "yes" once
+   * every module listed as pending in moduleProgress has gone.
+   */
+  const stillPending = (security.moduleProgress || []).filter(
+    (module) => module.state === "pending",
+  );
+  assert.ok(stillPending.length > 0, "modules are still pending; this guard must apply");
+
+  for (const id of ["SEC-001", "SEC-002", "SEC-003"]) {
+    const requirement = requirements.find((item) => item.id === id);
+    assert.notEqual(
+      requirement.status.codeImplemented,
+      "yes",
+      `${id}: implemented for Award only while ${stillPending.length} modules are pending`,
+    );
+    assert.match(
+      requirement.blockers,
+      /Award only|all system objects|not wired/i,
+      `${id}: the cross-module limit must be stated, not implied`,
+    );
+  }
+});
+
+test("an established policy is not the same as a verified acceptance criterion", () => {
+  // SEC-009: read-only is long-standing project policy, so the decision is
+  // settled - but no test proves the absence of a write path, so acceptance
+  // is NOT verified. The page must hold those two apart.
+  const nine = requirements.find((item) => item.id === "SEC-009");
+  assert.equal(nine.status.decisionApproved, "approved");
+  assert.equal(nine.status.acceptanceVerified, "no");
+  assert.equal(nine.status.testsPassed, "no");
+  assert.match(nine.businessRule, /ESTABLISHED PROJECT POLICY/);
+  assert.match(nine.tests, /NOT acceptance verification/i);
+  // And it is not one of the nine decisions taken on 2026-10-26.
+  assert.ok(
+    !security.decisionsApproved.some((decision) => /read-only/i.test(decision)),
+    "read-only policy predates the 2026-10-26 decisions and must not be listed among them",
+  );
+});
+
+test("the enforcement claim states its evidence and its limits", () => {
+  /*
+   * "OFF in every environment" is a stronger claim than the evidence
+   * supports: three environments are defined in Terraform, only dev has a
+   * recorded deployment, and no running instance was queried. The statement
+   * must say what was actually checked.
+   */
+  assert.match(security.enforcementState, /OFF/);
+  assert.match(security.enforcementState, /NO committed configuration file/);
+  assert.match(security.enforcementState, /defaults to false/);
+  assert.match(security.enforcementState, /dev, test and prod/);
+  assert.match(security.enforcementState, /only\s+dev has a recorded deployment/);
+  assert.match(security.enforcementState, /No runtime check/);
+  // The overclaim this replaced must not come back.
+  assert.doesNotMatch(security.enforcementState, /OFF in every environment/i);
+});
+
 test("genuinely unresolved questions survive, and settled ones are cleared", () => {
   const conflicted = requirementsWithConflicts(requirements).map((item) => item.id);
 
@@ -557,8 +618,10 @@ test("the page renders the stages, the module table and the decision list", () =
   assert.match(source, /securityStages\(requirement\)/);
   assert.match(source, /Remaining blockers/);
   assert.match(source, /Test coverage/);
-  // Enforcement-off must be impossible to miss.
-  assert.match(source, /Record-level authorization is OFF in every environment/);
+  // Enforcement-off must be impossible to miss - but stated no more
+  // strongly than the evidence in securityRequirements.json supports.
+  assert.match(source, /Record-level authorization is OFF</);
+  assert.doesNotMatch(source, /OFF in every environment/i);
 });
 
 test("the enforcement state is stated so no one reads these as live controls", () => {

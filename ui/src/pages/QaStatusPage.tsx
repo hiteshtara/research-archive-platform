@@ -399,9 +399,7 @@ export function QaStatusPage() {
       </Box>
 
       <Alert severity="warning">
-        <AlertTitle>
-          Record-level authorization is OFF in every environment
-        </AlertTitle>
+        <AlertTitle>Record-level authorization is OFF</AlertTitle>
         {securityData.enforcementState} Please do not test these as though they
         were live, and do not treat a passing functional case above as evidence
         for any of them. {securityData.recommendationStatus}
@@ -418,9 +416,11 @@ export function QaStatusPage() {
           Security implementation progress
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: "80ch" }}>
-          {progress.decided} of {progress.total} requirements have an approved
-          business decision, {progress.implemented} are fully implemented in code,{" "}
-          {progress.merged} are merged into main, and{" "}
+          {progress.decided} of {progress.total} requirements have a settled
+          business decision. {progress.implemented} are implemented in code
+          across their whole stated scope &mdash; the rest are built for Award
+          and nothing else, which is why they read &ldquo;partial&rdquo; rather
+          than done. {progress.merged} are merged into main, and{" "}
           <strong>{progress.verified} have been verified against their acceptance
           criteria</strong>. Those are four different facts and are reported
           separately on purpose.

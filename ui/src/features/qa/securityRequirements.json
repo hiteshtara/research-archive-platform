@@ -2,7 +2,7 @@
   "source": "Kuali Archive Enhancements and Requirements, Security Requirements tab",
   "sourceDated": "2026-10-20",
   "reconciledOn": "2026-10-26",
-  "enforcementState": "Record-level authorization is switched OFF in every environment, including the development website. Every gate described below is present in code and inert. Nothing on this page describes access control that is currently running.",
+  "enforcementState": "Record-level authorization is OFF. Evidence, and its limits: app.authorization.enforcement-enabled is set in NO committed configuration file and defaults to false in Java, so any instance built from this repository starts with every gate inert. Terraform defines three environments - dev, test and prod - but only dev has a recorded deployment; test and prod are configuration scaffolding with no record of being stood up. No runtime check of a deployed instance was performed, because the API exposes no endpoint reporting its authorization state. So this is a statement about the code and configuration in this repository, not a reading taken from each running environment.",
   "recommendationStatus": "The business decisions listed were approved on 2026-10-26. Implementation status is reported separately from them: an approved decision is not working software, and a passing test is not a released or verified one.",
   "decisionsApproved": [
     "PAFO Administrator is a department user restricted to assigned departments, not a Central user.",
@@ -77,7 +77,7 @@
       "businessRule": "Central Users have unrestricted archive read access and may see archive-wide statistics. Approved 2026-10-26.",
       "status": {
         "decisionApproved": "approved",
-        "codeImplemented": "yes",
+        "codeImplemented": "partial",
         "testsPassed": "yes",
         "mergedToMain": "no",
         "deployed": "no",
@@ -85,7 +85,7 @@
         "acceptanceVerified": "no"
       },
       "tests": "A Central scope renders no SQL predicate, so Central sees every record and archive-wide dashboard totals. Covered by decision3_centralSeesArchiveWideTotals and centralSeesEverythingIncludingRecordsWithNoUnitOrContact.",
-      "blockers": "Membership cannot be derived: five of the seven Central teams named in the source document are not Kuali user roles, so Central membership has to be granted and maintained by hand. No administrative surface exists to do that yet.",
+      "blockers": "Implemented for Award only - a Central scope renders no predicate, so Central sees every Award and archive-wide Award totals, but the other four modules have no gate at all, so 'all system objects' is not demonstrated. Separately, membership cannot be derived: five of the seven Central teams named in the source document are not Kuali user roles, so Central membership has to be granted by hand, and no administrative surface exists to do that yet.",
       "evidence": "PR #62 (open, draft - not merged)",
       "decisions": "Who administers Central grants, and whether granting Central access needs a second approver.",
       "conflict": "Five of the seven listed Central teams are not Kuali user roles, so Central membership cannot be derived from record contacts."
@@ -101,7 +101,7 @@
       "businessRule": "Department users see their assigned department and its authorised descendant units. PAFO Administrator is treated as a department user restricted to assigned departments, NOT as Central. Approved 2026-10-26.",
       "status": {
         "decisionApproved": "approved",
-        "codeImplemented": "yes",
+        "codeImplemented": "partial",
         "testsPassed": "yes",
         "mergedToMain": "no",
         "deployed": "no",
@@ -109,7 +109,7 @@
         "acceptanceVerified": "no"
       },
       "tests": "Lead-unit matching with descendant expansion only where both the policy and the grant allow it. Covered by decision4_departmentTotalsDescribeOnlyTheirOwnRecords, departmentScopeReturnsOnlyItsOwnUnitAndTheCountAgrees, parentUnitWithDescendantsReachesTheChildUnit and parentUnitWithoutDescendantsReachesNothing.",
-      "blockers": "Award only. Proposal, Negotiation, Subaward and IRB are not wired, and Negotiation has no unit column at all.",
+      "blockers": "Award only. Proposal, Negotiation, Subaward and IRB are not wired. Negotiation has no unit column at all, so department scoping cannot apply to it as written and needs its own rule before this requirement can be met across the archive.",
       "evidence": "PR #62 (open, draft - not merged)",
       "decisions": "",
       "conflict": ""
@@ -125,7 +125,7 @@
       "businessRule": "Approved contact access extends to the entire Award family, not only the version a person is listed on. Access requires an approved contact role; being named on a record with any other role grants nothing. Approved 2026-10-26.",
       "status": {
         "decisionApproved": "approved",
-        "codeImplemented": "yes",
+        "codeImplemented": "partial",
         "testsPassed": "yes",
         "mergedToMain": "no",
         "deployed": "no",
@@ -133,7 +133,7 @@
         "acceptanceVerified": "no"
       },
       "tests": "Contact matching against archived business data, restricted to approved role codes. Covered by contactScopeReachesTheAwardTheyAreListedOn, contactScopeIgnoresAListingWhoseRoleIsNotApproved and aPersonWhoIsNotAContactAnywhereSeesNothing.",
-      "blockers": "Historical contact data is not evidence of current employment. A person listed on an archived record keeps that listing forever, so grants derived from it need periodic review that does not exist yet.",
+      "blockers": "Award only; the Proposal contact tables exist and are supported by the predicate builder but nothing is wired to them, and Negotiation, Subaward and IRB have no contact rule. Separately, historical contact data is not evidence of current employment: a person listed on an archived record keeps that listing forever, so grants derived from it need a periodic review that does not exist yet.",
       "evidence": "PR #62 (open, draft - not merged)",
       "decisions": "",
       "conflict": ""
@@ -266,9 +266,9 @@
       "accessScope": "Role or specific IO number(s)",
       "audience": "All users of the archive.",
       "acceptance": "No test case was supplied in the source document. Proposed: evidence that no write path reaches the archive schema, plus the database grants the API role holds.",
-      "businessRule": "No decision recorded. The archive is read-only by charter and architecture, but no demonstrable control has been stated.",
+      "businessRule": "Read-only is ESTABLISHED PROJECT POLICY, not a decision taken on 2026-10-26. The archive is a read-only historical record by charter; the ETL is one-directional and never writes back to Oracle, and the API reads through JdbcClient with no write path to the archive schema. What has NOT been settled is the technical acceptance criterion - what would count as proof.",
       "status": {
-        "decisionApproved": "open",
+        "decisionApproved": "approved",
         "codeImplemented": "partial",
         "testsPassed": "no",
         "mergedToMain": "yes",
@@ -276,10 +276,10 @@
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
-      "tests": "No test asserts the absence of a write path. The claim currently rests on design and code review, not on evidence.",
-      "blockers": "Needs a demonstrable control rather than an assertion: a test proving no write path reaches the archive schema, and a statement of what grants the API's database role actually holds. Both are straightforward; neither exists.",
-      "evidence": "Architecture and charter; no dedicated evidence yet",
-      "decisions": "What counts as sufficient proof of read-only: a test, a database grant listing, or both.",
+      "tests": "No test asserts the absence of a write path, and no record exists of the database grants the API role actually holds. The read-only claim currently rests on design, charter and code review - which is reasonable evidence for a policy and is NOT acceptance verification.",
+      "blockers": "Needs a demonstrable control rather than an assertion: a test proving no write path reaches the archive schema, and a statement of the API database role's actual grants. Until both exist this stays unverified, however well established the policy is.",
+      "evidence": "Project charter and architecture (CLAUDE.md, docs/DECISIONS.md); no dedicated test evidence yet",
+      "decisions": "What counts as sufficient proof: a test, a database grant listing, or both. The policy itself is not in question.",
       "conflict": ""
     }
   ]
