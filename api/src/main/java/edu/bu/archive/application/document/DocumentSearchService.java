@@ -34,8 +34,22 @@ import java.util.List;
 public class DocumentSearchService {
 
     private final DocumentSearchRepository repository;
+    private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
 
-    public DocumentSearchService(DocumentSearchRepository repository) {
+    public DocumentSearchService(DocumentSearchRepository repository,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ) {
+        edu.bu.archive.application.authorization.AwardRecordAccess resolvedAccess =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = resolvedAccess != null
+                ? resolvedAccess
+                : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.AwardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
         this.repository = repository;
     }
 
@@ -48,6 +62,11 @@ public class DocumentSearchService {
             int page,
             int size
     ) {
+        // Cross-module index: Award rows are UNIONed with four modules that
+        // have no approved record rule, so this is refused for a scoped
+        // caller rather than returning Award rows outside their scope.
+        recordAccess.requireUnrestrictedForCrossModuleSearch("Document search");
+
         String rawDocumentNumber = normalize(documentNumber);
         String rawBusinessRecordNumber = normalize(businessRecordNumber);
         String rawTitle = normalize(title);

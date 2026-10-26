@@ -20,7 +20,8 @@ import org.springframework.web.context.request.RequestContextHolder;
  * With enforcement ON, a missing identity, policy or store, or any failure,
  * denies.
  */
-public class RecordAuthorizationService implements RecordVisibility, ProposalRecordAccess {
+public class RecordAuthorizationService
+        implements RecordVisibility, AwardRecordAccess, ProposalRecordAccess {
 
     private static final String OUTCOME_ATTRIBUTE = RecordAuthorizationService.class.getName() + ".outcome";
     private static final ThreadLocal<AccessOutcome> PROPAGATED = new ThreadLocal<>();
@@ -222,6 +223,19 @@ public class RecordAuthorizationService implements RecordVisibility, ProposalRec
                 .build(outcome, module, alias, expandedUnits(outcome, policy.get()));
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Delegates to {@link #scopeSql(RecordModule, String)} for
+     * {@link RecordModule#AWARD}; the Award service depends on the narrow
+     * {@link AwardRecordAccess} port rather than on this whole class.
+     */
+    @Override
+    public SqlFragment awardScopeSql(String alias) {
+        return scopeSql(RecordModule.AWARD, alias);
+    }
+
+    @Override
     public void requireAward(long awardId) {
         if (!enforced()) {
             return;
@@ -232,6 +246,7 @@ public class RecordAuthorizationService implements RecordVisibility, ProposalRec
     }
 
     /** Endpoints that read an Award family by number read its current version. */
+    @Override
     public void requireAwardNumber(String awardNumber) {
         if (!enforced()) {
             return;

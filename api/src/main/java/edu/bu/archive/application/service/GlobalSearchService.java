@@ -100,8 +100,18 @@ public class GlobalSearchService {
     // Temporary TC-042 measurement instrumentation, off by default.
     private final SearchTimingLog timingLog;
     /**
-     * Proposal record authorization for the legs that read Proposal rows.
-     * Defaults to PERMIT_ALL, which adds no predicate - today's behaviour.
+     * Carries the request's access decision onto the leg threads, and
+     * answers the module-agnostic "is this caller scoped at all" question.
+     * Defaults to {@link edu.bu.archive.application.authorization.RecordVisibility#ALL},
+     * which propagates nothing - today's behaviour with enforcement off.
+     */
+    private final edu.bu.archive.application.authorization.RecordVisibility visibility;
+
+    /**
+     * Proposal record authorization, for the Proposal leg's SQL predicate
+     * and its per-row enrichment filter. Defaults to PERMIT_ALL, which adds
+     * no predicate. Award needs no equivalent here because its leg goes
+     * through AwardArchiveService, which carries its own port.
      */
     private final edu.bu.archive.application.authorization.ProposalRecordAccess proposalAccess;
 
@@ -115,6 +125,7 @@ public class GlobalSearchService {
             SemanticSearchProperties semanticSearchProperties,
             ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider,
             SearchTimingLog timingLog,
+            ObjectProvider<edu.bu.archive.application.authorization.RecordVisibility> visibility,
             ObjectProvider<edu.bu.archive.application.authorization.ProposalRecordAccess>
                     proposalAccessProvider
     ) {
@@ -127,10 +138,15 @@ public class GlobalSearchService {
         this.semanticSearchProperties = semanticSearchProperties;
         this.embeddingProviderObjectProvider = embeddingProviderObjectProvider;
         this.timingLog = timingLog;
-        edu.bu.archive.application.authorization.ProposalRecordAccess resolved =
+        edu.bu.archive.application.authorization.RecordVisibility resolvedVisibility =
+                visibility == null ? null : visibility.getIfAvailable();
+        this.visibility = resolvedVisibility != null
+                ? resolvedVisibility
+                : edu.bu.archive.application.authorization.RecordVisibility.ALL;
+        edu.bu.archive.application.authorization.ProposalRecordAccess resolvedProposal =
                 proposalAccessProvider == null ? null : proposalAccessProvider.getIfAvailable();
-        this.proposalAccess = resolved != null
-                ? resolved
+        this.proposalAccess = resolvedProposal != null
+                ? resolvedProposal
                 : edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL;
     }
 
@@ -332,6 +348,23 @@ public class GlobalSearchService {
             String module,
             java.util.function.Supplier<List<GlobalSearchItemResponse>> work
     ) {
+        /*
+         * THREAD PROPAGATION (2026-10-26). Each leg runs on another thread,
+         * and the per-request access decision is held in a request-scoped
+         * attribute that does not follow it. Off the request thread
+         * RecordAuthorizationService.outcome() fails closed, so without this
+         * the Award leg would return NOTHING once enforcement is on - safe,
+         * but silently and wrongly empty, which is its own kind of lie.
+         *
+         * propagate() captures the decision on the calling (request) thread
+         * and reinstates it inside the worker. With enforcement off it
+         * returns the supplier unchanged, so nothing about today's behaviour
+         * moves. Applied to EVERY leg, not just Award: the same reasoning
+         * holds for Proposal, Subaward and Negotiation as they are wired.
+         */
+        java.util.function.Supplier<List<GlobalSearchItemResponse>> scopedWork =
+                visibility.propagate(work);
+
         long scheduledAtNanos = System.nanoTime();
         return CompletableFuture.supplyAsync(() -> {
             timingLog.record(
@@ -340,7 +373,7 @@ public class GlobalSearchService {
                     (System.nanoTime() - scheduledAtNanos) / 1_000_000,
                     -1
             );
-            return timedLeg(cid, module, work);
+            return timedLeg(cid, module, scopedWork);
         });
     }
 
@@ -1027,31 +1060,41 @@ public class GlobalSearchService {
 
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(rows.size());
         for (SemanticSearchRow row : rows) {
+            AwardSemanticSummaryRow awardSummary = awardSummaries.get(row.businessNumber());
             ProposalSemanticSummaryRow proposalSummary =
                     proposalSummaries.get(row.businessNumber());
 
             /*
-             * A semantic PROPOSAL row was read from a Proposal that exists,
-             * so an absent summary for a SCOPED caller means "not
-             * authorised", not "no data". The row must be dropped, not left
-             * unenriched: an unenriched row still carries the proposal
-             * number as its businessNumber and a /proposals link, which is
-             * the disclosure the enrichment filter exists to prevent.
+             * A semantic AWARD or PROPOSAL row was read from a record that
+             * exists, and the enrichment lookups filter to what the caller
+             * may see. So an absent summary for a SCOPED caller means "not
+             * authorised", not "no data", and the row must be DROPPED rather
+             * than left unenriched: an unenriched row still carries the
+             * business number and a module link, which is the disclosure the
+             * enrichment filter existed to prevent.
              *
-             * Gated on the caller not being unrestricted. With enforcement
-             * off, or for Central, an absent summary means a genuine data
-             * gap and today's behaviour is to keep the row - this must not
-             * change deployed behaviour.
+             * Only these two modules. Negotiation and Subaward have no record
+             * rule, so an absent summary there genuinely means unenriched -
+             * the existing documented design.
+             *
+             * Gated on NOT being unrestricted, which matters: with
+             * enforcement off, or for a Central caller, the summary lists are
+             * unfiltered, so an absent summary means a real data gap and
+             * today's behaviour is to keep the row. Dropping it there would
+             * change enforcement-disabled behaviour, which this work must not
+             * do. Unit tests cover exactly that case for both modules.
              */
-            if (!proposalAccess.unrestricted()
-                    && "PROPOSAL".equals(row.module())
-                    && proposalSummary == null) {
+            boolean scoped = !visibility.unrestricted();
+            if (scoped && "AWARD".equals(row.module()) && awardSummary == null) {
+                continue;
+            }
+            if (scoped && "PROPOSAL".equals(row.module()) && proposalSummary == null) {
                 continue;
             }
 
             mapped.add(toGlobalSearchItem(
                     row,
-                    awardSummaries.get(row.businessNumber()),
+                    awardSummary,
                     proposalSummary,
                     negotiationSummaries.get(row.businessNumber()),
                     subawardSummaries.get(row.businessNumber())

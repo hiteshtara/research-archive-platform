@@ -106,8 +106,11 @@ class GlobalSearchServiceTest {
                 embeddingProviderObjectProvider,
                 // TC-042 timing instrumentation, disabled - these tests
                 // are about search behaviour, not measurement.
-                new SearchTimingLog(false)
-        ,
+                new SearchTimingLog(false),
+                // visibility (thread propagation) and Proposal record access:
+                // absent means RecordVisibility.ALL / PERMIT_ALL, i.e. the
+                // enforcement-off behaviour these tests assert.
+                null,
                 null);
 
         // Default: empty results for every domain unless a test

@@ -42,18 +42,43 @@ public class ExplorerService {
     private final AwardArchiveRepository repository;
     private final AwardArchiveService awardArchiveService;
     private final AwardContactService contactService;
+    private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
 
     public ExplorerService(
             AwardArchiveRepository repository,
             AwardArchiveService awardArchiveService,
             AwardContactService contactService
     ) {
+        this(repository, awardArchiveService, contactService, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ExplorerService(
+            AwardArchiveRepository repository,
+            AwardArchiveService awardArchiveService,
+            AwardContactService contactService,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ) {
         this.repository = repository;
         this.awardArchiveService = awardArchiveService;
         this.contactService = contactService;
+        edu.bu.archive.application.authorization.AwardRecordAccess access =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = access != null
+                ? access
+                : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.AwardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
     }
 
     public ExplorerAwardResponse findAward(String awardNumber) {
+        // Explorer reads the Award repository directly, so it carries its
+        // own gate rather than inheriting AwardArchiveService's.
+        recordAccess.requireAwardNumber(awardNumber);
         return repository.findExplorerAwardByNumber(awardNumber)
                 .orElseThrow(() -> new NoSuchElementException(
                         "No current version archived for award_number: "
@@ -62,6 +87,7 @@ public class ExplorerService {
     }
 
     public ExplorerAwardResponse findAwardVersion(long awardId) {
+        recordAccess.requireAward(awardId);
         return repository.findExplorerAwardVersionById(awardId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Award not found: " + awardId
@@ -136,7 +162,11 @@ public class ExplorerService {
     public List<ExplorerAwardResponse> findSponsorsByCode(
             String sponsorCode
     ) {
-        return repository.findAwardsBySponsorCode(sponsorCode);
+        // Award-backed list: filtered per row, because a sponsor lookup
+        // legitimately spans Awards the caller may only partly see.
+        return repository.findAwardsBySponsorCode(sponsorCode).stream()
+                .filter(row -> recordAccess.canSeeAwardNumber(row.awardNumber()))
+                .toList();
     }
 
     public List<AwardAttachmentResponse> findAttachments(long awardId) {

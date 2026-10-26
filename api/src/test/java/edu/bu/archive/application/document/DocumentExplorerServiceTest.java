@@ -23,7 +23,8 @@ import static org.mockito.Mockito.when;
 class DocumentExplorerServiceTest {
 
     private final DocumentExplorerRepository repository = mock(DocumentExplorerRepository.class);
-    private final DocumentExplorerService service = new DocumentExplorerService(repository);
+    private final DocumentExplorerService service = new DocumentExplorerService(repository,
+                null, null);
 
     private void stub(List<DocumentExplorerRow> rows, long total) {
         // Stubs both the filtered path (count/search/moduleFacets) and

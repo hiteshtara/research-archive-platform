@@ -27,9 +27,29 @@ import java.util.NoSuchElementException;
 public class AwardContactService {
 
     private final AwardArchiveRepository repository;
+    private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
 
     public AwardContactService(AwardArchiveRepository repository) {
+        this(repository, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AwardContactService(
+            AwardArchiveRepository repository,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ) {
         this.repository = repository;
+        edu.bu.archive.application.authorization.AwardRecordAccess access =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = access != null
+                ? access
+                : edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.AwardRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
     }
 
     public AwardUnitDetailsResponse findUnitDetails(long awardId) {
@@ -58,10 +78,21 @@ public class AwardContactService {
         return repository.findCentralAdministrationContacts(awardId);
     }
 
+    /**
+     * Existence AND authorization, in that order, for all four contact
+     * endpoints. This service reads the Award repository directly rather
+     * than going through AwardArchiveService, so it does not inherit that
+     * class's gates and must carry its own.
+     *
+     * <p>Both failures raise NoSuchElementException with the same message
+     * shape, so an unauthorized Award is indistinguishable from an absent
+     * one.
+     */
     private void requireAwardExists(long awardId) {
         repository.findAwardNumberForId(awardId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Award not found: " + awardId
                 ));
+        recordAccess.requireAward(awardId);
     }
 }

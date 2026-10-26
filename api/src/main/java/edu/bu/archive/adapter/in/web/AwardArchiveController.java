@@ -6,7 +6,6 @@ import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceDetailResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardSequenceSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardWorkspaceResponse;
-import edu.bu.archive.adapter.out.persistence.AwardArchiveRepository;
 import edu.bu.archive.application.award.AwardArchiveService;
 
 import org.springframework.http.ResponseEntity;
@@ -31,14 +30,11 @@ import java.util.List;
 public class AwardArchiveController {
 
     private final AwardArchiveService service;
-    private final AwardArchiveRepository repository;
 
     public AwardArchiveController(
-            AwardArchiveService service,
-            AwardArchiveRepository repository
+            AwardArchiveService service
     ) {
         this.service = service;
-        this.repository = repository;
     }
 
     @GetMapping("/families")
@@ -54,7 +50,7 @@ public class AwardArchiveController {
                 200
         );
 
-        return repository.findFamilies(
+        return service.findFamilies(
                 query,
                 safeLimit
         );

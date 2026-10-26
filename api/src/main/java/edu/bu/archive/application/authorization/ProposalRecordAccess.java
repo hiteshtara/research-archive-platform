@@ -11,13 +11,13 @@ package edu.bu.archive.application.authorization;
  * operations they use, and so {@link #PERMIT_ALL} can stand in where the
  * Phase 1 beans are absent.
  *
- * <p>Deliberately a sibling of the Award port rather than a shared one. The
- * Award port is on an unmerged branch, so sharing it now would couple this
- * work to that review; the two should be consolidated once both are on main.
- * The duplication is the interface only - there is exactly one implementation
- * of the rules, in {@link RecordAuthorizationService}.
+ * <p>A sibling of {@link AwardRecordAccess}: the record operations differ per
+ * module, so each has its own port, while everything they share -
+ * {@code requireProvisioned}, {@code unrestricted} and the startup refusal -
+ * lives once in {@link RecordAccess}. There is exactly one implementation of
+ * the rules themselves, in {@link RecordAuthorizationService}.
  */
-public interface ProposalRecordAccess {
+public interface ProposalRecordAccess extends RecordAccess {
 
     /**
      * Scope predicate for Proposal rows under {@code alias}, to sit in the
@@ -25,16 +25,6 @@ public interface ProposalRecordAccess {
      * ordering all describe one row set.
      */
     SqlFragment proposalScopeSql(String alias);
-
-    /**
-     * Throws when the caller has no archive access at all, so an
-     * unprovisioned user gets an explicit problem rather than an empty list
-     * that looks like an empty archive.
-     */
-    void requireProvisioned();
-
-    /** True when enforcement is off, or the caller is Central. */
-    boolean unrestricted();
 
     /**
      * Throws when the caller may not read this Proposal version.
@@ -99,33 +89,14 @@ public interface ProposalRecordAccess {
     };
 
     /**
-     * Refuses to start when record authorization is ENABLED but the only
-     * available implementation is {@link #PERMIT_ALL}.
-     *
-     * <p>Without it, a context where the Phase 1 beans are missing, excluded
-     * or failed to initialise would serve every Proposal to every
-     * authenticated caller while configuration claimed enforcement was on -
-     * an operator reading {@code enforcement-enabled=true} would have
-     * positive confirmation of a control that was not running. Failing
-     * startup is loud and cannot be mistaken for working.
-     *
-     * <p>Enforcement OFF with {@code PERMIT_ALL} is the supported
-     * configuration today and is left alone.
+     * Startup refusal for this port. Delegates to
+     * {@link RecordAccess#requireEnforceableWiring}; kept as a named entry
+     * point so call sites read as the module they protect.
      */
     static void requireEnforceableWiring(
             ProposalRecordAccess access,
             org.springframework.beans.factory.ObjectProvider<AuthorizationProperties> properties
     ) {
-        if (access != PERMIT_ALL) {
-            return;
-        }
-        AuthorizationProperties settings = properties == null ? null : properties.getIfAvailable();
-        if (settings != null && settings.isEnforcementEnabled()) {
-            throw new IllegalStateException(
-                    "app.authorization.enforcement-enabled is true but no ProposalRecordAccess "
-                            + "implementation is available, so Proposal authorization would "
-                            + "silently permit every record. Refusing to start. Ensure the record "
-                            + "authorization beans (AuthorizationConfiguration) are present.");
-        }
+        RecordAccess.requireEnforceableWiring(access, PERMIT_ALL, properties, "ProposalRecordAccess");
     }
 }

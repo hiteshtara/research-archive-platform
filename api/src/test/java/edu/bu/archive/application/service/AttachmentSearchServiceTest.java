@@ -44,7 +44,8 @@ class AttachmentSearchServiceTest {
     void setUp() {
         awardArchiveService = mock(AwardArchiveService.class);
         repository = mock(AttachmentSearchRepository.class);
-        service = new AttachmentSearchService(awardArchiveService, repository);
+        service = new AttachmentSearchService(awardArchiveService, repository,
+                null, null);
     }
 
     // --- Backward compatibility: recordType omitted or AWARD delegates verbatim ---
