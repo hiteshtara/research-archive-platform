@@ -115,6 +115,20 @@ public class GlobalSearchService {
      */
     private final edu.bu.archive.application.authorization.ProposalRecordAccess proposalAccess;
 
+    /**
+     * Whether record-level enforcement is switched on at all.
+     *
+     * <p>Distinct from {@code visibility.unrestricted()}, which conflates
+     * "enforcement is off" with "this caller is Central". The IRB isolation
+     * below keys on ENFORCEMENT, not on the caller: once enforcement is on,
+     * IRB leaves shared Global Search for everyone, Central included,
+     * because IRB has no record rule and shared search is the one surface
+     * where its rows would travel beside authorized ones.
+     */
+    private final org.springframework.beans.factory.ObjectProvider<
+            edu.bu.archive.application.authorization.AuthorizationProperties>
+            authorizationProperties;
+
     public GlobalSearchService(
             GlobalSearchRepository irbSearchRepository,
             AwardArchiveService awardArchiveService,
@@ -127,8 +141,11 @@ public class GlobalSearchService {
             SearchTimingLog timingLog,
             ObjectProvider<edu.bu.archive.application.authorization.RecordVisibility> visibility,
             ObjectProvider<edu.bu.archive.application.authorization.ProposalRecordAccess>
-                    proposalAccessProvider
+                    proposalAccessProvider,
+            ObjectProvider<edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
     ) {
+        this.authorizationProperties = authorizationProperties;
         this.irbSearchRepository = irbSearchRepository;
         this.awardArchiveService = awardArchiveService;
         this.negotiationArchiveService = negotiationArchiveService;
@@ -156,6 +173,29 @@ public class GlobalSearchService {
      * like sponsor or status mean different things per domain (see
      * GlobalSearchItemResponse), so they are deliberately not offered here.
      */
+    /**
+     * IRB is OUT OF SCOPE for record authorization and will not get an
+     * engine. But shared Global Search is a surface where its rows would
+     * sit beside authorized Award/Proposal/Subaward/Negotiation results, so
+     * once enforcement is on IRB is removed from shared search entirely -
+     * no keyword leg, no semantic rows, and therefore no IRB identifiers,
+     * links or contribution to totalResults.
+     *
+     * <p>The IRB module's own endpoints are untouched, as are its tables
+     * and migrations. This is isolation of a shared surface, not an
+     * authorization rule.
+     *
+     * <p>With enforcement OFF - today's deployed configuration - this is
+     * false and IRB search behaves exactly as it always has.
+     */
+    private boolean irbExcludedFromSharedSearch() {
+        if (authorizationProperties == null) {
+            return false;
+        }
+        var settings = authorizationProperties.getIfAvailable();
+        return settings != null && settings.isEnforcementEnabled();
+    }
+
     public static final Set<String> SELECTABLE_MODULES =
             Set.of("AWARD", "PROPOSAL", "NEGOTIATION", "SUBAWARD");
 
@@ -179,8 +219,10 @@ public class GlobalSearchService {
         String cid = timingLog.correlationId();
         long requestStartNanos = System.nanoTime();
 
+        // Not merely filtered afterwards: the leg never runs, so no IRB
+        // row, identifier or count is computed for an enforced session.
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
-                selected.isEmpty()
+                selected.isEmpty() && !irbExcludedFromSharedSearch()
                         ? supplyLeg(cid, "IRB", () -> searchIrb(normalizedQuery))
                         : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
@@ -1129,6 +1171,12 @@ public class GlobalSearchService {
              */
             if (scoped && "NEGOTIATION".equals(row.module())
                     && negotiationSummaries.get(row.businessNumber()) == null) {
+                continue;
+            }
+            // IRB leaves shared search entirely once enforcement is on -
+            // keyed on enforcement, not on the caller, so Central drops it
+            // too. See irbExcludedFromSharedSearch.
+            if ("IRB".equals(row.module()) && irbExcludedFromSharedSearch()) {
                 continue;
             }
 

@@ -398,3 +398,39 @@ Nothing is bypassed: the record gate is additive to the group gate.
 a future "fix" fails loudly.
 
 **Reversing it needs a business decision**, with the 70.55% impact in view.
+
+## Derived rule — IRB leaves shared Global Search once enforcement is on
+
+Approved 2026-10-27. **Not an IRB authorization rule**, and no IRB engine is
+being built: IRB remains out of scope, and its tables, migrations and own
+endpoints are untouched.
+
+Shared Global Search is the one surface where IRB rows would travel beside
+authorized Award, Proposal, Subaward and Negotiation results. IRB has no
+record rule, so when record-level enforcement is enabled it is removed from
+that surface entirely:
+
+- the **keyword leg never runs** — not filtered afterwards, so no IRB row,
+  identifier, link or count is computed at all;
+- **semantic IRB rows are dropped**;
+- IRB therefore contributes nothing to `totalResults`.
+
+**Keyed on enforcement, not on the caller.** `irbExcludedFromSharedSearch()`
+reads `AuthorizationProperties.isEnforcementEnabled()`, deliberately not
+`visibility.unrestricted()`, which conflates "enforcement is off" with "this
+caller is Central". Central loses IRB from shared search too — the isolation
+is about the surface, not the grant.
+
+With enforcement OFF — today's deployed configuration — the flag is false
+and IRB search behaves exactly as it always has. Absent properties are
+treated as OFF, so slice tests and the pre-authorization world are
+unaffected.
+
+- **Enforced:** `GlobalSearchService.irbExcludedFromSharedSearch`, applied
+  to both the keyword leg and the semantic row filter.
+- **Tests:** five in `GlobalSearchSemanticScopeTest`, covering both
+  enforcement states, the Central case, and absent properties. The three
+  enforcement-on tests were verified to fail with the isolation removed.
+- **Known remaining IRB exposure:** none through shared Global Search.
+  Cross-module document search, document explorer and attachment search
+  were already fail-closed for scoped callers.

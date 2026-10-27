@@ -107,9 +107,11 @@ class GlobalSearchServiceTest {
                 // TC-042 timing instrumentation, disabled - these tests
                 // are about search behaviour, not measurement.
                 new SearchTimingLog(false),
-                // visibility (thread propagation) and Proposal record access:
-                // absent means RecordVisibility.ALL / PERMIT_ALL, i.e. the
-                // enforcement-off behaviour these tests assert.
+                // visibility (thread propagation), Proposal record access
+                // and authorization properties: absent means
+                // RecordVisibility.ALL / PERMIT_ALL / enforcement OFF, i.e.
+                // the behaviour these tests assert.
+                null,
                 null,
                 null);
 
