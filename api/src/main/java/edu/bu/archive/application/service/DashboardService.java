@@ -26,11 +26,14 @@ import org.springframework.stereotype.Service;
  * tally, and - since the funding-inheritance rule was approved (D6) - the
  * Subaward count and the SUBAWARD branch.
  *
- * <p>NOT scoped: IRB, Proposal and Negotiation. Negotiation and IRB have no
- * approved record rule at all. Proposal has one, and its endpoints are
- * scoped, but these two figures were not changed when it landed - a real
- * remaining gap, recorded in AUTHORIZATION_DECISIONS.md under D2 rather than
- * left to be discovered. The dashboard as a whole is not yet authorized.
+ * <p>Negotiation joined them on 2026-10-27 with the approved hybrid rule:
+ * the Negotiation count and the NEGOTIATION branch are now scoped too.
+ *
+ * <p>NOT scoped: IRB and Proposal. IRB has no approved record rule at all.
+ * Proposal HAS one and its endpoints are scoped, but these two figures were
+ * not changed when it landed - a real remaining gap, recorded in
+ * AUTHORIZATION_DECISIONS.md under D2 rather than left to be discovered.
+ * The dashboard as a whole is not yet authorized.
  */
 @Service
 public class DashboardService {
@@ -38,13 +41,14 @@ public class DashboardService {
     private final JdbcClient jdbcClient;
     private final AwardRecordAccess recordAccess;
     private final edu.bu.archive.application.authorization.SubawardRecordAccess subawardAccess;
+    private final edu.bu.archive.application.authorization.NegotiationRecordAccess negotiationAccess;
 
     public DashboardService(
             JdbcClient jdbcClient,
             ObjectProvider<AwardRecordAccess> recordAccessProvider,
             ObjectProvider<AuthorizationProperties> authorizationProperties
     ) {
-        this(jdbcClient, recordAccessProvider, null, authorizationProperties);
+        this(jdbcClient, recordAccessProvider, null, null, authorizationProperties);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -53,6 +57,8 @@ public class DashboardService {
             ObjectProvider<AwardRecordAccess> recordAccessProvider,
             ObjectProvider<edu.bu.archive.application.authorization.SubawardRecordAccess>
                     subawardAccessProvider,
+            ObjectProvider<edu.bu.archive.application.authorization.NegotiationRecordAccess>
+                    negotiationAccessProvider,
             ObjectProvider<AuthorizationProperties> authorizationProperties
     ) {
         this.jdbcClient = jdbcClient;
@@ -68,6 +74,14 @@ public class DashboardService {
                 : edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL;
         edu.bu.archive.application.authorization.SubawardRecordAccess
                 .requireEnforceableWiring(this.subawardAccess, authorizationProperties);
+
+        edu.bu.archive.application.authorization.NegotiationRecordAccess negotiation =
+                negotiationAccessProvider == null ? null : negotiationAccessProvider.getIfAvailable();
+        this.negotiationAccess = negotiation != null
+                ? negotiation
+                : edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.NegotiationRecordAccess
+                .requireEnforceableWiring(this.negotiationAccess, authorizationProperties);
     }
 
     public DashboardDto counts() {
@@ -85,6 +99,8 @@ public class DashboardService {
          */
         SqlFragment subawardScope =
                 subawardAccess.subawardScopeSql("sub").withParameterPrefix("sub_");
+        SqlFragment negotiationScope =
+                negotiationAccess.negotiationScopeSql("neg").withParameterPrefix("neg_");
 
         JdbcClient.StatementSpec statement = jdbcClient.sql("""
                 WITH award_counts AS (
@@ -113,9 +129,9 @@ public class DashboardService {
 
                     UNION ALL
 
-                    SELECT 'NEGOTIATION', document_number
-                    FROM archive.negotiation
-                    WHERE document_number IS NOT NULL
+                    SELECT 'NEGOTIATION', neg.document_number
+                    FROM archive.negotiation neg
+                    WHERE neg.document_number IS NOT NULL""" + negotiationScope.sql() + """
 
                     UNION ALL
 
@@ -145,7 +161,9 @@ public class DashboardService {
                     proposal_counts.proposals,
                     proposal_counts.proposal_history_records,
                     (SELECT COUNT(*)
-                     FROM archive.negotiation) AS negotiations,
+                     FROM archive.negotiation neg
+                     WHERE TRUE""" + negotiationScope.sql() + """
+                    ) AS negotiations,
                     (SELECT COUNT(DISTINCT sub.subaward_code)
                      FROM archive.subaward sub
                      WHERE TRUE""" + subawardScope.sql() + """
@@ -159,6 +177,9 @@ public class DashboardService {
             statement = statement.param(parameter.getKey(), parameter.getValue());
         }
         for (var parameter : subawardScope.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        for (var parameter : negotiationScope.params().entrySet()) {
             statement = statement.param(parameter.getKey(), parameter.getValue());
         }
         return statement.query(DashboardDto.class).single();

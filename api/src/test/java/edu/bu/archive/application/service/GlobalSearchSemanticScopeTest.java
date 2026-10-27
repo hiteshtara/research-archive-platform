@@ -31,6 +31,8 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -179,9 +181,105 @@ class GlobalSearchSemanticScopeTest {
         assertThat(response.results().getFirst().title()).isEqualTo("A visible subaward");
     }
 
+    // --- IRB isolation from shared Global Search ---------------------------
+
+    @Test
+    void withEnforcementOnTheIrbKeywordLegNeverRuns() {
+        /*
+         * IRB is out of scope for authorization and will not get an
+         * engine. But shared Global Search is the one surface where its
+         * rows would sit beside authorized ones, so once enforcement is on
+         * IRB leaves shared search entirely.
+         *
+         * The leg is not filtered afterwards - it is never started, so no
+         * IRB row, identifier, link or count is computed at all. Asserted
+         * by verifying the IRB repository is never touched.
+         */
+        when(subawardArchiveService.findActiveSummariesForCodes(anyList()))
+                .thenReturn(List.of(new SubawardSemanticSummaryRow(
+                        "SUB-SECRET", "A visible subaward", "Active", "NIH")));
+
+        GlobalSearchResponse response =
+                service(scoped(), enforcement(true)).search("gene therapy consortium");
+
+        verify(irbSearchRepository, never()).search(anyString(), anyInt());
+        assertThat(response.results()).noneMatch(r -> "IRB".equals(r.module()));
+    }
+
+    @Test
+    void withEnforcementOnIrbSemanticRowsAreDropped() {
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(
+                        new SemanticSearchRow("IRB", 77L, 77L, "IRB-0001", 0.9),
+                        new SemanticSearchRow("SUBAWARD", 9001L, 9001L, "SUB-SECRET", 0.42)));
+        when(subawardArchiveService.findActiveSummariesForCodes(anyList()))
+                .thenReturn(List.of(new SubawardSemanticSummaryRow(
+                        "SUB-SECRET", "A visible subaward", "Active", "NIH")));
+
+        GlobalSearchResponse response =
+                service(scoped(), enforcement(true)).search("gene therapy consortium");
+
+        assertThat(response.results()).noneMatch(r -> "IRB".equals(r.module()));
+        assertThat(response.toString()).doesNotContain("IRB-0001");
+        // The authorized Subaward row is unaffected - this removes IRB, not
+        // everything.
+        assertThat(response.results()).anyMatch(r -> "SUBAWARD".equals(r.module()));
+    }
+
+    @Test
+    void irbIsRemovedForEveryoneOnceEnforcementIsOn_includingCentral() {
+        // Keyed on ENFORCEMENT, not on the caller. Central is unrestricted
+        // and still does not get IRB through shared search, because the
+        // isolation is about the surface rather than the grant.
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(new SemanticSearchRow("IRB", 77L, 77L, "IRB-0001", 0.9)));
+
+        GlobalSearchResponse response =
+                service(unrestrictedVisibility(), enforcement(true)).search("gene therapy");
+
+        verify(irbSearchRepository, never()).search(anyString(), anyInt());
+        assertThat(response.results()).noneMatch(r -> "IRB".equals(r.module()));
+    }
+
+    @Test
+    void withEnforcementOffIrbSearchBehavesExactlyAsBefore() {
+        /*
+         * Today's deployed configuration, and the one that must not move.
+         * The keyword leg runs and semantic IRB rows render.
+         */
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(new SemanticSearchRow("IRB", 77L, 77L, "IRB-0001", 0.9)));
+
+        GlobalSearchResponse response =
+                service(null, enforcement(false)).search("gene therapy consortium");
+
+        verify(irbSearchRepository).search(anyString(), anyInt());
+        assertThat(response.results()).anyMatch(r -> "IRB".equals(r.module()));
+    }
+
+    @Test
+    void absentAuthorizationPropertiesIsTreatedAsEnforcementOff() {
+        // Slice tests and the pre-authorization world construct this
+        // service with no properties at all. That must not start isolating
+        // IRB by accident.
+        when(semanticSearchRepository.findNearest(any(float[].class), eq(50)))
+                .thenReturn(List.of(new SemanticSearchRow("IRB", 77L, 77L, "IRB-0001", 0.9)));
+
+        GlobalSearchResponse response = service(null, null).search("gene therapy consortium");
+
+        verify(irbSearchRepository).search(anyString(), anyInt());
+        assertThat(response.results()).anyMatch(r -> "IRB".equals(r.module()));
+    }
+
     // --- helpers ----------------------------------------------------------
 
     private GlobalSearchService service(RecordVisibility visibility) {
+        return service(visibility, null);
+    }
+
+    private GlobalSearchService service(
+            RecordVisibility visibility,
+            edu.bu.archive.application.authorization.AuthorizationProperties authorizationProperties) {
         return new GlobalSearchService(
                 irbSearchRepository,
                 awardArchiveService,
@@ -193,7 +291,8 @@ class GlobalSearchSemanticScopeTest {
                 embeddingProviderObjectProvider,
                 new SearchTimingLog(false),
                 provider(visibility),
-                null);
+                null,
+                provider(authorizationProperties));
     }
 
     /** A caller who is neither Central nor unenforced. */
@@ -279,6 +378,18 @@ class GlobalSearchSemanticScopeTest {
                 };
             }
         };
+    }
+
+    private static edu.bu.archive.application.authorization.AuthorizationProperties enforcement(
+            boolean enabled) {
+        var properties = new edu.bu.archive.application.authorization.AuthorizationProperties();
+        properties.setEnforcementEnabled(enabled);
+        return properties;
+    }
+
+    /** Central, or any unrestricted caller. */
+    private static RecordVisibility unrestrictedVisibility() {
+        return RecordVisibility.ALL;
     }
 
     private static <T> ObjectProvider<T> provider(T value) {

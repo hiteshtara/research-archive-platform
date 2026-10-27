@@ -281,3 +281,156 @@ Any new asynchronous leg must be wrapped the same way.
 - **Enforced:** `GlobalSearchService.supplyLeg` and the semantic future.
 - **Test:** `theSemanticLegRunsWithTheRequestsAccessDecisionReinstated`,
   verified to fail with the fix reverted.
+
+## D8 — Negotiation access is HYBRID: lead unit OR a type-gated association (APPROVED)
+
+> A user may view a Negotiation assigned to their authorized lead unit
+> (including descendants where the grant permits), **or** inherited from an
+> associated Award when the association type is explicitly Award, **or**
+> from an associated Proposal when the type is explicitly Institutional
+> Proposal. These are alternative paths.
+
+Approved 2026-10-27, after profiling. Negotiation is **flat** — 10,775 rows,
+10,775 distinct document numbers, no version family — so unlike every other
+module there is no family question.
+
+### Why hybrid, and not inheritance alone
+
+| Basis | Covered | % |
+|---|---|---|
+| Award + Proposal inheritance only | 2,226 | **20.7%** |
+| Lead unit only | 10,718 | 99.47% |
+| **Both (implemented)** | **10,721** | **99.50%** |
+| Central-only | 54 | 0.50% |
+
+Inheritance alone would have hidden 79% of Negotiations from every
+non-Central user. The two paths do not conflict: for all **2,223**
+Award-associated Negotiations the lead unit equals the Award's lead unit,
+0 differ.
+
+### The association-type gate is a security control
+
+`associated_document_id` is free TEXT and is populated on **every**
+Negotiation, including all 8,533 typed `None`, where it holds the
+Negotiation's own KC document number. Matched without the type gate, those
+collide with an Award **workflow** document number **7,246** times and with
+a `proposal_number` **6,980** times; **6,073 of 10,775** identifiers match
+more than one record kind.
+
+So the predicate and the evaluator both resolve associations **only** inside
+a gate on `negotiation_association_type_description`, and `'Award'` resolves
+against `award_number` — never `workflow_document_number`, which type-gated
+matches nothing and could only add false hits.
+
+`'Subaward'` (16 rows) grants **nothing**: its identifiers resolve
+ambiguously and no reliable key was found. Those records reach the lead-unit
+path like any other. **Unresolved — see below.**
+
+### Lead-unit source, and its limitation
+
+`archive.negotiation_search_attribute`, verified before use: strict 1:1 with
+`archive.negotiation` (PRIMARY KEY + FOREIGN KEY ON DELETE CASCADE), zero
+orphans in either direction, 10,718 of 10,775 carry a lead unit and **100%
+of those match `archive.unit`**.
+
+**It is an ETL-denormalised projection, not the system of record**, and for
+the 8,533 unassociated rows the unit is self-asserted by the negotiator
+rather than derived from an Award. That was accepted knowingly as the price
+of 99.5% coverage.
+
+### Preserved
+
+D7 applies to the associated record: if a Negotiation is reachable by lead
+unit but its Award or Proposal is not, the association is **omitted
+entirely** — the response degrades to exactly the shape an unassociated
+Negotiation produces, so a restricted association is indistinguishable from
+none. No counts, no markers. `negotiator_person_id` (only 16 distinct) and
+`contact_admin_person_id` are **not** authorization inputs.
+
+- **Enforced:** `RecordScopeSqlBuilder.negotiationRow`,
+  `RecordAuthorizationService.canSeeNegotiation`,
+  `JdbcRecordFactsRepository.negotiationFacts`,
+  `NegotiationArchiveService` (9 endpoints), `DashboardService`.
+- **Tests:** `NegotiationRecordAuthorizationIntegrationTest` (30), including
+  three collision regressions verified to fail with the type gate removed.
+- **Real data:** SQL predicate vs Java evaluator, **0 disagreements across
+  all 10,775 rows**. Predicate cost 19.9 ms, no new index.
+
+### Open
+
+- The **16 Subaward-typed** Negotiations have no reliable association key.
+- The **54 with no basis** are Central-only.
+### RESTRICTED attachment flag — investigated 2026-10-27, NOT changed
+
+Asked to require "the existing RESTRICTED attachment policy" as a third
+control, and to fail closed for flagged attachments **if no approved
+authorization semantics exist**. Investigated before touching code, and that
+condition does **not** hold: approved semantics exist and say the opposite.
+
+`docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md` records a final
+product decision in two parts, and states what survived both:
+
+> the legacy `RESTRICTED` flag itself is never an access-control signal, in
+> either version of the policy … **Do not gate any endpoint, query, or UI
+> element on this flag's value** — the group membership is the only gate.
+
+It was written, in its own words, so a later session would not "reintroduce
+access blocking based on RESTRICTED … since a naive reading of
+`RESTRICTED='Y'` looks like an access-control field even though this project
+has deliberately decided it is not one." Migration V076 says the same:
+*"Informational only: this column is never used for access control."*
+Verified in code: the column is selected and displayed, never filtered.
+
+**Functionality impact of failing closed, measured:** 20,406 of 28,923
+Negotiation attachments carry `Y` — **70.55%**. Gating on the flag would
+remove roughly seven of every ten Negotiation attachments from the archive.
+
+So the three controls stack as approved, with the flag contributing nothing:
+
+| Control | Where | Status |
+|---|---|---|
+| `ArchiveAttachmentViewer` group | controller, first | unchanged |
+| Negotiation record authorization | service | **added by this PR** |
+| RESTRICTED flag | — | informational by approved decision |
+
+Nothing is bypassed: the record gate is additive to the group gate.
+`recordAuthorizationDoesNotReadTheLegacyRestrictedFlag` pins the decision so
+a future "fix" fails loudly.
+
+**Reversing it needs a business decision**, with the 70.55% impact in view.
+
+## Derived rule — IRB leaves shared Global Search once enforcement is on
+
+Approved 2026-10-27. **Not an IRB authorization rule**, and no IRB engine is
+being built: IRB remains out of scope, and its tables, migrations and own
+endpoints are untouched.
+
+Shared Global Search is the one surface where IRB rows would travel beside
+authorized Award, Proposal, Subaward and Negotiation results. IRB has no
+record rule, so when record-level enforcement is enabled it is removed from
+that surface entirely:
+
+- the **keyword leg never runs** — not filtered afterwards, so no IRB row,
+  identifier, link or count is computed at all;
+- **semantic IRB rows are dropped**;
+- IRB therefore contributes nothing to `totalResults`.
+
+**Keyed on enforcement, not on the caller.** `irbExcludedFromSharedSearch()`
+reads `AuthorizationProperties.isEnforcementEnabled()`, deliberately not
+`visibility.unrestricted()`, which conflates "enforcement is off" with "this
+caller is Central". Central loses IRB from shared search too — the isolation
+is about the surface, not the grant.
+
+With enforcement OFF — today's deployed configuration — the flag is false
+and IRB search behaves exactly as it always has. Absent properties are
+treated as OFF, so slice tests and the pre-authorization world are
+unaffected.
+
+- **Enforced:** `GlobalSearchService.irbExcludedFromSharedSearch`, applied
+  to both the keyword leg and the semantic row filter.
+- **Tests:** five in `GlobalSearchSemanticScopeTest`, covering both
+  enforcement states, the Central case, and absent properties. The three
+  enforcement-on tests were verified to fail with the isolation removed.
+- **Known remaining IRB exposure:** none through shared Global Search.
+  Cross-module document search, document explorer and attachment search
+  were already fail-closed for scoped callers.

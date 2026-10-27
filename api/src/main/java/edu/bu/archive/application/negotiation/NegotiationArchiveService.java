@@ -27,11 +27,52 @@ public class NegotiationArchiveService {
 
     private final NegotiationArchiveRepository repository;
     private final NegotiationAttachmentStorage attachmentStorage;
+    private final edu.bu.archive.application.authorization.NegotiationRecordAccess recordAccess;
 
+    /*
+     * Pre-authorization signature, kept so existing unit tests construct
+     * this service unchanged. Resolves to PERMIT_ALL - exactly what every
+     * caller got before. Never the constructor Spring uses.
+     */
     public NegotiationArchiveService(
             NegotiationArchiveRepository repository,
             NegotiationAttachmentStorage attachmentStorage
     ) {
+        this(repository, attachmentStorage,
+                edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL);
+    }
+
+    /** Direct-injection form, for tests that already hold the port. */
+    public NegotiationArchiveService(
+            NegotiationArchiveRepository repository,
+            NegotiationAttachmentStorage attachmentStorage,
+            edu.bu.archive.application.authorization.NegotiationRecordAccess recordAccess
+    ) {
+        this.repository = repository;
+        this.attachmentStorage = attachmentStorage;
+        this.recordAccess = recordAccess == null
+                ? edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL
+                : recordAccess;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public NegotiationArchiveService(
+            NegotiationArchiveRepository repository,
+            NegotiationAttachmentStorage attachmentStorage,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.NegotiationRecordAccess>
+                    recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ) {
+        edu.bu.archive.application.authorization.NegotiationRecordAccess resolved =
+                recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
+        this.recordAccess = resolved != null
+                ? resolved
+                : edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.NegotiationRecordAccess
+                .requireEnforceableWiring(this.recordAccess, authorizationProperties);
         this.repository = repository;
         this.attachmentStorage = attachmentStorage;
     }
@@ -61,7 +102,18 @@ public class NegotiationArchiveService {
         int safePage = PaginationSupport.clampPage(page);
         int safeSize = PaginationSupport.clampSize(size);
 
-        long totalElements = repository.countNegotiations(filters);
+        /*
+         * Resolved ONCE and given to both statements, in the SAME WHERE as
+         * the filters. Filtering the fetched page in Java instead would
+         * publish the out-of-scope Negotiations through totalElements and
+         * return short pages that look like the end of the result.
+         */
+        recordAccess.requireProvisioned();
+
+        edu.bu.archive.application.authorization.SqlFragment scope =
+                recordAccess.negotiationScopeSql("n");
+
+        long totalElements = repository.countNegotiations(filters, scope);
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
                         safePage,
@@ -73,6 +125,7 @@ public class NegotiationArchiveService {
         List<NegotiationSummaryResponse> content =
                 repository.findNegotiations(
                         filters,
+                        scope,
                         safeSize,
                         offset
                 );
@@ -91,6 +144,7 @@ public class NegotiationArchiveService {
     public NegotiationWorkspaceResponse findWorkspace(
             long negotiationId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         NegotiationRowResponse current = requireNegotiation(
                 negotiationId
         );
@@ -104,6 +158,7 @@ public class NegotiationArchiveService {
     public List<NegotiationActivityResponse> findActivities(
             long negotiationId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         requireNegotiation(negotiationId);
         return repository.findActivities(negotiationId);
     }
@@ -111,6 +166,7 @@ public class NegotiationArchiveService {
     public List<NegotiationCustomDataResponse> findCustomData(
             long negotiationId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         requireNegotiation(negotiationId);
         return repository.findCustomData(negotiationId);
     }
@@ -118,6 +174,7 @@ public class NegotiationArchiveService {
     public List<NegotiationNotificationResponse> findNotifications(
             long negotiationId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         requireNegotiation(negotiationId);
         return repository.findNotifications(negotiationId);
     }
@@ -126,6 +183,7 @@ public class NegotiationArchiveService {
             findUnassociatedDetails(
                     long negotiationId
             ) {
+        recordAccess.requireNegotiation(negotiationId);
         requireNegotiation(negotiationId);
         return repository.findUnassociatedDetails(negotiationId);
     }
@@ -133,6 +191,7 @@ public class NegotiationArchiveService {
     public List<NegotiationAttachmentResponse> findAttachments(
             long negotiationId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         requireNegotiation(negotiationId);
         return repository.findAttachments(negotiationId);
     }
@@ -141,6 +200,7 @@ public class NegotiationArchiveService {
             long negotiationId,
             long attachmentId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         requireNegotiation(negotiationId);
 
         if (attachmentId <= 0) {
@@ -208,6 +268,7 @@ public class NegotiationArchiveService {
     public NegotiationAssociatedRecordResponse findAssociatedRecord(
             long negotiationId
     ) {
+        recordAccess.requireNegotiation(negotiationId);
         NegotiationRowResponse current = requireNegotiation(negotiationId);
         String code = current.negotiationAssociationTypeCode();
         String description =
@@ -217,6 +278,29 @@ public class NegotiationArchiveService {
         if (code == null || documentId == null || documentId.isBlank()) {
             return new NegotiationAssociatedRecordResponse(
                     code, description, documentId, "NONE", null, false
+            );
+        }
+
+        /*
+         * D7 applied to the associated record. Reaching a Negotiation
+         * through its LEAD UNIT does not authorize the Award, Proposal or
+         * Subaward it points at - those keep their own gates. Without this,
+         * a department user who can open a Negotiation would be handed the
+         * associated record's identifier, its resolved id and a navigable
+         * link to a record they may not read.
+         *
+         * Omitted entirely, never stubbed and never counted: the response
+         * degrades to exactly the shape an unassociated Negotiation
+         * produces, so a restricted association is indistinguishable from
+         * no association at all. A "you may not see this one" marker would
+         * itself be the existence disclosure D7 forbids.
+         *
+         * Gated on !unrestricted(): with enforcement off, or for Central,
+         * the response is byte-for-byte what it always was.
+         */
+        if (!recordAccess.unrestricted() && !associatedRecordVisible(code, documentId)) {
+            return new NegotiationAssociatedRecordResponse(
+                    code, description, null, "NONE", null, false
             );
         }
 
@@ -289,10 +373,42 @@ public class NegotiationArchiveService {
      * number - the identifier a semantic result carries (QA TC-041).
      * One query for the whole set; see the repository for why.
      */
+    /**
+     * Whether the caller may see the record this Negotiation points at.
+     *
+     * <p>The association code is the gate, exactly as in the authorization
+     * predicate: "AWD" resolves against award_number and "IP" against
+     * proposal_number, and nothing else is resolved by string match.
+     *
+     * <p>"SWD" (16 rows archive-wide) returns FALSE for a scoped caller.
+     * No reliable Subaward key exists for these - the identifier resolves
+     * ambiguously - so the honest answer is to disclose nothing rather than
+     * guess. They remain fully visible to Central and with enforcement off.
+     */
+    private boolean associatedRecordVisible(String code, String documentId) {
+        return switch (code) {
+            case "AWD" -> recordAccess.canSeeAwardNumber(documentId);
+            case "IP" -> recordAccess.canSeeProposalNumber(documentId);
+            case "NO" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Display fields for the Negotiation semantic results on one Global
+     * Search page.
+     *
+     * <p>Scoped in SQL, not afterwards. Global Search treats an absent
+     * summary as a row to drop, so a document number the caller may not
+     * open must produce no row - returning it unenriched would still
+     * publish the number and its link.
+     */
     public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
             List<String> documentNumbers
     ) {
-        return repository.findSummariesForDocumentNumbers(documentNumbers);
+        recordAccess.requireProvisioned();
+        return repository.findSummariesForDocumentNumbers(
+                documentNumbers, recordAccess.negotiationScopeSql("n"));
     }
 
 }

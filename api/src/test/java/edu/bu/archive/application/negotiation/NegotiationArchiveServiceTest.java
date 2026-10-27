@@ -7,6 +7,7 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationSummaryResponse;
 import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.out.persistence.NegotiationArchiveRepository;
+import edu.bu.archive.application.authorization.SqlFragment;
 import edu.bu.archive.adapter.out.persistence.NegotiationArchivedAttachment;
 import edu.bu.archive.adapter.out.persistence.NegotiationAttachmentStorage;
 
@@ -48,9 +49,9 @@ class NegotiationArchiveServiceTest {
         NegotiationSearchFilters filters =
                 NegotiationSearchFilters.ofQuery("award");
 
-        when(repository.countNegotiations(filters))
+        when(repository.countNegotiations(filters, SqlFragment.NONE))
                 .thenReturn(205L);
-        when(repository.findNegotiations(filters, 100, 0))
+        when(repository.findNegotiations(filters, SqlFragment.NONE, 100, 0))
                 .thenReturn(List.of(summary));
 
         PageResponse<NegotiationSummaryResponse> result = service.findPage(
@@ -66,7 +67,7 @@ class NegotiationArchiveServiceTest {
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(result.first()).isTrue();
         assertThat(result.last()).isFalse();
-        verify(repository).findNegotiations(filters, 100, 0);
+        verify(repository).findNegotiations(filters, SqlFragment.NONE, 100, 0);
     }
 
     @Test

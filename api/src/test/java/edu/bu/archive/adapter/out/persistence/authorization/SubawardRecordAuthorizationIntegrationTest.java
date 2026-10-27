@@ -1195,6 +1195,7 @@ class SubawardRecordAuthorizationIntegrationTest {
                 jdbcClient,
                 provider(edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL),
                 provider(access),
+                provider(edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL),
                 null)
                 .counts();
     }

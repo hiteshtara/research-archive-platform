@@ -65,12 +65,12 @@ class RecordScopeSqlBuilderTest {
 
     @Test
     void modulesWithoutAnApprovedNonCentralRuleDenyForNonCentralUsers() {
-        // SUBAWARD left this list on 2026-10-26, when the funding-
-        // inheritance rule was approved. NEGOTIATION and IRB still have no
-        // approved non-Central rule and must keep denying.
+        // SUBAWARD left this list on 2026-10-26 and NEGOTIATION on
+        // 2026-10-27, as each rule was approved. Only IRB still has no
+        // approved non-Central rule, and must keep denying.
         var builder = new RecordScopeSqlBuilder(PER_VERSION, IoSqlStrategy.NONE);
         var scope = scoped(false, Set.of(new UnitGrant("U1", false)), "P1", Set.of());
-        for (RecordModule module : Set.of(RecordModule.NEGOTIATION, RecordModule.IRB)) {
+        for (RecordModule module : Set.of(RecordModule.IRB)) {
             assertThat(builder.build(scope, module, "x", Set.of("U1"))).isEqualTo(SqlFragment.DENY_ALL);
         }
     }

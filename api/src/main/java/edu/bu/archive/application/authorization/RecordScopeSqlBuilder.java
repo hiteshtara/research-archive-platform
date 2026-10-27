@@ -44,8 +44,9 @@ public final class RecordScopeSqlBuilder {
             case AWARD -> familyWrap(module, alias, awardRow(scope, expandedUnits, params));
             case PROPOSAL -> familyWrap(module, alias, proposalRow(scope, expandedUnits, params));
             case SUBAWARD -> subawardRow(scope, expandedUnits, params);
-            // No approved non-Central rule is implemented for these yet (P8).
-            case NEGOTIATION, IRB -> null;
+            case NEGOTIATION -> negotiationRow(scope, expandedUnits, params);
+            // No approved non-Central rule is implemented for IRB yet (P8).
+            case IRB -> null;
         };
         if (row == null) {
             return SqlFragment.DENY_ALL;
@@ -166,6 +167,82 @@ public final class RecordScopeSqlBuilder {
                 + " WHERE az_fam.subaward_code = {row}.subaward_code"
                 + " AND az_sf.award_id IS NOT NULL"
                 + " AND " + awardPredicate.replace("{row}", "az_sa") + ")";
+    }
+
+    /**
+     * Negotiation access, approved 2026-10-27 as a HYBRID rule after
+     * profiling the dev archive. Three alternative paths, ORed: a valid
+     * grant through any one of them permits access.
+     *
+     * <ol>
+     *   <li><strong>Lead unit</strong> from
+     *       {@code archive.negotiation_search_attribute}. Covers 10,718 of
+     *       10,775 Negotiations (99.47%) and matches {@code archive.unit}
+     *       100% of the time.</li>
+     *   <li><strong>Award inheritance</strong>, only when the association
+     *       type is explicitly {@code 'Award'}.</li>
+     *   <li><strong>Proposal inheritance</strong>, only when the association
+     *       type is explicitly {@code 'Institutional Proposal'}.</li>
+     * </ol>
+     *
+     * <p><strong>The association type gate is a security control, not a
+     * filter.</strong> {@code associated_document_id} is free TEXT and is
+     * populated on EVERY Negotiation, including all 8,533 typed
+     * {@code 'None'} - where it holds the Negotiation's own KC document
+     * number. Matched without the type gate, those unassociated rows
+     * collide with an Award workflow document number 7,246 times and with a
+     * proposal_number 6,980 times; 6,073 of 10,775 identifiers match more
+     * than one record kind. Every one of those is a coincidence, not a
+     * relationship. Dropping the type gate would silently grant access to
+     * thousands of unassociated Negotiations.
+     *
+     * <p>Note which column each gate resolves against:
+     * {@code 'Award'} resolves to {@code award_number} and NEVER to
+     * {@code workflow_document_number} - type-gated, award_number matches
+     * 2,223/2,223 and the workflow column matches 0, so consulting the
+     * workflow column would add only false hits.
+     *
+     * <p>{@code 'Subaward'} (16 rows) is deliberately NOT implemented: its
+     * identifiers resolve ambiguously to both an Award document number and
+     * a proposal number, and no reliable key was found. Those Negotiations
+     * reach the lead-unit path like any other, and nothing else.
+     *
+     * <p>Inheritance reuses {@link #awardRow} and {@link #proposalRow}
+     * verbatim, family-wrapped exactly as the Award and Proposal modules
+     * wrap them, so department grants, descendant units and Research Staff
+     * contact access behave identically - there is no second rule to get
+     * wrong.
+     */
+    private String negotiationRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
+        List<String> paths = new ArrayList<>();
+
+        if (!units.isEmpty()) {
+            params.put("az_units", List.copyOf(units));
+            paths.add("EXISTS (SELECT 1 FROM archive.negotiation_search_attribute az_nsa"
+                    + " WHERE az_nsa.negotiation_id = {row}.negotiation_id"
+                    + " AND az_nsa.lead_unit_number IN (:az_units))");
+        }
+
+        String awardPredicate = awardRow(scope, units, params);
+        if (!"FALSE".equals(awardPredicate)) {
+            String wrapped = familyWrap(RecordModule.AWARD, "{row}", awardPredicate);
+            paths.add("EXISTS (SELECT 1 FROM archive.award_version az_na"
+                    + " WHERE {row}.negotiation_association_type_description = 'Award'"
+                    + " AND az_na.award_number = TRIM({row}.associated_document_id)"
+                    + " AND " + wrapped.replace("{row}", "az_na") + ")");
+        }
+
+        String proposalPredicate = proposalRow(scope, units, params);
+        if (!"FALSE".equals(proposalPredicate)) {
+            String wrapped = familyWrap(RecordModule.PROPOSAL, "{row}", proposalPredicate);
+            paths.add("EXISTS (SELECT 1 FROM archive.proposal_version az_np"
+                    + " WHERE {row}.negotiation_association_type_description"
+                    + " = 'Institutional Proposal'"
+                    + " AND az_np.proposal_number = TRIM({row}.associated_document_id)"
+                    + " AND " + wrapped.replace("{row}", "az_np") + ")");
+        }
+
+        return paths.isEmpty() ? "FALSE" : "(" + String.join(" OR ", paths) + ")";
     }
 
     private String proposalRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
