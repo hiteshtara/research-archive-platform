@@ -360,6 +360,41 @@ none. No counts, no markers. `negotiator_person_id` (only 16 distinct) and
 
 - The **16 Subaward-typed** Negotiations have no reliable association key.
 - The **54 with no basis** are Central-only.
-- The **RESTRICTED attachment flag** interaction is unreviewed — the record
-  gate and the flag are evaluated independently today, and no business rule
-  states which wins. Not changed by this work.
+### RESTRICTED attachment flag — investigated 2026-10-27, NOT changed
+
+Asked to require "the existing RESTRICTED attachment policy" as a third
+control, and to fail closed for flagged attachments **if no approved
+authorization semantics exist**. Investigated before touching code, and that
+condition does **not** hold: approved semantics exist and say the opposite.
+
+`docs/architecture/NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md` records a final
+product decision in two parts, and states what survived both:
+
+> the legacy `RESTRICTED` flag itself is never an access-control signal, in
+> either version of the policy … **Do not gate any endpoint, query, or UI
+> element on this flag's value** — the group membership is the only gate.
+
+It was written, in its own words, so a later session would not "reintroduce
+access blocking based on RESTRICTED … since a naive reading of
+`RESTRICTED='Y'` looks like an access-control field even though this project
+has deliberately decided it is not one." Migration V076 says the same:
+*"Informational only: this column is never used for access control."*
+Verified in code: the column is selected and displayed, never filtered.
+
+**Functionality impact of failing closed, measured:** 20,406 of 28,923
+Negotiation attachments carry `Y` — **70.55%**. Gating on the flag would
+remove roughly seven of every ten Negotiation attachments from the archive.
+
+So the three controls stack as approved, with the flag contributing nothing:
+
+| Control | Where | Status |
+|---|---|---|
+| `ArchiveAttachmentViewer` group | controller, first | unchanged |
+| Negotiation record authorization | service | **added by this PR** |
+| RESTRICTED flag | — | informational by approved decision |
+
+Nothing is bypassed: the record gate is additive to the group gate.
+`recordAuthorizationDoesNotReadTheLegacyRestrictedFlag` pins the decision so
+a future "fix" fails loudly.
+
+**Reversing it needs a business decision**, with the 70.55% impact in view.

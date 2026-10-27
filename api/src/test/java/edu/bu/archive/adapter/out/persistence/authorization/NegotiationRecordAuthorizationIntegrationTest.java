@@ -524,6 +524,59 @@ class NegotiationRecordAuthorizationIntegrationTest {
                 .containsExactlyInAnyOrder("NDOC-100", "NDOC-106", "NDOC-105");
     }
 
+    // --- Attachment controls stack; the RESTRICTED flag is not one of them ---
+
+    @Test
+    void attachmentDownloadRequiresRecordAccessOnTopOfTheViewerGroupGate() {
+        /*
+         * Three controls apply to a Negotiation attachment download and all
+         * must hold:
+         *   1. ArchiveAttachmentViewer group - enforced in the controller,
+         *      first, before any service call (unchanged by this work);
+         *   2. Negotiation record authorization - enforced here;
+         *   3. the legacy RESTRICTED flag policy - which is deliberately
+         *      NOT an access control. See below.
+         *
+         * This asserts (2). The storage is deliberately null: if the record
+         * gate ever stopped firing, this would NPE rather than pass.
+         */
+        assertThatThrownBy(() -> service(departmentScope("9999"))
+                .downloadAttachment(NEG_UNIT_CHEM, 1L))
+                .isInstanceOf(RecordNotAccessibleException.class);
+
+        // Authorized for the record: the record gate lets it through and
+        // the attachment lookup then fails honestly as "not found".
+        assertThatThrownBy(() -> service(departmentScope("7777"))
+                .downloadAttachment(NEG_UNIT_CHEM, 1L))
+                .isInstanceOf(NoSuchElementException.class)
+                .isNotInstanceOf(RecordNotAccessibleException.class);
+    }
+
+    @Test
+    void recordAuthorizationDoesNotReadTheLegacyRestrictedFlag() {
+        /*
+         * DELIBERATE, and load-bearing. docs/architecture/
+         * NEGOTIATION_ATTACHMENT_ACCESS_DESIGN.md records the approved
+         * product decision: the legacy Kuali RESTRICTED flag is historical
+         * metadata, never an access-control signal, and no endpoint, query
+         * or UI element may be gated on its value. The ArchiveAttachmentViewer
+         * group is the only attachment gate.
+         *
+         * That decision is easy to "helpfully" reverse - "RESTRICTED='Y'"
+         * reads like an access field - so this test exists to make the
+         * reversal fail loudly rather than ship. In dev, 20,406 of 28,923
+         * Negotiation attachments (70.55%) carry 'Y'; gating on it would
+         * remove roughly seven of every ten attachments from the archive.
+         *
+         * Reversing it is a business decision, not an engineering one.
+         */
+        assertThat(scopeFor(
+                new AccessScope(false, Set.of(new UnitGrant("7777", false)), Optional.empty(), Set.of()),
+                Set.of("7777"), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT).sql())
+                .doesNotContain("legacy_restricted_flag")
+                .doesNotContain("restricted");
+    }
+
     // --- The two paths must agree -------------------------------------------
 
     @Test
