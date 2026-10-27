@@ -43,7 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import({
         SecurityConfiguration.class,
         GlobalExceptionHandler.class,
-        AttachmentAuthorizationService.class
+        AttachmentAuthorizationService.class,
+        SynchronousMvcAsyncConfiguration.class
 })
 @TestPropertySource(properties = {
         "app.security.enabled=true",
@@ -127,6 +128,15 @@ class AwardV1ControllerDownloadSecurityTest {
         // into MockHttpServletResponse's LinkedCaseInsensitiveMap is what
         // intermittently threw ConcurrentModificationException from
         // HeaderWriterFilter under full-suite load.
+        //
+        // CORRECTED 2026-10-27: removing that second dispatch did not stop
+        // it. A captured stack trace shows the throw inside this FIRST
+        // perform(...), on the test thread, from HeaderWriterFilter adding
+        // the static security headers as the chain unwinds - while the
+        // async streaming worker is committing the same response. The race
+        // is between the filter chain and the worker, not between two
+        // dispatches, which is why getAsyncResult() below cannot prevent it.
+        // SynchronousMvcAsyncConfiguration removes the worker thread.
         //
         // getAsyncResult() blocks until the streaming callable has
         // finished, so the response is complete and quiescent before it
