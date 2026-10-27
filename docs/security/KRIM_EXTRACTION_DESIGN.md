@@ -87,10 +87,23 @@ do for Subaward.
 
 **The current targeted load is itself incomplete.** The driving set
 (`unit_administrator ∪ award_unit_contact`) is **1,127** person_ids, but
-only **467** resolved into `archive.person` — **41%**. Either 660 of those
-ids are not principals in `KRIM_PRNCPL_T`, or the load did not finish.
-**This must be determined before trusting any coverage estimate**, because
-it means the real KRIM hit-rate for the wider set is unknown rather than
+only **467** resolved into `archive.person` — **41%**.
+
+> **RESOLVED 2026-10-27 — neither of the two hypotheses below was right.**
+> All 660 unresolved ids **are** valid KRIM principals (660/660 verified
+> against Oracle staging), and the extraction query is correct. The cause
+> is that `archive.person` is a point-in-time snapshot loaded on
+> 2026-08-03 and never re-run, while `award_unit_contact` kept loading
+> until 2026-08-12 — all 660 arrived after the person snapshot. The real
+> KRIM hit-rate is therefore ~100%, now measured rather than assumed.
+> Full evidence, plus the unplanned finding that **61% of referenced
+> principals are inactive in KRIM**, is in
+> [`KRIM_LOCAL_IMPORT_PLAN.md`](KRIM_LOCAL_IMPORT_PLAN.md) §2.
+
+Original open question, retained for the record: either 660 of those ids
+are not principals in `KRIM_PRNCPL_T`, or the load did not finish. **This
+must be determined before trusting any coverage estimate**, because it
+means the real KRIM hit-rate for the wider set is unknown rather than
 assumed-100%.
 
 ---
