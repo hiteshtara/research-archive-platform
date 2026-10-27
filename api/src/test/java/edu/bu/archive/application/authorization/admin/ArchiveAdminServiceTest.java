@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Test;
 import edu.bu.archive.application.authorization.GrantType;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.fixtures.InMemoryAccessGrantRepository;
+import edu.bu.archive.application.authorization.fixtures.InMemoryAccessGrantRepository;
+import edu.bu.archive.application.authorization.fixtures.InMemoryAdminAuditRepository;
+import edu.bu.archive.application.authorization.fixtures.InMemoryAdminIdentityRepository;
 import edu.bu.archive.application.authorization.fixtures.InMemoryAdminRoleRepository;
 import edu.bu.archive.application.authorization.fixtures.RecordingAdminAuditSink;
 
@@ -33,13 +36,19 @@ class ArchiveAdminServiceTest {
 
     private InMemoryAdminRoleRepository adminRoles;
     private RecordingAdminAuditSink audit;
+    private InMemoryAccessGrantRepository grants;
+    private InMemoryAdminIdentityRepository identities;
+    private InMemoryAdminAuditRepository auditHistory;
     private ArchiveAdminService service;
 
     @BeforeEach
     void setUp() {
         adminRoles = new InMemoryAdminRoleRepository();
         audit = new RecordingAdminAuditSink();
-        service = new ArchiveAdminService(adminRoles, audit);
+        grants = new InMemoryAccessGrantRepository();
+        identities = new InMemoryAdminIdentityRepository();
+        auditHistory = new InMemoryAdminAuditRepository();
+        service = new ArchiveAdminService(adminRoles, audit, grants, identities, auditHistory);
     }
 
     /** Bring the first administrator into existence the only way allowed. */

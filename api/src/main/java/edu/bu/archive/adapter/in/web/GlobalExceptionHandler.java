@@ -5,6 +5,8 @@ import edu.bu.archive.application.authorization.AccessNotProvisionedProblem;
 import edu.bu.archive.application.authorization.IdentityAccessDeniedException;
 import edu.bu.archive.application.authorization.PartialFamilyAccessException;
 import edu.bu.archive.application.authorization.ReauthenticationRequiredException;
+import edu.bu.archive.application.authorization.admin.LastArchiveAdministratorException;
+import edu.bu.archive.application.authorization.admin.NotAnArchiveAdministratorException;
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
 import edu.bu.archive.exception.InvalidRequestParameterException;
 
@@ -213,6 +215,55 @@ public class GlobalExceptionHandler {
                         body(
                                 HttpStatus.BAD_REQUEST,
                                 "BAD_REQUEST",
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 403, deliberately unlike the 404 that record endpoints return for a
+     * denial (approved decision D-ADM-1). A record 404s because confirming
+     * that a record exists is itself a disclosure. The administrative API has
+     * no such secret - that it exists is not sensitive - and a 404 would make
+     * "am I an administrator?" undiagnosable for a legitimate administrator
+     * whose identity link is broken. No detail about the caller's own state is
+     * returned either way.
+     */
+    @ExceptionHandler(NotAnArchiveAdministratorException.class)
+    public ResponseEntity<Map<String, Object>> handleNotAnAdministrator(
+            NotAnArchiveAdministratorException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                "NOT_AN_ARCHIVE_ADMINISTRATOR",
+                                "This action requires an active ARCHIVE_ADMIN membership.",
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 409, not 400: the request is well formed and would normally succeed.
+     * It conflicts with the current state of the system - this is the last
+     * active administrator - and retrying it unchanged after someone else is
+     * appointed will work.
+     */
+    @ExceptionHandler(LastArchiveAdministratorException.class)
+    public ResponseEntity<Map<String, Object>> handleLastAdministrator(
+            LastArchiveAdministratorException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(
+                        body(
+                                HttpStatus.CONFLICT,
+                                "LAST_ARCHIVE_ADMINISTRATOR",
                                 exception.getMessage(),
                                 request
                         )

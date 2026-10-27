@@ -23,6 +23,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import edu.bu.archive.application.authorization.fixtures.InMemoryEnrollmentStore;
+import edu.bu.archive.application.authorization.fixtures.InMemoryAccessGrantRepository;
 import edu.bu.archive.application.authorization.fixtures.InMemoryIdentityLinkRepository;
 import edu.bu.archive.application.authorization.fixtures.MapUnitHierarchy;
 
@@ -348,7 +349,7 @@ class IdentityEnrollmentServiceTest {
                                                      ValidatedCognitoIdentity identity) {
         var links = new InMemoryIdentityLinkRepository();
         return new RecordAuthorizationService(properties, () -> Optional.of(identity),
-                new IdentityResolver(links), new AccessScopeResolver(grantee -> List.of(), clock),
+                new IdentityResolver(links), new AccessScopeResolver(new InMemoryAccessGrantRepository(), clock),
                 Mockito.mock(RecordFactsRepository.class), new MapUnitHierarchy(Map.of()), unit -> Set.of(unit),
                 Mockito.mock(IoSqlStrategy.class), enrollment, clock);
     }

@@ -1,9 +1,21 @@
 # ARCHIVE_ADMIN management — API and UI design
 
-Design only, 2026-10-27. **No code written, no migration applied, no
-administrator bootstrapped, no grant created.** Prepared for review
-before implementation, per the approved architecture in
+**Status 2026-10-27: implemented as a draft for review.** No migration
+applied, no administrator bootstrapped, no grant created, authorization
+still off by default, nothing deployed. The decisions below are the
+proposed ones, accepted subject to final owner approval.
+
+Built on the approved architecture in
 [`IDENTITY_AUTHORIZATION_ARCHITECTURE.md`](IDENTITY_AUTHORIZATION_ARCHITECTURE.md).
+
+| | |
+|---|---|
+| New Java files | 13 (6 application, 2 adapters, 1 controller, 6 DTOs) |
+| Changed Java files | 4 |
+| New UI files | 7 (helpers + declarations + client + 4 pages) |
+| Tests | **34 new** (13 controller, 15 service, 6 database) + **21 UI** |
+| Verified | API 1,201 unit + 278 Testcontainers green; UI 715 tests, lint and build green |
+| Migrations | **none added** — V082–V084 already carry every table used |
 
 ---
 
@@ -316,14 +328,23 @@ authorization, applies a migration, or creates a real grant.
 
 ---
 
-## 8. Open decisions
+## 8. Decisions — proposed, accepted pending final owner approval
+
+| # | Decision | Where it lives in the code |
+|---|---|---|
+| **D-ADM-1** | **403** for an authenticated non-administrator on an administrative endpoint | `GlobalExceptionHandler.handleNotAnAdministrator`, code `NOT_AN_ARCHIVE_ADMINISTRATOR` |
+| **D-ADM-2** | **No second approver** for ordinary grants and revocations | `AccessGrantRepository.create` takes no `approvedBy`; the column stays nullable and unused |
+| **D-ADM-3** | Grants **do not expire** unless an administrator sets an expiry | `GrantSpecification.expiresAt` defaults null; UI says "Leave empty for no automatic expiry" |
+| **D-ADM-4** | ARCHIVE_ADMIN **may search** `archive.person` for identity verification | `JdbcAdminIdentityRepository.search`, third source, labelled `HISTORICAL_PERSON` |
+| **D-ID-1** | Historical KRIM inactive status **does not revoke** an administrator-verified link; automatic enrollment stays disabled | no `actv_ind` read anywhere in the admin path; test `anIdentityMayBeLinkedToAPrincipalKrimMarksInactive` |
+| **D-ID-2** | First administrator through a **controlled operator procedure, never HTTP** | no bootstrap endpoint; test `thereIsNoBootstrapEndpoint` |
+| **D-ID-3** | **Do not assume** an institutional identifier until BU IAM confirms | no attribute is hard-coded; the identifier is whatever the resolved link carries |
+| **D-ID-4** | Complete the targeted KRIM backfill **before relying on** administrator identity search | search works today but reaches 7.89% of referenced people; the UI says a person can still be entered manually |
+
+### Still open
 
 | # | Decision | Blocks |
 |---|---|---|
-| **D-ADM-1** | 403 vs 404 for a non-administrator on the admin API (§3.4). Recommendation: **403** | step 4 |
-| **D-ADM-2** | Must a grant require a second approver (`access_grant.approved_by` exists and is nullable)? Recommendation: **not for CENTRAL-only in dev**, decide before production | step 3 |
-| **D-ADM-3** | Default grant expiry — none, or a required review date? | step 3 |
-| **D-ADM-4** | Should administrators be able to search `archive.person`, given it holds BU personnel data? Recommendation: **yes**, restricted to administrators, since it is the only way to link a person who has never signed in | step 4 |
-| **D-ID-2** | First administrators and who runs the bootstrap | step 6 |
-| **D-ID-3** | Which BU attribute is the institutional identifier | enabling authorization |
-| **D-ID-4** | KRIM backfill into dev RDS — without it, identity search finds 7.89% of people | usability of step 4 |
+| **D-ID-2(a)** | *Who* the first administrators are, and who runs the bootstrap | enabling authorization |
+| **D-ID-3(a)** | The BU IAM answer itself | enabling authorization |
+| **D-ID-4(a)** | Approval to run the KRIM backfill into dev RDS (~5,900 staff records) | full usability of identity search |

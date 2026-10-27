@@ -7,6 +7,11 @@ import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
 import { AwardSearchPage } from "./pages/award/AwardSearchPage";
 import { AwardVersionSearchPage } from "./pages/award/AwardVersionSearchPage";
 
+import { AdminAuditPage } from "./pages/admin/AdminAuditPage";
+import { AdminIdentitySearchPage } from "./pages/admin/AdminIdentitySearchPage";
+import { AdminIdentityWorkspacePage } from "./pages/admin/AdminIdentityWorkspacePage";
+import { AdministratorsPage } from "./pages/admin/AdministratorsPage";
+
 import { ArchivedFileFinderPage } from "./pages/ArchivedFileFinderPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { QaStatusPage } from "./pages/QaStatusPage";
@@ -132,6 +137,39 @@ export default function App() {
               <Navigate to="/" replace />
             )
           }
+        />
+
+        {/*
+          * ARCHIVE_ADMIN management. Every one of these calls an API that
+          * returns 404 while record authorization is disabled - the default
+          * and the current state - so the pages render their "not available"
+          * message rather than appearing to work. Visibility of the nav entry
+          * is convenience only; the server-side ARCHIVE_ADMIN check in
+          * ArchiveAdminService is the control.
+          */}
+        <Route
+          path="admin"
+          element={<Navigate to="/admin/identities" replace />}
+        />
+
+        <Route
+          path="admin/identities"
+          element={<AdminIdentitySearchPage />}
+        />
+
+        <Route
+          path="admin/identities/:identifier"
+          element={<AdminIdentityWorkspacePage />}
+        />
+
+        <Route
+          path="admin/administrators"
+          element={<AdministratorsPage />}
+        />
+
+        <Route
+          path="admin/audit"
+          element={<AdminAuditPage />}
         />
 
         <Route

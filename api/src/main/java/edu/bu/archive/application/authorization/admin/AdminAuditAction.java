@@ -7,6 +7,9 @@ package edu.bu.archive.application.authorization.admin;
  * record views are deliberately not logged - a recorded scope decision that
  * narrows SEC-008's literal "all archive activity" and is still awaiting
  * confirmation. See ANTHONY_REQUIREMENTS_TRACEABILITY.md, decision D4.
+ *
+ * <p>Adding a value needs no migration: authz.access_audit.action is
+ * VARCHAR(40) with no CHECK constraint. Keep names under 40 characters.
  */
 public enum AdminAuditAction {
     ADMIN_ROLE_ASSIGNED,
@@ -14,5 +17,9 @@ public enum AdminAuditAction {
     ADMIN_ROLE_BOOTSTRAPPED,
     ACCESS_GRANTED,
     ACCESS_MODIFIED,
-    ACCESS_REVOKED
+    ACCESS_REVOKED,
+    IDENTITY_LINKED,
+    IDENTITY_UNLINKED,
+    IDENTITY_SUSPENDED,
+    IDENTITY_RESTORED
 }

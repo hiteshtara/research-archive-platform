@@ -125,9 +125,16 @@ class AuthorizationInertWhenDisabledTest {
 
     @Test
     void noAdministrativeOrAuthorizationEndpointIsExposed() throws Exception {
-        // Phase 1 ships no administrative surface. If one is ever added by
-        // accident, this fails rather than quietly publishing it.
+        // The administrative API exists now, but it must not be reachable while
+        // enforcement is off: no grant is read by anything in that state, so an
+        // administrative surface that appeared to work would accept changes
+        // that have no effect. Paths that were never built are kept in the list
+        // so an accidentally published one still fails here.
         for (String path : List.of(
+                "/api/v1/admin/administrators",
+                "/api/v1/admin/audit",
+                "/api/v1/admin/identities?q=anyone",
+                "/api/v1/admin/identities/inst-anyone",
                 "/api/authz/admins", "/api/authz/grants", "/api/admin/archive-admins")) {
             mockMvc.perform(get(path)).andExpect(status().isNotFound());
         }

@@ -1,11 +1,17 @@
 package edu.bu.archive.application.authorization.admin;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import edu.bu.archive.application.authorization.AccessGrant;
+import edu.bu.archive.application.authorization.AccessGrantRepository;
+import edu.bu.archive.application.authorization.IdentityLink;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
+import edu.bu.archive.application.authorization.KualiPersonId;
 
 /**
  * The one place administrative changes happen.
@@ -36,10 +42,18 @@ public class ArchiveAdminService {
 
     private final AdminRoleRepository adminRoles;
     private final AdminAuditSink audit;
+    private final AccessGrantRepository grants;
+    private final AdminIdentityRepository identities;
+    private final AdminAuditRepository auditHistory;
 
-    public ArchiveAdminService(AdminRoleRepository adminRoles, AdminAuditSink audit) {
+    public ArchiveAdminService(AdminRoleRepository adminRoles, AdminAuditSink audit,
+                               AccessGrantRepository grants, AdminIdentityRepository identities,
+                               AdminAuditRepository auditHistory) {
         this.adminRoles = adminRoles;
         this.audit = audit;
+        this.grants = grants;
+        this.identities = identities;
+        this.auditHistory = auditHistory;
     }
 
     /** True when this identity currently holds ARCHIVE_ADMIN. */
@@ -144,6 +158,189 @@ public class ArchiveAdminService {
                     "recordGrantChange is for ACCESS_* actions; got " + action);
         }
         audit.record(actor.value(), action, subject, detail);
+    }
+
+    // ---------------------------------------------------------------------
+    // Data-access grants. Administration is NOT data access: nothing below
+    // grants the ACTOR anything. An administrator who wants archive access
+    // must be granted it explicitly, like anyone else, and that grant is
+    // audited like any other.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Grant archive access.
+     *
+     * <p>Approved decision D-ADM-2: no second approver is required, so this
+     * commits on one administrator's action. D-ADM-3: the grant does not
+     * expire unless {@link GrantSpecification#expiresAt()} says so.
+     */
+    @Transactional
+    public AccessGrant grantAccess(
+            InstitutionalIdentifier actor, InstitutionalIdentifier subject,
+            GrantSpecification specification) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+        if (specification == null) {
+            throw new IllegalArgumentException("grant specification is required");
+        }
+
+        AccessGrant granted = grants.create(subject, specification, actor.value());
+        audit.record(actor.value(), AdminAuditAction.ACCESS_GRANTED, subject,
+                describe(granted, specification.reason()));
+        return granted;
+    }
+
+    /** Change a grant's expiry, or whether a UNIT grant includes sub-units. */
+    @Transactional
+    public AccessGrant modifyAccess(
+            InstitutionalIdentifier actor, long grantId, Instant expiresAt,
+            boolean includeDescendants, String reason) {
+
+        requireAdministrator(actor);
+        AccessGrant modified = grants.modify(grantId, expiresAt, includeDescendants);
+        audit.record(actor.value(), AdminAuditAction.ACCESS_MODIFIED, modified.grantee(),
+                describe(modified, reason));
+        return modified;
+    }
+
+    /**
+     * Revoke a grant.
+     *
+     * <p>Effective on the caller's next request: authorization is resolved per
+     * request from this store, never from a Cognito group claim or a cache, so
+     * the revoked user loses access immediately even though their JWT stays
+     * valid for up to an hour.
+     */
+    @Transactional
+    public void revokeAccess(InstitutionalIdentifier actor, long grantId, String reason) {
+        requireAdministrator(actor);
+        AccessGrant existing = grants.findById(grantId)
+                .orElseThrow(() -> new NoSuchElementException("no grant " + grantId));
+
+        grants.revoke(grantId, actor.value(), reason);
+        audit.record(actor.value(), AdminAuditAction.ACCESS_REVOKED, existing.grantee(),
+                describe(existing, reason));
+    }
+
+    // ---------------------------------------------------------------------
+    // Identity links and suspension
+    // ---------------------------------------------------------------------
+
+    /**
+     * Link a BU-authenticated Cognito identity to an institutional identity
+     * and, when known, an archive principal.
+     *
+     * <p>Approved decision D-ID-1: the principal's historical KRIM
+     * {@code ACTV_IND} is not consulted. Most people on archived records are
+     * inactive in KRIM, and that must not stop an administrator verifying a
+     * legitimate user.
+     */
+    @Transactional
+    public IdentityLink linkIdentity(
+            InstitutionalIdentifier actor, String cognitoIssuer, String cognitoSubject,
+            InstitutionalIdentifier subject, KualiPersonId principal, String loginName,
+            String reason) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+        if (cognitoIssuer == null || cognitoIssuer.isBlank()
+                || cognitoSubject == null || cognitoSubject.isBlank()) {
+            throw new IllegalArgumentException(
+                    "the Cognito issuer and subject identify who signed in; both are required");
+        }
+
+        IdentityLink link = identities.link(
+                cognitoIssuer, cognitoSubject, subject, principal, loginName, actor.value());
+        audit.record(actor.value(), AdminAuditAction.IDENTITY_LINKED, subject,
+                "link=" + link.id() + (reason == null ? "" : "; " + reason));
+        return link;
+    }
+
+    /** Revoke an identity link. The person can no longer resolve to anyone. */
+    @Transactional
+    public void unlinkIdentity(InstitutionalIdentifier actor, long linkId, String reason) {
+        requireAdministrator(actor);
+        InstitutionalIdentifier subject = identities.revokeLink(linkId, actor.value());
+        audit.record(actor.value(), AdminAuditAction.IDENTITY_UNLINKED, subject,
+                "link=" + linkId + (reason == null ? "" : "; " + reason));
+    }
+
+    /**
+     * Suspend or restore archive access.
+     *
+     * <p>Suspension overrides every grant without touching any of them, so
+     * restoring is one action rather than re-granting. Use it for "stop this
+     * person now, decide about their grants later".
+     */
+    @Transactional
+    public void setSuspended(InstitutionalIdentifier actor, InstitutionalIdentifier subject,
+                             boolean suspended, String reason) {
+        requireAdministrator(actor);
+        requireSubject(subject);
+
+        identities.setSuspended(subject, suspended, actor.value(), reason);
+        audit.record(actor.value(),
+                suspended ? AdminAuditAction.IDENTITY_SUSPENDED : AdminAuditAction.IDENTITY_RESTORED,
+                subject, reason);
+    }
+
+    // ---------------------------------------------------------------------
+    // Review
+    // ---------------------------------------------------------------------
+
+    /** Everything about one identity, for the administrative workspace. */
+    public IdentityOverview describeIdentity(
+            InstitutionalIdentifier actor, InstitutionalIdentifier subject) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+
+        return new IdentityOverview(
+                subject,
+                identities.findLinksFor(subject),
+                grants.findForGrantee(subject),
+                identities.isSuspended(subject),
+                isAdministrator(subject),
+                auditHistory.find(AuditQuery.forSubject(subject.value())));
+    }
+
+    /** Candidate identities matching free text. See {@link IdentitySearchResult}. */
+    public List<IdentitySearchResult> searchIdentities(
+            InstitutionalIdentifier actor, String query, int limit) {
+
+        requireAdministrator(actor);
+        return identities.search(query, limit);
+    }
+
+    /** Administrative audit history. Readable by an administrator only. */
+    public List<AuditEntry> auditHistory(InstitutionalIdentifier actor, AuditQuery query) {
+        requireAdministrator(actor);
+        return auditHistory.find(query == null ? new AuditQuery(null, null, null, null, 0) : query);
+    }
+
+    /**
+     * Describe a grant for the audit detail. Deliberately records what was
+     * authorized rather than only the grant id, so the audit trail stays
+     * readable after the grant row is revoked or modified.
+     */
+    private static String describe(AccessGrant grant, String reason) {
+        StringBuilder detail = new StringBuilder("grant=").append(grant.id())
+                .append("; type=").append(grant.type());
+        if (grant.unitNumber() != null) {
+            detail.append("; unit=").append(grant.unitNumber())
+                    .append(grant.includeDescendants() ? " (+sub-units)" : "");
+        }
+        if (grant.ioValue() != null) {
+            detail.append("; io=").append(grant.ioValue());
+        }
+        if (grant.expiresAt() != null) {
+            detail.append("; expires=").append(grant.expiresAt());
+        }
+        if (reason != null && !reason.isBlank()) {
+            detail.append("; ").append(reason.trim());
+        }
+        return detail.toString();
     }
 
     private void requireAdministrator(InstitutionalIdentifier actor) {
