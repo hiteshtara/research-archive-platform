@@ -68,14 +68,40 @@ export function isGrantActive(grant, now = new Date()) {
  */
 export function accessBanner(identity) {
   if (!identity) return null;
+
   if (identity.suspended) {
     return {
       level: "danger",
       text: "Suspended. Every grant is overridden and no record is visible.",
     };
   }
+
+  // Checked before grants, deliberately. An identity with no verified link
+  // cannot be resolved at all, so it has no access however many grants are
+  // listed - and a screen that showed those grants without saying so would
+  // read as "provisioned" when the person cannot even sign in.
+  const hasActiveLink = (identity.links ?? []).some(
+    (link) => link && link.status === "ACTIVE",
+  );
+  if (!hasActiveLink) {
+    const grantCount = (identity.grants ?? []).filter((grant) =>
+      isGrantActive(grant),
+    ).length;
+    return {
+      level: "warning",
+      text:
+        grantCount > 0
+          ? `Not provisioned. No verified identity link, so this person cannot sign in ` +
+            `and the ${grantCount} grant${grantCount === 1 ? "" : "s"} below ` +
+            `${grantCount === 1 ? "has" : "have"} no effect until an administrator ` +
+            `links their identity.`
+          : "Not provisioned. No verified identity link and no archive access.",
+    };
+  }
+
   const hasActiveGrant = (identity.grants ?? []).some((grant) => isGrantActive(grant));
   if (hasActiveGrant) return null;
+
   if (identity.administrator) {
     return {
       level: "warning",

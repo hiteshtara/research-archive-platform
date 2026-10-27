@@ -8,10 +8,15 @@ export interface GrantLike {
   revokedAt?: string | null;
 }
 
+export interface LinkLike {
+  status?: string;
+}
+
 export interface IdentityLike {
   administrator?: boolean;
   suspended?: boolean;
   grants?: GrantLike[];
+  links?: LinkLike[];
 }
 
 export interface AccessBanner {

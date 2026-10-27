@@ -14,15 +14,18 @@ import {
   validateGrantForm,
 } from "./adminPresentation.mjs";
 
+/** An identity that has been verified and linked by an administrator. */
+const ACTIVE_LINK = { status: "ACTIVE" };
+
 test("an administrator with no grant is warned, not reassured", () => {
-  const banner = accessBanner({ administrator: true, suspended: false, grants: [] });
+  const banner = accessBanner({ administrator: true, suspended: false, grants: [], links: [ACTIVE_LINK] });
 
   assert.equal(banner.level, "warning");
   assert.match(banner.text, /grants no access to records/);
 });
 
 test("an ordinary identity with no grant is told authentication alone grants nothing", () => {
-  const banner = accessBanner({ administrator: false, suspended: false, grants: [] });
+  const banner = accessBanner({ administrator: false, suspended: false, grants: [], links: [ACTIVE_LINK] });
 
   assert.match(banner.text, /grants nothing on its own/);
 });
@@ -32,6 +35,7 @@ test("a suspension outranks any grant and is shown as danger", () => {
     administrator: false,
     suspended: true,
     grants: [{ type: "CENTRAL" }],
+    links: [ACTIVE_LINK],
   });
 
   assert.equal(banner.level, "danger");
@@ -40,7 +44,12 @@ test("a suspension outranks any grant and is shown as danger", () => {
 
 test("no banner when the identity actually has access", () => {
   assert.equal(
-    accessBanner({ administrator: false, suspended: false, grants: [{ type: "CENTRAL" }] }),
+    accessBanner({
+      administrator: false,
+      suspended: false,
+      grants: [{ type: "CENTRAL" }],
+      links: [ACTIVE_LINK],
+    }),
     null,
   );
 });
@@ -50,6 +59,7 @@ test("a revoked grant does not count as access", () => {
     administrator: false,
     suspended: false,
     grants: [{ type: "CENTRAL", revokedAt: "2026-10-01T00:00:00Z" }],
+    links: [ACTIVE_LINK],
   });
 
   assert.equal(banner.level, "warning");
@@ -155,4 +165,67 @@ test("audit actions read as plain English", () => {
   assert.equal(auditActionLabel("ACCESS_REVOKED"), "Access revoked");
   assert.equal(auditActionLabel("IDENTITY_SUSPENDED"), "Access suspended");
   assert.equal(auditActionLabel("SOMETHING_NEW"), "SOMETHING_NEW");
+});
+
+test("an identity with no verified link is reported as not provisioned", () => {
+  const banner = accessBanner({ administrator: false, suspended: false, grants: [], links: [] });
+
+  assert.equal(banner.level, "warning");
+  assert.match(banner.text, /Not provisioned/);
+  assert.match(banner.text, /No verified identity link/);
+});
+
+test("grants on an unlinked identity are reported as having no effect", () => {
+  // The misleading case: the page lists grants, so it reads as provisioned,
+  // but the person cannot resolve and therefore has no access at all.
+  const banner = accessBanner({
+    administrator: false,
+    suspended: false,
+    grants: [{ type: "CENTRAL" }],
+    links: [],
+  });
+
+  assert.equal(banner.level, "warning");
+  assert.match(banner.text, /Not provisioned/);
+  assert.match(banner.text, /1 grant below has no effect/);
+});
+
+test("the unlinked warning pluralises its grant count", () => {
+  const banner = accessBanner({
+    administrator: false,
+    suspended: false,
+    grants: [{ type: "CENTRAL" }, { type: "UNIT", unitNumber: "1234" }],
+    links: [],
+  });
+
+  assert.match(banner.text, /2 grants below have no effect/);
+});
+
+test("a revoked link does not count as provisioned", () => {
+  const banner = accessBanner({
+    administrator: false,
+    suspended: false,
+    grants: [{ type: "CENTRAL" }],
+    links: [{ status: "REVOKED" }],
+  });
+
+  assert.match(banner.text, /Not provisioned/);
+});
+
+test("suspension still outranks the not-provisioned warning", () => {
+  const banner = accessBanner({
+    administrator: false,
+    suspended: true,
+    grants: [],
+    links: [],
+  });
+
+  assert.equal(banner.level, "danger");
+  assert.match(banner.text, /Suspended/);
+});
+
+test("an unlinked administrator is told they are not provisioned, not merely ungranted", () => {
+  const banner = accessBanner({ administrator: true, suspended: false, grants: [], links: [] });
+
+  assert.match(banner.text, /Not provisioned/);
 });
