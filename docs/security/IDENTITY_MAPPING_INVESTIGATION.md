@@ -239,6 +239,22 @@ from changes**.
 
 ---
 
+## 5a. Follow-up: targeted KRIM extraction
+
+The extraction design, measured coverage and the BU IAM request are in
+[`KRIM_EXTRACTION_DESIGN.md`](KRIM_EXTRACTION_DESIGN.md). Headlines:
+
+- the grand union of contact `person_id`s across Award, Proposal and
+  Negotiation is **5,917**; `archive.person` holds **467** — **7.89%**;
+- `sql/extract/reference/05_person.sql` already does targeted KRIM
+  extraction correctly and needs only three more columns —
+  `PRNCPL_NM`, `ENTITY_ID`, `ACTV_IND`;
+- **Subaward contacts carry no `person_id`** (`rolodex_id` /
+  `requisitioner_id` only), so no contact-based identity path exists there;
+- the **current targeted load is itself only 41% resolved** — 1,127 driving
+  ids produced 467 rows — which must be explained before any coverage
+  estimate is trusted.
+
 ## 6. Required database / ETL changes (none applied)
 
 1. **Apply V082–V084 to dev.** They are committed and absent. Nothing can
