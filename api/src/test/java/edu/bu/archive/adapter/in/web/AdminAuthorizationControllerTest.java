@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import edu.bu.archive.application.authorization.AuthorizationPolicy;
 import edu.bu.archive.application.authorization.AuthorizationProperties;
 import edu.bu.archive.application.authorization.CurrentIdentityProvider;
 import edu.bu.archive.application.authorization.IdentityLinkStatus;
@@ -240,6 +241,98 @@ class AdminAuthorizationControllerTest {
             mvc.perform(get("/api/v1/admin/identities/inst-subject"))
                     .andExpect(jsonPath("$.suspended").value(true));
         }
+    }
+
+    @Nested
+    @DisplayName("The administrator gate does not depend on record-level policy")
+    class IndependentOfRecordEnforcement {
+
+        /*
+         * The point of these: ARCHIVE_ADMIN is checked against
+         * authz.admin_role_member and nothing else. It must not inherit the
+         * record-level policy's state - otherwise a half-configured
+         * deployment could either lock administrators out of the tool they
+         * need to fix it, or (far worse) let the gate fall open.
+         */
+
+        @Test
+        void anAdministratorIsStillRecognisedWhenNoRecordPolicyIsConfigured() throws Exception {
+            // properties.policy() is empty: no version scope, no department
+            // match, no research-staff roles. Record access would deny
+            // everything; administration must still work.
+            adminRoles.bootstrap(ADMIN, "operator", "test");
+            assertThat(properties.policy()).isEmpty();
+
+            mvc().perform(get("/api/v1/admin/administrators"))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void aNonAdministratorIsStillRefusedWhenNoRecordPolicyIsConfigured() throws Exception {
+            adminRoles.bootstrap(ADMIN, "operator", "test");
+            caller = cognito(ORDINARY_SUBJECT);
+            assertThat(properties.policy()).isEmpty();
+
+            mvc().perform(get("/api/v1/admin/administrators"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void aFullyConfiguredRecordPolicyDoesNotMakeAnyoneAnAdministrator() throws Exception {
+            // The inverse direction: a permissive record policy must not leak
+            // into administration. This caller would be a legitimate archive
+            // user and is still not an administrator.
+            configureACompleteRecordPolicy();
+            adminRoles.bootstrap(ADMIN, "operator", "test");
+            caller = cognito(ORDINARY_SUBJECT);
+
+            mvc().perform(get("/api/v1/admin/administrators"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void thereAreNoAdministratorsAtAllBeforeOneIsBootstrapped() throws Exception {
+            // Nobody has bootstrapped: every caller, including one holding a
+            // resolved identity, is refused. The role cannot be self-granted
+            // and there is no HTTP route to the first one.
+            configureACompleteRecordPolicy();
+
+            mvc().perform(get("/api/v1/admin/administrators"))
+                    .andExpect(status().isForbidden());
+            mvc().perform(post("/api/v1/admin/administrators")
+                            .contentType("application/json")
+                            .content("{\"institutionalIdentifier\":\"inst-admin\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        private void configureACompleteRecordPolicy() {
+            properties.setVersionScope(AuthorizationPolicy.VersionScope.values()[0]);
+            properties.setDepartmentMatch(AuthorizationPolicy.DepartmentMatch.values()[0]);
+            properties.setResearchStaffRoles(new java.util.LinkedHashSet<>(java.util.List.of("PI")));
+            properties.setContactDerivation(AuthorizationPolicy.ContactDerivation.values()[0]);
+            assertThat(properties.policy()).isPresent();
+        }
+    }
+
+    @Test
+    void anAdministratorHoldingNoGrantIsNotGivenRecordAccessByTheAdminApi() throws Exception {
+        // Rule 8, from the HTTP side: reading and writing administration must
+        // never create a grant for the actor.
+        adminRoles.bootstrap(ADMIN, "operator", "test");
+        MockMvc mvc = mvc();
+
+        mvc.perform(get("/api/v1/admin/administrators")).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/admin/administrators")
+                        .contentType("application/json")
+                        .content("{\"institutionalIdentifier\":\"inst-second\"}"))
+                .andExpect(status().isCreated());
+
+        assertThat(grants.findForGrantee(ADMIN))
+                .as("administering access must never grant the administrator access")
+                .isEmpty();
+        assertThat(grants.findForGrantee(new InstitutionalIdentifier("inst-second")))
+                .as("being appointed an administrator must never create a grant")
+                .isEmpty();
     }
 
     @Test
