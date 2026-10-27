@@ -75,7 +75,7 @@ class DashboardControllerTest {
                                 + "FROM archive.proposal_version"
                 )
                 .contains(
-                        "COUNT(*) FROM archive.negotiation"
+                        "COUNT(*) FROM archive.negotiation neg"
                 )
                 .contains(
                         "COUNT(DISTINCT sub.subaward_code) "
@@ -91,7 +91,7 @@ class DashboardControllerTest {
                 )
                 .contains("'AWARD' AS module, workflow_document_number")
                 .contains("'PROPOSAL', document_number")
-                .contains("'NEGOTIATION', document_number")
+                .contains("'NEGOTIATION', neg.document_number")
                 .contains("'SUBAWARD', sub.document_number")
                 .contains(
                         "'IRB', document_number "

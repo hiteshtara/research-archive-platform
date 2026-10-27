@@ -281,3 +281,85 @@ Any new asynchronous leg must be wrapped the same way.
 - **Enforced:** `GlobalSearchService.supplyLeg` and the semantic future.
 - **Test:** `theSemanticLegRunsWithTheRequestsAccessDecisionReinstated`,
   verified to fail with the fix reverted.
+
+## D8 — Negotiation access is HYBRID: lead unit OR a type-gated association (APPROVED)
+
+> A user may view a Negotiation assigned to their authorized lead unit
+> (including descendants where the grant permits), **or** inherited from an
+> associated Award when the association type is explicitly Award, **or**
+> from an associated Proposal when the type is explicitly Institutional
+> Proposal. These are alternative paths.
+
+Approved 2026-10-27, after profiling. Negotiation is **flat** — 10,775 rows,
+10,775 distinct document numbers, no version family — so unlike every other
+module there is no family question.
+
+### Why hybrid, and not inheritance alone
+
+| Basis | Covered | % |
+|---|---|---|
+| Award + Proposal inheritance only | 2,226 | **20.7%** |
+| Lead unit only | 10,718 | 99.47% |
+| **Both (implemented)** | **10,721** | **99.50%** |
+| Central-only | 54 | 0.50% |
+
+Inheritance alone would have hidden 79% of Negotiations from every
+non-Central user. The two paths do not conflict: for all **2,223**
+Award-associated Negotiations the lead unit equals the Award's lead unit,
+0 differ.
+
+### The association-type gate is a security control
+
+`associated_document_id` is free TEXT and is populated on **every**
+Negotiation, including all 8,533 typed `None`, where it holds the
+Negotiation's own KC document number. Matched without the type gate, those
+collide with an Award **workflow** document number **7,246** times and with
+a `proposal_number` **6,980** times; **6,073 of 10,775** identifiers match
+more than one record kind.
+
+So the predicate and the evaluator both resolve associations **only** inside
+a gate on `negotiation_association_type_description`, and `'Award'` resolves
+against `award_number` — never `workflow_document_number`, which type-gated
+matches nothing and could only add false hits.
+
+`'Subaward'` (16 rows) grants **nothing**: its identifiers resolve
+ambiguously and no reliable key was found. Those records reach the lead-unit
+path like any other. **Unresolved — see below.**
+
+### Lead-unit source, and its limitation
+
+`archive.negotiation_search_attribute`, verified before use: strict 1:1 with
+`archive.negotiation` (PRIMARY KEY + FOREIGN KEY ON DELETE CASCADE), zero
+orphans in either direction, 10,718 of 10,775 carry a lead unit and **100%
+of those match `archive.unit`**.
+
+**It is an ETL-denormalised projection, not the system of record**, and for
+the 8,533 unassociated rows the unit is self-asserted by the negotiator
+rather than derived from an Award. That was accepted knowingly as the price
+of 99.5% coverage.
+
+### Preserved
+
+D7 applies to the associated record: if a Negotiation is reachable by lead
+unit but its Award or Proposal is not, the association is **omitted
+entirely** — the response degrades to exactly the shape an unassociated
+Negotiation produces, so a restricted association is indistinguishable from
+none. No counts, no markers. `negotiator_person_id` (only 16 distinct) and
+`contact_admin_person_id` are **not** authorization inputs.
+
+- **Enforced:** `RecordScopeSqlBuilder.negotiationRow`,
+  `RecordAuthorizationService.canSeeNegotiation`,
+  `JdbcRecordFactsRepository.negotiationFacts`,
+  `NegotiationArchiveService` (9 endpoints), `DashboardService`.
+- **Tests:** `NegotiationRecordAuthorizationIntegrationTest` (30), including
+  three collision regressions verified to fail with the type gate removed.
+- **Real data:** SQL predicate vs Java evaluator, **0 disagreements across
+  all 10,775 rows**. Predicate cost 19.9 ms, no new index.
+
+### Open
+
+- The **16 Subaward-typed** Negotiations have no reliable association key.
+- The **54 with no basis** are Central-only.
+- The **RESTRICTED attachment flag** interaction is unreviewed — the record
+  gate and the flag are evaluated independently today, and no business rule
+  states which wins. Not changed by this work.

@@ -31,4 +31,29 @@ public interface RecordFactsRepository {
      * never be able to authorise anything.
      */
     List<Long> subawardFamilyFundingAwardIds(long subawardId);
+
+    /**
+     * The authorization basis for one Negotiation: its recorded lead unit,
+     * and its association ONLY where the association type explicitly names
+     * one. Never resolves associated_document_id by string match alone -
+     * 6,073 of 10,775 ids in dev match more than one record kind.
+     *
+     * @return empty when the Negotiation does not exist
+     */
+    java.util.Optional<NegotiationFacts> negotiationFacts(long negotiationId);
+
+    /**
+     * What a Negotiation offers the authorization engine. Any field may be
+     * absent: 57 Negotiations have no lead unit, and 8,533 have no real
+     * association at all.
+     *
+     * @param leadUnitNumber from negotiation_search_attribute (1:1, FK-enforced)
+     * @param awardNumber    set ONLY when association type is 'Award'
+     * @param proposalNumber set ONLY when association type is 'Institutional Proposal'
+     */
+    record NegotiationFacts(
+            String leadUnitNumber,
+            String awardNumber,
+            String proposalNumber
+    ) { }
 }

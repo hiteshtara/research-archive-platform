@@ -21,7 +21,8 @@ import org.springframework.web.context.request.RequestContextHolder;
  * denies.
  */
 public class RecordAuthorizationService
-        implements RecordVisibility, AwardRecordAccess, ProposalRecordAccess, SubawardRecordAccess {
+        implements RecordVisibility, AwardRecordAccess, ProposalRecordAccess, SubawardRecordAccess,
+        NegotiationRecordAccess {
 
     private static final String OUTCOME_ATTRIBUTE = RecordAuthorizationService.class.getName() + ".outcome";
     private static final ThreadLocal<AccessOutcome> PROPAGATED = new ThreadLocal<>();
@@ -319,6 +320,87 @@ public class RecordAuthorizationService
             // Fail closed: an error resolving funding is not permission.
             return false;
         }
+    }
+
+    @Override
+    public SqlFragment negotiationScopeSql(String alias) {
+        return scopeSql(RecordModule.NEGOTIATION, alias);
+    }
+
+    /**
+     * The approved hybrid rule, 2026-10-27. Three ALTERNATIVE paths: the
+     * recorded lead unit, an explicitly Award-typed association, or an
+     * explicitly Institutional-Proposal-typed association. Any one suffices.
+     *
+     * <p>The association is never resolved from
+     * {@code associated_document_id} alone - {@code negotiationFacts} gates
+     * it on the association type, because 6,073 of 10,775 identifiers in
+     * dev match more than one record kind and every such match on an
+     * unassociated Negotiation is a coincidence.
+     *
+     * <p>Subaward-typed associations (16 rows) grant nothing: no reliable
+     * key exists for them. They reach the lead-unit path like any other.
+     *
+     * <p>Reaching a Negotiation grants nothing on the associated record
+     * itself - that keeps its own gate.
+     */
+    @Override
+    public void requireNegotiation(long negotiationId) {
+        if (!enforced()) {
+            return;
+        }
+        requireProvisioned();
+        if (!canSeeNegotiation(negotiationId)) {
+            throw new RecordNotAccessibleException();
+        }
+    }
+
+    @Override
+    public boolean canSeeNegotiation(long negotiationId) {
+        if (unrestricted()) {
+            // Central, or enforcement off. Central sees every Negotiation,
+            // including the 54 with no authorization basis at all.
+            return true;
+        }
+        try {
+            Optional<RecordFactsRepository.NegotiationFacts> facts0 =
+                    facts.negotiationFacts(negotiationId);
+            if (facts0.isEmpty()) {
+                return false;
+            }
+            RecordFactsRepository.NegotiationFacts negotiation = facts0.get();
+
+            if (negotiation.leadUnitNumber() != null
+                    && !negotiation.leadUnitNumber().isBlank()
+                    && leadUnitInScope(negotiation.leadUnitNumber())) {
+                return true;
+            }
+            if (negotiation.awardNumber() != null && canSeeAwardNumber(negotiation.awardNumber())) {
+                return true;
+            }
+            return negotiation.proposalNumber() != null
+                    && canSeeProposalNumber(negotiation.proposalNumber());
+        } catch (RuntimeException failure) {
+            // Fail closed: an error resolving the basis is not permission.
+            return false;
+        }
+    }
+
+    /**
+     * Whether a unit is within the caller's granted units, expanded for
+     * descendants exactly as the SQL predicate expands them - so the two
+     * paths cannot drift on hierarchy behaviour.
+     */
+    private boolean leadUnitInScope(String leadUnitNumber) {
+        AccessOutcome outcome = outcome();
+        if (!(outcome instanceof AccessOutcome.Scoped scoped)) {
+            return false;
+        }
+        Optional<AuthorizationPolicy> policy = properties.policy();
+        if (policy.isEmpty()) {
+            return false;
+        }
+        return expandedUnits(outcome, policy.get()).contains(leadUnitNumber.trim());
     }
 
     @Override

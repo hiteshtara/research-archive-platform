@@ -1097,9 +1097,9 @@ public class GlobalSearchService {
              * the code is the fail-closed answer, and the keyword leg still
              * finds whatever the caller is entitled to.
              *
-             * NEGOTIATION is excluded: it has no approved record rule yet,
-             * so an absent summary there genuinely means unenriched - the
-             * existing documented design.
+             * All four business modules are now covered. IRB is excluded:
+             * it has no approved record rule, so an absent summary there
+             * genuinely means unenriched - the existing documented design.
              *
              * Gated on NOT being unrestricted, which matters: with
              * enforcement off, or for a Central caller, the summary lists are
@@ -1117,6 +1117,18 @@ public class GlobalSearchService {
             }
             if (scoped && "SUBAWARD".equals(row.module())
                     && subawardSummaries.get(row.businessNumber()) == null) {
+                continue;
+            }
+            /*
+             * NEGOTIATION joined the drop list on 2026-10-27, when the
+             * hybrid rule was approved and findSummariesForDocumentNumbers
+             * became scoped. Before that it had no record rule, so an
+             * absent summary genuinely meant unenriched. Now it means the
+             * same as the other three: not authorised, and the row must go
+             * rather than render with its document number and a link.
+             */
+            if (scoped && "NEGOTIATION".equals(row.module())
+                    && negotiationSummaries.get(row.businessNumber()) == null) {
                 continue;
             }
 

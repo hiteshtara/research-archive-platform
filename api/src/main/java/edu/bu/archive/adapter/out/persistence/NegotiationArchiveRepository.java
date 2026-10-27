@@ -10,6 +10,7 @@ import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationUnassociatedDeta
 import edu.bu.archive.application.negotiation.NegotiationSearchFilters;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
+import edu.bu.archive.application.authorization.SqlFragment;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -114,12 +115,40 @@ public class NegotiationArchiveRepository {
             """;
 
     public long countNegotiations(NegotiationSearchFilters filters) {
-        Long count = bind(jdbc.sql(
-                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE), filters)
+        return countNegotiations(filters, SqlFragment.NONE);
+    }
+
+    /**
+     * The count MUST take the same scope predicate as
+     * {@link #findNegotiations}: a total computed over Negotiations the
+     * caller cannot open would report their existence through
+     * {@code totalElements} even though no row is returned.
+     *
+     * @param scope predicate for alias {@code n}. {@link SqlFragment#NONE}
+     *              reproduces the unscoped statement exactly.
+     */
+    public long countNegotiations(NegotiationSearchFilters filters, SqlFragment scope) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        Long count = bindScope(bind(jdbc.sql(
+                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE + safeScope.sql()), filters),
+                safeScope)
                 .query(Long.class)
                 .single();
 
         return count == null ? 0L : count;
+    }
+
+    private static JdbcClient.StatementSpec bindScope(
+            JdbcClient.StatementSpec statement,
+            SqlFragment scope
+    ) {
+        if (scope == null) {
+            return statement;
+        }
+        for (var parameter : scope.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        return statement;
     }
 
     public List<NegotiationSummaryResponse> findNegotiations(
@@ -127,7 +156,22 @@ public class NegotiationArchiveRepository {
             int limit,
             int offset
     ) {
-        return bind(jdbc.sql("""
+        return findNegotiations(filters, SqlFragment.NONE, limit, offset);
+    }
+
+    /**
+     * @param scope predicate for alias {@code n}, in the SAME WHERE as the
+     *              filters so LIMIT/OFFSET and {@link #countNegotiations}
+     *              describe one row set.
+     */
+    public List<NegotiationSummaryResponse> findNegotiations(
+            NegotiationSearchFilters filters,
+            SqlFragment scope,
+            int limit,
+            int offset
+    ) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
+        return bindScope(bind(jdbc.sql("""
                 SELECT
                     n.negotiation_id,
                     n.document_number,
@@ -153,7 +197,7 @@ public class NegotiationArchiveRepository {
                     a.lead_unit_number,
                     a.lead_unit_name,
                     a.attribute_source
-                """ + SEARCH_FROM + SEARCH_WHERE + """
+                """ + SEARCH_FROM + SEARCH_WHERE + safeScope.sql() + """
                 ORDER BY
                     CASE WHEN CAST(n.negotiation_id AS TEXT) = :query
                             THEN 0 ELSE 1 END,
@@ -162,7 +206,7 @@ public class NegotiationArchiveRepository {
                     n.negotiation_id DESC
                 LIMIT :limit
                 OFFSET :offset
-                """), filters)
+                """), filters), safeScope)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(NegotiationSummaryResponse.class)
@@ -549,11 +593,19 @@ public class NegotiationArchiveRepository {
     public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
             List<String> documentNumbers
     ) {
+        return findSummariesForDocumentNumbers(documentNumbers, SqlFragment.NONE);
+    }
+
+    public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
+            List<String> documentNumbers,
+            SqlFragment scope
+    ) {
+        SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
         if (documentNumbers.isEmpty()) {
             return List.of();
         }
 
-        return jdbc.sql("""
+        return bindScope(jdbc.sql("""
                 WITH ranked AS (
                     SELECT
                         n.document_number,
@@ -567,12 +619,12 @@ public class NegotiationArchiveRepository {
                     FROM archive.negotiation n
                     LEFT JOIN archive.negotiation_search_attribute a
                            ON a.negotiation_id = n.negotiation_id
-                    WHERE n.document_number IN (:documentNumbers)
+                    WHERE n.document_number IN (:documentNumbers)""" + safeScope.sql() + """
                 )
                 SELECT document_number, title, status, negotiator
                 FROM ranked
                 WHERE row_rank = 1
-                """)
+                """), safeScope)
                 .param("documentNumbers", documentNumbers)
                 .query((resultSet, rowNumber) -> new NegotiationSemanticSummaryRow(
                         resultSet.getString("document_number"),

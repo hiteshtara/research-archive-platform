@@ -129,6 +129,48 @@ public class JdbcRecordFactsRepository implements RecordFactsRepository {
     }
 
     @Override
+    public java.util.Optional<RecordFactsRepository.NegotiationFacts> negotiationFacts(long negotiationId) {
+        /*
+         * The association columns are resolved ONLY inside a CASE gated on
+         * negotiation_association_type_description. That gate is the
+         * security control: associated_document_id is free TEXT, populated
+         * on every row including the 8,533 typed 'None' where it holds the
+         * Negotiation's own document number. Ungated, those collide with an
+         * Award workflow document number 7,246 times and a proposal_number
+         * 6,980 times in dev.
+         *
+         * 'Award' resolves against award_number, never
+         * workflow_document_number: type-gated, award_number matches
+         * 2,223/2,223 and the workflow column matches none, so consulting it
+         * could only add false hits.
+         *
+         * Must agree with RecordScopeSqlBuilder.negotiationRow - the
+         * integration suite compares the two paths.
+         */
+        return jdbc.sql("""
+                SELECT sa.lead_unit_number AS lead_unit_number,
+                       CASE WHEN n.negotiation_association_type_description = 'Award'
+                            THEN (SELECT av.award_number FROM archive.award_version av
+                                  WHERE av.award_number = TRIM(n.associated_document_id) LIMIT 1)
+                       END AS award_number,
+                       CASE WHEN n.negotiation_association_type_description = 'Institutional Proposal'
+                            THEN (SELECT pv.proposal_number FROM archive.proposal_version pv
+                                  WHERE pv.proposal_number = TRIM(n.associated_document_id) LIMIT 1)
+                       END AS proposal_number
+                FROM archive.negotiation n
+                LEFT JOIN archive.negotiation_search_attribute sa
+                       ON sa.negotiation_id = n.negotiation_id
+                WHERE n.negotiation_id = :negotiationId
+                """)
+                .param("negotiationId", negotiationId)
+                .query((rs, rowNum) -> new RecordFactsRepository.NegotiationFacts(
+                        rs.getString("lead_unit_number"),
+                        rs.getString("award_number"),
+                        rs.getString("proposal_number")))
+                .optional();
+    }
+
+    @Override
     public java.util.List<Long> subawardFamilyFundingAwardIds(long subawardId) {
         /*
          * FAMILY-wide, and the family is reached through subaward_id ->
