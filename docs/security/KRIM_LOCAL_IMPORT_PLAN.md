@@ -27,7 +27,7 @@ database on 5432 was only inspected for its schema version.
 |---|---|
 | local `research_archive` migration level | **V080** |
 | repository | **V084** |
-| gap | **V082, V083, V084** — there is no V081; **all three are the authorization migrations** |
+| gap | **V082, V083, V084** — all three are the authorization migrations (V081 is reserved for separate Award amount-dates work and is not on this branch) |
 
 So the local database **cannot host `authz.*` staging tables today**. It is
 three migrations behind, and the missing ones are precisely the identity and
@@ -161,52 +161,38 @@ open question blocking this estimate.
 
 ---
 
-## 4. Priority 3 — inactive-principal enforcement
+## 4. Priority 3 — inactive principals ⟶ SUPERSEDED 2026-10-27
 
-### Design
+> **This section originally proposed enforcing KRIM `ACTV_IND` as an
+> authorization input — continuous status synchronization, automatic
+> denial on inactive, and snapshot staleness as a denial condition. That
+> proposal is WITHDRAWN.** It mistook a historical archive for a
+> continuously synchronized Kuali authorization system.
+>
+> Under the approved architecture, current access is controlled by
+> `authz` identity links, explicit administrator-issued grants,
+> suspension and revocation — **not** by historical KRIM status. See
+> [`IDENTITY_AUTHORIZATION_ARCHITECTURE.md`](IDENTITY_AUTHORIZATION_ARCHITECTURE.md).
 
-1. **Load status, don't infer it.** `authz.kim_principal.actv_ind` already
-   exists in V083 and is loaded by nothing. Populate it from the extraction
-   above, with `loaded_at` and `load_ref` per row.
-2. **Check it in `IdentityResolver`.** After resolving a link, require
-   `kim_principal.actv_ind = 'Y'` for the `prncpl_id`; otherwise deny. Add
-   an `IdentityResolution.Inactive` state alongside `Revoked`/`Suspended`.
-3. **Fail closed on unknown, not just on inactive.** If there is **no**
-   `kim_principal` row for the principal, deny. A principal the archive has
-   never seen must not be treated as active — this is the case the 660
-   would have fallen into.
-4. **Staleness is itself a denial condition.** The snapshot has a
-   `loaded_at`; if it is older than a configured maximum age, deny rather
-   than trust it. Without this, a snapshot frozen on 2026-08-03 would
-   authorize deactivated staff indefinitely — which is precisely the state
-   `archive.person` is in today.
+What survives from the original section is the **measurement**, which
+keeps its value under the corrected reading:
 
-### How status arrives, and how fast deactivation takes effect
+| Set | active in KRIM | inactive | % inactive |
+|---|---|---|---|
+| already in `archive.person` (467) | 159 | 308 | **66%** |
+| unresolved (660) | 283 | 377 | 57% |
+| **whole driving set (1,127)** | **442** | **685** | **61%** |
 
-**It arrives by ETL refresh, never by a live Kuali call** — a live call in
-the request path was ruled out, and Kuali is not an API dependency of the
-archive.
+Its meaning changes completely, though. Originally this was the argument
+for automatic revocation. It is now simply a description of what a
+historical archive contains: **most people referenced by decades of
+archived research records no longer work at BU, and that is normal.**
+They must remain visible as the PI or contact on the records they
+touched — see [`IDENTITY_AUTHORIZATION_ARCHITECTURE.md`](IDENTITY_AUTHORIZATION_ARCHITECTURE.md) §2.
 
-So deactivation latency = the refresh interval. That is a **business
-decision**, not an engineering one, and the honest framing is:
-
-| Refresh cadence | Worst-case window in which a departed user retains access |
-|---|---|
-| Nightly | up to 24h |
-| Hourly | up to 1h |
-| On demand only | **unbounded** — today's situation |
-
-The existing Subaward nightly sync shows a nightly ECS schedule is already
-an established pattern here. **A manual revocation path must exist
-regardless**, because no cadence covers an urgent departure: revoking the
-`identity_link` takes effect on the very next request, since resolution is
-per request and nothing is memoised.
-
-> **A historical KRIM snapshot is not evidence of current employment.** It
-> is evidence of status *as at `loaded_at`*. The staleness check in (4) is
-> what keeps that distinction honest in code.
-
----
+Extracting `ACTV_IND` is still worth doing, as **historical identity
+data**, not as an access control. It records what KRIM said at
+`extracted_at`; it does not decide who may sign in.
 
 ## 5. Priority 5 — local import plan, and the approval gate
 
