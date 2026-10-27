@@ -1,11 +1,12 @@
-# Holdoff — end of day, 2026-10-26
+# Holdoff — 2026-10-27
 
-Resume point for the Anthony security work. Every fact below was **verified
-against live AWS, git and the dev database on 2026-10-26**, not carried over
-from conversation notes.
+Resume point for the Anthony security work. Supersedes the 2026-10-26
+holdoff. Every fact verified against live AWS, git and the dev database on
+2026-10-27.
 
-> **IRB is out of scope.** It is not in tomorrow's roadmap and no IRB work
-> should be started.
+> **IRB is out of scope.** No IRB authorization engine. The only IRB work
+> done — and the only kind permitted — is isolating it from *shared*
+> surfaces.
 
 ---
 
@@ -13,199 +14,147 @@ from conversation notes.
 
 | | |
 |---|---|
-| `origin/main` | **`3559fd5`** (merge of PR #66) |
-| ECS API | task definition **revision 81**, 1/1 running, 1 deployment — **unchanged all day** |
-| Amplify | app `d288p9gmoteftb`, job **144** for `3559fd5` **SUCCEED**; 143 (`7d6e982`) and 142 (`bdf7c36`) also SUCCEED |
-| Terraform (dev) | **no outstanding changes** — `terraform plan` reports "No changes" with `manage_db_tunnel_access=true` |
-| Authorization enforcement | **OFF.** No `AUTHORIZATION*` env var on task definition 81; `app.authorization.enforcement-enabled` unset, Java default `false` |
-| Migrations | highest committed is **V084**. **None applied today.** No migration in any PR merged today |
-| Main checkout branch | `qa/version-table-and-hierarchy-link-semantics` (not main) — untracked scratch only |
+| `origin/main` | **`f94617b`** (merge of PR #71) |
+| ECS API | task definition **revision 81**, 1/1 running, 1 deployment — **unchanged** |
+| Amplify | job **146** for `f94617b` **SUCCEED**; 145 (`6fb1611`) SUCCEED |
+| Terraform (dev) | no outstanding changes |
+| Authorization enforcement | **OFF.** No `AUTHORIZATION*` env var on task def 81; property unset, Java default `false`; `application.yml` untouched by any merge |
+| Migrations | highest committed **V084**; **none applied**, none in any PR merged today |
+| SSM tunnel | stopped — 0 tasks, port 15432 closed |
+| Tunnel operator IAM policy | **0 attachments** (roles/users/groups) |
 
-### Merged today
+### Merged 2026-10-27
 
 | PR | SHA | What |
 |---|---|---|
-| #62 | `b77f03f` | Award record authorization (Phase 2A), off by default |
-| #63 | `98d201c` | QA status: nine SEC requirements, seven states |
-| #64 | `f1b8115` | Proposal record authorization, off by default |
-| #65 | `bdf7c36` | QA status after the authorization merges |
-| #67 | `7d6e982` | SSM database tunnel (ephemeral Fargate, no bastion) |
-| **#66** | **`3559fd5`** | **Subaward family-level authorization, off by default** |
+| **#71** | **`f94617b`** | **Negotiation hybrid authorization + IRB shared-search isolation, off by default** |
 
 ### Open PRs
 
-- **#68** (draft) `fix/ssm-tunnel-target-not-connected` — tunnel retry fix + SSM agent finding. **Not merged.**
-- #57, #46, #45, #44, #32, #16, #15, #14, #13, #12 — older, unrelated to today.
-
-### Worktrees
-
-`rap-sub2` (#66, merged), `rap-tunnel` (#68, open), `rap-holdoff` (this doc).
-Many older worktrees exist; `git worktree list` is authoritative.
+- **#70** — Negotiation data profile and rule options (docs; superseded in
+  substance by #71, still open)
+- **#68** (draft) — SSM tunnel `TargetNotConnected` retry + agent finding
+- #57, #46, #45, #44, #32, #16, #15, #14, #13, #12 — older, unrelated
 
 ---
 
-## 2. Anthony security — what is actually true
+## 2. Authorization status — merged ≠ deployed ≠ enforced
 
-**Merged ≠ deployed ≠ enforced.** Everything below is merged to main and
-**none of it is running**: the deployed API is revision 81, which predates
-all of it, and enforcement is off in code regardless.
+**None of this is running.** The deployed API is revision 81, which predates
+all four modules, and enforcement is off in code regardless. Only Shibboleth
+auth/logout is live.
 
-| Work | Merged | In the deployed API | Tested | Enforcement on |
+| Module | Merged | Deployed | Tested | Enforced |
 |---|---|---|---|---|
-| BU Shibboleth auth + logout | yes | **yes** — this one *is* live | yes, browser-verified | n/a |
-| Phase 1 authorization engine | yes (PR #56) | no | yes | no |
-| Award authorization | yes (#62) | **no** | yes — 31 integration tests | **no** |
-| Proposal authorization | yes (#64) | **no** | yes — 18 integration tests | **no** |
-| Subaward family authorization | yes (#66) | **no** | yes — 59 integration tests | **no** |
-| ARCHIVE_ADMIN foundation | partial — schema + service exist | no | yes | no |
-| QA Status dashboard | yes (#63, #65) | yes (Amplify) | UI unit tests | n/a |
+| Shibboleth auth + logout | yes | **yes** | yes | n/a |
+| Phase 1 engine (#56) | yes | no | yes | no |
+| Award (#62) | yes | no | 31 tests | no |
+| Proposal (#64) | yes | no | 18 tests | no |
+| Subaward family (#66) | yes | no | 59 tests | no |
+| **Negotiation hybrid (#71)** | **yes** | **no** | **32 tests** | **no** |
+| ARCHIVE_ADMIN | schema + service only | no | yes | no |
+| QA Status dashboard | yes | yes (Amplify) | yes | n/a |
 
-Test totals on `3559fd5`: **API unit 1380**, **PostgreSQL integration 240**,
-**UI 694** — all passing, all three CI checks green.
-
-Enforcement is off three independent ways: the property is unset (Java
-default `false`), each service short-circuits when unenforced, and every
-port defaults to `PERMIT_ALL`. A startup guard refuses to boot if
-enforcement is ever enabled while a permissive fallback is wired.
+Totals on `f94617b`: **API 1417 · PostgreSQL integration 272 · UI 694**, all
+green, all three CI checks passing.
 
 ---
 
-## 3. Subaward findings — verified real data
+## 3. Approved rules now in code
 
-Profiled against dev RDS over the SSM tunnel, read-only, 2026-10-26.
+- **D6a — Subaward**: family-level ANY-match funding inheritance.
+- **D7** — restricted funding Awards omitted entirely; no counts, flags or
+  placeholders. Funding heading is the constant "Associated Awards".
+- **D8 — Negotiation**: HYBRID — recorded lead unit **OR** explicitly
+  `Award`-typed association **OR** explicitly `Institutional Proposal`-typed
+  association. Alternatives; any one suffices.
+- **D8 — RESTRICTED attachment flag**: informational, **never** an access
+  control. Downloads require authorized record access **and**
+  `ArchiveAttachmentViewer`. **20,406 of 28,923 (70.55%)** Negotiation
+  attachments carry `Y` — gating on it would remove seven in ten.
+- **IRB shared-search isolation**: when enforcement is ON, IRB leaves shared
+  Global Search for **all** users **including Central** — keyed on the
+  enforcement flag, not on the caller. Keyword leg never runs; semantic rows
+  dropped. Enforcement OFF is unchanged.
 
-| Measure | Value |
-|---|---|
-| Subaward version rows | **93,735** |
-| Subaward families (`subaward_code`) | **3,511** |
-| Versions **structurally reachable** under family inheritance | **91,945** (98.09%) |
-| Families with no resolvable funding relationship | **270** (7.69%) |
-| ├ only broken funding references | **224** |
-| └ no funding references at all | **46** |
-| Inconsistent denormalized funding-family codes | **8** |
-| SQL vs Java authorization disagreements | **0** (compared across all 93,735 rows) |
+### Real-data findings (dev, read-only)
 
-### Structural reachability is NOT permission
+**Subaward**: 93,735 version rows · 3,511 families · 91,945 structurally
+reachable (98.09%) · 270 families unresolved (224 broken refs, 46 none) · 8
+inconsistent denormalized codes · **0 SQL/Java disagreements**.
 
-**91,945 does not mean 91,945 rows any user can see.** It means those
-versions belong to a family where *at least one funding Award resolves to a
-real archived Award*. Whether a given user may open them still depends
-entirely on whether **that user** holds a grant on **that Award** — by
-department unit, descendant unit, or Research Staff role. A user with one
-department grant sees a small fraction of the 91,945. The figure measures
-the *ceiling* the data permits, not anyone's actual access.
+**Negotiation**: 10,775 rows, flat (no versions) · lead unit covers 10,718
+(99.47%), matches `archive.unit` 100% · Award-typed 2,223, Proposal-typed 3
+· **10,721 reachable (99.50%)**, 54 Central-only · **0 SQL/Java
+disagreements across all 10,775 rows** · predicate 19.9 ms, no new index.
 
-The 270 unreachable families are the inverse: no user except Central can
-ever reach them, because nothing in the family resolves to an Award at all.
+> **Structural reachability is NOT permission.** These are ceilings the data
+> permits, not any user's access. A user with one department grant sees a
+> small fraction.
 
-### Approved rules
+### Why both rules changed shape after profiling
 
-- **D6a — family-level ANY-match** (supersedes D6's per-version form):
-  a user may view **all versions of a Subaward family** when authorized for
-  at least one valid funding Award linked to **any version** of that family.
-  Per version it was 4.06% reachable; the archive's historical record would
-  have been invisible.
-- **D7 — restricted funding Awards leave no trace.** Only authorized funding
-  Awards are returned. No counts, no flags, no placeholders, no existence
-  indicators. The Funding heading is the constant `"Associated Awards"` and
-  `resolveAssociatedAwardsSectionLabel()` takes **no arguments** so there is
-  nothing to count. **Do not reintroduce a count.**
+Per-version Subaward reached **4.06%** of version rows; family-level reaches
+98.09%. Negotiation inheritance alone reached **20.7%**; hybrid reaches
+99.50%. Neither would have been caught by fixtures. **Profile real data
+before designing a rule.**
 
-### Two data caveats that shaped the code
+### The Negotiation collision trap
 
-1. `(subaward_code, sequence_number)` is **not unique** — 2,577 pairs repeat,
-   up to 5 deep. Family key only; `subaward_id` is the version key.
-2. `subaward_funding.subaward_code` disagrees with its parent for **8 rows**
-   (3046 vs 1970, 3203 vs 4094). The family is derived by joining
-   `archive.subaward` on `subaward_id`; reading the denormalized column would
-   grant the **wrong** family.
-
-Performance: the family-wide `EXISTS` runs in **6.4 ms** over all 93,735 rows
-on the existing `ix_subaward_code_sequence`. **No migration needed.**
-
-**PR #66 status: MERGED, `3559fd5`.** Not deployed, not enforced.
+`associated_document_id` is free TEXT, populated on every row including all
+8,533 typed `None`. Ungated it collides with an Award workflow document
+number **7,246** times and a `proposal_number` **6,980** times; **6,073 of
+10,775** ids match more than one record kind. Both decision paths therefore
+resolve associations **only** inside an association-type gate, and `'Award'`
+resolves against `award_number`, never `workflow_document_number`. Three
+regression tests, each verified to fail with the gate removed.
 
 ---
 
 ## 4. SSM database tunnel
 
-**PR #67 merged (`7d6e982`) and applied to dev.** Nine resources: a
-single-AZ `ssmmessages` interface endpoint, a dedicated ECS cluster, a
-minimal task role (four `ssmmessages` actions only), a zero-ingress security
-group, one SG-to-SG RDS ingress rule, a task definition, a log group and the
-operator IAM policy.
+PR #67 merged and applied. `scripts/start-db-tunnel.sh` opens
+**localhost:15432** → dev RDS; Ctrl-C closes and stops the task.
+`scripts/stop-db-tunnel.sh` sweeps strays. Connect as **`archive_analyst`**
+(read-only at the database level), `sslmode=require`. Credential via
+`scripts/mac-show-analyst-password.sh` — clipboard, never printed. **No
+credential appears in this document.**
 
-```bash
-scripts/start-db-tunnel.sh     # opens localhost:15432; Ctrl-C closes and stops the task
-scripts/stop-db-tunnel.sh      # sweeps any stray task
-```
+> **Port 15432, never 5432.** 5432 is local Homebrew PostgreSQL — a separate
+> copy, last seen at migration V080 against the repo's V084.
 
-Connect on **port 15432** as **`archive_analyst`** (read-only at the database
-level), database `research_archive`, `sslmode=require`. Credential comes from
-`scripts/mac-show-analyst-password.sh`, which copies to the clipboard and
-never prints. **No credential is recorded in this document, and none should
-be.**
-
-> **Port 15432, never 5432.** 5432 is local Homebrew PostgreSQL — a separate,
-> stale copy. Keep the existing DBeaver connection pointed there; use a
-> **duplicate** for the tunnel.
-
-### State at end of day
-
-- **Tunnel tasks running: 0.** Nothing is left running overnight. Verified.
-- **Operator policy attachments: 0 roles, 0 users, 0 groups** — created but
-  deliberately unattached.
-- `Shibboleth-InfraMgt` was **not** broadened.
-
-### Open items
-
-- **PR #68 is open and unmerged** — retries `TargetNotConnected` (the exec
-  agent reports RUNNING before SSM registers the channel; the first live run
-  failed on a good tunnel), plus the live verification record.
-- **SSM Agent patch status is INDETERMINATE.** `--version` reports `3.3.0.0`,
-  below the `3.3.4851.0` that fixes CVE-2026-89049; but the binaries are
-  dated **2026-10-13**, over a month after the 2026-09-10 fix, so the string
-  is probably a placeholder in the Fargate build. No VERSION file, no log
-  banner. An earlier note called this "confirmed unpatched" — **that was an
-  overstatement and is corrected.** A definitive answer needs AWS Support or
-  a Fargate platform release note.
-  Containment, which is what the design rests on: the task role is worthless
-  if stolen, and `ssm:StartSession` is scoped to one document and one cluster
-  (AWS's own published workaround).
+- **PR #68 open**: retries `TargetNotConnected` (the exec agent reports
+  RUNNING before SSM registers the channel). Worth merging.
+- **SSM Agent patch status INDETERMINATE**: `--version` reports `3.3.0.0`,
+  below the `3.3.4851.0` that fixes CVE-2026-89049, but the binaries are
+  dated 2026-10-13, over a month after the fix — so the string is likely a
+  placeholder. Containment is what the design rests on: the task role holds
+  only four `ssmmessages` actions.
+- Operator policy deliberately **unattached**; `Shibboleth-InfraMgt` not
+  broadened.
 
 ---
 
-## 5. Tomorrow's priorities, in order
+## 5. Next security work, in order
 
-1. **PR #66** — merged as `3559fd5`; confirm nothing further is outstanding.
-2. **Negotiation authorization investigation** — read-only real-database
-   queries first, same discipline that caught the Subaward 4.06% problem.
-3. **Profile associated vs unassociated Negotiations.**
-4. **Propose Negotiation rules and get them approved *before* implementing.**
-5. **Investigate the 270 unresolved Subaward families** (224 broken refs, 46
-   none) — see the plan below.
-6. **Close the Proposal Dashboard count-scoping gap.**
-7. **Continue planning the ARCHIVE_ADMIN management interface.**
-8. **Keep /qa-status aligned with actual deployment status.**
+1. **Investigate the 270 unresolved Subaward families.** First question:
+   does `subaward_funding.award_number` resolve where `award_id` does not?
+   That separates an ETL gap from genuine orphans. Do **not** reach for a
+   fallback rule — `requisitioner_unit` matches `archive.unit` 100% and is
+   still not approved for authorization.
+2. **Close the Proposal Dashboard count-scoping gap** (D2). `proposals`,
+   `proposal_history_records` and the `PROPOSAL` document tally are still
+   archive-wide while Proposal endpoints are scoped. **Blocker before
+   enforcement.**
+3. **Review and merge PR #68.**
+4. **ARCHIVE_ADMIN management interface** — still schema + service only; no
+   administrative UI exists.
+5. **Keep /qa-status aligned** with actual deployment state.
+6. Decide the **16 Subaward-typed Negotiations** (currently lead-unit only)
+   and whether the **54 no-basis Negotiations** staying Central-only is
+   acceptable long-term.
 
-**Do not start IRB work.**
-
-### Plan for the 270 unresolved Subaward families
-
-Investigation, not a code change. The question is whether 759 dangling
-`award_id` references are an ETL gap or genuine historical orphans.
-
-1. Sample the 224 all-broken families; check whether their `award_id` values
-   exist in Oracle staging but not in `archive.award_version` (ETL gap) or
-   nowhere at all (orphans).
-2. Check whether `subaward_funding.award_number` resolves where `award_id`
-   does not — V067 backfills that column, and the ETL may simply not have
-   re-run.
-3. If it is an ETL gap, the fix is a loader re-run, not an authorization
-   change. If they are genuine orphans, the business decision is whether
-   Central-only access is acceptable for 7.69% of families.
-4. Do **not** invent a fallback rule. `requisitioner_unit` matches
-   `archive.unit` 100% and is still not approved for authorization.
+**Do not start IRB work** beyond shared-surface isolation.
 
 ---
 
@@ -213,14 +162,30 @@ Investigation, not a code change. The question is whether 759 dangling
 
 | # | Question | Owner | Blocks |
 |---|---|---|---|
-| 1 | **Negotiation authorization rules** — no approved rule exists. Cross-module document/attachment search is fail-closed for scoped callers until one does | Anthony / BU | Negotiation authorization; full enforcement |
-| 2 | **SEC-008 audit scope** — what must be audited, retained how long, reviewed by whom. Not fully resolved; must not be marked complete | Anthony / BU security | Enforcement sign-off |
-| 3 | **BU identity → KRIM mapping** — how a Cognito/Shibboleth identity resolves to a KRIM person id, and what happens when it is ambiguous, revoked or unlinked. Engine fails closed today | Anthony / BU IAM | Enabling enforcement anywhere |
-| 4 | **Proposal Dashboard counts unscoped** — `proposals`, `proposal_history_records` and the `PROPOSAL` document tally are archive-wide even though Proposal endpoints are scoped. **Recorded as an outstanding blocker before enforcement** (D2) | engineering | Enabling enforcement |
-| 5 | **270 Subaward families Central-only** — acceptable, or fix the data? | Anthony / BU | Subaward enforcement |
-| 6 | **Tunnel operator IAM** — no project-specific human role exists; the only candidates are shared BU SSO roles. Policy stays unattached pending this | BU IAM / Anthony | Tunnel use by anyone else |
-| 7 | **SSM Agent patch status** — indeterminate; needs AWS Support or a platform release note | engineering / AWS | Normal tunnel use judgement |
-| 8 | **Explicit Subaward grant type** — D6 mentions one for the no-funding case; none exists in the `authz` schema | Anthony / BU | The 46 unfunded families |
+| 1 | **SEC-008 audit scope** — what is audited, retained how long, reviewed by whom. Must not be marked complete | Anthony / BU security | Enforcement sign-off |
+| 2 | **BU identity → KRIM mapping** — how a Cognito/Shibboleth identity resolves to a KRIM person id, and behaviour when ambiguous, revoked or unlinked. Fails closed today | Anthony / BU IAM | Enabling enforcement anywhere |
+| 3 | **Proposal Dashboard counts unscoped** (D2) | engineering | Enabling enforcement |
+| 4 | **270 Subaward families** Central-only — acceptable, or fix the data? | Anthony / BU | Subaward enforcement |
+| 5 | **Tunnel operator IAM** — no project-specific human role exists; only shared BU SSO roles. Policy stays unattached | BU IAM / Anthony | Tunnel use by others |
+| 6 | **SSM Agent patch status** indeterminate | engineering / AWS | Tunnel risk judgement |
+| 7 | **Explicit Subaward grant type** — D6 mentions one for the no-funding case; none exists in the `authz` schema | Anthony / BU | The 46 unfunded families |
+| 8 | **16 Subaward-typed Negotiations** — no reliable association key | Anthony / BU | Completeness |
+
+---
+
+## 7. Lessons worth not relearning
+
+- **Profile real data before designing an authorization rule.** Two rules
+  were redesigned after profiling; neither failure mode was visible in
+  fixtures.
+- **`mvn -q test-compile` can report BUILD SUCCESS against stale test
+  classes.** After a constructor signature change it hid two broken call
+  sites; only `rm -rf target/classes target/test-classes` surfaced them.
+  Incremental test-compile is not proof that test sources compile.
+- **A bare `git push` goes to the `bu` remote** unless `remote.pushDefault`
+  is unset (it now is). Prefer `git push origin <branch>`.
+- **Verify a denial test actually fails without the fix.** Every regression
+  test added for a leak this week was checked that way.
 
 ---
 
@@ -230,5 +195,5 @@ Investigation, not a code change. The question is whether 759 dangling
 - Do not deploy a new ECS API image.
 - Do not apply database migrations.
 - Do not grant permissions or bootstrap administrators.
-- Do not modify Cognito, Shibboleth, production, RDS data or DNS.
+- Do not modify Cognito, Shibboleth, Terraform, production, RDS data or DNS.
 - Do not leave the SSM tunnel running.
