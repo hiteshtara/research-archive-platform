@@ -238,14 +238,13 @@ count leaks the existence of records a user cannot open.
 > research staff, no-grant, denied, unprovisioned and enforcement-off,
 > and nine of them fail if the scope is removed.
 >
-> **Still unscoped: the five IRB-derived figures** — `irb`, `submissions`,
-> `funding_records`, `timeline_events`, and the IRB branch of the
-> document tally. There is no approved IRB record rule, so there is
-> nothing to apply. Note the inconsistency to settle before stage 6: IRB
-> is excluded from shared Global Search when enforcement is on, but the
-> Dashboard still reports archive-wide IRB totals to every caller. These
-> are aggregates, not records, and the exposure is small — but the two
-> surfaces should agree, and that is a decision rather than a bug fix.
+> **D9 decided and implemented (PR pending review).** IRB is excluded
+> from the Dashboard entirely when enforcement is on — the four IRB
+> figures are omitted from the JSON (null, not zero: a zero would assert
+> the archive holds no protocols) and the IRB branch leaves the document
+> union, so the tally carries no IRB subtotal. It applies to every
+> caller, Central included, mirroring the shared-search decision. With
+> enforcement off the Dashboard is unchanged.
 
 Also confirm counts and pages come from the **same `WHERE`**: a scope
 predicate applied to the page but not the count makes `totalElements`
@@ -321,7 +320,7 @@ asserted:
 | **D-ID-3** — which BU attribute is the institutional identifier (BU IAM) | stages 2–6 |
 | **D-ID-2(a)** — who the first administrators are | stage 3 |
 | ~~**D2** — unscoped Proposal Dashboard count~~ | **closed 2026-10-27** |
-| **D9** — IRB Dashboard figures stay archive-wide while IRB is hidden from shared search | stage 6 (decision, not a fix) |
+| ~~**D9** — IRB Dashboard figures stay archive-wide~~ | **decided and implemented 2026-10-27**; PR open for review |
 | **D-ID-4(a)** — approval for the KRIM backfill into dev RDS | stage 3's usability |
 | Approval to deploy an API image containing the admin surface | stage 2 |
 

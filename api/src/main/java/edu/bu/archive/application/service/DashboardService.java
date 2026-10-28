@@ -36,11 +36,18 @@ import org.springframework.stereotype.Service;
  * dashboard whose own numbers disagree with each other and with the
  * Proposal search the same user can run.
  *
- * <p>NOT scoped: IRB. It has no approved record rule, so there is nothing
- * to apply; the four IRB figures and the IRB document branch stay
- * archive-wide for every caller. That is a recorded exposure rather than an
- * oversight - see AUTHORIZATION_DECISIONS.md - and it is why the dashboard
- * as a whole is still not fully authorized.
+ * <p>IRB is EXCLUDED rather than scoped (decision D9, 2026-10-27). It has
+ * no approved record rule and will not get one, so there is nothing to
+ * apply - but leaving archive-wide IRB totals on an otherwise authorized
+ * dashboard would contradict the shared-search decision, which already
+ * removes IRB entirely once enforcement is on. So when enforcement is on
+ * the four IRB figures are omitted from the response and the IRB branch
+ * leaves the document union, for EVERY caller including Central.
+ *
+ * <p>This is isolation of a shared surface, not an authorization rule: the
+ * IRB module's own endpoints, tables and migrations are untouched. With
+ * enforcement off - today's deployed configuration - the dashboard is
+ * exactly what it always was.
  */
 @Service
 public class DashboardService {
@@ -50,6 +57,7 @@ public class DashboardService {
     private final edu.bu.archive.application.authorization.SubawardRecordAccess subawardAccess;
     private final edu.bu.archive.application.authorization.NegotiationRecordAccess negotiationAccess;
     private final edu.bu.archive.application.authorization.ProposalRecordAccess proposalAccess;
+    private final ObjectProvider<AuthorizationProperties> authorizationProperties;
 
     public DashboardService(
             JdbcClient jdbcClient,
@@ -100,6 +108,23 @@ public class DashboardService {
                 : edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL;
         edu.bu.archive.application.authorization.ProposalRecordAccess
                 .requireEnforceableWiring(this.proposalAccess, authorizationProperties);
+
+        this.authorizationProperties = authorizationProperties;
+    }
+
+    /*
+     * Deliberately reads the enforcement flag rather than
+     * recordAccess.unrestricted(). D9 excludes IRB for EVERY caller once
+     * enforcement is on - a Central user is not an exception, exactly as in
+     * GlobalSearchService.irbExcludedFromSharedSearch(). Using unrestricted()
+     * would quietly exempt Central and leave the two surfaces disagreeing.
+     */
+    private boolean irbExcludedFromDashboard() {
+        if (authorizationProperties == null) {
+            return false;
+        }
+        AuthorizationProperties settings = authorizationProperties.getIfAvailable();
+        return settings != null && settings.isEnforcementEnabled();
     }
 
     public DashboardDto counts() {
@@ -121,6 +146,40 @@ public class DashboardService {
                 negotiationAccess.negotiationScopeSql("neg").withParameterPrefix("neg_");
         SqlFragment proposalScope =
                 proposalAccess.proposalScopeSql("pv").withParameterPrefix("prop_");
+
+        /*
+         * D9. Two separate removals, because IRB reaches the response twice:
+         * as its own four figures, and as a contributing branch of the
+         * single documents tally. Removing only the first would leave the
+         * document count carrying an IRB subtotal that no caller could see
+         * or reconcile.
+         */
+        boolean excludeIrb = irbExcludedFromDashboard();
+        String irbDocumentBranch = excludeIrb ? "" : """
+
+                    UNION ALL
+
+                    SELECT 'IRB', document_number
+                    FROM archive.irb_protocol_version
+                    WHERE document_number IS NOT NULL""";
+        /*
+         * NULL, not 0. A zero would be read as "the archive holds no IRB
+         * protocols", which is false; the DTO is NON_NULL so these columns
+         * leave the JSON altogether.
+         */
+        // Leading newline: a text block strips the one after its opening
+        // delimiter, so without this the concatenation yields "SELECTCAST(".
+        String irbFigures = "\n" + (excludeIrb
+                ? """
+                    CAST(NULL AS BIGINT) AS irb,
+                    CAST(NULL AS BIGINT) AS submissions,
+                    CAST(NULL AS BIGINT) AS funding_records,
+                    CAST(NULL AS BIGINT) AS timeline_events,"""
+                : """
+                    (SELECT COUNT(*) FROM archive.irb_protocol) AS irb,
+                    (SELECT COUNT(*) FROM archive.irb_submission) AS submissions,
+                    (SELECT COUNT(*) FROM archive.irb_funding_source) AS funding_records,
+                    (SELECT COUNT(*) FROM archive.irb_timeline_event) AS timeline_events,""");
 
         JdbcClient.StatementSpec statement = jdbcClient.sql("""
                 WITH award_counts AS (
@@ -158,25 +217,9 @@ public class DashboardService {
 
                     SELECT 'SUBAWARD', sub.document_number
                     FROM archive.subaward sub
-                    WHERE sub.document_number IS NOT NULL""" + subawardScope.sql() + """
-
-                    UNION ALL
-
-                    SELECT 'IRB', document_number
-                    FROM archive.irb_protocol_version
-                    WHERE document_number IS NOT NULL
+                    WHERE sub.document_number IS NOT NULL""" + subawardScope.sql() + irbDocumentBranch + """
                 )
-                SELECT
-                    (SELECT COUNT(*)
-                     FROM archive.irb_protocol) AS irb,
-                    (SELECT COUNT(*)
-                     FROM archive.irb_submission) AS submissions,
-                    (SELECT COUNT(*)
-                     FROM archive.irb_funding_source)
-                        AS funding_records,
-                    (SELECT COUNT(*)
-                     FROM archive.irb_timeline_event)
-                        AS timeline_events,
+                SELECT""" + irbFigures + """
                     award_counts.awards,
                     award_counts.award_history_records,
                     proposal_counts.proposals,
