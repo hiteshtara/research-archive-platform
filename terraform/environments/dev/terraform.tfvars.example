@@ -254,3 +254,20 @@ manage_amplify = false
 # redirect from the retired *.amplifyapp.com URL. Like the Amplify
 # environment map generally, omitting it DELETES the deployed variable.
 # ui_canonical_origin = "https://REPLACE_WITH_YOUR_ADVERTISED_DOMAIN"
+
+# --- SSM port-forwarding tunnel to dev RDS (psql / DBeaver) ---------------
+#
+# Off by default. When enabled, db_tunnel_image is REQUIRED - a precondition
+# in main.tf enforces it, so the tunnel cannot silently fall back to
+# following whatever image the ETL loader currently runs.
+#
+# Pin by DIGEST, never by tag: tags in these repositories are MUTABLE. The
+# digest must also carry a "protected-*" tag in ECR, or the loader
+# repository's "keep the newest 20" lifecycle rule will eventually expire
+# it and the tunnel will fail with CannotPullContainerError.
+# See docs/runbooks/DB_TUNNEL_IMAGE_PINNING.md.
+#
+# Not a credential - an image digest is a public content identifier.
+#
+# manage_db_tunnel_access = true
+# db_tunnel_image         = "<account>.dkr.ecr.<region>.amazonaws.com/<project>-<env>-loader@sha256:<64 hex>"

@@ -71,6 +71,29 @@ A new `var.db_tunnel_image`, digest-only, defaulting to `null`:
 Validation rejects a tag, because tags in this repository are `MUTABLE`
 and therefore not a stable reference.
 
+## The guard against silently un-pinning
+
+`main.tf`'s `terraform_data.config_guard` gains a precondition: if
+`manage_db_tunnel_access` is true, `db_tunnel_image` must be set. The
+module-level fallback to the live loader image stays for compatibility —
+this just makes it unreachable by accident in DEV.
+
+Verified by removing the pin and re-planning (with the auto-loaded
+`terraform.tfvars` moved aside, or the test proves nothing — Terraform
+loads it *in addition to* `-var-file`):
+
+```
+Error: Resource precondition failed
+manage_db_tunnel_access is true, so db_tunnel_image must be set to …
+exit code: 1
+```
+
+**Note the exact behaviour:** `plan` exits non-zero, but with `-out` it
+still writes a plan file. So the exit code is the signal, not the presence
+of the file. Do not apply a plan whose `plan` command failed.
+
+---
+
 ## Step 1 — protect the image: **DONE 2026-10-28**
 
 ```
