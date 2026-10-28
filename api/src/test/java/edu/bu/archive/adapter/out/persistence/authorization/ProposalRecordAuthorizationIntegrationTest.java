@@ -136,6 +136,11 @@ class ProposalRecordAuthorizationIntegrationTest {
                      NULL,   NULL,  NULL,   NULL,        NULL,        'DOC-NULL-1')
                     """);
             statement.execute("""
+                    INSERT INTO archive.irb_protocol_version (
+                        protocol_id, protocol_base, protocol_number, document_number
+                    ) VALUES (7001, 'IRB-1', 'IRB-1-001', 'DOC-IRB-1')
+                    """);
+            statement.execute("""
                     INSERT INTO archive.proposal_person (
                         proposal_person_id, proposal_id, proposal_number,
                         sequence_number, person_id, full_name, contact_role_code
@@ -376,8 +381,9 @@ class ProposalRecordAuthorizationIntegrationTest {
         assertThat(counts.proposals()).isEqualTo(3);
         assertThat(counts.proposalHistoryRecords()).isEqualTo(4);
         assertThat(counts.documents())
-                .as("four PROPOSAL document numbers, nothing else in the fixture")
-                .isEqualTo(4);
+                .as("four PROPOSAL documents plus the one IRB document, which is "
+                        + "still counted while enforcement is off")
+                .isEqualTo(5);
     }
 
     @Test
@@ -389,7 +395,7 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isEqualTo(3);
         assertThat(counts.proposalHistoryRecords()).isEqualTo(4);
-        assertThat(counts.documents()).isEqualTo(4);
+        assertThat(counts.documents()).isEqualTo(5);
     }
 
     @Test
@@ -406,8 +412,9 @@ class ProposalRecordAuthorizationIntegrationTest {
                 .as("both CHEM-P1 versions, and neither of the other families")
                 .isEqualTo(2);
         assertThat(counts.documents())
-                .as("DOC-CHEM-1 and DOC-CHEM-2 only")
-                .isEqualTo(2);
+                .as("DOC-CHEM-1 and DOC-CHEM-2, plus the IRB document that "
+                        + "enforcement-off still counts")
+                .isEqualTo(3);
     }
 
     @Test
@@ -420,7 +427,7 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isEqualTo(1);
         assertThat(counts.proposalHistoryRecords()).isEqualTo(2);
-        assertThat(counts.documents()).isEqualTo(2);
+        assertThat(counts.documents()).isEqualTo(3);   // + the IRB document
     }
 
     @Test
@@ -432,7 +439,9 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isZero();
         assertThat(counts.proposalHistoryRecords()).isZero();
-        assertThat(counts.documents()).isZero();
+        assertThat(counts.documents())
+                .as("no Proposal documents; the IRB one remains while enforcement is off")
+                .isEqualTo(1);
     }
 
     @Test
@@ -447,7 +456,7 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isEqualTo(1);
         assertThat(counts.proposalHistoryRecords()).isEqualTo(2);
-        assertThat(counts.documents()).isEqualTo(2);
+        assertThat(counts.documents()).isEqualTo(3);   // + the IRB document
     }
 
     @Test
@@ -459,7 +468,9 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isZero();
         assertThat(counts.proposalHistoryRecords()).isZero();
-        assertThat(counts.documents()).isZero();
+        assertThat(counts.documents())
+                .as("no Proposal documents; the IRB one remains while enforcement is off")
+                .isEqualTo(1);
     }
 
     @Test
@@ -470,7 +481,9 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isZero();
         assertThat(counts.proposalHistoryRecords()).isZero();
-        assertThat(counts.documents()).isZero();
+        assertThat(counts.documents())
+                .as("no Proposal documents; the IRB one remains while enforcement is off")
+                .isEqualTo(1);
     }
 
     @Test
@@ -567,9 +580,9 @@ class ProposalRecordAuthorizationIntegrationTest {
                     .as("version-row count must equal the versions unit %s can open", unit)
                     .isEqualTo(versionsTheUserCanRetrieve);
             assertThat(counts.documents())
-                    .as("every fixture version carries one document number, so the "
-                            + "document tally must match the version count for unit %s", unit)
-                    .isEqualTo(versionsTheUserCanRetrieve);
+                    .as("every fixture version carries one document number, plus the "
+                            + "one IRB document enforcement-off still counts, for unit %s", unit)
+                    .isEqualTo(versionsTheUserCanRetrieve + 1);
         }
     }
 
@@ -588,7 +601,9 @@ class ProposalRecordAuthorizationIntegrationTest {
 
         assertThat(counts.proposals()).isEqualTo(1).isNotEqualTo(3);
         assertThat(counts.proposalHistoryRecords()).isEqualTo(1).isNotEqualTo(4);
-        assertThat(counts.documents()).isEqualTo(1).isNotEqualTo(4);
+        assertThat(counts.documents())
+                .as("one Proposal document plus the IRB one, not the archive-wide 5")
+                .isEqualTo(2).isNotEqualTo(5);
     }
 
     @Test
@@ -609,6 +624,156 @@ class ProposalRecordAuthorizationIntegrationTest {
         assertThat(counts.subawards()).isZero();
         assertThat(counts.negotiations()).isZero();
         assertThat(counts.proposals()).isEqualTo(1);
+    }
+
+    // --- IRB exclusion from the Dashboard (D9) ---------------------------
+
+    /*
+     * IRB has no record rule and will not get one. Rather than scope it,
+     * enforcement removes it from this shared surface entirely, exactly as
+     * shared Global Search already does - for EVERY caller, Central
+     * included. Two removals, because IRB reaches the response twice: its
+     * own four figures, and a branch of the single documents tally.
+     */
+
+    @Test
+    void irbFiguresAreOmittedNotZeroedWhenEnforcementIsOn() {
+        var counts = dashboardWithEnforcement(true, permissiveProposal());
+
+        assertThat(counts.irb())
+                .as("null, so the field leaves the JSON; 0 would assert the "
+                        + "archive holds no protocols, which is false")
+                .isNull();
+        assertThat(counts.submissions()).isNull();
+        assertThat(counts.fundingRecords()).isNull();
+        assertThat(counts.timelineEvents()).isNull();
+    }
+
+    @Test
+    void omittedIrbFiguresAreAbsentFromTheSerialisedResponse() throws Exception {
+        // The contract the UI and any other client actually sees.
+        String json = new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(dashboardWithEnforcement(true, permissiveProposal()));
+
+        assertThat(json)
+                .doesNotContain("\"irb\"")
+                .doesNotContain("\"submissions\"")
+                .doesNotContain("\"fundingRecords\"")
+                .doesNotContain("\"timelineEvents\"")
+                .as("the non-IRB figures must still be present")
+                .contains("\"proposals\"")
+                .contains("\"documents\"");
+    }
+
+    @Test
+    void theDocumentTallyCarriesNoIrbSubtotalWhenEnforcementIsOn() {
+        /*
+         * The leak that is easy to miss: documents is one number over five
+         * modules. Scoping the four figures while leaving the IRB branch in
+         * the union would keep an IRB subtotal inside a number the caller
+         * can see and cannot reconcile.
+         */
+        long withIrb = dashboardWithEnforcement(false, permissiveProposal()).documents();
+        long withoutIrb = dashboardWithEnforcement(true, permissiveProposal()).documents();
+
+        assertThat(withIrb)
+                .as("the fixture has 4 proposal documents and 1 IRB document")
+                .isEqualTo(5);
+        assertThat(withoutIrb)
+                .as("the IRB document must not be counted once enforcement is on")
+                .isEqualTo(4);
+    }
+
+    @Test
+    void irbIsExcludedForCentralToo() {
+        // Central is not an exception. The check reads the enforcement flag,
+        // never unrestricted(), so a Central caller is treated identically.
+        var counts = dashboardWithEnforcement(true, dashboardScope(
+                new AccessScope(true, Set.of(), Optional.empty(), Set.of()),
+                Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of("CHEM-P1", "PHYS-P1", "NULL-P1")));
+
+        assertThat(counts.irb()).isNull();
+        assertThat(counts.documents())
+                .as("Central still sees every Proposal document, and no IRB one")
+                .isEqualTo(4);
+        assertThat(counts.proposals()).isEqualTo(3);
+    }
+
+    @Test
+    void irbIsExcludedForEveryKindOfGrantEqually() {
+        record Case(String name, ProposalRecordAccess access) { }
+        List<Case> cases = List.of(
+                new Case("unit", dashboardScope(
+                        new AccessScope(false, Set.of(new UnitGrant("7777", false)),
+                                Optional.empty(), Set.of()),
+                        Set.of("7777"), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                        Set.of("CHEM-P1"))),
+                new Case("descendants", dashboardScope(
+                        new AccessScope(false, Set.of(new UnitGrant("7000", true)),
+                                Optional.empty(), Set.of()),
+                        Set.of("7000", "7777"),
+                        AuthorizationPolicy.DepartmentMatch.LEAD_UNIT_WITH_DESCENDANTS,
+                        Set.of("CHEM-P1"))),
+                new Case("research staff", dashboardScope(
+                        new AccessScope(false, Set.of(), Optional.of(CONTACT), Set.of()),
+                        Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                        Set.of("CHEM-P1"))),
+                new Case("no grant", dashboardScope(
+                        new AccessScope(false, Set.of(), Optional.empty(), Set.of()),
+                        Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT, Set.of())),
+                new Case("denied", denying()));
+
+        for (Case each : cases) {
+            var counts = dashboardWithEnforcement(true, each.access());
+            assertThat(counts.irb()).as("%s: irb", each.name()).isNull();
+            assertThat(counts.submissions()).as("%s: submissions", each.name()).isNull();
+            assertThat(counts.fundingRecords()).as("%s: fundingRecords", each.name()).isNull();
+            assertThat(counts.timelineEvents()).as("%s: timelineEvents", each.name()).isNull();
+        }
+    }
+
+    @Test
+    void enforcementOffLeavesEveryIrbFigureExactlyAsBefore() {
+        var counts = dashboardWithEnforcement(false, permissiveProposal());
+
+        // The four IRB count tables are empty in this fixture, so these are
+        // 0 - and 0 is exactly the value that must NOT appear once
+        // enforcement is on. "Present and zero" and "absent" are different
+        // statements, and this pair is what pins the difference.
+        assertThat(counts.irb()).isEqualTo(0L);
+        assertThat(counts.submissions()).isEqualTo(0L);
+        assertThat(counts.fundingRecords()).isEqualTo(0L);
+        assertThat(counts.timelineEvents()).isEqualTo(0L);
+        assertThat(counts.documents()).isEqualTo(5);
+    }
+
+    @Test
+    void enforcementOffStillSerialisesTheIrbFields() throws Exception {
+        String json = new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(dashboardWithEnforcement(false, permissiveProposal()));
+
+        assertThat(json)
+                .contains("\"irb\"")
+                .contains("\"submissions\"")
+                .contains("\"fundingRecords\"")
+                .contains("\"timelineEvents\"");
+    }
+
+    @Test
+    void excludingIrbDoesNotDisturbAnyNonIrbFigure() {
+        var off = dashboardWithEnforcement(false, permissiveProposal());
+        var on = dashboardWithEnforcement(true, permissiveProposal());
+
+        assertThat(on.awards()).isEqualTo(off.awards());
+        assertThat(on.awardHistoryRecords()).isEqualTo(off.awardHistoryRecords());
+        assertThat(on.proposals()).isEqualTo(off.proposals());
+        assertThat(on.proposalHistoryRecords()).isEqualTo(off.proposalHistoryRecords());
+        assertThat(on.negotiations()).isEqualTo(off.negotiations());
+        assertThat(on.subawards()).isEqualTo(off.subawards());
+        assertThat(on.documents())
+                .as("documents differs by exactly the one IRB document, nothing else")
+                .isEqualTo(off.documents() - 1);
     }
 
     private static ProposalArchiveService service(ProposalRecordAccess access) {
@@ -653,6 +818,108 @@ class ProposalRecordAuthorizationIntegrationTest {
                 provider(access),
                 null)
                 .counts();
+    }
+
+    /**
+     * The dashboard with the enforcement flag set explicitly, so the D9
+     * exclusion can be exercised in both directions. Everything but the
+     * Proposal port is PERMIT_ALL.
+     */
+    private static edu.bu.archive.adapter.in.web.dto.DashboardDto dashboardWithEnforcement(
+            boolean enforcementEnabled, ProposalRecordAccess access) {
+        var properties = new edu.bu.archive.application.authorization.AuthorizationProperties();
+        properties.setEnforcementEnabled(enforcementEnabled);
+        /*
+         * NOT the PERMIT_ALL constants. requireEnforceableWiring refuses to
+         * start when enforcement is on and a port is still the permissive
+         * default, which is exactly the guard working - so these stand-ins
+         * are distinct objects that happen to impose no predicate, leaving
+         * the Proposal port the only thing under test.
+         */
+        var award = new edu.bu.archive.application.authorization.AwardRecordAccess() {
+            @Override public SqlFragment awardScopeSql(String alias) {
+                return SqlFragment.NONE;
+            }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public boolean unrestricted() {
+                return true;
+            }
+
+            @Override public void requireAward(long awardId) { }
+
+            @Override public void requireAwardNumber(String awardNumber) { }
+
+            @Override public void requireEveryAwardVersion(String awardNumber) { }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return true;
+            }
+        };
+        var subaward = new edu.bu.archive.application.authorization.SubawardRecordAccess() {
+            @Override public SqlFragment subawardScopeSql(String alias) {
+                return SqlFragment.NONE;
+            }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public boolean unrestricted() {
+                return true;
+            }
+
+            @Override public void requireSubaward(long subawardId) { }
+
+            @Override public boolean canSeeSubaward(long subawardId) {
+                return true;
+            }
+
+            @Override public boolean canSeeAward(long awardId) {
+                return true;
+            }
+        };
+        var negotiation = new edu.bu.archive.application.authorization.NegotiationRecordAccess() {
+            @Override public SqlFragment negotiationScopeSql(String alias) {
+                return SqlFragment.NONE;
+            }
+
+            @Override public void requireProvisioned() { }
+
+            @Override public boolean unrestricted() {
+                return true;
+            }
+
+            @Override public void requireNegotiation(long negotiationId) { }
+
+            @Override public boolean canSeeNegotiation(long negotiationId) {
+                return true;
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return true;
+            }
+
+            @Override public boolean canSeeProposalNumber(String proposalNumber) {
+                return true;
+            }
+        };
+
+        return new edu.bu.archive.application.service.DashboardService(
+                jdbcClient,
+                provider(award),
+                provider(subaward),
+                provider(negotiation),
+                provider(access),
+                provider(properties))
+                .counts();
+    }
+
+    /**
+     * Permissive, but NOT the PERMIT_ALL constant - the startup guard
+     * refuses that combination once enforcement is on, by design.
+     */
+    private static ProposalRecordAccess permissiveProposal() {
+        return new BaseAccess() { };
     }
 
     /** A Proposal scope rendered for the dashboard's own alias. */
