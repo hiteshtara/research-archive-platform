@@ -224,14 +224,18 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_db_tunnel" {
 # CannotPullContainerError. Reading the live definition is self-maintaining
 # and can only ever name an image that is actually deployed. Mirrors the
 # api_live pattern in main.tf.
+#
+# Only consulted when var.db_tunnel_image is null. Pinning the image skips
+# these reads entirely, which is the point: the data source is what couples
+# this task definition to the loader's deploy cadence.
 data "aws_ecs_task_definition" "loader_live" {
-  count = var.manage_db_tunnel_access ? 1 : 0
+  count = var.manage_db_tunnel_access && var.db_tunnel_image == null ? 1 : 0
 
   task_definition = module.loader_ecs.task_definition_family
 }
 
 data "aws_ecs_container_definition" "loader_live" {
-  count = var.manage_db_tunnel_access ? 1 : 0
+  count = var.manage_db_tunnel_access && var.db_tunnel_image == null ? 1 : 0
 
   task_definition = data.aws_ecs_task_definition.loader_live[0].id
   container_name  = "loader"
@@ -253,8 +257,10 @@ resource "aws_ecs_task_definition" "db_tunnel" {
   execution_role_arn = module.loader_ecs.execution_role_arn
 
   container_definitions = jsonencode([{
-    name      = "tunnel"
-    image     = data.aws_ecs_container_definition.loader_live[0].image
+    name = "tunnel"
+    # Pinned when var.db_tunnel_image is set; otherwise whatever the loader
+    # is currently running. See that variable for why pinning is preferred.
+    image     = var.db_tunnel_image != null ? var.db_tunnel_image : data.aws_ecs_container_definition.loader_live[0].image
     essential = true
 
     # A hard ceiling on a forgotten task, independent of the Mac. If the

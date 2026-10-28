@@ -472,6 +472,19 @@ variable "manage_db_tunnel_access" {
   default     = false
 }
 
+variable "db_tunnel_image" {
+  description = "Fully-qualified, digest-pinned image for the tunnel container, e.g. \"<acct>.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:...\". Pin this so that deploying a new ETL loader revision does not replace the tunnel task definition as a side effect - the two have nothing to do with each other. The digest MUST also carry a \"protected-\" tag in ECR, or lifecycle rule 2 (\"keep the latest 20\") will eventually expire it and the tunnel will fail with CannotPullContainerError. When null, falls back to reading the live loader task definition, which is the historical behaviour and keeps working, at the cost of that coupling."
+  type        = string
+  default     = null
+
+  validation {
+    # Tags in this repository are MUTABLE, so a tag is not a stable
+    # reference. Require a digest.
+    condition     = var.db_tunnel_image == null || can(regex("@sha256:[0-9a-f]{64}$", var.db_tunnel_image))
+    error_message = "db_tunnel_image must be pinned by digest (…@sha256:<64 hex>), not by tag - image tags in this account are mutable."
+  }
+}
+
 variable "db_tunnel_max_session_seconds" {
   description = "Hard ceiling on one tunnel task, enforced by the container's own sleep command. Independent of the operator's Mac: if the laptop sleeps or the shell dies before the stop call, the task still exits by itself. Defaults to 3600 (one hour), which matches the account-wide Session Manager idleSessionTimeout."
   type        = number
