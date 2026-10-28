@@ -362,6 +362,17 @@ resource "aws_ecs_task_definition" "api" {
     }
   }
 
+  # Keep superseded revisions ACTIVE so a rollback can point the service
+  # straight back at one. Without this, replacing this resource
+  # DEREGISTERS the old revision and the documented "roll back to
+  # revision 81" is not possible - confirmed on 2026-10-28, when
+  # replacing the db tunnel's task definition left its revision 1
+  # INACTIVE. Deregistered revisions cannot be run.
+  #
+  # Only affects destroy behaviour, so old revisions simply accumulate.
+  # They cost nothing.
+  skip_destroy = true
+
   family                   = "${var.project_name}-${var.environment}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
