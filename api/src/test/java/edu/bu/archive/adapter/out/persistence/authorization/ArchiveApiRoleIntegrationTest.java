@@ -94,8 +94,7 @@ class ArchiveApiRoleIntegrationTest {
          * stands in for archive_admin). Everything else runs verbatim, so a
          * mistake in the real file fails here.
          */
-        String script = Files.readString(locateRoleScript())
-                .replace("\\set ON_ERROR_STOP on", "")
+        String script = stripPsqlMetaCommands(Files.readString(locateRoleScript()))
                 .replace(":'archive_api_password'", "'" + API_PASSWORD + "'")
                 .replace("FOR ROLE archive_admin", "FOR ROLE " + postgres.getUsername())
                 .replace("GRANT CONNECT ON DATABASE research_archive",
@@ -376,6 +375,35 @@ class ArchiveApiRoleIntegrationTest {
         }
     }
 
+    @Test
+    void theScriptRefusesToProceedIfTheRoleHasADangerousAttribute() throws Exception {
+        /*
+         * The script asserts rather than ALTERs, because turning an
+         * attribute off requires holding it: archive_admin cannot remove
+         * SUPERUSER, REPLICATION or BYPASSRLS. A blanket ALTER ROLE looked
+         * like it reasserted safety and in fact failed outright against
+         * real DEV. Prove the assertion that replaced it actually fires.
+         */
+        asOwner("ALTER ROLE archive_api CREATEDB");
+        try {
+            String script = stripPsqlMetaCommands(Files.readString(locateRoleScript()))
+                    .replace(":'archive_api_password'", "'" + API_PASSWORD + "'")
+                    .replace("FOR ROLE archive_admin", "FOR ROLE " + postgres.getUsername())
+                    .replace("GRANT CONNECT ON DATABASE research_archive",
+                             "GRANT CONNECT ON DATABASE " + postgres.getDatabaseName());
+            assertThatThrownBy(() -> asOwner(script))
+                    .hasMessageContaining("attributes it must not have")
+                    .hasMessageContaining("CREATEDB");
+        } finally {
+            // The script opens its own BEGIN, so the failure leaves this
+            // connection in an aborted transaction. Clear it before the
+            // next statement, or every later test on this connection
+            // fails with "current transaction is aborted".
+            asOwner("ROLLBACK");
+            asOwner("ALTER ROLE archive_api NOCREATEDB");
+        }
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────
 
     private static void asApi(String sql) throws SQLException {
@@ -388,6 +416,19 @@ class ArchiveApiRoleIntegrationTest {
         try (Statement s = owner.createStatement()) {
             s.execute(sql);
         }
+    }
+
+    /**
+     * Drops psql meta-command lines (those beginning with a backslash).
+     * They are not SQL and JDBC cannot execute them: {@code \set},
+     * {@code \o}. {@code \o /dev/null} only suppresses terminal output, so
+     * removing it changes nothing about what the script does to the
+     * database - it just means this test sees the row psql would hide.
+     */
+    private static String stripPsqlMetaCommands(String sql) {
+        return sql.lines()
+                .filter(line -> !line.stripLeading().startsWith("\\"))
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private static int migrationVersion(Path path) {

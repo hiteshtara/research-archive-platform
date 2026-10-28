@@ -24,7 +24,16 @@ BEGIN;
 -- Bridge the psql variable into a run-time setting. psql does NOT expand
 -- :'variables' inside a dollar-quoted block, so the DO below cannot read
 -- one directly; set_config is evaluated out here, where it can.
+--
+-- Output is silenced because set_config RETURNS the value it sets, and
+-- psql would print the password to the terminal - and therefore into
+-- whatever is capturing that terminal. Learned the hard way on
+-- 2026-10-28, when a DEV run echoed a freshly generated credential and
+-- it had to be discarded and regenerated. Errors go to stderr and are
+-- unaffected.
+\o /dev/null
 SELECT set_config('archive_api.password', :'archive_api_password', true);
+\o
 
 -- ─────────────────────────────────────────────────────────────────────
 -- 1. The role
@@ -47,10 +56,42 @@ BEGIN
 END
 $$;
 
--- Reassert the attributes even on an existing role, so a hand-edited role
--- cannot quietly keep a privilege it should not have.
-ALTER ROLE archive_api
-    NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+-- Assert, rather than reassert, the attributes.
+--
+-- ALTER ROLE cannot be used here. To turn an attribute OFF you must hold
+-- it yourself: removing SUPERUSER needs SUPERUSER, removing REPLICATION
+-- needs REPLICATION, and so on. The owner that runs this script
+-- (archive_admin) holds CREATEDB and CREATEROLE but not SUPERUSER,
+-- REPLICATION or BYPASSRLS, so a blanket
+--   ALTER ROLE archive_api NOSUPERUSER ... NOBYPASSRLS;
+-- fails outright - confirmed against DEV on 2026-10-28 and reproduced in
+-- a throwaway container. CREATE ROLE with the same NO* list is fine,
+-- because it changes nothing from the defaults.
+--
+-- So: verify, and fail loudly naming what a superuser must fix. That is
+-- strictly better than an ALTER that silently could not have worked.
+DO $$
+DECLARE
+    bad text;
+BEGIN
+    SELECT string_agg(attr, ', ') INTO bad
+      FROM (
+        SELECT 'SUPERUSER'   AS attr FROM pg_roles WHERE rolname='archive_api' AND rolsuper
+        UNION ALL SELECT 'CREATEDB'    FROM pg_roles WHERE rolname='archive_api' AND rolcreatedb
+        UNION ALL SELECT 'CREATEROLE'  FROM pg_roles WHERE rolname='archive_api' AND rolcreaterole
+        UNION ALL SELECT 'REPLICATION' FROM pg_roles WHERE rolname='archive_api' AND rolreplication
+        UNION ALL SELECT 'BYPASSRLS'   FROM pg_roles WHERE rolname='archive_api' AND rolbypassrls
+        UNION ALL SELECT 'INHERIT'     FROM pg_roles WHERE rolname='archive_api' AND rolinherit
+      ) t;
+
+    IF bad IS NOT NULL THEN
+        RAISE EXCEPTION
+          'archive_api holds attributes it must not have: %. Removing them '
+          'requires a role that holds each attribute (SUPERUSER for '
+          'SUPERUSER, and so on). Fix with a superuser, then re-run.', bad;
+    END IF;
+END
+$$;
 
 GRANT CONNECT ON DATABASE research_archive TO archive_api;
 
