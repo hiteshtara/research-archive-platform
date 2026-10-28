@@ -44,6 +44,72 @@ Two further constraints, both previously established:
 
 ---
 
+## 0b. Terraform drift found — fix this BEFORE any apply
+
+A complete untargeted plan was run against DEV with the live tfvars
+(2026-10-28, read-only, no apply). It was **not** clean:
+
+```
+Plan: 0 to add, 0 to change, 9 to destroy.
+```
+
+All nine are the SSM DB tunnel stack — `aws_ecs_cluster.db_tunnel`,
+`aws_ecs_task_definition.db_tunnel`, `aws_security_group.db_tunnel`,
+`aws_vpc_endpoint.ssmmessages`, `aws_cloudwatch_log_group.db_tunnel`,
+`aws_iam_role.db_tunnel_task`, `aws_iam_role_policy.db_tunnel_task_ssm`,
+`aws_iam_policy.db_tunnel_operator`,
+`aws_vpc_security_group_ingress_rule.database_from_db_tunnel` — each
+*"because index [0] is out of range for count"*.
+
+**Cause:** `var.manage_db_tunnel_access` defaults to `false` and is absent
+from the live `terraform.tfvars`, while all nine resources exist in AWS and
+in state. They were created by an apply whose toggle was never written back.
+This is pre-existing drift, unrelated to `archive_api`.
+
+**Consequence:** an untargeted apply would destroy the DBeaver / psql access
+path to dev RDS — including the one used to verify this very rollout.
+
+**Fix — reconcile, do not hide it behind `-target`:**
+
+```hcl
+# terraform/environments/dev/terraform.tfvars  (untracked)
+manage_db_tunnel_access = true
+```
+
+Verified: with that one line the nine destroys disappear.
+
+### The one change that remains, and why it is expected
+
+```
+Plan: 1 to add, 0 to change, 1 to destroy.
+# aws_ecs_task_definition.db_tunnel[0] must be replaced
+```
+
+The tunnel task definition deliberately reads its image **from the live
+loader task definition** rather than composing one from a tag — see the
+comment at `db_tunnel.tf:218-225`, which exists because `loader_image_tag`
+is unset and `latest` does not exist in that repository. Loader revision
+254 was registered on 2026-10-28 (the `linux/amd64` rebuild), so the data
+source now returns
+`…dev-loader@sha256:983bab23…` (tag `20261028T163450Z-cead763-amd64`)
+instead of the digest behind `20260923T163946Z-443e507`.
+
+So this is the configuration working as designed, following a deliberate
+image change forward. It replaces an **ephemeral** task definition that is
+launched per session. Accept it, or pin it, but know what it is.
+
+### Baseline for this rollout
+
+```
+terraform plan -target=module.api_service   →  No changes.
+```
+
+`api_image_tag` already matches what is live, so the image rollback guard
+will not block the plan, and the secrets repoint will be the **only**
+difference this rollout introduces.
+
+---
+
 ## 1. Generate the credential and create the secret
 
 Never echoed, never in `argv`, never in shell history.
