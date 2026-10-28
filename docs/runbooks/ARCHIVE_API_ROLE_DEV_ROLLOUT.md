@@ -354,7 +354,7 @@ Then, in order:
 > secrets repoint would have deregistered revision 81 and destroyed the
 > rollback target this document names.
 
-### Prerequisite 1 — make revision 81 survive
+### Prerequisite 1 — make revision 81 survive: **DONE 2026-10-28**
 
 `skip_destroy = true` on `aws_ecs_task_definition.api` keeps superseded
 revisions `ACTIVE`. Verified by plan to be an **in-place update**, not a
@@ -368,7 +368,7 @@ Plan: 0 to add, 1 to change, 0 to destroy.
 **Apply it before the credential cutover, not with it** — two changes in
 one apply means a failure is not attributable.
 
-### Prerequisite 2 — protect the known-good image
+### Prerequisite 2 — protect the known-good image: **DONE 2026-10-28**
 
 `modules/api_ecr` had only a "keep the latest 20" rule and **no
 `protected-*` exemption**, unlike the loader repository — which gained one
@@ -391,8 +391,21 @@ protected-20261006T182647Z-b10e4e3
   -> sha256:4b74cdbc2fc7ed3bf47260f53031df6a5c0accfa3c06607c63fa8ccb37216ce3
 ```
 
-Both prerequisites are prepared in **PR #86's successor,
-`fix/api-rollback-safety`**, and are not applied.
+**Both prerequisites are applied** (PR #88, merged `b97d990`):
+
+| | |
+|---|---|
+| `skip_destroy` | `false → true`, in place; revision stayed **81**, service never redeployed |
+| API ECR policy | priority 1 `protected-*` (36500 days), priority 2 keep-20 |
+| Protected tag | `protected-20261006T182647Z-b10e4e3` → `sha256:4b74cdbc…` |
+| Duplicate manifest | none — repository still 27 entries |
+| Lifecycle preview | 4 images expire, all rule 2; **the protected image is excluded** |
+| Follow-up plan | **No changes** |
+| API throughout | `dev-api:81`, 1/1, task running since 2026-10-22 (never restarted), `/actuator/health` → 200 `{"status":"UP"}`, ALB target healthy |
+
+Rollback A is therefore the live path: revision 81 is `ACTIVE` and its
+image is protected from the lifecycle sweep. Rollback B remains documented
+for the case where some future replacement predates `skip_destroy`.
 
 ### Known-good baseline, recorded 2026-10-28
 
