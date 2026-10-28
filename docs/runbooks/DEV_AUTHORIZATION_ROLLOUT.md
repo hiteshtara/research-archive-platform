@@ -42,9 +42,22 @@ apply and report success. That is the shape of the V076 incident of
 | Source commit | `cead763957b4b5ef929ffa7849d0af40ffe301c2` | same |
 | Dockerfile | `etl/Dockerfile.loader` | `api/Dockerfile` |
 
-> ⛔ **Neither image has been pushed to ECR.** A push is a gated action and
-> needs explicit approval. The tags above are local; the ECR digest can only
-> be recorded after a push.
+### ✅ Pushed to ECR 2026-10-28, with owner approval
+
+| | Loader | API |
+|---|---|---|
+| ECR digest | `sha256:1dcb39ed5ddefcdda63c3c8087e57ca6a6dc1d59e0dd7be5e08c9bb1bac93011` | `sha256:5c9bc0d4636464c29a77954ecb3f4fbcb1f4312ac979da030730f1313baf0895` |
+| Pushed | 11:15:12 EDT | 11:15:47 EDT |
+| Size | 115 MiB | 180 MiB |
+
+The ECR manifest digest equals the local image id in both cases. Neither tag
+existed beforehand, so **nothing was overwritten** — both repositories are
+MUTABLE, so that was checked rather than assumed. The loader was pulled back
+**by digest** and re-verified to still contain all five migrations after the
+round trip.
+
+**No task definition was registered and no service was updated.** Publishing
+an image changes nothing that runs.
 
 #### Loader image — verified contents
 
@@ -170,6 +183,46 @@ not over the analyst tunnel.
 > `apply_migrations` logs and continues; only V073 is whitelisted as an
 > intentional gap, so V081 reports. Harmless.
 
+### The V081 gap — investigated 2026-10-28
+
+| Question | Answer |
+|---|---|
+| **Why absent?** | Reserved by `feat/award-amount-dates-v081` (commit `6ae107d`, WIP, **unmerged**), which adds `V081__add_award_amount_dates_and_tnm_status.sql` |
+| **Does it interact with V082–V086?** | **No.** It touches `archive.award_*` only — **zero** references to `authz`, `identity_link` or `access_grant` |
+| **Warning or error?** | **Warning.** `apply_migrations` calls `logger.warning` and continues; there is no raise. Only V073 is whitelisted in `INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS`, so V081 reports on every run |
+| **Correct order?** | **Yes.** `discover_migrations` sorts by integer version (`migrations.sort(key=lambda item: item[0])`), so V082→V083→V084→V085→V086 regardless of filesystem order |
+| **Recorded transactionally?** | **Yes.** The DDL and the `INSERT INTO public.schema_migration` run on one connection and commit together; any exception rolls both back and re-raises. PostgreSQL has transactional DDL, so a migration cannot be applied without being recorded, or recorded without being applied |
+
+#### ⚠️ Can a partial failure be reported as success?
+
+**A failure, no.** Each migration is its own transaction; an exception rolls
+it back and propagates, and the task exits non-zero. If V082–V084 succeed and
+V085 fails, the first three stay committed, the run fails loudly, and
+re-running skips what is already applied.
+
+**A no-op, yes — and that is the real risk.** If the image does not contain
+the migration files, `discover_migrations` finds nothing, the loop does
+nothing, and the run reports success having applied nothing. That is exactly
+the V076 incident of 2026-08-14, and exactly why the loader image had to be
+rebuilt first. **Always read the applied-version list back; never infer
+success from a zero exit code.**
+
+#### Verifying applied versions with the execution role
+
+`public.schema_migration` is readable only by the **master credential the
+loader resolves from `POSTGRES_SECRET_ID`** — `archive_analyst` gets
+*permission denied*, confirmed on 2026-10-28.
+
+```sql
+-- as the migration role, inside the loader task
+SELECT version, description, file_name, applied_at
+  FROM public.schema_migration ORDER BY version;
+-- expect a contiguous run ending at 86, with 73 and 81 absent
+```
+
+From the analyst tunnel the *existence* of the objects can still be confirmed
+via `pg_catalog`, which is privilege-independent — see below.
+
 ### Post-migration read-only verification
 
 Through the analyst tunnel, as `archive_analyst`:
@@ -177,9 +230,14 @@ Through the analyst tunnel, as `archive_analyst`:
 ```sql
 SELECT current_database(), current_user;        -- research_archive | archive_analyst
 SHOW transaction_read_only;                      -- on
-SELECT count(*) FROM information_schema.tables WHERE table_schema='authz';  -- 8
-SELECT count(*) FROM authz.access_grant;         -- 0
-SELECT count(*) FROM authz.admin_role_member;    -- 0
+
+-- pg_catalog, NOT information_schema. information_schema.tables lists only
+-- tables the CURRENT user holds a privilege on, and archive_analyst is
+-- granted nothing on authz - so it would report 0 and look like a failed
+-- migration. pg_class is visible regardless of privilege.
+SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'authz' AND c.relkind = 'r';  -- expect 8
+
 SELECT count(*) FROM archive.award_version;      -- unchanged from before
 ```
 
