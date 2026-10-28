@@ -393,6 +393,28 @@ resolver denies ambiguity anyway. That is the correct shape against all four
 risks above. The same file records that **which BU attribute supplies the
 institutional identifier is not yet decided (awaiting BU IAM)**.
 
+> ## ⚠️ Correction — 2026-10-27: KRIM status is not an access control
+>
+> This document was written while the design still treated Kuali KRIM as a
+> live authorization source. **That model is withdrawn.** The Research
+> Archive is a read-only historical archive of a retired system, not a
+> continuously synchronized Kuali authorization system.
+>
+> What changed, and what it means for the passages below:
+>
+> | Previously stated | Now |
+> |---|---|
+> | An inactive KRIM principal is denied (T-019, Part D's D3 mitigation) | **Historical `ACTV_IND` never revokes an administrator-verified link.** 61% of principals referenced by archived records are already inactive in KRIM; denying them would deny most legitimate users |
+> | Option B, a KRIM snapshot with revocation synchronisation, is a candidate | **Rejected.** Current access is administrator-managed: `authz.identity_link`, `access_grant`, `person_status`, and ARCHIVE_ADMIN |
+> | A stale snapshot grants revoked access (SEC-006 risk) | Still true of the *rejected* design, and no longer a risk the archive carries — there is no snapshot in the authorization path |
+>
+> Still correct, and unchanged: suspension and link revocation deny
+> regardless of grants; contact derivation must be an explicit grant rather
+> than an implicit rule; revocation takes effect on the next request.
+>
+> Authority: [`IDENTITY_AUTHORIZATION_ARCHITECTURE.md`](IDENTITY_AUTHORIZATION_ARCHITECTURE.md).
+> Everything below is retained as the analysis that led here.
+
 ## Part F — Authorization source comparison
 
 ### A. Direct read-only evaluation of current Kuali KRIM
@@ -408,7 +430,7 @@ institutional identifier is not yet decided (awaiting BU IAM)**.
   archive access.
 - **Verdict:** rejected on availability and charter, not on correctness.
 
-### B. Controlled KRIM snapshot with revocation synchronisation
+### B. Controlled KRIM snapshot with revocation synchronisation — ⛔ REJECTED 2026-10-27
 
 - **Correctness:** good *if* the refresh is frequent and revocation-aware. The
   schema makes this tractable: a refresh must re-evaluate `ACTV_IND` on
@@ -686,7 +708,7 @@ Derived from Anthony's own fixtures where supplied.
 | T-016 | identity | Suspend via `person_status` | Immediate denial regardless of grants |
 | T-017 | identity | Two ACTIVE `identity_link` rows for one Cognito sub | Denied as ambiguous; index prevents the write |
 | T-018 | identity | Shibboleth user absent from `archive.person` | Denied with a distinguishable reason, not a 500 |
-| T-019 | identity | `KRIM_PRNCPL_T.ACTV_IND='N'` principal | Denied |
+| T-019 | identity | `KRIM_PRNCPL_T.ACTV_IND='N'` principal with an administrator-verified link and a grant | **Allowed** — see the correction note above |
 | T-020 | regression | All of the above with enforcement flag **off** | Current behaviour unchanged |
 
 ---
@@ -798,8 +820,10 @@ D3 is still implementable, but only because the owner attached the
 qualifier. The mitigation has to carry the whole weight:
 
 - **Identity status gates it.** `authz.person_status.suspended` and
-  `identity_link.status = 'REVOKED'` deny regardless of contact rows, and
-  `KRIM_PRNCPL_T.ACTV_IND = 'N'` should too.
+  `identity_link.status = 'REVOKED'` deny regardless of contact rows.
+  ~~and `KRIM_PRNCPL_T.ACTV_IND = 'N'` should too~~ — **withdrawn
+  2026-10-27**; historical KRIM status is not an access control. See the
+  correction note above.
 - **Contact derivation must be a grant, not an implicit rule.**
   `access_grant.grant_type = 'CONTACT_DERIVATION'` with `valid_from` /
   `expires_at` / `revoked_at` lets an administrator switch a person's
