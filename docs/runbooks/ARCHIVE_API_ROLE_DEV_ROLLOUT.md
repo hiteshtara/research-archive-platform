@@ -209,6 +209,24 @@ differently from the suite.
 
 ---
 
+## 3b. What the existing roles keep
+
+`archive_api_role.sql` contains no `ALTER ROLE`, `REVOKE` or `DROP`
+touching any role but `archive_api` — grep it. Specifically:
+
+| Role | Used for | Effect of this rollout |
+|---|---|---|
+| `archive_admin` | ETL migrations (`--migrate-only`), schema ownership | **none.** Still the owner; still the only role that can run migrations. The loader keeps its own secret and its own task definition |
+| `archive_analyst` | DBeaver / psql read-only over the SSM tunnel | **none.** Not referenced by the script at all |
+| `archive_api` | the API, and nothing else | created |
+
+The one interaction worth stating: `ALTER DEFAULT PRIVILEGES FOR ROLE
+archive_admin IN SCHEMA archive` changes what *future* `archive_admin`-created
+tables grant to `archive_api`. It grants `archive_admin` nothing and takes
+nothing away.
+
+---
+
 ## 4. Repoint the API — in Terraform
 
 In `terraform/environments/dev/main.tf`, the `module "api_service"` block:
@@ -232,6 +250,42 @@ with a new `var.api_database_secret_arn`, set in the operator's untracked
 This needs **no module change**: `merge` puts `additional_secrets` last, so
 these five override `base_secrets`, and the execution role picks up the new
 ARN automatically through `local.additional_secret_arns`.
+
+### Resulting ECS container-definition diff
+
+Only the five `valueFrom` values change. No image change, no environment
+change, no command change, no role change:
+
+```diff
+   "secrets": [
+-    {"name":"POSTGRES_DB",      "valueFrom":".../dev/postgres-4k6Ngz:dbname::"},
+-    {"name":"POSTGRES_HOST",    "valueFrom":".../dev/postgres-4k6Ngz:host::"},
+-    {"name":"POSTGRES_PASSWORD","valueFrom":".../dev/postgres-4k6Ngz:password::"},
+-    {"name":"POSTGRES_PORT",    "valueFrom":".../dev/postgres-4k6Ngz:port::"},
+-    {"name":"POSTGRES_USER",    "valueFrom":".../dev/postgres-4k6Ngz:username::"}
++    {"name":"POSTGRES_DB",      "valueFrom":".../dev/postgres-api-XXXXXX:dbname::"},
++    {"name":"POSTGRES_HOST",    "valueFrom":".../dev/postgres-api-XXXXXX:host::"},
++    {"name":"POSTGRES_PASSWORD","valueFrom":".../dev/postgres-api-XXXXXX:password::"},
++    {"name":"POSTGRES_PORT",    "valueFrom":".../dev/postgres-api-XXXXXX:port::"},
++    {"name":"POSTGRES_USER",    "valueFrom":".../dev/postgres-api-XXXXXX:username::"}
+   ]
+```
+
+`image` stays `…dev-api:20261006T182647Z-b10e4e3`, the revision 81 image.
+**Record-level enforcement stays OFF** — it is not set here, and its
+property defaults to `false`.
+
+And the IAM policy gains one ARN:
+
+```diff
+   "Resource": [
+       ".../secret:research-archive-platform/dev/postgres-4k6Ngz"
++  ,   ".../secret:research-archive-platform/dev/postgres-api-XXXXXX"
+   ]
+```
+
+Both ARNs are present during cutover — deliberate, so rollback needs no IAM
+change. Narrowing to the new one alone is §7, after the soak.
 
 ```sh
 terraform plan -target=module.api_service
