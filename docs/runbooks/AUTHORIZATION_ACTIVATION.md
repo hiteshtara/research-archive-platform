@@ -167,15 +167,90 @@ confirmed which attribute that is. Three options, for the owner to choose:
 **Recommendation: B for dev**, recorded as provisional, with the re-keying
 step written down now rather than discovered later.
 
-#### ⛔ Blocker: there is no operator path to invoke it
+#### ✅ The operator path now exists
 
-`bootstrapFirstAdministrator` exists in `ArchiveAdminService` and is called by
-**nothing but tests**. There is no CLI, no `CommandLineRunner`, no script on
-`main` (PR #16, a stale stacked draft, mentions an admin CLI that never
-landed). Deliberately, there is also no HTTP endpoint.
+`ArchiveAdminBootstrapCli`, an `ApplicationRunner` behind the
+**`bootstrap-admin`** Spring profile, which no deployment sets. Not an HTTP
+endpoint and it cannot become one by accident: no request-mapping annotation,
+outside `adapter/in/web`, and a test asserts all of that.
 
-**So the bootstrap cannot be performed today even if the identifier were
-settled.** Building that operator path is the next engineering task.
+**Default is a dry run.** Writing requires `--confirm`, so forgetting a flag
+produces the safe outcome rather than an administrator.
+
+```
+SPRING_PROFILES_ACTIVE=bootstrap-admin \
+java -jar app.jar --spring.main.web-application-type=none \
+  --aws-account-id=770203350335 \
+  --environment=dev \
+  --cognito-user-pool-id=us-east-1_VJ4ekQ27c \
+  --cognito-issuer=https://cognito-idp.us-east-1.amazonaws.com/us-east-1_VJ4ekQ27c \
+  --cognito-subject=b438a418-d0a1-7071-2169-023a374a4038 \
+  --institutional-identifier='<THE APPROVED VALUE - see D-ID-2(c)>' \
+  --login-name=BUShibboleth_mukadder@bu.edu \
+  --operator='<the person running this>' \
+  --reason='Approved by the project owner 2026-10-28, dev only' \
+  [--accept-provisional-identifier] \
+  [--confirm]
+```
+
+Run it **without `--confirm` first**. Exit status is 0 for a passing dry run
+or a completed bootstrap, 1 for a refusal.
+
+#### What it validates before writing anything
+
+| Check | Refuses when |
+|---|---|
+| AWS account | does not match the environment it is running in |
+| Environment | does not match — and **production is refused outright** |
+| Cognito user pool | does not match |
+| Cognito issuer | is not the one **derived from** that pool, so a typo in either shows up here rather than as a link that can never resolve |
+| Cognito subject | is not a well-formed immutable `sub` UUID — a username, email or NameID in that field is caught |
+| Institutional identifier | is missing; or is the Cognito subject (a Cognito artefact, not a BU identity); or is email-shaped **without** `--accept-provisional-identifier` |
+| Operator and reason | either is missing — an unexplained audit row is a poor audit row |
+| Existing administrator | one is already active |
+
+Nothing is derived, looked up, or read from a token. **The institutional
+identifier must be typed by the operator** — D-ID-2(c), still open.
+
+#### Prerequisites
+
+1. V082–V084 applied to the target database (stage 1).
+2. A deployed artefact containing this code — the running image predates it.
+3. Database credentials for the target environment.
+4. **D-ID-2(c) answered**: what value the institutional identifier takes.
+
+#### Rollback
+
+- **Dry run**: nothing to roll back; it writes nothing, not even an audit row.
+- **After a successful bootstrap**: appoint a second administrator through the
+  API, then revoke the first through the API. The last-administrator guard
+  refuses to reach zero, so recovering from "wrong first administrator" means
+  adding the right one first.
+- **Deleting the row directly** is a last resort and leaves the audit trail
+  asserting something no longer true. `authz.access_audit` is append-only by
+  trigger, so the bootstrap event cannot be erased either way.
+
+#### Audit evidence to keep
+
+```sql
+SELECT institutional_identifier, status, granted_by, granted_at, reason
+  FROM authz.admin_role_member;          -- 1 ACTIVE, granted_by = 'BOOTSTRAP'
+SELECT actor, action, occurred_at, detail
+  FROM authz.access_audit ORDER BY audit_id;
+  -- ADMIN_ROLE_BOOTSTRAPPED (detail names the operator), then IDENTITY_LINKED
+SELECT COUNT(*) FROM authz.access_grant; -- 0
+```
+
+#### ⚠️ A concurrency hole was found and fixed on the way
+
+`JdbcAdminRoleRepository.bootstrap` guarded itself with
+`SELECT … WHERE status='ACTIVE' FOR UPDATE`. **That locks nothing when the
+table is empty**, which is exactly when bootstrap runs — four concurrent
+attempts produced **four administrators**. The unique index would have stopped
+two rows for the *same* identity, but not two different first administrators.
+Now serialised with `pg_advisory_xact_lock`, which holds on a value rather
+than on rows. The revoke path keeps its row lock: there, rows exist by
+definition.
 
 #### The procedure, once both blockers clear
 
@@ -442,7 +517,7 @@ asserted:
 |---|---|
 | **D-ID-3** — which BU attribute is the institutional identifier (BU IAM) | stages 2–6 |
 | ~~**D-ID-2(a)** — who the first administrator is~~ — **answered 2026-10-28** | — |
-| **D-ID-2(b)** — no operator path exists to call `bootstrapFirstAdministrator`: no CLI, no runner, no script on main | **the bootstrap itself** |
+| ~~**D-ID-2(b)** — no operator path exists~~ — **built 2026-10-28**, dry-run by default, PR open | — |
 | **D-ID-2(c)** — which value goes in `institutional_identifier`, pending D-ID-3 | the bootstrap itself |
 | ~~**D2** — unscoped Proposal Dashboard count~~ | **closed 2026-10-27** |
 | **D9** — IRB Dashboard figures stay archive-wide while IRB is hidden from shared search | stage 6 (decision, not a fix) |
