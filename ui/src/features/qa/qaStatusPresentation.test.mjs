@@ -508,9 +508,14 @@ test("Phase 1 statuses for SEC-005, SEC-006, SEC-008 and SEC-009 are preserved",
   // The administrative service shipped in #56 and IS in the running API.
   assert.equal(byId["SEC-005"].status.mergedToMain, "yes");
   assert.equal(byId["SEC-005"].status.deployed, "yes");
-  // SEC-006 spans a merged PR and work proven later; partial is the honest value.
-  assert.equal(byId["SEC-006"].status.mergedToMain, "partial");
-  assert.equal(byId["SEC-006"].status.deployed, "partial");
+  /*
+   * SEC-006 was "partial" because there was no API surface to revoke through.
+   * PR #74 built one (merged b11efaa), so the merge half is now complete and
+   * the honest value changed with the fact. Deployed is a flat no: revision 81
+   * predates every authorization merge, checked against the live service.
+   */
+  assert.equal(byId["SEC-006"].status.mergedToMain, "yes");
+  assert.equal(byId["SEC-006"].status.deployed, "no");
   // SEC-008 stays open; SEC-009 keeps policy-approved / acceptance-unverified.
   assert.equal(byId["SEC-008"].status.decisionApproved, "open");
   assert.equal(byId["SEC-009"].status.decisionApproved, "approved");
@@ -554,17 +559,29 @@ test("a rule implemented for Award only is never reported as fully implemented",
    * cross-module guarantee that does not exist. They may only say "yes" once
    * every module listed as pending in moduleProgress has gone.
    */
-  const stillPending = (security.moduleProgress || []).filter(
-    (module) => module.state === "pending",
+  /*
+   * Re-keyed 2026-10-27. This used to look for modules in state "pending",
+   * and none remain - all four authorization modules are merged. What it
+   * actually protects is unchanged: IRB holds archive records and has no
+   * gate, by decision, so "all system objects" is still not demonstrated.
+   * IRB is deliberately NOT an authorization module here; it appears as
+   * shared-surface isolation, which is why this now looks for any module
+   * that is not merged rather than for the old label.
+   */
+  const notMerged = (security.moduleProgress || []).filter(
+    (module) => !["merged-not-deployed", "implemented", "working"].includes(module.state),
   );
-  assert.ok(stillPending.length > 0, "modules are still pending; this guard must apply");
+  assert.ok(
+    notMerged.length > 0,
+    "something is still uncovered or unmerged; this guard must apply",
+  );
 
   for (const id of ["SEC-001", "SEC-002", "SEC-003"]) {
     const requirement = requirements.find((item) => item.id === id);
     assert.notEqual(
       requirement.status.codeImplemented,
       "yes",
-      `${id}: implemented for Award only while ${stillPending.length} modules are pending`,
+      `${id}: ${notMerged.length} area(s) still uncovered or unmerged`,
     );
     /*
      * The blocker must NAME the modules that are still uncovered. Which
@@ -609,7 +626,14 @@ test("the enforcement claim states its evidence and its limits", () => {
   assert.match(security.enforcementState, /defaults to false/);
   assert.match(security.enforcementState, /dev, test and prod/);
   assert.match(security.enforcementState, /only\s+dev has a recorded deployment/);
-  assert.match(security.enforcementState, /No runtime check/);
+  /*
+   * Was /No runtime check/. A runtime check against the live dev service WAS
+   * performed on 2026-10-27, so requiring the old caveat would now force the
+   * page to understate its evidence. The claim must still say what was
+   * observed versus what is asserted from configuration.
+   */
+  assert.match(security.enforcementState, /A runtime check WAS performed/);
+  assert.match(security.enforcementState, /asserted from\s+configuration rather than observed/);
   // The overclaim this replaced must not come back.
   assert.doesNotMatch(security.enforcementState, /OFF in every environment/i);
 });

@@ -1,199 +1,257 @@
-# Holdoff — 2026-10-27
+# Research Archive — handoff, 2026-10-27 (evening)
 
-Resume point for the Anthony security work. Supersedes the 2026-10-26
-holdoff. Every fact verified against live AWS, git and the dev database on
-2026-10-27.
-
-> **IRB is out of scope.** No IRB authorization engine. The only IRB work
-> done — and the only kind permitted — is isolating it from *shared*
-> surfaces.
+State verified against GitHub and live AWS on 2026-10-27, not recalled from
+earlier notes. `origin/main` = **`54a4254`**.
 
 ---
 
-## 1. Current state
+## Executive summary
+
+### The one-line version
+
+Every planned authorization module is **built, tested and merged**. **None of
+it is running.** The archive behaves today exactly as it always has, and will
+until someone deploys the API and turns enforcement on — which is blocked on
+two answers we do not have.
+
+### Status at a glance
+
+| Area | Built | Merged | **Deployed** | **Enforced** | Acceptance-verified |
+|---|---|---|---|---|---|
+| Authentication (Shibboleth + Duo) | ✅ | ✅ | ✅ **live** | n/a | ✅ dev, 2026-10-23 |
+| Authorization engine | ✅ | ✅ | ✅ (inert) | ❌ off | ❌ |
+| Award authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
+| Proposal authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
+| Subaward authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
+| Negotiation authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
+| ARCHIVE_ADMIN API + UI | ✅ | ✅ | ❌ | ❌ off | ❌ |
+| Dashboard scoping (D2) | ✅ | ✅ | ❌ | ❌ off | ❌ |
+| IRB shared-surface isolation (D9) | ✅ | ⏳ **PR #77 open** | ❌ | ❌ off | ❌ |
+| BU identity → KRIM mapping | 🔍 investigated | ✅ docs | ❌ | n/a | ❌ **blocked on BU IAM** |
+| SEC-008 audit scope | ❌ | — | — | — | ❌ **decision open** |
+
+**Read the five columns separately.** They are not stages of one thing: merged
+means the code is on `main`; deployed means the ECS API runs it; enforced means
+the flag is on; acceptance-verified means a person confirmed the behaviour in a
+real environment. **Nothing is acceptance-verified**, because that needs
+enforcement on, and it is off everywhere.
+
+### What is live today
+
+Only authentication. Users sign in with BU Shibboleth and Duo through Cognito,
+and then **see the entire archive**, exactly as before this programme started.
+
+### What remains before authorization can be switched on
+
+1. **BU IAM must confirm the institutional identifier** — which attribute is
+   the stable `eppn → PRNCPL_ID` key. Without it there is nothing safe to key
+   a grant on.
+2. **Anthony must name the first administrators** — at least two, so the
+   last-administrator guard is never a single point of failure.
+3. **Deploy an API image** containing this work (separate approval).
+4. **Bootstrap the first administrator** through the operator procedure, then
+   issue real grants.
+5. **Turn enforcement on**, dev first, with the stage-5 validation re-run live.
+
+Steps 1 and 2 are not engineering work. They are the critical path.
+
+### Decisions needed
+
+| From | Decision |
+|---|---|
+| **BU IAM** | The authoritative `eppn → PRNCPL_ID` mapping (blocks everything) |
+| **BU IAM** | Whether that identifier can be released to our Cognito service provider |
+| **Anthony** | **SEC-008** — is auditing administrative actions only sufficient, or must record views and searches be logged too? **Still open.** |
+| **Anthony** | Who the first ARCHIVE_ADMIN holders are |
+| **Anthony** | Approve the targeted KRIM backfill into dev RDS (~5,900 staff records) |
+| **Anthony** | Approve deploying an API image containing the admin surface |
+
+### Next engineering tasks
+
+1. Merge **PR #77** (D9) after review.
+2. Build the one designed-but-missing admin capability: contact-relationships
+   review (`GET /identities/{id}/contact-relationships`).
+3. Draft the operator bootstrap procedure, ready to run when (1) and (2) above
+   are answered.
+4. Everything else waits on the two external answers.
+
+---
+
+## Verified live state
 
 | | |
 |---|---|
-| `origin/main` | **`f94617b`** (merge of PR #71) |
-| ECS API | task definition **revision 81**, 1/1 running, 1 deployment — **unchanged** |
-| Amplify | job **146** for `f94617b` **SUCCEED**; 145 (`6fb1611`) SUCCEED |
-| Terraform (dev) | no outstanding changes |
-| Authorization enforcement | **OFF.** No `AUTHORIZATION*` env var on task def 81; property unset, Java default `false`; `application.yml` untouched by any merge |
-| Migrations | highest committed **V084**; **none applied**, none in any PR merged today |
-| SSM tunnel | stopped — 0 tasks, port 15432 closed |
-| Tunnel operator IAM policy | **0 attachments** (roles/users/groups) |
+| `origin/main` | `54a4254` |
+| **ECS API** | `research-archive-platform-dev-api:81`, deployed **2026-10-22**, 1/1 running, rollout COMPLETED |
+| **Enforcement** | **OFF** — the running task definition carries **no `APP_AUTHORIZATION_*` variable at all**, so the Java default `false` applies. Checked directly, not inferred |
+| **Amplify** | builds 148, 149, 150 all SUCCEED; UI returns HTTP 200. **A UI rebuild is not a backend deployment** |
+| **Migrations** | V082–V084 **not applied** anywhere; `authz` schema does not exist on dev RDS |
+| **Administrators** | none bootstrapped; `authz.admin_role_member` does not exist |
+| **Grants** | none |
+| **SSM tunnel** | dbtunnel cluster 0 tasks; local port 15432 closed |
+| AWS account | 770203350335 (`bu-nprd`) |
 
-### Merged 2026-10-27
-
-| PR | SHA | What |
-|---|---|---|
-| **#71** | **`f94617b`** | **Negotiation hybrid authorization + IRB shared-search isolation, off by default** |
-
-### Open PRs
-
-- **#70** — Negotiation data profile and rule options (docs; superseded in
-  substance by #71, still open)
-- **#68** (draft) — SSM tunnel `TargetNotConnected` retry + agent finding
-- #57, #46, #45, #44, #32, #16, #15, #14, #13, #12 — older, unrelated
+> **The deployed API predates every authorization merge.** The website being
+> demonstrated contains none of this behaviour, and the ARCHIVE_ADMIN screens
+> are unreachable in every environment.
 
 ---
 
-## 2. Authorization status — merged ≠ deployed ≠ enforced
+## Completed and merged
 
-**None of this is running.** The deployed API is revision 81, which predates
-all four modules, and enforcement is off in code regardless. Only Shibboleth
-auth/logout is live.
+### The four authorization modules
 
-| Module | Merged | Deployed | Tested | Enforced |
-|---|---|---|---|---|
-| Shibboleth auth + logout | yes | **yes** | yes | n/a |
-| Phase 1 engine (#56) | yes | no | yes | no |
-| Award (#62) | yes | no | 31 tests | no |
-| Proposal (#64) | yes | no | 18 tests | no |
-| Subaward family (#66) | yes | no | 59 tests | no |
-| **Negotiation hybrid (#71)** | **yes** | **no** | **32 tests** | **no** |
-| ARCHIVE_ADMIN | schema + service only | no | yes | no |
-| QA Status dashboard | yes | yes (Amplify) | yes | n/a |
-
-Totals on `f94617b`: **API 1417 · PostgreSQL integration 272 · UI 694**, all
-green, all three CI checks passing.
-
----
-
-## 3. Approved rules now in code
-
-- **D6a — Subaward**: family-level ANY-match funding inheritance.
-- **D7** — restricted funding Awards omitted entirely; no counts, flags or
-  placeholders. Funding heading is the constant "Associated Awards".
-- **D8 — Negotiation**: HYBRID — recorded lead unit **OR** explicitly
-  `Award`-typed association **OR** explicitly `Institutional Proposal`-typed
-  association. Alternatives; any one suffices.
-- **D8 — RESTRICTED attachment flag**: informational, **never** an access
-  control. Downloads require authorized record access **and**
-  `ArchiveAttachmentViewer`. **20,406 of 28,923 (70.55%)** Negotiation
-  attachments carry `Y` — gating on it would remove seven in ten.
-- **IRB shared-search isolation**: when enforcement is ON, IRB leaves shared
-  Global Search for **all** users **including Central** — keyed on the
-  enforcement flag, not on the caller. Keyword leg never runs; semantic rows
-  dropped. Enforcement OFF is unchanged.
-
-### Real-data findings (dev, read-only)
-
-**Subaward**: 93,735 version rows · 3,511 families · 91,945 structurally
-reachable (98.09%) · 270 families unresolved (224 broken refs, 46 none) · 8
-inconsistent denormalized codes · **0 SQL/Java disagreements**.
-
-**Negotiation**: 10,775 rows, flat (no versions) · lead unit covers 10,718
-(99.47%), matches `archive.unit` 100% · Award-typed 2,223, Proposal-typed 3
-· **10,721 reachable (99.50%)**, 54 Central-only · **0 SQL/Java
-disagreements across all 10,775 rows** · predicate 19.9 ms, no new index.
-
-> **Structural reachability is NOT permission.** These are ceilings the data
-> permits, not any user's access. A user with one department grant sees a
-> small fraction.
-
-### Why both rules changed shape after profiling
-
-Per-version Subaward reached **4.06%** of version rows; family-level reaches
-98.09%. Negotiation inheritance alone reached **20.7%**; hybrid reaches
-99.50%. Neither would have been caught by fixtures. **Profile real data
-before designing a rule.**
-
-### The Negotiation collision trap
-
-`associated_document_id` is free TEXT, populated on every row including all
-8,533 typed `None`. Ungated it collides with an Award workflow document
-number **7,246** times and a `proposal_number` **6,980** times; **6,073 of
-10,775** ids match more than one record kind. Both decision paths therefore
-resolve associations **only** inside an association-type gate, and `'Award'`
-resolves against `award_number`, never `workflow_document_number`. Three
-regression tests, each verified to fail with the gate removed.
-
----
-
-## 4. SSM database tunnel
-
-PR #67 merged and applied. `scripts/start-db-tunnel.sh` opens
-**localhost:15432** → dev RDS; Ctrl-C closes and stops the task.
-`scripts/stop-db-tunnel.sh` sweeps strays. Connect as **`archive_analyst`**
-(read-only at the database level), `sslmode=require`. Credential via
-`scripts/mac-show-analyst-password.sh` — clipboard, never printed. **No
-credential appears in this document.**
-
-> **Port 15432, never 5432.** 5432 is local Homebrew PostgreSQL — a separate
-> copy, last seen at migration V080 against the repo's V084.
-
-- **PR #68 open**: retries `TargetNotConnected` (the exec agent reports
-  RUNNING before SSM registers the channel). Worth merging.
-- **SSM Agent patch status INDETERMINATE**: `--version` reports `3.3.0.0`,
-  below the `3.3.4851.0` that fixes CVE-2026-89049, but the binaries are
-  dated 2026-10-13, over a month after the fix — so the string is likely a
-  placeholder. Containment is what the design rests on: the task role holds
-  only four `ssmmessages` actions.
-- Operator policy deliberately **unattached**; `Shibboleth-InfraMgt` not
-  broadened.
-
----
-
-## 5. Next security work, in order
-
-1. **Investigate the 270 unresolved Subaward families.** First question:
-   does `subaward_funding.award_number` resolve where `award_id` does not?
-   That separates an ETL gap from genuine orphans. Do **not** reach for a
-   fallback rule — `requisitioner_unit` matches `archive.unit` 100% and is
-   still not approved for authorization.
-2. **Close the Proposal Dashboard count-scoping gap** (D2). `proposals`,
-   `proposal_history_records` and the `PROPOSAL` document tally are still
-   archive-wide while Proposal endpoints are scoped. **Blocker before
-   enforcement.**
-3. **Review and merge PR #68.**
-4. **ARCHIVE_ADMIN management interface** — still schema + service only; no
-   administrative UI exists.
-5. **Keep /qa-status aligned** with actual deployment state.
-6. Decide the **16 Subaward-typed Negotiations** (currently lead-unit only)
-   and whether the **54 no-basis Negotiations** staying Central-only is
-   acceptable long-term.
-
-**Do not start IRB work** beyond shared-surface isolation.
-
----
-
-## 6. Outstanding security decisions
-
-| # | Question | Owner | Blocks |
+| Module | PR | Merge | Rule |
 |---|---|---|---|
-| 1 | **SEC-008 audit scope** — what is audited, retained how long, reviewed by whom. Must not be marked complete | Anthony / BU security | Enforcement sign-off |
-| 2 | **BU identity → KRIM mapping** — how a Cognito/Shibboleth identity resolves to a KRIM person id, and behaviour when ambiguous, revoked or unlinked. Fails closed today | Anthony / BU IAM | Enabling enforcement anywhere |
-| 3 | **Proposal Dashboard counts unscoped** (D2) | engineering | Enabling enforcement |
-| 4 | **270 Subaward families** Central-only — acceptable, or fix the data? | Anthony / BU | Subaward enforcement |
-| 5 | **Tunnel operator IAM** — no project-specific human role exists; only shared BU SSO roles. Policy stays unattached | BU IAM / Anthony | Tunnel use by others |
-| 6 | **SSM Agent patch status** indeterminate | engineering / AWS | Tunnel risk judgement |
-| 7 | **Explicit Subaward grant type** — D6 mentions one for the no-funding case; none exists in the `authz` schema | Anthony / BU | The 46 unfunded families |
-| 8 | **16 Subaward-typed Negotiations** — no reliable association key | Anthony / BU | Completeness |
+| Award | #62 | `b77f03f` | Lead unit, with descendants where the grant allows; Research Staff contact derivation; IO = SAP account |
+| Proposal | #64 | `f1b8115` | Sibling port; 14 endpoints |
+| Subaward | #66 | `3559fd5` | **Family-level** funding inheritance — visible when any funding Award is. Per-version reached only **4.06%** of version rows in real data; family-level reaches **98.09%** |
+| Negotiation | #71 | `f94617b` | Hybrid: lead unit, or associated Award, or associated Proposal. Association resolution is **gated by explicit association type**, which avoids 6,073 document-number collisions found in real data |
+
+Shared properties: denial is **404, never 403**; scope predicates sit in the
+**same `WHERE`** as filters so the page and the count agree; every port has a
+`PERMIT_ALL` default plus a startup guard that refuses to run with enforcement
+on and a permissive port.
+
+### ARCHIVE_ADMIN management — PR #74, merged `b11efaa`
+
+**12** endpoints and **4** UI screens: find and verify an identity, link it,
+grant CENTRAL/UNIT/SAP-account access, suspend, revoke, audit history, and
+manage administrators with last-administrator protection under a row lock.
+
+- **Administration is not data access** — structural, not conventional:
+  `admin_role_member` is its own table rather than a `grant_type`, so no query
+  asking "does this user hold a grant" can answer yes for an administrator.
+  The UI warns when any identity, administrator included, holds no grant.
+- **No HTTP bootstrap endpoint.** The first administrator cannot be appointed
+  by an existing one, so an HTTP route would bypass the model.
+- **The whole `/api/v1/admin` tree returns 404 while enforcement is off.**
+- ⚠️ **Not built:** capability 4, contact-relationships review. Designed,
+  recorded in the design document, and tracked as a follow-up. Nothing is
+  unprotected by its absence.
+
+### Dashboard scoping — D2, PR #76, merged `54a4254`
+
+All three Proposal-derived figures scoped together: family count, version-row
+count, and the PROPOSAL branch of the document tally. **10 of 15** Dashboard
+metrics now scoped. 11 integration tests; **9 fail if the scope is removed**,
+verified by reverting it.
+
+### Identity investigation — PR #73, merged `289a5ac` (documentation only)
+
+**The 660 unresolved principal ids are explained, and it is none of the
+assumed failure modes.** All 660 are valid KRIM principals (660/660 verified
+against Oracle staging). `archive.person` is a point-in-time snapshot loaded
+**2026-08-03 and never re-run**, while `award_unit_contact` kept loading until
+**2026-08-12** — 660 contacts arrived after the snapshot, 0 before. A missing
+ETL dependency, not a failed extraction.
+
+**Unplanned finding that changed the architecture:** **61%** of referenced
+principals are inactive in KRIM, including 308 of the 467 already loaded. That
+is normal for a decades-deep archive — and it is why historical KRIM status
+must never gate current access.
+
+### Test-infrastructure fix — PR #75, merged `91471c3`
+
+A `ConcurrentModificationException` hit the full suite roughly **one run in
+three**. The diagnosis written in the tests was wrong; a captured stack trace
+showed the race is between the MockMvc filter chain and the async streaming
+worker, inside the first `perform(...)`. Fixed test-only; five consecutive
+full runs clean.
 
 ---
 
-## 7. Lessons worth not relearning
+## Open pull requests
 
-- **Profile real data before designing an authorization rule.** Two rules
-  were redesigned after profiling; neither failure mode was visible in
-  fixtures.
-- **`mvn -q test-compile` can report BUILD SUCCESS against stale test
-  classes.** After a constructor signature change it hid two broken call
-  sites; only `rm -rf target/classes target/test-classes` surfaced them.
-  Incremental test-compile is not proof that test sources compile.
-- **A bare `git push` goes to the `bu` remote** unless `remote.pushDefault`
-  is unset (it now is). Prefer `git push origin <branch>`.
-- **Verify a denial test actually fails without the fix.** Every regression
-  test added for a leak this week was checked that way.
+| PR | State | Depends on | Summary |
+|---|---|---|---|
+| **#77** | **draft, open** | — | **D9**: exclude IRB from the Dashboard when enforcement is on. CI green. **Ready for review.** |
+| #68 | draft | — | SSM tunnel: `TargetNotConnected` retry and live verification record |
+| #70, #57, #44, #32 | open | — | Older documentation/QA PRs, not on the authorization path |
+| #45, #46 | draft | each other | QA dashboard card link semantics |
+| #12–#16 | draft, stacked | each other | Superseded authorization stack; **candidates for closure** — their content reached `main` through #56/#62 and later |
 
 ---
 
-## Hard safety rules still in force
+## Decisions
 
-- Do not enable authorization enforcement anywhere.
-- Do not deploy a new ECS API image.
-- Do not apply database migrations.
-- Do not grant permissions or bootstrap administrators.
-- Do not modify Cognito, Shibboleth, Terraform, production, RDS data or DNS.
-- Do not leave the SSM tunnel running.
+### D9 — IRB shared-surface isolation (approved 2026-10-27, implemented in #77)
+
+IRB is **outside** Research Archive authorization scope and will not get a
+record rule. When enforcement is on it is removed from shared surfaces: already
+from shared Global Search, and now from the Dashboard — the four IRB figures
+are **omitted from the response** (null, not zero: a zero would assert the
+archive holds no protocols) and the IRB branch leaves the document tally.
+Applies to **every caller, Central included**.
+
+### D-ID-1 — historical KRIM status is not an access control
+
+An administrator-verified link is **not** revoked because KRIM marks the
+principal inactive. With 61% inactive, the opposite rule would deny most
+legitimate users.
+
+### SEC-008 — audit scope — ⚠️ **STILL OPEN**
+
+Currently **only administrative actions** are audited: grants, revocations,
+suspensions, identity links and role changes, in an append-only table enforced
+by a database trigger. Record **views and searches are deliberately not
+logged**. SEC-008 as written says "all archive activity". **Anthony has not
+confirmed the narrowing.** If full view logging is required it is new work, not
+a configuration change.
+
+---
+
+## KRIM historical identity backfill — not run
+
+Targeted extraction design is complete: 10 driving columns, **5,917** distinct
+principal ids, bind-filtered, never a full KRIM scan. `subaward_contact` is
+excluded deliberately — it carries `rolodex_id`/`requisitioner_id`, not
+`person_id`, and Rolodex entries are not KRIM principals.
+
+Current coverage is **467 of 5,917 (7.89%)**. Until the backfill runs,
+administrator identity search finds a small fraction of people; an identifier
+can always be entered manually, and the UI says so.
+
+**Local import to a laptop was planned and then recommended against** — the
+local database is three migrations behind, synthetic fixtures serve every
+engineering need, and ~5,900 BU staff records on a developer machine needs a
+data-handling decision. **No personnel data has been transferred anywhere.**
+
+---
+
+## SSM database tunnel
+
+Working and proven end to end (PRs #67 merged, #68 open for the
+`TargetNotConnected` retry). Ephemeral Fargate task, no bastion, RDS stays
+private. **Not running now** — 0 tasks, local port closed.
+
+One correction carried forward: the SSM agent's patch status is
+**INDETERMINATE, leaning patched** for CVE-2026-89049 — the version string is
+below the fix but the binaries postdate it. It was briefly overstated as
+"confirmed unpatched"; it is not confirmed either way.
+
+---
+
+## Known gaps, stated plainly
+
+| | |
+|---|---|
+| Nothing is **acceptance-verified** | requires enforcement on in a real environment |
+| **270 unresolved Subaward families** | from the funding-inheritance profiling; not investigated |
+| **Contact-relationships review** not built | designed, tracked; nothing unprotected |
+| **IRB module endpoints** remain unauthorized | by decision; they are not a shared surface |
+| **Upstream change detection** absent | nothing notices a Kuali role change; revocation is administrator-driven, by design (D-ID-1) |
+| **PR #12–#16** stale | superseded; should be closed to stop them misleading readers |
+
+---
+
+## Where to look
+
+| | |
+|---|---|
+| Activation sequence | `docs/runbooks/AUTHORIZATION_ACTIVATION.md` |
+| The authorization model | `docs/security/IDENTITY_AUTHORIZATION_ARCHITECTURE.md` |
+| Admin API and UI design | `docs/security/ARCHIVE_ADMIN_MANAGEMENT_DESIGN.md` |
+| The 660 finding | `docs/security/KRIM_LOCAL_IMPORT_PLAN.md` §2 |
+| Requirement traceability | `docs/security/ANTHONY_REQUIREMENTS_TRACEABILITY.md` (read its correction note first) |
+| Live QA status | `/qa-status` on the dev site |

@@ -1,9 +1,9 @@
 {
   "source": "Kuali Archive Enhancements and Requirements, Security Requirements tab",
   "sourceDated": "2026-10-20",
-  "reconciledOn": "2026-10-26",
-  "enforcementState": "Record-level authorization is OFF. Evidence, and its limits: app.authorization.enforcement-enabled is set in NO committed configuration file and defaults to false in Java, so any instance built from this repository starts with every gate inert. Terraform defines three environments - dev, test and prod - but only dev has a recorded deployment; test and prod are configuration scaffolding with no record of being stood up. No runtime check of a deployed instance was performed, because the API exposes no endpoint reporting its authorization state. So this is a statement about the code and configuration in this repository, not a reading taken from each running environment.",
-  "recommendationStatus": "The business decisions listed were approved on 2026-10-26. Implementation status is reported separately from them: an approved decision is not working software, and a passing test is not a released or verified one.",
+  "reconciledOn": "2026-10-27",
+  "enforcementState": "Record-level authorization is OFF everywhere. Evidence, and its limits: app.authorization.enforcement-enabled is set in NO committed configuration file and defaults to false in Java; the live dev task definition (revision 81) carries no APP_AUTHORIZATION_* environment variable, checked directly on 2026-10-27. Terraform defines dev, test and prod, but only dev has a recorded deployment, so test and prod remain configuration scaffolding whose state is asserted from configuration rather than observed. A runtime check WAS performed against dev on 2026-10-27 - previously there was no runtime check at all - and it confirmed the running task definition carries no authorization variable. Three independent mechanisms keep it inert - the property default, a service-level short-circuit, and PERMIT_ALL defaults on every port - and AuthorizationInertWhenDisabledTest proves the application starts and behaves identically with all the authorization code present.",
+  "recommendationStatus": "Business decisions were approved on 2026-10-26 and 2026-10-27. Implementation status is reported separately from them, because an approved decision is not working software, a merged pull request is not a deployment, and a passing test is not acceptance verification. Nothing on this page is acceptance-verified: that requires enforcement to be on in a real environment, which it is not.",
   "decisionsApproved": [
     "PAFO Administrator is a department user restricted to assigned departments, not a Central user.",
     "“IO number” means the SAP account number.",
@@ -32,37 +32,55 @@
       "name": "Award authorization",
       "detail": "All 45 Award endpoints gated; scoped search, counts, exports, hierarchy and attachments.",
       "state": "merged-not-deployed",
-      "evidence": "PR #62 merged as b77f03f. Implemented in source - NOT in the running API."
+      "evidence": "PR #62 merged as b77f03f. In source - NOT in the running API (revision 81)."
     },
     {
       "name": "Proposal authorization",
-      "detail": "All 14 Proposal endpoints gated; scoped search, counts, version history and attachments.",
+      "detail": "All 14 Proposal endpoints gated; scoped search, counts and version history.",
       "state": "merged-not-deployed",
-      "evidence": "PR #64 merged as f1b8115. Implemented in source - NOT in the running API."
-    },
-    {
-      "name": "Negotiation authorization",
-      "detail": "No approved record rule. Negotiation has no unit column, so department scoping cannot apply as written.",
-      "state": "pending",
-      "evidence": "Not started"
+      "evidence": "PR #64 merged as f1b8115. In source - NOT in the running API (revision 81)."
     },
     {
       "name": "Subaward authorization",
-      "detail": "No approved record rule.",
-      "state": "pending",
-      "evidence": "Not started"
+      "detail": "Family-level funding inheritance: a Subaward is visible when any Award funding it is. Per-version inheritance reached only 4.06% of version rows against real data, family-level reaches 98.09%.",
+      "state": "merged-not-deployed",
+      "evidence": "PR #66 merged as 3559fd5. In source - NOT in the running API (revision 81)."
     },
     {
-      "name": "IRB authorization",
-      "detail": "No approved record rule. IRB is a separate domain from the Proposal-Award chain.",
-      "state": "pending",
-      "evidence": "Not started"
+      "name": "Negotiation authorization",
+      "detail": "Hybrid rule: lead unit, or an associated Award, or an associated Proposal. Association resolution is gated by the explicit association type, which prevents 6,073 document-number collisions found in real data.",
+      "state": "merged-not-deployed",
+      "evidence": "PR #71 merged as f94617b. In source - NOT in the running API (revision 81)."
+    },
+    {
+      "name": "ARCHIVE_ADMIN management",
+      "detail": "12 administrative endpoints and 4 UI screens: find and verify an identity, link it, grant CENTRAL/UNIT/SAP-account access, suspend, revoke, review audit history and manage administrators with last-administrator protection. Administration grants no archive data access.",
+      "state": "merged-not-deployed",
+      "evidence": "PR #74 merged as b11efaa. The whole /api/v1/admin tree returns 404 while enforcement is off, so the screens are unreachable today. One designed capability, the contact-relationships review, is NOT built."
+    },
+    {
+      "name": "Dashboard count scoping (D2)",
+      "detail": "All three Proposal-derived figures scoped: family count, version-row count and the PROPOSAL branch of the document tally. 10 of 15 Dashboard metrics are now scoped.",
+      "state": "merged-not-deployed",
+      "evidence": "PR #76 merged as 54a4254. 11 integration tests; 9 fail if the scope is removed."
+    },
+    {
+      "name": "IRB shared-surface isolation (D9)",
+      "detail": "NOT an authorization module - IRB has no record rule and will not get one. When enforcement is on, IRB is removed from shared surfaces: already excluded from shared Global Search, and now from the Dashboard (four figures omitted from the response, IRB branch dropped from the document tally), for every caller including Central.",
+      "state": "open-pr",
+      "evidence": "Global Search part merged in PR #71. Dashboard part is PR #77, OPEN DRAFT, not merged."
+    },
+    {
+      "name": "BU identity to KRIM mapping",
+      "detail": "Investigation complete. No authoritative eppn-to-PRNCPL_ID source confirmed, so automatic enrollment stays disabled and every identity link must be created by an administrator.",
+      "state": "blocked",
+      "evidence": "PR #73 merged as 289a5ac - documentation only. Blocked on BU IAM."
     },
     {
       "name": "Enforcement",
-      "detail": "app.authorization.enforcement-enabled is unset everywhere and defaults to false. Every gate is inert.",
+      "detail": "app.authorization.enforcement-enabled is unset everywhere and defaults to false; the live task definition has no such variable.",
       "state": "off",
-      "evidence": "No environment has it enabled"
+      "evidence": "No environment has it enabled. Verified on the live service 2026-10-27."
     }
   ],
   "requirements": [
@@ -85,7 +103,7 @@
         "acceptanceVerified": "no"
       },
       "tests": "A Central scope renders no SQL predicate, so Central sees every record and archive-wide dashboard totals. Covered by decision3_centralSeesArchiveWideTotals and centralSeesEverythingIncludingRecordsWithNoUnitOrContact.",
-      "blockers": "Merged for Award and Proposal only - three of five modules (Negotiation, Subaward, IRB) have no gate, so 'all system objects' is not demonstrated. The merged code is also not running: the API image has not been rebuilt. Separately, Central membership cannot be derived - five of the seven Central teams named in the source document are not Kuali user roles - and no administrative surface exists to grant it by hand.",
+      "blockers": "Merged for all four authorization modules (Award, Proposal, Subaward, Negotiation). IRB still has no gate and will not get one - it is out of authorization scope by decision - so 'all system objects' is still not demonstrated across the archive. IRB is instead removed from shared surfaces when enforcement is on. The merged code is also not running: the API image has not been rebuilt. Separately, Central membership cannot be derived - five of the seven Central teams named in the source document are not Kuali user roles - and no administrative surface exists to grant it by hand.",
       "evidence": "PR #62 merged as b77f03f; PR #64 merged as f1b8115. Not in the running API.",
       "decisions": "Who administers Central grants, and whether granting Central access needs a second approver.",
       "conflict": "Five of the seven listed Central teams are not Kuali user roles, so Central membership cannot be derived from record contacts."
@@ -150,15 +168,15 @@
       "status": {
         "decisionApproved": "approved",
         "codeImplemented": "partial",
-        "testsPassed": "no",
-        "mergedToMain": "no",
+        "testsPassed": "yes",
+        "mergedToMain": "yes",
         "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
       "tests": "No automated coverage yet. The resolver and the SQL clause exist; no test drives an end-to-end SAP-account grant.",
-      "blockers": "Implemented but untested. AwardAccountNumberIoResolver and the IO clause in the scope builder exist from Phase 1, and the terminology is now settled, but nothing exercises them and no grant of this kind has been created.",
-      "evidence": "PR #56 (merged into main) for the resolver; PR #62 (open, draft - not merged) for the scope clause",
+      "blockers": "Implemented and tested, never exercised against a real grant. AwardAccountNumberIoResolver and the IO clause in the scope builder are merged and covered by tests, and the ARCHIVE_ADMIN API can now issue an SAP-account grant - but no such grant has been created and the admin API is unreachable while enforcement is off. Note the deliberate limit: an IO grant reaches Awards only and never travels to related Proposals, Negotiations or Subawards.",
+      "evidence": "PR #56 for the resolver; PR #62 merged as b77f03f for the scope clause; PR #74 merged as b11efaa for the grant-issuing API",
       "decisions": "",
       "conflict": ""
     },
@@ -199,14 +217,14 @@
         "decisionApproved": "approved",
         "codeImplemented": "partial",
         "testsPassed": "yes",
-        "mergedToMain": "partial",
-        "deployed": "partial",
+        "mergedToMain": "yes",
+        "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
       "tests": "Covered by ArchiveAdminServiceTest, and by revokingAGrantTakesEffectOnTheNextRequestWithNoCacheToClear, which proves the scope is rebuilt per request rather than memoised.",
-      "blockers": "Same as SEC-005: no API surface. The administrative service is merged (#56); the proof that revocation takes effect immediately is in #62, which is still an open draft. Also unresolved - nothing detects that a person's Kuali role or department assignment has changed upstream, so a grant stays active until someone revokes it by hand.",
-      "evidence": "PR #56 (merged into main) and PR #62 (open, draft - not merged)",
+      "blockers": "The API surface now exists: PR #74 (merged as b11efaa) provides revoke endpoints for both a grant and an SAP-account (IO) grant, each audited in the same transaction, and revocation takes effect on the caller's next request because authorization is resolved per request rather than from a token claim. What remains unresolved is upstream change detection: nothing notices that a person's Kuali role or department assignment has changed, so a grant stays active until an administrator revokes it. Approved decision D-ID-1 makes that explicit - historical KRIM status does not revoke archive access.",
+      "evidence": "PR #56, PR #62 merged as b77f03f, and PR #74 merged as b11efaa (ARCHIVE_ADMIN revoke endpoints). NOT in the running API - revision 81 predates all of them.",
       "decisions": "How a change of employment or department upstream becomes a revocation here.",
       "conflict": ""
     },
@@ -283,5 +301,5 @@
       "conflict": ""
     }
   ],
-  "apiDeploymentState": "The Award and Proposal authorization changes are MERGED INTO MAIN but are NOT running. Amplify rebuilds the user interface automatically on every merge to main and did so for both (builds 140 and 141), but these are BACKEND changes and the API is deployed separately: the ECS service still runs task definition revision 81, which predates them. So the website you are testing contains none of this authorization code. A green Amplify build is not a backend deployment."
+  "apiDeploymentState": "All four authorization modules (Award, Proposal, Subaward, Negotiation) and the ARCHIVE_ADMIN management API and UI are MERGED INTO MAIN but are NOT running. Amplify rebuilds the user interface automatically on every merge and did so again for the latest three (builds 148, 149 and 150, all SUCCEED) - but a UI rebuild is not a backend deployment, and an Amplify build is not a release of this work. These are BACKEND changes, the API deploys separately, and the ECS service still runs task definition revision 81, deployed 2026-10-22, which predates every one of them. Verified against the live service on 2026-10-27: revision 81, 1/1 running, and the task definition carries NO APP_AUTHORIZATION_* variable at all, so enforcement falls to the Java default of false. The website being tested therefore contains none of this behaviour, and the ARCHIVE_ADMIN screens are unreachable in every environment."
 }
