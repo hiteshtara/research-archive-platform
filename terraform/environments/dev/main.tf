@@ -66,6 +66,17 @@ resource "terraform_data" "config_guard" {
       error_message = "manage_amplify is true and amplify_custom_domain is not set, so Amplify's own URL is only known after the first apply (it's a randomly-assigned *.amplifyapp.com domain) - set ui_redirect_url/ui_logout_url explicitly (see README) or set amplify_custom_domain to a domain you control."
     }
 
+    # Without this, enabling the tunnel and forgetting db_tunnel_image
+    # silently reverts to reading the live loader task definition - so an
+    # unrelated ETL deploy replaces the tunnel's task definition again, and
+    # the image is whatever the loader happens to run rather than the
+    # protected, digest-pinned one. The fallback stays in the module for
+    # compatibility; it just may not be reached by accident here.
+    precondition {
+      condition     = !var.manage_db_tunnel_access || var.db_tunnel_image != null
+      error_message = "manage_db_tunnel_access is true, so db_tunnel_image must be set to a digest-pinned image (…@sha256:<64 hex>) that also carries a protected-* ECR tag. Leaving it null makes the tunnel follow the live loader image, which couples it to ETL deploys and risks the image being expired by the loader repository's lifecycle policy. See docs/runbooks/DB_TUNNEL_IMAGE_PINNING.md."
+    }
+
     precondition {
       condition     = !var.use_private_subnets_for_api || var.enable_nat_gateway
       error_message = "use_private_subnets_for_api requires enable_nat_gateway = true, or the API will have no route to the public internet (needed for the live OpenAI provider)."
