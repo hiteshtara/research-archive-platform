@@ -26,6 +26,11 @@ public class RecordingAdminAuditSink implements AdminAuditSink {
         return List.copyOf(events);
     }
 
+    /** Forget everything recorded so far, so a test can assert on one phase only. */
+    public void clear() {
+        events.clear();
+    }
+
     public List<AdminAuditAction> actions() {
         return events.stream().map(Event::action).toList();
     }

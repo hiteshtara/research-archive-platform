@@ -74,6 +74,12 @@ class AuthorizationSchemaAndAuditIntegrationTest {
     private static AdminRoleRepository adminRoles;
     private static AdminAuditSink auditSink;
     private static ArchiveAdminService service;
+    /**
+     * The same service with NO transactional proxy, so its own
+     * {@code @Transactional} is inert. Used only to prove the ports still
+     * refuse to run alone if that annotation were ever lost.
+     */
+    private static ArchiveAdminService serviceWithoutItsOwnTransaction;
     private static TransactionTemplate requiresNew;
 
     @BeforeAll
@@ -107,11 +113,46 @@ class AuthorizationSchemaAndAuditIntegrationTest {
                 new JdbcAdminRoleRepository(jdbc), AdminRoleRepository.class, txManager);
         auditSink = transactional(
                 new JdbcAdminAuditSink(jdbc), AdminAuditSink.class, txManager);
-        service = new ArchiveAdminService(adminRoles, auditSink);
+        // Real JDBC adapters for the new collaborators too: this suite exists to
+        // prove the declared transaction attributes hold against a real database.
+        // The service is proxied too, not just the ports. Its own @Transactional
+        // is what opens the transaction that the ports' MANDATORY propagation
+        // then joins - exactly as Spring does in production. Constructing it
+        // with `new` leaves those annotations inert and every write fails with
+        // "no existing transaction", which is the ports working as designed.
+        var adminIdentities = transactional(new JdbcAdminIdentityRepository(jdbc),
+                edu.bu.archive.application.authorization.admin.AdminIdentityRepository.class, txManager);
+        var grantRepository = transactional(new JdbcAccessGrantRepository(jdbc),
+                edu.bu.archive.application.authorization.AccessGrantRepository.class, txManager);
+        var auditReader = new JdbcAdminAuditRepository(jdbc);
+
+        serviceWithoutItsOwnTransaction = new ArchiveAdminService(
+                adminRoles, auditSink, grantRepository, adminIdentities, auditReader);
+
+        service = transactionalClass(new ArchiveAdminService(
+                adminRoles,
+                auditSink,
+                grantRepository, adminIdentities, auditReader),
+                ArchiveAdminService.class, txManager);
 
         var definition = new DefaultTransactionDefinition();
         definition.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         requiresNew = new TransactionTemplate(txManager, definition);
+    }
+
+    /**
+     * The same, for a concrete class with no port interface: CGLIB-proxied so
+     * {@link ArchiveAdminService}'s own {@code @Transactional} methods really
+     * start a transaction.
+     */
+    private static <T> T transactionalClass(
+            T target, Class<T> type, PlatformTransactionManager txManager) {
+
+        var factory = new ProxyFactory(target);
+        factory.setProxyTargetClass(true);
+        factory.addAdvice(new TransactionInterceptor(
+                txManager, new AnnotationTransactionAttributeSource()));
+        return type.cast(factory.getProxy());
     }
 
     /** Put the declared transaction attributes genuinely in force. */
@@ -127,6 +168,9 @@ class AuthorizationSchemaAndAuditIntegrationTest {
 
     @BeforeEach
     void reset() {
+        jdbc.sql("DELETE FROM authz.access_grant").update();
+        jdbc.sql("DELETE FROM authz.identity_link").update();
+        jdbc.sql("DELETE FROM authz.person_status").update();
         jdbc.sql("DELETE FROM authz.admin_role_member").update();
         clearAudit();
     }
@@ -392,7 +436,7 @@ class AuthorizationSchemaAndAuditIntegrationTest {
             seedAdministrator();
 
             assertThatThrownBy(() ->
-                    service.assignAdministrator(ADMIN, SUBJECT, "no transaction"))
+                    serviceWithoutItsOwnTransaction.assignAdministrator(ADMIN, SUBJECT, "no transaction"))
                     .isInstanceOf(IllegalTransactionStateException.class);
 
             assertThat(service.isAdministrator(SUBJECT)).isFalse();
@@ -482,5 +526,121 @@ class AuthorizationSchemaAndAuditIntegrationTest {
             return fromModule;
         }
         throw new IllegalStateException("cannot locate database/migrations");
+    }
+
+    /**
+     * The administrative write paths against real PostgreSQL. These exercise
+     * SQL the unit tests cannot: RETURNING clauses, the ON CONFLICT upsert on
+     * person_status, and - most importantly - that the CHECK constraints in
+     * V082 and the Java validation agree about what a legal grant is.
+     */
+    @Nested
+    class AdministrativeWrites {
+
+        @BeforeEach
+        void anAdministratorExists() {
+            service.bootstrapFirstAdministrator(ADMIN, "operator@bu.edu", "integration test");
+            clearAudit();
+        }
+
+        @Test
+        void aGrantIsPersistedAndAuditedInOneTransaction() {
+            var granted = service.grantAccess(ADMIN, SUBJECT,
+                    new edu.bu.archive.application.authorization.admin.GrantSpecification(
+                            edu.bu.archive.application.authorization.GrantType.UNIT,
+                            "1234", true, null, null, "new analyst"));
+
+            assertThat(granted.id()).isPositive();
+            assertThat(jdbc.sql("SELECT COUNT(*) FROM authz.access_grant WHERE grant_id = :id")
+                    .param("id", granted.id()).query(Integer.class).single()).isEqualTo(1);
+            assertThat(jdbc.sql(
+                            "SELECT action FROM authz.access_audit ORDER BY audit_id DESC LIMIT 1")
+                    .query(String.class).single())
+                    .isEqualTo(AdminAuditAction.ACCESS_GRANTED.name());
+        }
+
+        @Test
+        void revokingSetsRevokedAtAndRevokedByRatherThanDeleting() {
+            var granted = service.grantAccess(ADMIN, SUBJECT, central());
+
+            service.revokeAccess(ADMIN, granted.id(), "left BU");
+
+            var row = jdbc.sql("""
+                            SELECT revoked_by, revoked_at IS NOT NULL AS revoked
+                            FROM authz.access_grant WHERE grant_id = :id
+                            """)
+                    .param("id", granted.id())
+                    .query((rs, n) -> rs.getString("revoked_by") + "/" + rs.getBoolean("revoked"))
+                    .single();
+            assertThat(row).isEqualTo(ADMIN.value() + "/true");
+        }
+
+        @Test
+        void theDatabaseAndTheJavaValidationAgreeOnWhatAGrantMayBe() {
+            // Java refuses an IO grant with descendants...
+            assertThatThrownBy(() -> new edu.bu.archive.application.authorization.admin
+                    .GrantSpecification(
+                            edu.bu.archive.application.authorization.GrantType.IO,
+                            null, true, "9500012345", null, null))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            // ...and so does ck_access_grant_shape, so the two cannot drift apart.
+            assertThatThrownBy(() -> jdbc.sql("""
+                            INSERT INTO authz.access_grant
+                                (institutional_identifier, grant_type, io_value,
+                                 include_descendants, granted_by)
+                            VALUES ('SYN-X', 'IO', '9500012345', TRUE, 'SYN-ADMIN')
+                            """).update())
+                    .hasMessageContaining("ck_access_grant_shape");
+        }
+
+        @Test
+        void suspensionUpsertsRatherThanFailingOnASecondCall() {
+            service.setSuspended(ADMIN, SUBJECT, true, "under review");
+            service.setSuspended(ADMIN, SUBJECT, false, "cleared");
+
+            assertThat(jdbc.sql("""
+                            SELECT suspended FROM authz.person_status
+                            WHERE institutional_identifier = :id
+                            """)
+                    .param("id", SUBJECT.value())
+                    .query(Boolean.class)
+                    .single())
+                    .isFalse();
+            assertThat(jdbc.sql("SELECT COUNT(*) FROM authz.person_status")
+                    .query(Integer.class).single()).isEqualTo(1);
+        }
+
+        @Test
+        void aSecondActiveLinkForOneCognitoIdentityIsRefused() {
+            service.linkIdentity(ADMIN, "https://issuer", "cognito-1", SUBJECT, null, null, null);
+
+            assertThatThrownBy(() -> service.linkIdentity(
+                    ADMIN, "https://issuer", "cognito-1", SUBJECT, null, null, null))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        void anAdministrativeChangeAndItsAuditRowRollBackTogether() {
+            long before = auditCount();
+
+            // Revoking a grant that does not exist fails after the role check,
+            // so nothing - neither the change nor an audit row - may survive.
+            assertThatThrownBy(() -> service.revokeAccess(ADMIN, 999_999L, "nope"))
+                    .isInstanceOf(java.util.NoSuchElementException.class);
+
+            assertThat(auditCount()).isEqualTo(before);
+        }
+
+        private long auditCount() {
+            return jdbc.sql("SELECT COUNT(*) FROM authz.access_audit")
+                    .query(Long.class).single();
+        }
+
+        private edu.bu.archive.application.authorization.admin.GrantSpecification central() {
+            return new edu.bu.archive.application.authorization.admin.GrantSpecification(
+                    edu.bu.archive.application.authorization.GrantType.CENTRAL,
+                    null, false, null, null, null);
+        }
     }
 }
