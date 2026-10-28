@@ -146,6 +146,58 @@ Minting is **not** idempotent and deliberately so: there is nothing to make
 idempotent, because an identifier means nothing until a human attaches it to a
 person. Re-running produces a different value and no orphan.
 
+## 4d. Two-person rule for re-linking an identity that holds grants
+
+Approved 2026-10-28. Ordinary grants and revocations still need **one**
+administrator (D-ADM-2). Re-linking is different in kind: the grants hang off
+the archive identity, so pointing it at a new Cognito identity hands that
+person everything it holds. One administrator should not be able to do that
+alone.
+
+**Identities with no active grants keep the single-administrator procedure.**
+There is nothing to transfer, and the extra ceremony would only discourage the
+legitimate pool-replacement case.
+
+### Not a second role-management system
+
+Approvers are ARCHIVE_ADMINs from `authz.admin_role_member`. `V086` holds
+**approvals**, not roles — individual decisions bound to one identity and one
+target, consumed once.
+
+### How each requirement is held
+
+| Requirement | Where |
+|---|---|
+| Bound to the exact identity **and** proposed issuer/subject | all three are columns, all three are compared on lookup *and* re-asserted by `RelinkApproval.covers(...)` |
+| Cannot be reused for another identity or target | the binding above; `ux_relink_approval_live` also permits one live approval per target |
+| A revoked or changed approval authorises nothing | only `APPROVED` is usable; `REVOKED` and `PENDING` are refused by status |
+| Grant state rechecked at execution | the count is taken **at relink time**, never from the request — so an identity that gains a grant after approval still requires one, and one that loses all its grants no longer does |
+| Approver ≠ requester | `ck_relink_approval_two_people` (a **database** CHECK), plus a readable service refusal |
+| Approver ≠ the identity being linked | the service refuses when the proposed Cognito identity is the approver's own active link — one person on both sides |
+| Concurrency cannot bypass it | `consume()` is a single conditional `UPDATE … WHERE status='APPROVED'`; concurrent relinks serialise and exactly one consumes |
+| Auditable | `RELINK_APPROVAL_REQUESTED`, `RELINK_APPROVAL_GRANTED`, `RELINK_APPROVAL_REVOKED`, `IDENTITY_RELINKED` — and the relink row records **how many grants moved** and **under which approval** |
+| Bootstrap unaffected | it links a freshly minted identity with no history and no grants, so it never reaches this path |
+
+### Who may execute
+
+Deliberately not constrained. The two-person rule is about the **decision**,
+and that is held where it cannot be bypassed — `approved_by <> requested_by`
+as a database constraint. Whoever runs the resulting relink can only do what
+two administrators already agreed to, against that exact identity and target.
+
+### Migration impact
+
+**`V086` only.** One new table and two indexes; `V082`–`V085` are untouched.
+Additive, no data altered, and `relink_approval` is read by nothing until a
+relink is attempted against an identity holding grants.
+
+### Not yet exposed over HTTP
+
+`requestRelinkApproval`, `approveRelink`, `revokeRelinkApproval` and
+`relinkIdentity` are service-layer only, consistent with `relink` itself.
+`RelinkApprovalRequiredException` maps to **409** when they are exposed.
+Adding the four endpoints is a follow-up, tracked rather than assumed.
+
 ## 5. Cognito replacement, federation re-creation, account linking
 
 | Scenario | Effect | Recovery |
