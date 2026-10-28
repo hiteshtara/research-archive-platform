@@ -319,26 +319,47 @@ makes it pass. The tests are load-bearing, not decorative.
 
 | Risk | Mitigation |
 |---|---|
-| A missed privilege fails only at the first write in production | Tests 1, 3 and 9 exercise every write path the inventory found. The `person_status` upsert is the known trap and is covered explicitly |
+| A missed privilege fails only at the first write in production | The suite exercises every write path the inventory found, and was mutation-checked so a missing grant actually fails it. The `person_status` upsert is the known trap and is covered through both branches |
 | Future `archive` tables unreadable by the API | `ALTER DEFAULT PRIVILEGES` covers tables created by `archive_admin`. **It does not cover tables created by any other role** — if the ETL ever runs as something else, the grant must be repeated |
 | Future `authz` tables not granted | **Deliberate.** A new authz table should require a conscious grant |
 | Two credentials in flight during the switch | The old secret stays until the new one is verified; rollback is one command |
 | `NOINHERIT` surprises | `archive_api` is granted no roles, so nothing to inherit. Listed for completeness |
-| Sequence names guessed wrong | §2 includes the query to confirm them first |
+| Sequence names guessed wrong | **Resolved.** The script names all five explicitly and the tests run the script itself — a wrong name makes `GRANT` raise *relation does not exist* and the suite fails at setup. It passes, so the names are right |
 
 ---
 
 ## 8. Recommended order
 
-1. **Confirm the sequence names** (§2 query) — everything else depends on it.
-2. Write and land the Testcontainers suite **first**, with the grants as a
-   test fixture. It proves the grant set before any real role exists.
+1. ~~Confirm the sequence names.~~ **Done** — all five confirmed by the
+   script running clean against a real database (a wrong name would make
+   `GRANT` fail outright).
+2. ~~Write and land the Testcontainers suite first.~~ **Done** — and it runs
+   `database/roles/archive_api_role.sql` itself rather than a copy of the
+   grants, so it tests the artefact that will actually be run in DEV. It
+   found two defects before they could ship (§6).
 3. Create the secret; generate the password; grant the execution role access.
-4. Create `archive_api` in dev and apply the grants.
+4. Create `archive_api` in DEV and apply the grants.
 5. Register a task definition repointing the five `secrets`; deploy.
 6. Run the startup tests.
 7. After a soak, remove the execution role's access to the owner secret.
 8. Revisit the `SECURITY DEFINER` question only if the threat model changes.
 
-**Steps 1–2 need no AWS or database change and can start immediately.**
-Everything from step 3 needs approval.
+**Steps 1–2 are complete and touched nothing outside this repository.**
+Everything from step 3 needs approval and has not been started: no role
+exists in DEV, no secret has been created, no task definition registered.
+
+### Running it against DEV, when approved
+
+The script takes the password as a `psql` variable so it never appears in
+the file, in `argv`, or in shell history:
+
+```sh
+psql "$OWNER_URL" \
+  -v archive_api_password="$(... read from Secrets Manager ...)" \
+  -f database/roles/archive_api_role.sql
+```
+
+It is idempotent: re-running it reasserts the attributes and grants, and
+**will not change an existing role's password** — it says so with a
+`NOTICE` instead. Rotation is therefore a deliberate, separate `ALTER
+ROLE`, not an accident of re-running the setup.
