@@ -80,6 +80,35 @@ public class JdbcAdminIdentityRepository implements AdminIdentityRepository {
                     "an active identity link already exists for this Cognito identity");
         }
 
+        /*
+         * And the reverse direction, which the resolver does NOT catch.
+         *
+         * Two different Cognito subjects pointing at one archive identity both
+         * resolve to it and inherit every grant it holds. IdentityResolver's
+         * ambiguity check cannot see it: that check asks activePersonIdsFor,
+         * whose SQL filters "kuali_person_id IS NOT NULL", and an
+         * administrator-verified link has no Kuali principal.
+         *
+         * ux_identity_link_active_identity (V085) is the real guarantee. This
+         * check exists so the common case is a sentence an administrator can
+         * act on rather than a constraint-violation stack trace.
+         */
+        boolean identityAlreadyHeld = jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM authz.identity_link
+                            WHERE institutional_identifier = :identity AND status = 'ACTIVE')
+                        """)
+                .param("identity", identity.value())
+                .query(Boolean.class)
+                .single();
+        if (identityAlreadyHeld) {
+            throw new IllegalStateException(
+                    "this archive identity is already linked to a different Cognito identity. "
+                            + "Linking a second one would let both sign-ins inherit the same "
+                            + "grants. Revoke the existing link first, or mint a separate "
+                            + "archive identity for this person.");
+        }
+
         Long linkId = jdbc.sql("""
                         INSERT INTO authz.identity_link
                             (cognito_issuer, cognito_subject, institutional_identifier,
