@@ -197,23 +197,75 @@ class ArchiveIssuedIdentityIntegrationTest {
         }
 
         @Test
-        void revokingReleasesTheIdentityForRelinking() {
-            // The Cognito-pool-replacement path: revoke, then link the new
-            // subject. Grants are untouched because they key on the archive
-            // identity, not on the Cognito subject.
+        void anIdentityWithPriorHistoryCannotBeLinkedByTheOrdinaryPath() {
+            /*
+             * The hole V085 does NOT close, found by probing this design: a
+             * revoked link leaves the archive identity and its grants intact,
+             * so linking a DIFFERENT person to it transfers them silently.
+             * The partial index does not apply, because the old row is
+             * REVOKED.
+             *
+             * link() therefore refuses any identity with prior history. Only
+             * relink() - a named, separately audited act - accepts one.
+             */
             InstitutionalIdentifier archiveId = ArchivePrincipalId.mint();
-            var first = link("cognito-old-pool", archiveId);
-
+            var first = link("cognito-person-a", archiveId);
+            grantCentralTo(archiveId);
             inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
 
-            assertThatCode(() -> link("cognito-new-pool", archiveId)).doesNotThrowAnyException();
+            assertThatThrownBy(() -> link("cognito-person-b", archiveId))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("has been linked before")
+                    .hasMessageContaining("would transfer them");
+
+            assertThat(activeLinksFor(archiveId)).isZero();
+        }
+
+        @Test
+        void relinkingIsTheExplicitPathForAReplacedCognitoPool() {
+            // Same person, new pool. Grants are untouched because they key on
+            // the archive identity, not on the Cognito subject.
+            InstitutionalIdentifier archiveId = ArchivePrincipalId.mint();
+            var first = link("cognito-old-pool", archiveId);
+            grantCentralTo(archiveId);
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
+
+            assertThatCode(() -> inTransaction.executeWithoutResult(s -> identities.relink(
+                    ISSUER, "cognito-new-pool", archiveId, null, "display-only", "operator")))
+                    .doesNotThrowAnyException();
+
             assertThat(activeLinksFor(archiveId)).isEqualTo(1);
+            assertThat(mappedIdentifier("cognito-new-pool")).isEqualTo(archiveId.value());
             assertThat(jdbc.sql("""
                             SELECT COUNT(*) FROM authz.identity_link
                             WHERE institutional_identifier = :id
                             """).param("id", archiveId.value()).query(Integer.class).single())
                     .as("the revoked link stays as history")
                     .isEqualTo(2);
+            assertThat(jdbc.sql("""
+                            SELECT COUNT(*) FROM authz.access_grant
+                            WHERE institutional_identifier = :id AND revoked_at IS NULL
+                            """).param("id", archiveId.value()).query(Integer.class).single())
+                    .as("zero re-grants needed after a pool replacement")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void relinkingRefusesAnIdentityThatHasNeverBeenLinked() {
+            assertThatThrownBy(() -> inTransaction.executeWithoutResult(s -> identities.relink(
+                    ISSUER, "cognito-person-a", ArchivePrincipalId.mint(), null, null, "operator")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("never been linked");
+        }
+
+        @Test
+        void relinkingStillCannotProduceTwoActiveLinks() {
+            InstitutionalIdentifier archiveId = ArchivePrincipalId.mint();
+            link("cognito-person-a", archiveId);
+
+            assertThatThrownBy(() -> inTransaction.executeWithoutResult(s -> identities.relink(
+                    ISSUER, "cognito-person-b", archiveId, null, null, "operator")))
+                    .hasMessageContaining("ux_identity_link_active_identity");
         }
 
         @Test
@@ -315,6 +367,7 @@ class ArchiveIssuedIdentityIntegrationTest {
                 .as("but the grant keys on the archive identity, never on the principal")
                 .isEqualTo(archiveId.value());
     }
+
 
     // ------------------------------------------------------------------
 

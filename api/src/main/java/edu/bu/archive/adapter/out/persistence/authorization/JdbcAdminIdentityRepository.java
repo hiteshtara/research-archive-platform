@@ -109,6 +109,36 @@ public class JdbcAdminIdentityRepository implements AdminIdentityRepository {
                             + "archive identity for this person.");
         }
 
+        /*
+         * And prior history, even fully revoked.
+         *
+         * A revoked link leaves the archive identity - and every grant hanging
+         * off it - intact. Linking a DIFFERENT person to it silently hands
+         * them those grants, which is the one failure this whole model has to
+         * avoid. V085 does not catch it: the old row is REVOKED, so the
+         * partial index does not apply.
+         *
+         * At the schema level this is indistinguishable from a legitimate
+         * re-link after a Cognito pool replacement. Only a human knows which
+         * it is, so link() refuses and relink() is the named, audited act
+         * that says "same person, new subject".
+         */
+        if (hasEverBeenLinked(identity)) {
+            throw new IllegalStateException(
+                    "this archive identity has been linked before and may still hold grants. "
+                            + "Linking it to a new Cognito identity would transfer them. If "
+                            + "this is the SAME person under a replaced user pool, use the "
+                            + "re-link path, which records that decision. If it is a "
+                            + "different person, mint a new archive identity.");
+        }
+
+        return insertLink(cognitoIssuer, cognitoSubject, identity, principal,
+                loginName, verifiedBy);
+    }
+
+    private IdentityLink insertLink(String cognitoIssuer, String cognitoSubject,
+                                    InstitutionalIdentifier identity, KualiPersonId principal,
+                                    String loginName, String verifiedBy) {
         Long linkId = jdbc.sql("""
                         INSERT INTO authz.identity_link
                             (cognito_issuer, cognito_subject, institutional_identifier,
@@ -131,6 +161,43 @@ public class JdbcAdminIdentityRepository implements AdminIdentityRepository {
                 .filter(link -> link.id() == linkId)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("link " + linkId + " vanished after insert"));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public IdentityLink relink(String cognitoIssuer, String cognitoSubject,
+                               InstitutionalIdentifier identity, KualiPersonId principal,
+                               String loginName, String verifiedBy) {
+
+        if (!hasEverBeenLinked(identity)) {
+            throw new IllegalStateException(
+                    "this archive identity has never been linked; use the ordinary link path");
+        }
+        return insertLink(cognitoIssuer, cognitoSubject, identity, principal,
+                loginName, verifiedBy);
+    }
+
+    @Override
+    public int activeGrantCountFor(InstitutionalIdentifier identity) {
+        return jdbc.sql("""
+                        SELECT COUNT(*) FROM authz.access_grant
+                        WHERE institutional_identifier = :identity AND revoked_at IS NULL
+                        """)
+                .param("identity", identity.value())
+                .query(Integer.class)
+                .single();
+    }
+
+    @Override
+    public boolean hasEverBeenLinked(InstitutionalIdentifier identity) {
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM authz.identity_link
+                            WHERE institutional_identifier = :identity)
+                        """)
+                .param("identity", identity.value())
+                .query(Boolean.class)
+                .single();
     }
 
     @Override

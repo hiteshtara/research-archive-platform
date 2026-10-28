@@ -257,6 +257,51 @@ public class ArchiveAdminService {
         return link;
     }
 
+    /**
+     * Re-link an archive identity to a NEW Cognito identity for the SAME
+     * person - a replaced user pool, or re-created federation.
+     *
+     * <p>Deliberately not reachable through {@link #linkIdentity}. The grants
+     * hang off the archive identity, so re-linking hands them to whoever the
+     * new Cognito subject belongs to; if that is a different person, it is a
+     * silent transfer of someone else's access. No constraint can tell the
+     * two apart, so this is a separate act an administrator must choose, and
+     * the audit row records how many grants moved with it.
+     */
+    @Transactional
+    public IdentityLink relinkIdentity(
+            InstitutionalIdentifier actor, String cognitoIssuer, String cognitoSubject,
+            InstitutionalIdentifier subject, KualiPersonId principal, String loginName,
+            String reason) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+        if (cognitoIssuer == null || cognitoIssuer.isBlank()
+                || cognitoSubject == null || cognitoSubject.isBlank()) {
+            throw new IllegalArgumentException(
+                    "the Cognito issuer and subject identify who signed in; both are required");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException(
+                    "re-linking transfers whatever grants this identity holds; a reason is "
+                            + "required so the audit trail says why");
+        }
+
+        int inherited = identities.activeGrantCountFor(subject);
+        IdentityLink link = identities.relink(
+                cognitoIssuer, cognitoSubject, subject, principal, loginName, actor.value());
+        audit.record(actor.value(), AdminAuditAction.IDENTITY_RELINKED, subject,
+                "link=" + link.id() + "; grants inherited by the new Cognito identity="
+                        + inherited + "; " + reason.trim());
+        return link;
+    }
+
+    /** Active grants currently attached to an archive identity. */
+    public int activeGrantCountFor(InstitutionalIdentifier actor, InstitutionalIdentifier subject) {
+        requireAdministrator(actor);
+        return identities.activeGrantCountFor(subject);
+    }
+
     /** Revoke an identity link. The person can no longer resolve to anyone. */
     @Transactional
     public void unlinkIdentity(InstitutionalIdentifier actor, long linkId, String reason) {

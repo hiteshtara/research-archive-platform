@@ -380,6 +380,91 @@ class ArchiveAdminBootstrapIntegrationTest {
                 .isEqualTo(1);
     }
 
+    @Nested
+    @DisplayName("Archive-issued identifier (D-ID-5)")
+    class ArchiveIssuedIdentifier {
+
+        @Test
+        void aConfirmedRunMintsRecordsAndReportsTheIdentifier() {
+            BootstrapOutcome outcome = command().run(request().mint(true).build());
+
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.APPLIED);
+
+            String stored = jdbc.sql("""
+                    SELECT institutional_identifier FROM authz.admin_role_member
+                    WHERE status='ACTIVE'
+                    """).query(String.class).single();
+            assertThat(edu.bu.archive.application.authorization.ArchivePrincipalId
+                    .isArchiveIssued(stored))
+                    .as("a well-formed ARP identifier was written")
+                    .isTrue();
+            assertThat(outcome.message())
+                    .as("and reported, so the operator records the value actually written")
+                    .contains(stored)
+                    .contains("RECORD THIS VALUE");
+            assertThat(jdbc.sql("""
+                    SELECT institutional_identifier FROM authz.identity_link
+                    WHERE status='ACTIVE'
+                    """).query(String.class).single())
+                    .as("the link uses the same identifier")
+                    .isEqualTo(stored);
+        }
+
+        @Test
+        void aDryRunNeitherCreatesNorReservesAnIdentifier() {
+            BootstrapOutcome outcome = command().run(request().mint(true).dryRun(true).build());
+
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.DRY_RUN_OK);
+            assertThat(administrators()).isZero();
+            assertThat(jdbc.sql("SELECT COUNT(*) FROM authz.identity_link")
+                    .query(Integer.class).single()).isZero();
+            assertThat(String.join("\n", outcome.checks()) + outcome.message())
+                    .as("no sample identifier is shown, so none can be mistaken for the real one")
+                    .doesNotContain("ARP-");
+        }
+
+        @Test
+        void twoConsecutiveBootstrapsNeverReuseAnIdentifier() {
+            String first = mintedIdentifier();
+            jdbc.sql("DELETE FROM authz.identity_link").update();
+            jdbc.sql("DELETE FROM authz.admin_role_member").update();
+            clearAuditRows();
+            String second = mintedIdentifier();
+
+            assertThat(first).isNotEqualTo(second);
+        }
+
+        @Test
+        void supplyingAnIdentifierAndAskingToMintIsRefused() {
+            BootstrapOutcome outcome = command().run(
+                    request().mint(true).identifier("SYN-EXPLICIT").build());
+
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.REFUSED);
+            assertThat(outcome.problems()).anySatisfy(p -> assertThat(p).contains("not both"));
+            assertThat(administrators()).isZero();
+        }
+
+        @Test
+        void aFailedConfirmedRunLeavesNoIdentifierBehind() {
+            // Safe retry: the checks fail, so nothing is minted and the next
+            // attempt starts clean rather than inheriting a half-used value.
+            command().run(request().mint(true).account("999999999999").build());
+
+            assertThat(administrators()).isZero();
+            assertThat(jdbc.sql("SELECT COUNT(*) FROM authz.identity_link")
+                    .query(Integer.class).single()).isZero();
+            assertThat(auditActions()).isEmpty();
+        }
+
+        private String mintedIdentifier() {
+            command().run(request().mint(true).build());
+            return jdbc.sql("""
+                    SELECT institutional_identifier FROM authz.admin_role_member
+                    WHERE status='ACTIVE'
+                    """).query(String.class).single();
+        }
+    }
+
     @Test
     void bootstrappingGrantsNoResearchRecordAccess() {
         command().run(request().build());
@@ -444,6 +529,10 @@ class ArchiveAdminBootstrapIntegrationTest {
                 .query(Integer.class).single();
     }
 
+    private static void clearAuditRows() {
+        jdbc.sql("TRUNCATE authz.access_audit").update();
+    }
+
     private static List<String> auditActions() {
         return jdbc.sql("SELECT action FROM authz.access_audit ORDER BY audit_id")
                 .query(String.class).list();
@@ -463,6 +552,7 @@ class ArchiveAdminBootstrapIntegrationTest {
         private String identifier = IDENTIFIER;
         private String operator = OPERATOR;
         private String reason = REASON;
+        private boolean mint;
         private boolean acceptProvisional;
         private boolean dryRun;
         private boolean confirmed = true;
@@ -475,6 +565,7 @@ class ArchiveAdminBootstrapIntegrationTest {
         Req identifier(String v) { this.identifier = v; return this; }
         Req operator(String v) { this.operator = v; return this; }
         Req reason(String v) { this.reason = v; return this; }
+        Req mint(boolean v) { this.mint = v; this.identifier = null; return this; }
         Req acceptProvisional(boolean v) { this.acceptProvisional = v; return this; }
         Req dryRun(boolean v) { this.dryRun = v; return this; }
         Req confirmed(boolean v) { this.confirmed = v; return this; }
@@ -482,7 +573,7 @@ class ArchiveAdminBootstrapIntegrationTest {
         BootstrapRequest build() {
             return new BootstrapRequest(account, environment, pool, issuer, subject,
                     identifier, "BUShibboleth_synthetic", operator, reason,
-                    acceptProvisional, dryRun, confirmed);
+                    mint, acceptProvisional, dryRun, confirmed);
         }
     }
 

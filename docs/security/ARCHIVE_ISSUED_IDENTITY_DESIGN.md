@@ -105,6 +105,47 @@ two people already share one identity and it must be resolved deliberately.
 `V082`–`V084` need no other change. `institutional_identifier` is already
 `TEXT`, so the format needs no migration.
 
+## 4b. ⚠️ A second hole, found by probing this design
+
+V085 stops two **active** links sharing an identity. It does not stop this:
+
+```
+link person A → ARP-X ;  grant CENTRAL to ARP-X ;  revoke A's link
+link person B → ARP-X            ← permitted: the old row is REVOKED
+```
+
+**Person B inherits person A's grant.** Probed against a real database before
+being believed: B resolved to `ARP-X` holding one active grant.
+
+And at the schema level this is **the same two statements** as a legitimate
+re-link after a Cognito pool replacement — revoke the old link, create a new
+one. No constraint can tell them apart. Only a human knows which it is.
+
+**Resolution: split the operation.**
+
+| | |
+|---|---|
+| `link(...)` | refuses an identity with **any** prior history, active or revoked |
+| `relink(...)` | the named, separately audited act for "same person, new subject". Audited as `IDENTITY_RELINKED`, with **how many grants moved with it** recorded in the detail |
+
+So handing someone else's identity to a new person is no longer a side effect
+of ordinary linking — it requires deliberately choosing the re-link path, and
+the audit row says how much access travelled.
+
+## 4c. Issuance lifecycle, and safe retry
+
+| Step | What persists | Retry is safe because |
+|---|---|---|
+| Mint | **nothing** — the value exists only in memory until written | nothing is reserved, so an abandoned mint leaves no trace |
+| Dry run | **nothing** — and no sample identifier is even displayed | a dry-run value could never be mistaken for the real one |
+| Checks fail on a confirmed run | **nothing** — minting happens past every check | the next attempt starts clean |
+| Membership written, link fails | membership only | the identifier is recorded in `admin_role_member`; link it through the API |
+| Both written | both, paired in audit | a second bootstrap is refused outright |
+
+Minting is **not** idempotent and deliberately so: there is nothing to make
+idempotent, because an identifier means nothing until a human attaches it to a
+person. Re-running produces a different value and no orphan.
+
 ## 5. Cognito replacement, federation re-creation, account linking
 
 | Scenario | Effect | Recovery |

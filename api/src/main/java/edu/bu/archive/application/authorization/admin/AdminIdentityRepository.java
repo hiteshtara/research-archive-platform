@@ -41,6 +41,41 @@ public interface AdminIdentityRepository {
                       String loginName, String verifiedBy);
 
     /**
+     * Re-link an archive identity that has been linked before - the Cognito
+     * user pool replaced, or federation re-created, so the SAME person now
+     * signs in under a new subject.
+     *
+     * <p>Separate from {@link #link} on purpose, and this is the important
+     * part of the design. At the schema level "the same person under a new
+     * subject" and "a different person given someone else's identity" are the
+     * same two statements: revoke the old link, create a new one. The grants
+     * hang off the archive identity, so the second case silently transfers
+     * every one of them.
+     *
+     * <p>No constraint can tell those apart - only a human can. So re-linking
+     * is a distinct, named, separately audited act
+     * ({@code IDENTITY_RELINKED}) that an administrator must choose, rather
+     * than something that happens by calling the ordinary link method on a
+     * used identity. {@link #link} refuses an identity with any prior
+     * history, which is what forces the choice.
+     *
+     * @param activeGrantsInherited how many active grants the new Cognito
+     *        identity will inherit, so the caller can state it in the audit
+     *        detail and the administrator can see it before agreeing
+     * @throws IllegalStateException if the identity has no prior link (use
+     *         {@link #link}), or already has an active one
+     */
+    IdentityLink relink(String cognitoIssuer, String cognitoSubject,
+                        InstitutionalIdentifier identity, KualiPersonId principal,
+                        String loginName, String verifiedBy);
+
+    /** Active, unrevoked grants currently attached to an archive identity. */
+    int activeGrantCountFor(InstitutionalIdentifier identity);
+
+    /** True when this archive identity has ever been linked, active or not. */
+    boolean hasEverBeenLinked(InstitutionalIdentifier identity);
+
+    /**
      * Revoke a link. Status change, never a delete: the row is the evidence
      * that the access existed.
      *
