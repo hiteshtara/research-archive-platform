@@ -39,7 +39,7 @@ by enabling enforcement in production to create the first administrator.**
 
 ---
 
-## 1. V082–V084 migration safety
+## 1. V082–V086 migration safety
 
 ### What they do
 
@@ -48,8 +48,10 @@ by enabling enforcement in production to create the first administrator.**
 | `V082` | schema `authz`; `identity_link`, `person_status`, `access_grant`, `access_audit` + append-only trigger | none |
 | `V083` | `kim_principal`, `principal_crosswalk` | none |
 | `V084` | `admin_role_member` | none |
+| `V085` | unique index `ux_identity_link_active_identity` | none — but **fails if the table already holds two active links for one identity**, which is the correct outcome: two people would already share one archive identity, and that must be resolved deliberately rather than indexed over |
+| `V086` | `relink_approval` + 2 indexes | none |
 
-**All three are purely additive.** No `ALTER` of an existing table, no
+**All five are purely additive.** No `ALTER` of an existing table, no
 `UPDATE`, no `DELETE`, no `INSERT`, no backfill; every table and index is
 `CREATE ... IF NOT EXISTS`. The one `DROP` in the set is
 `DROP TRIGGER IF EXISTS tr_access_audit_append_only`, immediately before
@@ -214,7 +216,7 @@ identifier must be typed by the operator** — D-ID-2(c), still open.
 
 #### Prerequisites
 
-1. V082–V084 applied to the target database (stage 1).
+1. V082–V086 applied to the target database (stage 1).
 2. A deployed artefact containing this code — the running image predates it.
 3. Database credentials for the target environment.
 4. **D-ID-2(c) answered**: what value the institutional identifier takes.
@@ -254,7 +256,7 @@ definition.
 
 #### The procedure, once both blockers clear
 
-1. Apply V082–V084 to dev (stage 1), and deploy an API image containing them.
+1. Apply V082–V086 to dev (stage 1), and deploy an API image containing them.
 2. Run the operator path — once, by a named operator, with a witness:
    ```
    bootstrapFirstAdministrator(
@@ -515,10 +517,11 @@ asserted:
 
 | | Blocks |
 |---|---|
-| **D-ID-3** — which BU attribute is the institutional identifier (BU IAM) | stages 2–6 |
+| ~~**D-ID-3** — which BU attribute is the institutional identifier~~ | **no longer blocking.** D-ID-5 (merged `1e72a66`) makes the grant key an archive-issued `ARP-…`. Still worth asking BU IAM, as an optional crosswalk to automate re-linking after a pool replacement — never as the grant key |
 | ~~**D-ID-2(a)** — who the first administrator is~~ — **answered 2026-10-28** | — |
 | ~~**D-ID-2(b)** — no operator path exists~~ — **built 2026-10-28**, dry-run by default, PR open | — |
-| **D-ID-2(c)** — which value goes in `institutional_identifier`, pending D-ID-3 | the bootstrap itself |
+| ~~**D-ID-2(c)** — which value goes in `institutional_identifier`~~ | **answered by D-ID-5**: a minted `ARP-…`. The bootstrap CLI takes `--mint-archive-identifier` |
+| **D-ID-6** — the relink approval API and UI are **NOT built**. `requestRelinkApproval`, `approveRelink`, `revokeRelinkApproval` and `relinkIdentity` exist at the service layer only, with no HTTP endpoint and no screen. An administrator cannot perform a two-person relink through the product today | **not a blocker for activation** — it is only reachable once an identity holds grants AND needs re-linking. Tracked, NOT complete |
 | ~~**D2** — unscoped Proposal Dashboard count~~ | **closed 2026-10-27** |
 | **D9** — IRB Dashboard figures stay archive-wide while IRB is hidden from shared search | stage 6 (decision, not a fix) |
 | **D-ID-4(a)** — approval for the KRIM backfill into dev RDS | stage 3's usability |
