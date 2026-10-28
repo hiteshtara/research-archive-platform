@@ -225,17 +225,27 @@ count leaks the existence of records a user cannot open.
 | Global Search — IRB | any user, **including Central** | **no IRB rows at all** when enforcement is on |
 | Dashboard — Award | unit-scoped user | counts scoped |
 | Dashboard — Subaward, Negotiation | unit-scoped user | counts scoped |
-| **Dashboard — Proposal** | unit-scoped user | ⚠️ **known unscoped (D2)** — see below |
+| **Dashboard — Proposal** | unit-scoped user | ✅ counts scoped (D2 closed 2026-10-27) |
 | Documents / Archived File Finder | unit-scoped user | scoped; no out-of-scope filenames |
 | Attachment download | out-of-scope attachment id, guessed | **404**, never 403 |
 
-> ### ⚠️ Known gap that must be closed before stage 6
+> ### ✅ D2 closed — and ⚠️ what is still open
 >
-> **The Proposal Dashboard count is not scoped.** It is recorded in the
-> handoff as decision D2 and is still open. A scoped user would see a
-> Proposal count that includes records they cannot open — a disclosure,
-> small but real. **Close it or accept it explicitly before enabling
-> enforcement**; do not discover it in production.
+> **The Proposal Dashboard counts are scoped as of 2026-10-27.** All three
+> Proposal-derived figures move together: the family count, the
+> version-row count, and the PROPOSAL branch of the document tally.
+> Eleven integration tests cover Central, department, descendants,
+> research staff, no-grant, denied, unprovisioned and enforcement-off,
+> and nine of them fail if the scope is removed.
+>
+> **Still unscoped: the five IRB-derived figures** — `irb`, `submissions`,
+> `funding_records`, `timeline_events`, and the IRB branch of the
+> document tally. There is no approved IRB record rule, so there is
+> nothing to apply. Note the inconsistency to settle before stage 6: IRB
+> is excluded from shared Global Search when enforcement is on, but the
+> Dashboard still reports archive-wide IRB totals to every caller. These
+> are aggregates, not records, and the exposure is small — but the two
+> surfaces should agree, and that is a decision rather than a bug fix.
 
 Also confirm counts and pages come from the **same `WHERE`**: a scope
 predicate applied to the page but not the count makes `totalElements`
@@ -310,7 +320,8 @@ asserted:
 |---|---|
 | **D-ID-3** — which BU attribute is the institutional identifier (BU IAM) | stages 2–6 |
 | **D-ID-2(a)** — who the first administrators are | stage 3 |
-| **D2** — unscoped Proposal Dashboard count | stage 6 |
+| ~~**D2** — unscoped Proposal Dashboard count~~ | **closed 2026-10-27** |
+| **D9** — IRB Dashboard figures stay archive-wide while IRB is hidden from shared search | stage 6 (decision, not a fix) |
 | **D-ID-4(a)** — approval for the KRIM backfill into dev RDS | stage 3's usability |
 | Approval to deploy an API image containing the admin surface | stage 2 |
 

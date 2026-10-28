@@ -1196,6 +1196,7 @@ class SubawardRecordAuthorizationIntegrationTest {
                 provider(edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL),
                 provider(access),
                 provider(edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL),
+                provider(edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL),
                 null)
                 .counts();
     }

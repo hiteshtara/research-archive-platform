@@ -80,6 +80,7 @@ class ProposalRecordAuthorizationIntegrationTest {
             DockerImageName.parse("pgvector/pgvector:pg17").asCompatibleSubstituteFor("postgres"));
 
     private static ProposalArchiveRepository repository;
+    private static JdbcClient jdbcClient;
 
     @BeforeAll
     static void applyMigrationsAndSeed() throws Exception {
@@ -122,16 +123,17 @@ class ProposalRecordAuthorizationIntegrationTest {
                     INSERT INTO archive.proposal_version (
                         proposal_id, proposal_number, version_number, title,
                         proposal_sequence_status, sponsor_code, sponsor_name,
-                        lead_unit_number, lead_unit_name, principal_investigator_name
+                        lead_unit_number, lead_unit_name, principal_investigator_name,
+                        document_number
                     ) VALUES
                     (8001, 'CHEM-P1', 1, 'Chemistry proposal v1', 'Approved',
-                     '0200', 'NIH', '7777', 'CHEMISTRY', 'A CONTACT'),
+                     '0200', 'NIH', '7777', 'CHEMISTRY', 'A CONTACT', 'DOC-CHEM-1'),
                     (8002, 'CHEM-P1', 2, 'Chemistry proposal v2', 'Approved',
-                     '0200', 'NIH', '7777', 'CHEMISTRY', 'A CONTACT'),
+                     '0200', 'NIH', '7777', 'CHEMISTRY', 'A CONTACT', 'DOC-CHEM-2'),
                     (9001, 'PHYS-P1', 1, 'Physics proposal',      'Approved',
-                     '0100', 'NSF', '1234', 'PHYSICS',   'B OTHER'),
+                     '0100', 'NSF', '1234', 'PHYSICS',   'B OTHER',   'DOC-PHYS-1'),
                     (9500, 'NULL-P1', 1, 'Unitless proposal',     'Approved',
-                     NULL,   NULL,  NULL,   NULL,        NULL)
+                     NULL,   NULL,  NULL,   NULL,        NULL,        'DOC-NULL-1')
                     """);
             statement.execute("""
                     INSERT INTO archive.proposal_person (
@@ -143,7 +145,8 @@ class ProposalRecordAuthorizationIntegrationTest {
                     """);
         }
 
-        repository = new ProposalArchiveRepository(JdbcClient.create(dataSource));
+        jdbcClient = JdbcClient.create(dataSource);
+        repository = new ProposalArchiveRepository(jdbcClient);
     }
 
     // --- Enforcement disabled -------------------------------------------
@@ -349,6 +352,265 @@ class ProposalRecordAuthorizationIntegrationTest {
         return service(access).findFamilyPage("", ProposalSearchFilters.none(), 0, 50);
     }
 
+    // --- Dashboard counts (D2) ------------------------------------------
+
+    /*
+     * Three figures come from archive.proposal_version and must move
+     * together: the family count, the version-row count, and the PROPOSAL
+     * branch of the document tally. Scoping a subset is worse than scoping
+     * none - the dashboard would then contradict itself and the Proposal
+     * search the same user can run.
+     *
+     * Fixture: CHEM-P1 (2 versions, unit 7777 under 7000, CONTACT is PI on
+     * the later one), PHYS-P1 (1 version, unit 1234), NULL-P1 (1 version, no
+     * unit, no contact). Four distinct proposal document numbers.
+     *
+     * Only the Proposal port is restricted in these tests, so any change in
+     * the numbers can only come from the Proposal scope.
+     */
+
+    @Test
+    void dashboardWithEnforcementOffCountsEveryProposalAsBefore() {
+        var counts = dashboard(ProposalRecordAccess.PERMIT_ALL);
+
+        assertThat(counts.proposals()).isEqualTo(3);
+        assertThat(counts.proposalHistoryRecords()).isEqualTo(4);
+        assertThat(counts.documents())
+                .as("four PROPOSAL document numbers, nothing else in the fixture")
+                .isEqualTo(4);
+    }
+
+    @Test
+    void dashboardForCentralCountsEveryProposal() {
+        var counts = dashboard(dashboardScope(
+                new AccessScope(true, Set.of(), Optional.empty(), Set.of()),
+                Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of("CHEM-P1", "PHYS-P1", "NULL-P1")));
+
+        assertThat(counts.proposals()).isEqualTo(3);
+        assertThat(counts.proposalHistoryRecords()).isEqualTo(4);
+        assertThat(counts.documents()).isEqualTo(4);
+    }
+
+    @Test
+    void dashboardForADepartmentCountsOnlyItsOwnProposals() {
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(new UnitGrant("7777", false)), Optional.empty(), Set.of()),
+                Set.of("7777"), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of("CHEM-P1")));
+
+        assertThat(counts.proposals())
+                .as("CHEM-P1 only; PHYS-P1 and NULL-P1 are out of scope")
+                .isEqualTo(1);
+        assertThat(counts.proposalHistoryRecords())
+                .as("both CHEM-P1 versions, and neither of the other families")
+                .isEqualTo(2);
+        assertThat(counts.documents())
+                .as("DOC-CHEM-1 and DOC-CHEM-2 only")
+                .isEqualTo(2);
+    }
+
+    @Test
+    void dashboardForAParentUnitWithDescendantsReachesTheChildUnit() {
+        // 7000 holds no proposals itself; CHEM-P1 sits on 7777 beneath it.
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(new UnitGrant("7000", true)), Optional.empty(), Set.of()),
+                Set.of("7000", "7777"), AuthorizationPolicy.DepartmentMatch.LEAD_UNIT_WITH_DESCENDANTS,
+                Set.of("CHEM-P1")));
+
+        assertThat(counts.proposals()).isEqualTo(1);
+        assertThat(counts.proposalHistoryRecords()).isEqualTo(2);
+        assertThat(counts.documents()).isEqualTo(2);
+    }
+
+    @Test
+    void dashboardForAParentUnitWithoutDescendantsReachesNothing() {
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(new UnitGrant("7000", false)), Optional.empty(), Set.of()),
+                Set.of("7000"), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of()));
+
+        assertThat(counts.proposals()).isZero();
+        assertThat(counts.proposalHistoryRecords()).isZero();
+        assertThat(counts.documents()).isZero();
+    }
+
+    @Test
+    void dashboardForResearchStaffCountsTheFamilyTheyAreListedOn() {
+        // CONTACT is PI on CHEM-P1 version 2 only, and OTHER on PHYS-P1.
+        // The policy is FAMILY_WIDE, so the whole CHEM-P1 family counts and
+        // PHYS-P1 does not: OTHER is not an approved research-staff role.
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(), Optional.of(CONTACT), Set.of()),
+                Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of("CHEM-P1")));
+
+        assertThat(counts.proposals()).isEqualTo(1);
+        assertThat(counts.proposalHistoryRecords()).isEqualTo(2);
+        assertThat(counts.documents()).isEqualTo(2);
+    }
+
+    @Test
+    void dashboardForAnIdentityWithNoGrantCountsNoProposals() {
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(), Optional.empty(), Set.of()),
+                Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of()));
+
+        assertThat(counts.proposals()).isZero();
+        assertThat(counts.proposalHistoryRecords()).isZero();
+        assertThat(counts.documents()).isZero();
+    }
+
+    @Test
+    void dashboardForARevokedOrSuspendedIdentityCountsNoProposals() {
+        // Both states resolve to a denying scope before any SQL is built, so
+        // they are indistinguishable here - which is the intent.
+        var counts = dashboard(denying());
+
+        assertThat(counts.proposals()).isZero();
+        assertThat(counts.proposalHistoryRecords()).isZero();
+        assertThat(counts.documents()).isZero();
+    }
+
+    @Test
+    void dashboardRefusesEntirelyForAnUnprovisionedIdentity() {
+        /*
+         * counts() asks requireProvisioned() once, through the Award port.
+         * That is sufficient rather than lax: in production all four ports
+         * are the SAME RecordAuthorizationService instance, so an identity
+         * that is unprovisioned is unprovisioned for every module. This test
+         * therefore has to withhold provisioning where production would -
+         * passing only an unprovisioned Proposal port would prove nothing,
+         * because nothing asks it.
+         *
+         * The point being recorded: an unprovisioned caller gets an explicit
+         * problem, never a dashboard of zeroes that looks like an empty
+         * archive.
+         */
+        edu.bu.archive.application.authorization.AwardRecordAccess unprovisionedAward =
+                new edu.bu.archive.application.authorization.AwardRecordAccess() {
+                    @Override public SqlFragment awardScopeSql(String alias) {
+                        return SqlFragment.DENY_ALL;
+                    }
+
+                    @Override public void requireProvisioned() {
+                        throw new AccessNotProvisionedException();
+                    }
+
+                    @Override public boolean unrestricted() {
+                        return false;
+                    }
+
+                    @Override public void requireAward(long awardId) {
+                        throw new RecordNotAccessibleException();
+                    }
+
+                    @Override public void requireAwardNumber(String awardNumber) {
+                        throw new RecordNotAccessibleException();
+                    }
+
+                    @Override public void requireEveryAwardVersion(String awardNumber) {
+                        throw new RecordNotAccessibleException();
+                    }
+
+                    @Override public boolean canSeeAwardNumber(String awardNumber) {
+                        return false;
+                    }
+                };
+
+        assertThatThrownBy(() -> new edu.bu.archive.application.service.DashboardService(
+                jdbcClient,
+                provider(unprovisionedAward),
+                provider(edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL),
+                provider(edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL),
+                provider(unprovisioned()),
+                null)
+                .counts())
+                .isInstanceOf(AccessNotProvisionedException.class);
+    }
+
+    @Test
+    void allThreeProposalFiguresAgreeWithTheAuthorizedProposalSearch() {
+        /*
+         * The regression that matters. A count built from a different row set
+         * than the list is a disclosure even when every individual record is
+         * correctly gated: the number itself reveals how much exists.
+         *
+         * All three figures are held against what the SAME user can actually
+         * retrieve through the Proposal services - the family page for the
+         * family count, the version page of each visible family for the
+         * version-row count and for the documents those versions carry. A
+         * figure that agreed with the predicate but not with the services
+         * would still be wrong.
+         */
+        for (String unit : List.of("7777", "1234")) {
+            ProposalRecordAccess access = departmentScope(unit);
+            Set<String> visible = "7777".equals(unit) ? Set.of("CHEM-P1") : Set.of("PHYS-P1");
+
+            PageResponse<ProposalFamilySummaryResponse> families = search(access);
+
+            long versionsTheUserCanRetrieve = 0;
+            for (String number : numbers(families)) {
+                versionsTheUserCanRetrieve +=
+                        service(access).findVersionPage(number, 0, 50).totalElements();
+            }
+
+            var counts = dashboard(dashboardScope(
+                    new AccessScope(false, Set.of(new UnitGrant(unit, false)), Optional.empty(), Set.of()),
+                    Set.of(unit), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT, visible));
+
+            assertThat(counts.proposals())
+                    .as("family count must equal what unit %s can list", unit)
+                    .isEqualTo(families.totalElements());
+            assertThat(counts.proposalHistoryRecords())
+                    .as("version-row count must equal the versions unit %s can open", unit)
+                    .isEqualTo(versionsTheUserCanRetrieve);
+            assertThat(counts.documents())
+                    .as("every fixture version carries one document number, so the "
+                            + "document tally must match the version count for unit %s", unit)
+                    .isEqualTo(versionsTheUserCanRetrieve);
+        }
+    }
+
+    @Test
+    void anOutOfScopeProposalCannotRaiseAnyProposalFigure() {
+        /*
+         * Directly: the archive holds 3 families, 4 versions and 4 proposal
+         * document numbers, but a 1234 user must see only their own in every
+         * one of the three figures. If any figure were left unscoped it would
+         * report the archive-wide number here.
+         */
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(new UnitGrant("1234", false)), Optional.empty(), Set.of()),
+                Set.of("1234"), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of("PHYS-P1")));
+
+        assertThat(counts.proposals()).isEqualTo(1).isNotEqualTo(3);
+        assertThat(counts.proposalHistoryRecords()).isEqualTo(1).isNotEqualTo(4);
+        assertThat(counts.documents()).isEqualTo(1).isNotEqualTo(4);
+    }
+
+    @Test
+    void theProposalScopeDoesNotDisturbTheOtherModulesParameters() {
+        /*
+         * The Proposal predicate binds az_units, exactly like the Award one,
+         * so both fragments in this single statement would fight over the
+         * name without the prop_ prefix. The Award side is PERMIT_ALL here,
+         * so a collision would surface as a bad-parameter failure rather than
+         * a wrong number - either way this would not pass.
+         */
+        var counts = dashboard(dashboardScope(
+                new AccessScope(false, Set.of(new UnitGrant("7777", false)), Optional.empty(), Set.of()),
+                Set.of("7777"), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
+                Set.of("CHEM-P1")));
+
+        assertThat(counts.awards()).isZero();
+        assertThat(counts.subawards()).isZero();
+        assertThat(counts.negotiations()).isZero();
+        assertThat(counts.proposals()).isEqualTo(1);
+    }
+
     private static ProposalArchiveService service(ProposalRecordAccess access) {
         return new ProposalArchiveService(repository, provider(access), null);
     }
@@ -366,6 +628,38 @@ class ProposalRecordAuthorizationIntegrationTest {
             AccessScope scope, Set<String> units, AuthorizationPolicy.DepartmentMatch match) {
         return new RecordScopeSqlBuilder(policy(match), IoSqlStrategy.NONE)
                 .build(new AccessOutcome.Scoped(scope), RecordModule.PROPOSAL, "ranked", units);
+    }
+
+    /** The same predicate, rendered for a caller-supplied alias. */
+    private static SqlFragment scopeFor(
+            AccessScope scope, Set<String> units,
+            AuthorizationPolicy.DepartmentMatch match, String alias) {
+        return new RecordScopeSqlBuilder(policy(match), IoSqlStrategy.NONE)
+                .build(new AccessOutcome.Scoped(scope), RecordModule.PROPOSAL, alias, units);
+    }
+
+    /**
+     * The real DashboardService with only the Proposal port restricted, so a
+     * difference in the Proposal figures can only come from the Proposal
+     * scope. Award, Subaward and Negotiation are PERMIT_ALL.
+     */
+    private static edu.bu.archive.adapter.in.web.dto.DashboardDto dashboard(
+            ProposalRecordAccess access) {
+        return new edu.bu.archive.application.service.DashboardService(
+                jdbcClient,
+                provider(edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL),
+                provider(edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL),
+                provider(edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL),
+                provider(access),
+                null)
+                .counts();
+    }
+
+    /** A Proposal scope rendered for the dashboard's own alias. */
+    private static ProposalRecordAccess dashboardScope(
+            AccessScope scope, Set<String> units,
+            AuthorizationPolicy.DepartmentMatch match, Set<String> visible) {
+        return scoped(scopeFor(scope, units, match, "pv"), visible);
     }
 
     private static ProposalRecordAccess centralScope() {

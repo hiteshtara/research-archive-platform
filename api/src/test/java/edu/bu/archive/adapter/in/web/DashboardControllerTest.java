@@ -68,11 +68,11 @@ class DashboardControllerTest {
                                 + "FROM archive.award_version"
                 )
                 .contains(
-                        "COUNT(DISTINCT proposal_number) AS proposals"
+                        "COUNT(DISTINCT pv.proposal_number) AS proposals"
                 )
                 .contains(
                         "COUNT(*) AS proposal_history_records "
-                                + "FROM archive.proposal_version"
+                                + "FROM archive.proposal_version pv"
                 )
                 .contains(
                         "COUNT(*) FROM archive.negotiation neg"
@@ -90,7 +90,7 @@ class DashboardControllerTest {
                                 + "FROM kuali_documents"
                 )
                 .contains("'AWARD' AS module, workflow_document_number")
-                .contains("'PROPOSAL', document_number")
+                .contains("'PROPOSAL', pv.document_number")
                 .contains("'NEGOTIATION', neg.document_number")
                 .contains("'SUBAWARD', sub.document_number")
                 .contains(

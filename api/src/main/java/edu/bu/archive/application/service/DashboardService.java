@@ -29,11 +29,18 @@ import org.springframework.stereotype.Service;
  * <p>Negotiation joined them on 2026-10-27 with the approved hybrid rule:
  * the Negotiation count and the NEGOTIATION branch are now scoped too.
  *
- * <p>NOT scoped: IRB and Proposal. IRB has no approved record rule at all.
- * Proposal HAS one and its endpoints are scoped, but these two figures were
- * not changed when it landed - a real remaining gap, recorded in
- * AUTHORIZATION_DECISIONS.md under D2 rather than left to be discovered.
- * The dashboard as a whole is not yet authorized.
+ * <p>Proposal joined them on 2026-10-27, closing D2. All THREE
+ * Proposal-derived figures are scoped together - the family count, the
+ * version-row count, and the PROPOSAL branch of the document tally -
+ * because scoping a subset is worse than scoping none: it produces a
+ * dashboard whose own numbers disagree with each other and with the
+ * Proposal search the same user can run.
+ *
+ * <p>NOT scoped: IRB. It has no approved record rule, so there is nothing
+ * to apply; the four IRB figures and the IRB document branch stay
+ * archive-wide for every caller. That is a recorded exposure rather than an
+ * oversight - see AUTHORIZATION_DECISIONS.md - and it is why the dashboard
+ * as a whole is still not fully authorized.
  */
 @Service
 public class DashboardService {
@@ -42,13 +49,14 @@ public class DashboardService {
     private final AwardRecordAccess recordAccess;
     private final edu.bu.archive.application.authorization.SubawardRecordAccess subawardAccess;
     private final edu.bu.archive.application.authorization.NegotiationRecordAccess negotiationAccess;
+    private final edu.bu.archive.application.authorization.ProposalRecordAccess proposalAccess;
 
     public DashboardService(
             JdbcClient jdbcClient,
             ObjectProvider<AwardRecordAccess> recordAccessProvider,
             ObjectProvider<AuthorizationProperties> authorizationProperties
     ) {
-        this(jdbcClient, recordAccessProvider, null, null, authorizationProperties);
+        this(jdbcClient, recordAccessProvider, null, null, null, authorizationProperties);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -59,6 +67,8 @@ public class DashboardService {
                     subawardAccessProvider,
             ObjectProvider<edu.bu.archive.application.authorization.NegotiationRecordAccess>
                     negotiationAccessProvider,
+            ObjectProvider<edu.bu.archive.application.authorization.ProposalRecordAccess>
+                    proposalAccessProvider,
             ObjectProvider<AuthorizationProperties> authorizationProperties
     ) {
         this.jdbcClient = jdbcClient;
@@ -82,6 +92,14 @@ public class DashboardService {
                 : edu.bu.archive.application.authorization.NegotiationRecordAccess.PERMIT_ALL;
         edu.bu.archive.application.authorization.NegotiationRecordAccess
                 .requireEnforceableWiring(this.negotiationAccess, authorizationProperties);
+
+        edu.bu.archive.application.authorization.ProposalRecordAccess proposal =
+                proposalAccessProvider == null ? null : proposalAccessProvider.getIfAvailable();
+        this.proposalAccess = proposal != null
+                ? proposal
+                : edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL;
+        edu.bu.archive.application.authorization.ProposalRecordAccess
+                .requireEnforceableWiring(this.proposalAccess, authorizationProperties);
     }
 
     public DashboardDto counts() {
@@ -101,6 +119,8 @@ public class DashboardService {
                 subawardAccess.subawardScopeSql("sub").withParameterPrefix("sub_");
         SqlFragment negotiationScope =
                 negotiationAccess.negotiationScopeSql("neg").withParameterPrefix("neg_");
+        SqlFragment proposalScope =
+                proposalAccess.proposalScopeSql("pv").withParameterPrefix("prop_");
 
         JdbcClient.StatementSpec statement = jdbcClient.sql("""
                 WITH award_counts AS (
@@ -112,9 +132,10 @@ public class DashboardService {
                 ),
                 proposal_counts AS (
                     SELECT
-                        COUNT(DISTINCT proposal_number) AS proposals,
+                        COUNT(DISTINCT pv.proposal_number) AS proposals,
                         COUNT(*) AS proposal_history_records
-                    FROM archive.proposal_version
+                    FROM archive.proposal_version pv
+                    WHERE TRUE""" + proposalScope.sql() + """
                 ),
                 kuali_documents AS (
                     SELECT 'AWARD' AS module, workflow_document_number AS document_number
@@ -123,9 +144,9 @@ public class DashboardService {
 
                     UNION ALL
 
-                    SELECT 'PROPOSAL', document_number
-                    FROM archive.proposal_version
-                    WHERE document_number IS NOT NULL
+                    SELECT 'PROPOSAL', pv.document_number
+                    FROM archive.proposal_version pv
+                    WHERE pv.document_number IS NOT NULL""" + proposalScope.sql() + """
 
                     UNION ALL
 
@@ -180,6 +201,9 @@ public class DashboardService {
             statement = statement.param(parameter.getKey(), parameter.getValue());
         }
         for (var parameter : negotiationScope.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        for (var parameter : proposalScope.params().entrySet()) {
             statement = statement.param(parameter.getKey(), parameter.getValue());
         }
         return statement.query(DashboardDto.class).single();
