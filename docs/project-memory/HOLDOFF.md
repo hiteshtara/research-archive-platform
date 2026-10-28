@@ -1,7 +1,7 @@
 # Research Archive — handoff, 2026-10-28
 
 State verified against GitHub and live AWS on **2026-10-28**, re-derived rather
-than carried forward. `origin/main` = **`54a4254`**.
+than carried forward. `origin/main` = **`c341ed0`** (see the merge log below).
 
 > ### ⚠️ Correction, 2026-10-28
 >
@@ -39,8 +39,10 @@ two answers we do not have.
 | Negotiation authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
 | ARCHIVE_ADMIN API + UI | ✅ | ✅ | ❌ | ❌ off | ❌ |
 | Dashboard scoping (D2) | ✅ | ✅ | ❌ | ❌ off | ❌ |
-| IRB shared-surface isolation (D9) | ✅ | ⏳ **PR #77 open** | ❌ | ❌ off | ❌ |
-| BU identity → KRIM mapping | 🔍 investigated | ✅ docs | ❌ | n/a | ❌ **blocked on BU IAM** |
+| IRB shared-surface isolation (D9) | ✅ | ✅ `c341ed0` | ❌ | ❌ off | ❌ |
+| BU identity → KRIM mapping | 🔍 investigated | ✅ docs | ❌ | n/a | **no longer blocking** — superseded by ARP |
+| ARCHIVE_ADMIN bootstrap utility | ✅ | ✅ `542f03c` | ❌ | ❌ off | ❌ |
+| Archive-issued identity (ARP) | ✅ | ✅ `1e72a66` | ❌ | ❌ off | ❌ |
 | SEC-008 audit scope | ❌ | — | — | — | ❌ **decision open** |
 
 **Read the five columns separately.** They are not stages of one thing: merged
@@ -99,7 +101,7 @@ Steps 1 and 2 are not engineering work. They are the critical path.
 | **What the image contains** | **None** of #56, #62, #64, #66, #71, #74, #76 — verified by `git merge-base --is-ancestor` on 2026-10-28 |
 | **Enforcement** | **OFF** — the running task definition carries **no `APP_AUTHORIZATION_*` variable at all**, so the Java default `false` applies. Checked directly, not inferred |
 | **Amplify** | builds 148, 149, 150 all SUCCEED; UI returns HTTP 200. **A UI rebuild is not a backend deployment** |
-| **Migrations** | V082–V084 **not applied** anywhere; `authz` schema does not exist on dev RDS |
+| **Migrations** | **V082–V086 not applied** anywhere. `authz` schema does not exist on dev RDS — verified read-only through the approved SSM tunnel on 2026-10-28 |
 | **Administrators** | none bootstrapped; `authz.admin_role_member` does not exist |
 | **Grants** | none |
 | **SSM tunnel** | dbtunnel cluster 0 tasks; local port 15432 closed |
