@@ -206,23 +206,31 @@ name: research-archive-platform/dev/postgres-api
 keys: username=archive_api, password=<generated>, host, port, dbname
 ```
 
-### IAM
+### IAM and task definition — **superseded**
 
-The API **execution** role (`…-dev-api-execution-role`) resolves ECS
-`secrets`, so it needs `secretsmanager:GetSecretValue` on the **new ARN**, and
-should **lose** it on the old one once the switch is verified.
+This section originally proposed a hand-written IAM policy and a
+CLI-registered task definition. **Both are wrong for this repository.**
 
-```json
-{"Effect":"Allow","Action":"secretsmanager:GetSecretValue",
- "Resource":"arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-*"}
-```
+`terraform/modules/api_service/main.tf` owns the API task definition and the
+execution role's secret policy, and neither carries `ignore_changes`:
 
-### Task definition
+- `base_secrets` (`main.tf:44-50`) builds all five `POSTGRES_*` from
+  `var.database_secret_arn`;
+- `container_secrets = merge(base_secrets, var.additional_secrets)`
+  (`main.tf:52-55`) — so `additional_secrets` overrides them;
+- the execution policy is
+  `concat([var.database_secret_arn], local.additional_secret_arns)`
+  (`main.tf:255-267`) — so a new ARN there is granted automatically.
 
-Only the five `secrets` entries change — `valueFrom` repointed from
-`…/postgres-4k6Ngz:<key>::` to the new secret. **No application
-configuration changes at all**: the API reads `POSTGRES_USER`/`PASSWORD`/
-`HOST`/`PORT`/`DB`, and does not care which role it is.
+A CLI-registered revision is therefore drift, and the next
+`terraform apply -target=module.api_service` reverts `POSTGRES_USER` to
+`archive_admin`. There is a rollback guard for the *image* and none for the
+secrets, so that revert would be **silent** and the API would quietly regain
+owner privileges.
+
+The correct route — pass the five keys through `additional_secrets`, which
+also grants the IAM access — and the full procedure are in
+[`docs/runbooks/ARCHIVE_API_ROLE_DEV_ROLLOUT.md`](../runbooks/ARCHIVE_API_ROLE_DEV_ROLLOUT.md).
 
 ### Startup tests, in order
 
