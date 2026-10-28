@@ -69,14 +69,16 @@ This is pre-existing drift, unrelated to `archive_api`.
 **Consequence:** an untargeted apply would destroy the DBeaver / psql access
 path to dev RDS — including the one used to verify this very rollout.
 
-**Fix — reconcile, do not hide it behind `-target`:**
+**Fixed 2026-10-28 — reconciled, not hidden behind `-target`:**
 
 ```hcl
 # terraform/environments/dev/terraform.tfvars  (untracked)
 manage_db_tunnel_access = true
 ```
 
-Verified: with that one line the nine destroys disappear.
+Added to the operator's local tfvars (backed up first, outside the repo —
+a `.bak` beside it would **not** be gitignored). Re-planned: the nine
+destroys are gone. The file remains untracked and unstageable.
 
 ### The one change that remains, and why it is expected
 
@@ -96,13 +98,29 @@ instead of the digest behind `20260923T163946Z-443e507`.
 
 So this is the configuration working as designed, following a deliberate
 image change forward. It replaces an **ephemeral** task definition that is
-launched per session. Accept it, or pin it, but know what it is.
+launched per session.
+
+**Being fixed separately in PR #86**, which adds a digest-only
+`var.db_tunnel_image` so the tunnel stops tracking the loader. That PR also
+records a sharper problem found while preparing it: the loader repository's
+lifecycle policy keeps only the newest 20 images, and the image the tunnel
+runs today is #21 of 27 — about four more loader builds before it is swept
+and the tunnel fails to pull. See
+[`DB_TUNNEL_IMAGE_PINNING.md`](DB_TUNNEL_IMAGE_PINNING.md).
+
+Until that lands, this one replacement is expected and harmless.
 
 ### Baseline for this rollout
 
 ```
-terraform plan -target=module.api_service   →  No changes.
+terraform plan                            →  1 to add, 0 to change, 1 to destroy
+                                             (the tunnel task definition only)
+terraform plan -target=module.api_service →  No changes.
 ```
+
+Confirmed from the plan JSON, 2026-10-28: exactly **one** resource has a
+planned action. CloudShell, Cognito, Shibboleth, RDS, the Subaward
+scheduler, Amplify, Route53 and `module.api_service` all have none.
 
 `api_image_tag` already matches what is live, so the image rollback guard
 will not block the plan, and the secrets repoint will be the **only**
