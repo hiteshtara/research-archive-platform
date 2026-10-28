@@ -25,8 +25,8 @@
     {
       "name": "Authorization engine",
       "detail": "Policy, scope resolution, SQL predicate builder, evaluator, identity links, grants and the administrative service.",
-      "state": "implemented",
-      "evidence": "PR #56, merged and in the running API, inert while enforcement is off"
+      "state": "merged-not-deployed",
+      "evidence": "PR #56 merged as b1e6856 on 2026-10-23. NOT in the running API: the deployed image is built from commit b10e4e3 of 2026-10-06, which predates it. Corrected 2026-10-28."
     },
     {
       "name": "Award authorization",
@@ -194,12 +194,12 @@
         "codeImplemented": "partial",
         "testsPassed": "yes",
         "mergedToMain": "yes",
-        "deployed": "yes",
+        "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
       "tests": "ArchiveAdminServiceTest and ArchiveAdminConcurrencyIntegrationTest cover granting, revoking, the last-administrator guard and concurrent membership changes against a real database.",
-      "blockers": "No API surface and no user interface: the service exists and is tested, but nothing exposes it, so no administrator can actually grant anything yet. No bootstrap administrator has been created, deliberately.",
+      "blockers": "CORRECTED 2026-10-28: previously recorded as deployed. It is not. The running image is tagged 20261006T182647Z-b10e4e3 and is built from commit b10e4e3 of 2026-10-06, which predates PR #56 (merged 2026-10-23) and every authorization merge after it. The administrative service exists in source only. No API surface and no user interface: the service exists and is tested, but nothing exposes it, so no administrator can actually grant anything yet. No bootstrap administrator has been created, deliberately.",
       "evidence": "PR #56 (merged into main)",
       "decisions": "",
       "conflict": ""
@@ -266,7 +266,7 @@
         "codeImplemented": "partial",
         "testsPassed": "yes",
         "mergedToMain": "yes",
-        "deployed": "yes",
+        "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
@@ -290,7 +290,7 @@
         "codeImplemented": "partial",
         "testsPassed": "no",
         "mergedToMain": "yes",
-        "deployed": "yes",
+        "deployed": "no",
         "enforcementEnabled": "off",
         "acceptanceVerified": "no"
       },
@@ -301,5 +301,5 @@
       "conflict": ""
     }
   ],
-  "apiDeploymentState": "All four authorization modules (Award, Proposal, Subaward, Negotiation) and the ARCHIVE_ADMIN management API and UI are MERGED INTO MAIN but are NOT running. Amplify rebuilds the user interface automatically on every merge and did so again for the latest three (builds 148, 149 and 150, all SUCCEED) - but a UI rebuild is not a backend deployment, and an Amplify build is not a release of this work. These are BACKEND changes, the API deploys separately, and the ECS service still runs task definition revision 81, deployed 2026-10-22, which predates every one of them. Verified against the live service on 2026-10-27: revision 81, 1/1 running, and the task definition carries NO APP_AUTHORIZATION_* variable at all, so enforcement falls to the Java default of false. The website being tested therefore contains none of this behaviour, and the ARCHIVE_ADMIN screens are unreachable in every environment."
+  "apiDeploymentState": "NOTHING authorization-related is running. The dev API service runs task definition revision 81, deployed 2026-10-22, whose image is tagged 20261006T182647Z-b10e4e3 - built on 2026-10-06 from commit b10e4e3. Verified by ancestry on 2026-10-28: NONE of PR #56, #62, #64, #66, #71, #74 or #76 is contained in that commit. So the authorization engine, all four module gates (Award, Proposal, Subaward, Negotiation), the ARCHIVE_ADMIN API and UI, and the Dashboard scoping are ALL merged into main and NONE of them is deployed. Revision 81 is also the newest revision registered, so no newer image is waiting. Amplify rebuilds the user interface on every merge and did so again (builds 148, 149, 150, all SUCCEED) - but a UI rebuild is not a backend deployment, and an Amplify build is not a release of this work. The ARCHIVE_ADMIN screens are unreachable in every environment."
 }

@@ -497,7 +497,7 @@ test("a merge is never reported as a deployment of the backend", () => {
   }
 
   // And the page must state the distinction where nobody can miss it.
-  assert.match(security.apiDeploymentState, /MERGED INTO MAIN but are NOT\s+running/);
+  assert.match(security.apiDeploymentState, /merged into main and NONE of them is deployed/i);
   assert.match(security.apiDeploymentState, /revision 81/);
   assert.match(security.apiDeploymentState, /not a backend deployment/i);
 });
@@ -505,9 +505,16 @@ test("a merge is never reported as a deployment of the backend", () => {
 test("Phase 1 statuses for SEC-005, SEC-006, SEC-008 and SEC-009 are preserved", () => {
   const byId = Object.fromEntries(requirements.map((item) => [item.id, item]));
 
-  // The administrative service shipped in #56 and IS in the running API.
+  /*
+   * CORRECTED 2026-10-28. This asserted that #56 "IS in the running API".
+   * It is not, and the guard was enforcing the overclaim it exists to
+   * prevent. The deployed image is tagged 20261006T182647Z-b10e4e3, built
+   * from commit b10e4e3 of 2026-10-06; ancestry shows it contains none of
+   * #56, #62, #64, #66, #71, #74 or #76. Nothing authorization-related is
+   * deployed, so no requirement may say otherwise.
+   */
   assert.equal(byId["SEC-005"].status.mergedToMain, "yes");
-  assert.equal(byId["SEC-005"].status.deployed, "yes");
+  assert.equal(byId["SEC-005"].status.deployed, "no");
   /*
    * SEC-006 was "partial" because there was no API surface to revoke through.
    * PR #74 built one (merged b11efaa), so the merge half is now complete and
@@ -516,6 +523,21 @@ test("Phase 1 statuses for SEC-005, SEC-006, SEC-008 and SEC-009 are preserved",
    */
   assert.equal(byId["SEC-006"].status.mergedToMain, "yes");
   assert.equal(byId["SEC-006"].status.deployed, "no");
+  // The general form, so no future edit can reintroduce a deployment claim
+  // one requirement at a time.
+  for (const requirement of requirements) {
+    assert.equal(
+      requirement.status.deployed,
+      "no",
+      `${requirement.id}: nothing authorization-related is in the running image`,
+    );
+    assert.equal(
+      requirement.status.acceptanceVerified,
+      "no",
+      `${requirement.id}: acceptance needs enforcement on in a real environment`,
+    );
+  }
+
   // SEC-008 stays open; SEC-009 keeps policy-approved / acceptance-unverified.
   assert.equal(byId["SEC-008"].status.decisionApproved, "open");
   assert.equal(byId["SEC-009"].status.decisionApproved, "approved");

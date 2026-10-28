@@ -1,7 +1,20 @@
-# Research Archive — handoff, 2026-10-27 (evening)
+# Research Archive — handoff, 2026-10-28
 
-State verified against GitHub and live AWS on 2026-10-27, not recalled from
-earlier notes. `origin/main` = **`54a4254`**.
+State verified against GitHub and live AWS on **2026-10-28**, re-derived rather
+than carried forward. `origin/main` = **`54a4254`**.
+
+> ### ⚠️ Correction, 2026-10-28
+>
+> The 2026-10-27 draft of this file, and the QA Status page, said the
+> authorization **engine** (PR #56) was "in the running API, inert". **It is
+> not.** The deployed image is tagged `20261006T182647Z-b10e4e3`, built on
+> **2026-10-06** from commit `b10e4e3`. Ancestry shows it contains **none** of
+> #56, #62, #64, #66, #71, #74 or #76 — PR #56 merged on 2026-10-23, ten hours
+> *after* revision 81 was deployed.
+>
+> **Nothing authorization-related is deployed at all.** Three requirements
+> (SEC-005, SEC-008, SEC-009) claimed `deployed: yes` on that basis and are
+> corrected, along with a guard test that was enforcing the overclaim.
 
 ---
 
@@ -19,7 +32,7 @@ two answers we do not have.
 | Area | Built | Merged | **Deployed** | **Enforced** | Acceptance-verified |
 |---|---|---|---|---|---|
 | Authentication (Shibboleth + Duo) | ✅ | ✅ | ✅ **live** | n/a | ✅ dev, 2026-10-23 |
-| Authorization engine | ✅ | ✅ | ✅ (inert) | ❌ off | ❌ |
+| Authorization engine | ✅ | ✅ | ❌ | ❌ off | ❌ |
 | Award authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
 | Proposal authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
 | Subaward authorization | ✅ | ✅ | ❌ | ❌ off | ❌ |
@@ -82,7 +95,8 @@ Steps 1 and 2 are not engineering work. They are the critical path.
 | | |
 |---|---|
 | `origin/main` | `54a4254` |
-| **ECS API** | `research-archive-platform-dev-api:81`, deployed **2026-10-22**, 1/1 running, rollout COMPLETED |
+| **ECS API** | `research-archive-platform-dev-api:81`, deployed **2026-10-22**, 1/1 running, rollout COMPLETED. Image `20261006T182647Z-b10e4e3` — **built 2026-10-06**, and the newest revision registered, so nothing newer is waiting |
+| **What the image contains** | **None** of #56, #62, #64, #66, #71, #74, #76 — verified by `git merge-base --is-ancestor` on 2026-10-28 |
 | **Enforcement** | **OFF** — the running task definition carries **no `APP_AUTHORIZATION_*` variable at all**, so the Java default `false` applies. Checked directly, not inferred |
 | **Amplify** | builds 148, 149, 150 all SUCCEED; UI returns HTTP 200. **A UI rebuild is not a backend deployment** |
 | **Migrations** | V082–V084 **not applied** anywhere; `authz` schema does not exist on dev RDS |
@@ -91,9 +105,10 @@ Steps 1 and 2 are not engineering work. They are the critical path.
 | **SSM tunnel** | dbtunnel cluster 0 tasks; local port 15432 closed |
 | AWS account | 770203350335 (`bu-nprd`) |
 
-> **The deployed API predates every authorization merge.** The website being
-> demonstrated contains none of this behaviour, and the ARCHIVE_ADMIN screens
-> are unreachable in every environment.
+> **The deployed API predates every authorization merge by about three weeks.**
+> The website being demonstrated contains none of this behaviour, the
+> ARCHIVE_ADMIN screens are unreachable in every environment, and even the
+> Phase 1 engine is absent — not merely inert.
 
 ---
 
