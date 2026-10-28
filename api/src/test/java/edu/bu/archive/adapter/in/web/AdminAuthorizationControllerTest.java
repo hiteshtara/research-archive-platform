@@ -30,6 +30,7 @@ import edu.bu.archive.application.authorization.fixtures.RecordingAdminAuditSink
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -113,7 +114,7 @@ class AdminAuthorizationControllerTest {
     class NonAdministrator {
 
         @Test
-        void anAuthenticatedOrdinaryUserGets403OnEveryEndpoint() throws Exception {
+        void anAuthenticatedOrdinaryUserGets403OnEveryOneOfTheTwelveEndpoints() throws Exception {
             adminRoles.bootstrap(ADMIN, "operator", "test");
             caller = cognito(ORDINARY_SUBJECT);
             MockMvc mvc = mvc();
@@ -140,6 +141,19 @@ class AdminAuthorizationControllerTest {
                             .content("{\"institutionalIdentifier\":\"inst-x\"}"))
                     .andExpect(status().isForbidden());
             mvc.perform(delete("/api/v1/admin/administrators/inst-admin"))
+                    .andExpect(status().isForbidden());
+            // The three identity-link paths. Added after a review found the
+            // parameterised list covered 9 of the 12 endpoints: these were
+            // protected - every method goes through actor() - but not proven.
+            mvc.perform(post("/api/v1/admin/identities/inst-subject/links")
+                            .contentType("application/json")
+                            .content("{\"cognitoIssuer\":\"https://issuer\",\"cognitoSubject\":\"sub\"}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete("/api/v1/admin/identities/inst-subject/links/1"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(patch("/api/v1/admin/identities/inst-subject/grants/1")
+                            .contentType("application/json")
+                            .content("{\"includeDescendants\":false}"))
                     .andExpect(status().isForbidden());
 
             assertThat(audit.events())

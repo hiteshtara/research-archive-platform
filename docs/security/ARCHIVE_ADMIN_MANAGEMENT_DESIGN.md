@@ -81,12 +81,31 @@ ports pattern).
 | 3 | Grant CENTRAL / UNIT / **SAP account (IO)** access | `POST` | `/identities/{id}/grants` |
 | 3 | Modify a grant (expiry, descendants) | `PATCH` | `/identities/{id}/grants/{grantId}` |
 | 6 | **Revoke a grant immediately** | `DELETE` | `/identities/{id}/grants/{grantId}` |
-| 4 | Review Research Staff access relationships | `GET` | `/identities/{id}/contact-relationships` |
+| 4 | Review Research Staff access relationships | `GET` | `/identities/{id}/contact-relationships` — ⛔ **DESIGNED, NOT IMPLEMENTED** (see below) |
 | 5 | Suspend / restore archive access | `PUT` | `/identities/{id}/suspension` |
 | 7 | Administrative audit history | `GET` | `/audit?identity=&action=&from=&to=` |
 | 8 | List administrators | `GET` | `/administrators` |
 | 8 | Assign ARCHIVE_ADMIN | `POST` | `/administrators` |
 | 8 | Revoke ARCHIVE_ADMIN (last-admin protected) | `DELETE` | `/administrators/{id}` |
+
+> ### ⛔ Capability 4 is not implemented
+>
+> **12 of the 13 endpoints above exist. `GET /identities/{id}/contact-relationships`
+> does not, and neither does the "Research staff relationships" panel in the
+> UI mock-up in §5.1.** Found during the pre-merge verification, recorded here
+> rather than quietly dropped.
+>
+> It is a **read-only review screen**, so nothing is unprotected and no
+> security property depends on it — an administrator simply cannot yet see,
+> on one screen, which records a person is listed on in a qualifying role.
+> A `CONTACT_DERIVATION` grant can still be issued and revoked like any other.
+>
+> Building it is more than an endpoint: `ContactRelationships` answers a
+> boolean (`isQualifyingContact`), so listing the relationships needs new
+> queries across Award, Proposal, Negotiation and Subaward. That is why it
+> should be its own change rather than an addition late in this one.
+>
+> **Tracked as a follow-up.** Every other capability is complete.
 
 Bootstrap is **deliberately absent from the API**. The first
 administrator cannot be granted by an existing administrator, so it stays
@@ -275,7 +294,7 @@ suites; any new suite must be named in **both** lists in `ci.yml`):
 
 | # | Test | Proves |
 |---|---|---|
-| T1 | `nonAdministratorCannotReachAnyAdminEndpoint` (parameterised over all 13) | the gate has no gap |
+| T1 | `anAuthenticatedOrdinaryUserGets403OnEveryOneOfTheTwelveEndpoints` | the gate has no gap — all **12** implemented endpoints, after a review found the list originally covered 9 |
 | T2 | `administratorWithNoGrantSeesNoRecords` | **rule 8**, end to end |
 | T3 | `grantedAccessIsVisibleOnTheVeryNextRequest` | no caching |
 | T4 | `revokedGrantDeniesOnTheVeryNextRequest` | **rule 6** |
