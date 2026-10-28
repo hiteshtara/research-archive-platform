@@ -37,13 +37,18 @@ The loader ECR repository has a lifecycle policy:
 | 1 | tagged `protected-*` | expire after 36500 days — i.e. never |
 | 2 | **any**, more than 20 images | expire |
 
-Rule 1 exists precisely for images referenced by a pinned task definition.
+Rule 1 exists precisely for images referenced by a pinned task definition,
+and **it is already in use**: `20260817T011034Z-4a82821` also carries
+`protected-20260817T011034Z-4a82821`. So this is the established local
+pattern, not a new one being invented here.
 
-Measured 2026-10-28: the repository holds **27** entries, so the oldest 7
-are already due for expiry, and the image the tunnel runs today
-(`20260923T163946Z-443e507`, digest `sha256:19972492…`) sits at **#21 of
-27** — roughly **four more loader builds** of headroom before rule 2 sweeps
-it. Each build pushes about three entries.
+Measured 2026-10-28: the repository holds **27** entries, of which **1** is
+exempt via rule 1, leaving **26** subject to rule 2 — so the oldest **6**
+are already due for expiry. The image the tunnel runs today
+(`20260923T163946Z-443e507`, digest `sha256:19972492…`) sits at **#20 of
+26**: **13 entries**, roughly **four more loader builds**, of headroom
+before rule 2 sweeps it. Each build pushes about three entries (the tagged
+image plus two untagged).
 
 So this is not only a tidiness problem. **The tunnel's current image is on
 a path to being deleted**, pinned or not; pinning to it without protecting
