@@ -7,6 +7,7 @@ import edu.bu.archive.application.authorization.PartialFamilyAccessException;
 import edu.bu.archive.application.authorization.ReauthenticationRequiredException;
 import edu.bu.archive.application.authorization.admin.LastArchiveAdministratorException;
 import edu.bu.archive.application.authorization.admin.NotAnArchiveAdministratorException;
+import edu.bu.archive.application.authorization.admin.RelinkApprovalRequiredException;
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
 import edu.bu.archive.exception.InvalidRequestParameterException;
 
@@ -242,6 +243,29 @@ public class GlobalExceptionHandler {
                                 HttpStatus.FORBIDDEN,
                                 "NOT_AN_ARCHIVE_ADMINISTRATOR",
                                 "This action requires an active ARCHIVE_ADMIN membership.",
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 409 for the same reason as the last-administrator guard: the request is
+     * well formed and will succeed once a second ARCHIVE_ADMIN has approved
+     * this exact identity and target. The message says what is missing; it
+     * does not say what the identity holds.
+     */
+    @ExceptionHandler(RelinkApprovalRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleRelinkApprovalRequired(
+            RelinkApprovalRequiredException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(
+                        body(
+                                HttpStatus.CONFLICT,
+                                "RELINK_APPROVAL_REQUIRED",
+                                exception.getMessage(),
                                 request
                         )
                 );

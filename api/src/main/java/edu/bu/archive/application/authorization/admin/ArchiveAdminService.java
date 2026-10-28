@@ -45,10 +45,21 @@ public class ArchiveAdminService {
     private final AccessGrantRepository grants;
     private final AdminIdentityRepository identities;
     private final AdminAuditRepository auditHistory;
+    private final RelinkApprovalRepository relinkApprovals;
 
     public ArchiveAdminService(AdminRoleRepository adminRoles, AdminAuditSink audit,
                                AccessGrantRepository grants, AdminIdentityRepository identities,
                                AdminAuditRepository auditHistory) {
+        this(adminRoles, audit, grants, identities, auditHistory, null);
+    }
+
+    /** The Spring constructor. The 5-arg one is a test convenience. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ArchiveAdminService(AdminRoleRepository adminRoles, AdminAuditSink audit,
+                               AccessGrantRepository grants, AdminIdentityRepository identities,
+                               AdminAuditRepository auditHistory,
+                               RelinkApprovalRepository relinkApprovals) {
+        this.relinkApprovals = relinkApprovals;
         this.adminRoles = adminRoles;
         this.audit = audit;
         this.grants = grants;
@@ -255,6 +266,199 @@ public class ArchiveAdminService {
         audit.record(actor.value(), AdminAuditAction.IDENTITY_LINKED, subject,
                 "link=" + link.id() + (reason == null ? "" : "; " + reason));
         return link;
+    }
+
+    /**
+     * Re-link an archive identity to a NEW Cognito identity for the SAME
+     * person - a replaced user pool, or re-created federation.
+     *
+     * <p>Deliberately not reachable through {@link #linkIdentity}. The grants
+     * hang off the archive identity, so re-linking hands them to whoever the
+     * new Cognito subject belongs to; if that is a different person, it is a
+     * silent transfer of someone else's access. No constraint can tell the
+     * two apart, so this is a separate act an administrator must choose, and
+     * the audit row records how many grants moved with it.
+     */
+    @Transactional
+    public IdentityLink relinkIdentity(
+            InstitutionalIdentifier actor, String cognitoIssuer, String cognitoSubject,
+            InstitutionalIdentifier subject, KualiPersonId principal, String loginName,
+            String reason) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+        if (cognitoIssuer == null || cognitoIssuer.isBlank()
+                || cognitoSubject == null || cognitoSubject.isBlank()) {
+            throw new IllegalArgumentException(
+                    "the Cognito issuer and subject identify who signed in; both are required");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException(
+                    "re-linking transfers whatever grants this identity holds; a reason is "
+                            + "required so the audit trail says why");
+        }
+
+        /*
+         * RE-CHECKED here, not taken from the request. Grants can be issued
+         * or revoked between asking and executing, and the two-person rule
+         * must reflect what is actually about to move - including the case
+         * where an identity had none when the request was raised and has
+         * some now.
+         */
+        int inherited = identities.activeGrantCountFor(subject);
+        Long consumedApproval = null;
+
+        if (inherited > 0) {
+            if (relinkApprovals == null) {
+                throw new IllegalStateException(
+                        "this archive identity holds " + inherited + " active grant(s), so a "
+                                + "second ARCHIVE_ADMIN must approve the relink, and no "
+                                + "approval store is configured");
+            }
+            RelinkApproval approval = relinkApprovals
+                    .findLive(subject, cognitoIssuer.trim(), cognitoSubject.trim())
+                    .orElseThrow(() -> new RelinkApprovalRequiredException(
+                            "this archive identity holds active grants, which the new Cognito "
+                                    + "identity would inherit. A second, distinct ARCHIVE_ADMIN "
+                                    + "must approve this exact identity and target first."));
+
+            if (!approval.isUsable()) {
+                throw new RelinkApprovalRequiredException(
+                        "the relink approval for this target is " + approval.status()
+                                + ", not APPROVED; a revoked or unapproved request authorises "
+                                + "nothing");
+            }
+            // Belt and braces: findLive already matched all three, and the
+            // approval itself re-asserts the binding.
+            if (!approval.covers(subject, cognitoIssuer.trim(), cognitoSubject.trim())) {
+                throw new RelinkApprovalRequiredException(
+                        "the approval does not name this identity and target");
+            }
+            /*
+             * No check that the executor differs from the approver. The
+             * two-person rule is about the DECISION, and it is already held
+             * where it cannot be bypassed: ck_relink_approval_two_people
+             * makes approved_by <> requested_by a database constraint. Who
+             * runs the resulting relink adds nothing - they can only do what
+             * two administrators already agreed to, against this exact
+             * identity and target.
+             */
+            if (!relinkApprovals.consume(approval.approvalId())) {
+                // Another relink took it first, or it was revoked between the
+                // read and the consume.
+                throw new RelinkApprovalRequiredException(
+                        "the relink approval was already used or withdrawn; request a new one");
+            }
+            consumedApproval = approval.approvalId();
+        }
+
+        IdentityLink link = identities.relink(
+                cognitoIssuer.trim(), cognitoSubject.trim(), subject, principal,
+                loginName, actor.value());
+        audit.record(actor.value(), AdminAuditAction.IDENTITY_RELINKED, subject,
+                "link=" + link.id() + "; grants inherited by the new Cognito identity="
+                        + inherited
+                        + (consumedApproval == null
+                                ? "; no second approval required (no active grants)"
+                                : "; approval=" + consumedApproval)
+                        + "; " + reason.trim());
+        return link;
+    }
+
+    /**
+     * Ask a second administrator to approve re-linking an identity that holds
+     * active grants. Bound to this exact identity and this exact target.
+     */
+    @Transactional
+    public RelinkApproval requestRelinkApproval(
+            InstitutionalIdentifier actor, InstitutionalIdentifier subject,
+            String cognitoIssuer, String cognitoSubject, String reason) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("a reason is required");
+        }
+        requireApprovalStore();
+
+        int grants = identities.activeGrantCountFor(subject);
+        RelinkApproval requested = relinkApprovals.request(
+                subject, cognitoIssuer.trim(), cognitoSubject.trim(), actor.value(),
+                grants, reason.trim());
+        audit.record(actor.value(), AdminAuditAction.RELINK_APPROVAL_REQUESTED, subject,
+                "approval=" + requested.approvalId() + "; grants at request=" + grants
+                        + "; " + reason.trim());
+        return requested;
+    }
+
+    /**
+     * Approve a pending relink request.
+     *
+     * <p>The approver must be a different ARCHIVE_ADMIN from the requester,
+     * and must not be the person whose Cognito identity is being linked -
+     * otherwise the two-person rule would be satisfied by one person acting
+     * on their own behalf.
+     */
+    @Transactional
+    public RelinkApproval approveRelink(InstitutionalIdentifier actor, long approvalId) {
+        requireAdministrator(actor);
+        requireApprovalStore();
+
+        RelinkApproval approval = relinkApprovals.findById(approvalId)
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "no relink approval " + approvalId));
+
+        if (approval.requestedBy().equals(actor.value())) {
+            throw new IllegalStateException(
+                    "the administrator who requested this relink cannot also approve it; "
+                            + "a second, distinct ARCHIVE_ADMIN must");
+        }
+        /*
+         * And the approver must not be the target. If the proposed Cognito
+         * identity is the approver's own, approving it would hand themselves
+         * the identity's grants - one person on both sides of the decision.
+         */
+        identities.findLinksFor(actor).stream()
+                .filter(IdentityLink::isActive)
+                .filter(link -> link.cognitoIdentity().issuer().equals(approval.proposedCognitoIssuer())
+                        && link.cognitoIdentity().subject().equals(approval.proposedCognitoSubject()))
+                .findAny()
+                .ifPresent(self -> {
+                    throw new IllegalStateException(
+                            "the approver cannot be the Cognito identity being linked; that "
+                                    + "would put one person on both sides of the decision");
+                });
+
+        RelinkApproval approved = relinkApprovals.approve(approvalId, actor.value());
+        audit.record(actor.value(), AdminAuditAction.RELINK_APPROVAL_GRANTED, approval.identity(),
+                "approval=" + approvalId + "; requested by " + approval.requestedBy());
+        return approved;
+    }
+
+    /** Withdraw a relink request or approval. A revoked one authorises nothing. */
+    @Transactional
+    public void revokeRelinkApproval(InstitutionalIdentifier actor, long approvalId) {
+        requireAdministrator(actor);
+        requireApprovalStore();
+
+        RelinkApproval approval = relinkApprovals.findById(approvalId)
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "no relink approval " + approvalId));
+        relinkApprovals.revoke(approvalId, actor.value());
+        audit.record(actor.value(), AdminAuditAction.RELINK_APPROVAL_REVOKED,
+                approval.identity(), "approval=" + approvalId);
+    }
+
+    private void requireApprovalStore() {
+        if (relinkApprovals == null) {
+            throw new IllegalStateException("no relink approval store is configured");
+        }
+    }
+
+    /** Active grants currently attached to an archive identity. */
+    public int activeGrantCountFor(InstitutionalIdentifier actor, InstitutionalIdentifier subject) {
+        requireAdministrator(actor);
+        return identities.activeGrantCountFor(subject);
     }
 
     /** Revoke an identity link. The person can no longer resolve to anyone. */

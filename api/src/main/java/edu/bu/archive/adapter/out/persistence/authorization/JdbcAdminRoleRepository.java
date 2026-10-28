@@ -22,6 +22,13 @@ import edu.bu.archive.application.authorization.admin.LastArchiveAdministratorEx
 @Repository
 public class JdbcAdminRoleRepository implements AdminRoleRepository {
 
+    /**
+     * Arbitrary but fixed: every bootstrap attempt must choose the same value
+     * or they do not serialise against each other. Scoped to the transaction,
+     * so it cannot leak if a caller fails.
+     */
+    private static final long BOOTSTRAP_LOCK_KEY = 8_262_027_431_001L;
+
     private static final String COLUMNS = """
             admin_member_id, institutional_identifier, status,
             granted_by, granted_at, revoked_by, revoked_at, reason
@@ -153,8 +160,28 @@ public class JdbcAdminRoleRepository implements AdminRoleRepository {
     public AdminRoleMember bootstrap(
             InstitutionalIdentifier member, String operator, String reason) {
 
-        // Lock the whole active set, so two concurrent bootstraps cannot both
-        // observe an empty table and both insert.
+        /*
+         * An advisory lock, not SELECT ... FOR UPDATE.
+         *
+         * The row lock below was the original guard and it does not work for
+         * THIS path: bootstrap runs when the table is empty, and locking an
+         * empty result set locks nothing, so concurrent callers all saw zero
+         * rows and all inserted. ux_admin_role_member_active would stop two
+         * rows for the SAME identity, but not two different first
+         * administrators - proven by
+         * ArchiveAdminBootstrapIntegrationTest.concurrentBootstrapAttemptsLeaveExactlyOneAdministrator,
+         * which left four.
+         *
+         * pg_advisory_xact_lock serialises on a value rather than on rows, so
+         * it holds even with nothing to lock, and releases with the
+         * transaction. The revoke path keeps its row lock: there, rows exist
+         * by definition.
+         */
+        jdbc.sql("SELECT pg_advisory_xact_lock(:key)")
+                .param("key", BOOTSTRAP_LOCK_KEY)
+                .query(Object.class)
+                .single();
+
         List<Long> active = jdbc.sql("""
                         SELECT admin_member_id FROM authz.admin_role_member
                         WHERE status = 'ACTIVE' FOR UPDATE
