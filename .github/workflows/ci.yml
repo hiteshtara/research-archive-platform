@@ -68,7 +68,7 @@ jobs:
       - name: mvn test (database suites excluded)
         run: >
           mvn -B -ntp test
-          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest,!AuthorizationStoreIntegrationTest,!ArchiveAdminConcurrencyIntegrationTest,!ArchiveAdminBootstrapIntegrationTest,!ArchiveIssuedIdentityIntegrationTest,!AuthorizationSchemaAndAuditIntegrationTest,!AuthorizationInertWhenDisabledTest,!AwardRecordAuthorizationIntegrationTest,!ProposalRecordAuthorizationIntegrationTest,!SubawardRecordAuthorizationIntegrationTest,!NegotiationRecordAuthorizationIntegrationTest'
+          -Dtest='!NegotiationWorkspaceAttributeContractTest,!NegotiationArchiveRepositorySchemaIntegrationTest,!SubawardAttachmentArchiveMigrationTest,!SubawardFrnSearchIntegrationTest,!StructuredSearchFiltersIntegrationTest,!AuthorizationStoreIntegrationTest,!ArchiveAdminConcurrencyIntegrationTest,!ArchiveAdminBootstrapIntegrationTest,!ArchiveIssuedIdentityIntegrationTest,!AuthorizationSchemaAndAuditIntegrationTest,!AuthorizationInertWhenDisabledTest,!AwardRecordAuthorizationIntegrationTest,!ProposalRecordAuthorizationIntegrationTest,!SubawardRecordAuthorizationIntegrationTest,!NegotiationRecordAuthorizationIntegrationTest,!ArchiveApiRoleIntegrationTest'
           -Dsurefire.failIfNoSpecifiedTests=false
       - name: Upload test reports
         if: failure()
@@ -111,7 +111,7 @@ jobs:
       - name: mvn test (database suites)
         run: >
           mvn -B -ntp test
-          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest,AuthorizationStoreIntegrationTest,ArchiveAdminConcurrencyIntegrationTest,ArchiveAdminBootstrapIntegrationTest,ArchiveIssuedIdentityIntegrationTest,AuthorizationSchemaAndAuditIntegrationTest,AuthorizationInertWhenDisabledTest,AwardRecordAuthorizationIntegrationTest,ProposalRecordAuthorizationIntegrationTest,SubawardRecordAuthorizationIntegrationTest,NegotiationRecordAuthorizationIntegrationTest'
+          -Dtest='StructuredSearchFiltersIntegrationTest,SubawardFrnSearchIntegrationTest,NegotiationArchiveRepositorySchemaIntegrationTest,NegotiationWorkspaceAttributeContractTest,SubawardAttachmentArchiveMigrationTest,AuthorizationStoreIntegrationTest,ArchiveAdminConcurrencyIntegrationTest,ArchiveAdminBootstrapIntegrationTest,ArchiveIssuedIdentityIntegrationTest,AuthorizationSchemaAndAuditIntegrationTest,AuthorizationInertWhenDisabledTest,AwardRecordAuthorizationIntegrationTest,ProposalRecordAuthorizationIntegrationTest,SubawardRecordAuthorizationIntegrationTest,NegotiationRecordAuthorizationIntegrationTest,ArchiveApiRoleIntegrationTest'
           -Dsurefire.failIfNoSpecifiedTests=false
       - name: Upload test reports
         if: failure()

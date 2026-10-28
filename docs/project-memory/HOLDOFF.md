@@ -1,7 +1,23 @@
 # Research Archive — handoff, 2026-10-28
 
 State verified against GitHub and live AWS on **2026-10-28**, re-derived rather
-than carried forward. `origin/main` = **`c341ed0`** (see the merge log below).
+than carried forward. `origin/main` = **`cead763`**.
+
+> ### Merged 2026-10-28
+>
+> | PR | Merge SHA | What |
+> |---|---|---|
+> | #82 | `1e72a66` | Archive-issued ARP identity + two-person relink rule (V085, V086) |
+> | #77 | `c341ed0` | IRB Dashboard isolation (D9) |
+> | #78 | `919169e` | QA status and handoff reconciled |
+> | #81 | `cead763` | DEV activation readiness |
+> | #83 | — | **closed as redundant**; its content landed via #81 |
+>
+> **Both container images are stale.** The API image is from 2026-10-06 and
+> the ETL loader from 2026-09-23 — so the loader physically lacks V082–V086
+> and `--migrate-only` would report success having applied nothing. New
+> images were built locally from `cead763` and verified, but **neither is
+> pushed**. See [`DEV_AUTHORIZATION_ROLLOUT.md`](../runbooks/DEV_AUTHORIZATION_ROLLOUT.md).
 
 > ### ⚠️ Correction, 2026-10-28
 >
@@ -102,6 +118,7 @@ Steps 1 and 2 are not engineering work. They are the critical path.
 | **Enforcement** | **OFF** — the running task definition carries **no `APP_AUTHORIZATION_*` variable at all**, so the Java default `false` applies. Checked directly, not inferred |
 | **Amplify** | builds 148, 149, 150 all SUCCEED; UI returns HTTP 200. **A UI rebuild is not a backend deployment** |
 | **Migrations** | **V082–V086 not applied** anywhere. `authz` schema does not exist on dev RDS — verified read-only through the approved SSM tunnel on 2026-10-28 |
+| **Loader image** | `…-dev-loader:20260923T163946Z-443e507` (2026-09-23) — **does not contain V082–V086**. Must be rebuilt before any migration |
 | **Administrators** | none bootstrapped; `authz.admin_role_member` does not exist |
 | **Grants** | none |
 | **SSM tunnel** | dbtunnel cluster 0 tasks; local port 15432 closed |

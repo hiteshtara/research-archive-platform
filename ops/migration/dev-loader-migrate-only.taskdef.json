@@ -1,0 +1,52 @@
+{
+  "family": "research-archive-platform-dev-loader",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::770203350335:role/research-archive-platform-dev-loader-execution-role",
+  "taskRoleArn": "arn:aws:iam::770203350335:role/research-archive-platform-dev-loader-task-role",
+  "containerDefinitions": [
+    {
+      "name": "loader",
+      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:983bab23dc84000af49ac972d3eb6e6704f5998c18ea58c48786077a7f717974",
+      "essential": true,
+      "environment": [
+        {
+          "name": "AWARD_ATTACHMENT_BUCKET_NAME",
+          "value": "research-archive-platform-dev-documents-770203350335"
+        },
+        {
+          "name": "DATA_BUCKET_NAME",
+          "value": "research-archive-platform-dev-data-770203350335"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "IRB_S3_PREFIX",
+          "value": "landing/irb/"
+        },
+        {
+          "name": "ORACLE_SECRET_ID",
+          "value": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/oracle-ECgann"
+        },
+        {
+          "name": "POSTGRES_SECRET_ID",
+          "value": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-4k6Ngz"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/research-archive-platform-dev-loader",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "loader"
+        }
+      }
+    }
+  ]
+}
