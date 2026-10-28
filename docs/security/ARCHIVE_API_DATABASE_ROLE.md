@@ -269,26 +269,49 @@ read-only loader task (SELECT only; prepared in
 
 ## 6. Tests — disposable PostgreSQL, Testcontainers
 
-New suite `ArchiveApiRoleIntegrationTest`, registered in **both** `ci.yml`
-lists. It applies every migration, creates `archive_api` with the grants
-above, opens a **second connection as that role**, and asserts:
+Implemented as `ArchiveApiRoleIntegrationTest`, registered in **both**
+`ci.yml` lists. 16 tests, all passing.
 
-| # | Test | Expect |
+It applies every migration, creates the ledger table the ETL would create,
+then runs **`database/roles/archive_api_role.sql` itself** — not a copy of
+the grants — substituting only the two things `psql` would supply (the
+password variable, and the owner role name in `ALTER DEFAULT PRIVILEGES`).
+Running the shipped file is the point: a test written against a hand-copied
+grant list passes happily while the script that will actually be run in DEV
+is wrong. It then opens a **second connection authenticated as
+`archive_api`** and asserts both halves of the privilege boundary.
+
+| Group | Tests | Asserts |
 |---|---|---|
-| 1 | `archiveReadsSucceed` | SELECT on `archive.award_version`, `proposal_version`, `subaward`, `negotiation` and `v_global_search` all succeed |
-| 2 | `archiveWritesFail` | INSERT/UPDATE/DELETE on any `archive` table → *permission denied* |
-| 3 | `authorizedAdministrativeWritesSucceed` | INSERT+UPDATE on `identity_link`, `access_grant`, `admin_role_member`, `relink_approval`; upsert on `person_status`; INSERT on `access_audit` |
-| 4 | `auditUpdateAndDeleteFail` | UPDATE and DELETE on `access_audit` → denied **by grant**, before the trigger is reached |
-| 5 | `droppingTheAuditTriggerFails` | `DROP TRIGGER tr_access_audit_append_only` → *must be owner* |
-| 6 | `ddlFails` | `CREATE TABLE`, `ALTER TABLE`, `DROP INDEX`, `CREATE SCHEMA`, `TRUNCATE` → all denied |
-| 7 | `migrationCommandsFail` | writing `public.schema_migration`, and `CREATE SCHEMA authz2` → denied |
-| 8 | `deleteOnAuthzTablesFails` | DELETE on every `authz` table → denied (no DELETE is granted anywhere) |
-| 9 | `sequencesWorkForGrantedTablesOnly` | the five INSERTs get ids; `principal_crosswalk` INSERT → denied |
-| 10 | `behaviourUnchangedWithEnforcementOff` | existing suites re-run against a connection using `archive_api` |
+| Archive reads | 2 | SELECT succeeds on all four modules plus the search view, IRB, negotiation attributes and `archive.person` |
+| Authorized writes | 4 | INSERT+UPDATE on `identity_link`, `access_grant`, `admin_role_member`, `relink_approval`; the `person_status` upsert through **both** branches; INSERT on `access_audit` |
+| Forbidden | 9 | audit UPDATE/DELETE; the append-only trigger itself; dropping that trigger; all `archive` writes; DELETE on every one of the 8 `authz` tables; DDL; `public` schema object creation; migration-ledger read and write; ungranted sequence use |
+| Role attributes | 1 | not SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS, is NOINHERIT and LOGIN, and **owns zero objects** |
 
-Test 4 is the one that matters most: it proves the audit trail is protected by
-**two independent mechanisms**, grant and trigger, and that the grant catches
-it first.
+The audit tests are the ones that matter most: they prove the trail is
+protected by **two independent mechanisms** and establish the order — the
+grant denies first, so the statement never reaches
+`tr_access_audit_append_only`. The trigger is then proven still live by
+hitting it as the *owner*, who no grant restrains.
+
+### What the tests actually found
+
+The suite was not green on the first run. Two real defects, both in work
+produced for this change:
+
+1. **`REVOKE ALL ON public.schema_migration` aborted the whole script** on
+   any database where the ETL had not yet created that table — it is created
+   by the ETL's migration runner, not by a migration file. DEV happens to
+   have it, so this would have gone unnoticed there and failed later
+   somewhere else. Now guarded by `to_regclass`.
+2. **An assertion that proved nothing.** The trigger check ran `UPDATE
+   authz.access_audit` against an empty table; the trigger is `FOR EACH ROW`,
+   so nothing fired and the test "passed" without exercising the trigger at
+   all. It now inserts a row first and checks UPDATE *and* DELETE.
+
+The suite was also mutation-checked: removing `UPDATE` from the
+`person_status` grant makes `suspensionUpsertSucceeds` fail, and restoring it
+makes it pass. The tests are load-bearing, not decorative.
 
 ---
 
