@@ -531,24 +531,45 @@ class ProposalRecordAuthorizationIntegrationTest {
     }
 
     @Test
-    void dashboardProposalCountsAgreeWithTheProposalSearchForTheSameUser() {
+    void allThreeProposalFiguresAgreeWithTheAuthorizedProposalSearch() {
         /*
          * The regression that matters. A count built from a different row set
          * than the list is a disclosure even when every individual record is
          * correctly gated: the number itself reveals how much exists.
+         *
+         * All three figures are held against what the SAME user can actually
+         * retrieve through the Proposal services - the family page for the
+         * family count, the version page of each visible family for the
+         * version-row count and for the documents those versions carry. A
+         * figure that agreed with the predicate but not with the services
+         * would still be wrong.
          */
         for (String unit : List.of("7777", "1234")) {
             ProposalRecordAccess access = departmentScope(unit);
-            PageResponse<ProposalFamilySummaryResponse> page = search(access);
+            Set<String> visible = "7777".equals(unit) ? Set.of("CHEM-P1") : Set.of("PHYS-P1");
+
+            PageResponse<ProposalFamilySummaryResponse> families = search(access);
+
+            long versionsTheUserCanRetrieve = 0;
+            for (String number : numbers(families)) {
+                versionsTheUserCanRetrieve +=
+                        service(access).findVersionPage(number, 0, 50).totalElements();
+            }
 
             var counts = dashboard(dashboardScope(
                     new AccessScope(false, Set.of(new UnitGrant(unit, false)), Optional.empty(), Set.of()),
-                    Set.of(unit), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
-                    "7777".equals(unit) ? Set.of("CHEM-P1") : Set.of("PHYS-P1")));
+                    Set.of(unit), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT, visible));
 
             assertThat(counts.proposals())
-                    .as("dashboard family count must equal what unit %s can actually list", unit)
-                    .isEqualTo(page.totalElements());
+                    .as("family count must equal what unit %s can list", unit)
+                    .isEqualTo(families.totalElements());
+            assertThat(counts.proposalHistoryRecords())
+                    .as("version-row count must equal the versions unit %s can open", unit)
+                    .isEqualTo(versionsTheUserCanRetrieve);
+            assertThat(counts.documents())
+                    .as("every fixture version carries one document number, so the "
+                            + "document tally must match the version count for unit %s", unit)
+                    .isEqualTo(versionsTheUserCanRetrieve);
         }
     }
 
