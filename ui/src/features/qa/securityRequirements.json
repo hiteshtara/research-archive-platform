@@ -2,7 +2,7 @@
   "source": "Kuali Archive Enhancements and Requirements, Security Requirements tab",
   "sourceDated": "2026-10-20",
   "reconciledOn": "2026-10-28",
-  "enforcementState": "Record-level authorization is OFF everywhere. Evidence, and its limits: app.authorization.enforcement-enabled is set in NO committed configuration file and defaults to false in Java; the live dev task definition (revision 81) carries no APP_AUTHORIZATION_* environment variable, checked directly on 2026-10-27. Terraform defines dev, test and prod, but only dev has a recorded deployment, so test and prod remain configuration scaffolding whose state is asserted from configuration rather than observed. A runtime check WAS performed against dev on 2026-10-27 - previously there was no runtime check at all - and it confirmed the running task definition carries no authorization variable. Three independent mechanisms keep it inert - the property default, a service-level short-circuit, and PERMIT_ALL defaults on every port - and AuthorizationInertWhenDisabledTest proves the application starts and behaves identically with all the authorization code present.",
+  "enforcementState": "Record-level authorization is OFF everywhere. app.authorization.enforcement-enabled appears in NO committed configuration file, and - checked inside the newly built artefact on 2026-10-28 - neither application.yml nor application-local.yml packaged in the jar contains any authorization or enforcement key, so the property defaults to false (the Java primitive default). The live dev task definition carries no APP_AUTHORIZATION_* variable either. Terraform defines dev, test and prod but only dev has a recorded deployment, so test and prod are asserted from configuration rather than observed; A runtime check WAS performed against dev on 2026-10-28, confirming the running task definition carries no authorization variable. Three independent mechanisms keep it inert - the property default, a service-level short-circuit and PERMIT_ALL port defaults - and AuthorizationInertWhenDisabledTest proves the application starts and behaves identically with all the authorization code present.",
   "recommendationStatus": "Business decisions were approved on 2026-10-26 and 2026-10-27. Implementation status is reported separately from them, because an approved decision is not working software, a merged pull request is not a deployment, and a passing test is not acceptance verification. Nothing on this page is acceptance-verified: that requires enforcement to be on in a real environment, which it is not.",
   "decisionsApproved": [
     "PAFO Administrator is a department user restricted to assigned departments, not a Central user.",
@@ -68,7 +68,7 @@
       "name": "IRB shared-surface isolation (D9)",
       "detail": "NOT an authorization module - IRB has no record rule and will not get one. When enforcement is on, IRB is removed from shared surfaces: already excluded from shared Global Search, and now from the Dashboard (four figures omitted from the response, IRB branch dropped from the document tally), for every caller including Central.",
       "state": "merged-not-deployed",
-      "evidence": "Global Search part merged in PR #71. Dashboard part merged in PR #77 as c341ed0. NOT in the running API."
+      "evidence": "Global Search in PR #71; Dashboard in PR #77, merged c341ed0. NOT deployed."
     },
     {
       "name": "BU identity to KRIM mapping",
@@ -86,7 +86,7 @@
       "name": "Archive-issued identity (ARP)",
       "detail": "Authorization grants key on an identifier the archive mints (ARP-XXXXXXXX-XXXXXXXX), not on an email, username, SAML NameID or Kuali principal. Authentication is unchanged - BU Shibboleth and Duo through Cognito, anchored on the immutable (issuer, sub). Re-linking an identity that holds grants needs a second, distinct ARCHIVE_ADMIN.",
       "state": "merged-not-deployed",
-      "evidence": "PR #82 merged as 1e72a66, adding migrations V085 and V086. NOT applied and NOT in the running API. The relink approval API and UI are NOT built (D-ID-6)."
+      "evidence": "PR #82 merged 1e72a66, adding V085 and V086. Migrations NOT applied - the authz schema does not exist on dev RDS, verified 2026-10-28. NOT deployed. The relink approval API and UI are NOT built (D-ID-6)."
     },
     {
       "name": "Enforcement",
@@ -313,5 +313,5 @@
       "conflict": ""
     }
   ],
-  "apiDeploymentState": "NOTHING authorization-related is running. The dev API service runs task definition revision 81, deployed 2026-10-22, whose image is tagged 20261006T182647Z-b10e4e3 - built on 2026-10-06 from commit b10e4e3. Verified by ancestry on 2026-10-28: NONE of PR #56, #62, #64, #66, #71, #74, #76, #77, #80 or #82 is contained in that commit. So the authorization engine, all four module gates (Award, Proposal, Subaward, Negotiation), the ARCHIVE_ADMIN API and UI, and the Dashboard scoping are ALL merged into main and NONE of them is deployed. Revision 81 is also the newest revision registered, so no newer image is waiting. Amplify rebuilds the user interface on every merge and did so again (builds 148, 149, 150, all SUCCEED) - but a UI rebuild is not a backend deployment, and an Amplify build is not a release of this work. The ARCHIVE_ADMIN screens are unreachable in every environment. Migrations V082-V086 are committed and NOT applied: the authz schema does not exist on dev RDS, verified read-only through the approved SSM tunnel on 2026-10-28."
+  "apiDeploymentState": "NOTHING authorization-related is running. The dev API service runs task definition revision 81, deployed 2026-10-22, whose image 20261006T182647Z-b10e4e3 was built on 2026-10-06. Verified by ancestry: PR #56, #62, #64, #66, #71, #74, #76, #77, #80 and #82 are all merged into main and NONE of them is deployed. The ETL loader image is stale too - 20260923T163946Z-443e507, built 2026-09-23 - so it physically does not contain migrations V082-V086 and --migrate-only against it would find nothing to apply and report success. BOTH images must be rebuilt, loader first. New images were built locally on 2026-10-28 from cead763 and verified to contain the right content, but NEITHER has been pushed to ECR, no migration has been applied, and the service has not been updated. Amplify rebuilds the UI on every merge - that is not a backend deployment."
 }
