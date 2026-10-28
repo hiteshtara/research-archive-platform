@@ -472,6 +472,17 @@ variable "manage_db_tunnel_access" {
   default     = false
 }
 
+variable "api_database_secret_arn" {
+  description = "ARN of a Secrets Manager secret holding a DEDICATED, least-privilege database credential for the API (role archive_api), with keys username/password/host/port/dbname. When set, the five POSTGRES_* container secrets are sourced from it instead of the database owner's secret, and the API execution role is granted read access to it automatically (modules/api_service derives the grant from additional_secrets). The owner secret stays referenced by the execution role until the switch is verified, so rollback needs no IAM change. Null leaves the API on the owner credential. The secret is created out-of-band - Terraform only ever sees this ARN, never a password."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.api_database_secret_arn == null || can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.api_database_secret_arn))
+    error_message = "api_database_secret_arn must be a full Secrets Manager secret ARN, including the random suffix AWS appends."
+  }
+}
+
 variable "db_tunnel_image" {
   description = "Fully-qualified, digest-pinned image for the tunnel container, e.g. \"<acct>.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:...\". Pin this so that deploying a new ETL loader revision does not replace the tunnel task definition as a side effect - the two have nothing to do with each other. The digest MUST also carry a \"protected-\" tag in ECR, or lifecycle rule 2 (\"keep the latest 20\") will eventually expire it and the tunnel will fail with CannotPullContainerError. When null, falls back to reading the live loader task definition, which is the historical behaviour and keeps working, at the cost of that coupling."
   type        = string

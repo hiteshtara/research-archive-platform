@@ -533,9 +533,28 @@ module "api_service" {
     { APP_CORS_ALLOWED_ORIGINS = join(",", local.cors_allowed_origins) }
   )
 
-  additional_secrets = var.enable_openai_secret ? {
-    OPENAI_API_KEY = "${module.openai_secret[0].openai_secret_arn}:apiKey::"
-  } : {}
+  # container_secrets in modules/api_service is
+  # merge(base_secrets, var.additional_secrets), and the later map wins -
+  # so these five override the owner-credential defaults built from
+  # var.database_secret_arn. The module also derives the execution role's
+  # secretsmanager:GetSecretValue grant from the ARNs referenced here, so
+  # no separate IAM change is needed.
+  #
+  # Nothing else about the task definition changes: same image, same
+  # environment, same roles. The API reads POSTGRES_* and does not care
+  # which database role it is.
+  additional_secrets = merge(
+    var.enable_openai_secret ? {
+      OPENAI_API_KEY = "${try(module.openai_secret[0].openai_secret_arn, "")}:apiKey::"
+    } : {},
+    var.api_database_secret_arn == null ? {} : {
+      POSTGRES_HOST     = "${var.api_database_secret_arn}:host::"
+      POSTGRES_PORT     = "${var.api_database_secret_arn}:port::"
+      POSTGRES_DB       = "${var.api_database_secret_arn}:dbname::"
+      POSTGRES_USER     = "${var.api_database_secret_arn}:username::"
+      POSTGRES_PASSWORD = "${var.api_database_secret_arn}:password::"
+    },
+  )
 }
 
 # Hard-fails plan/apply if the UI's Explorer flag is on while the API's
