@@ -37,10 +37,28 @@ apply and report success. That is the shape of the V076 incident of
 
 | | Loader | API |
 |---|---|---|
-| Tag | `20261028T141920Z-cead763` | `20261028T142100Z-cead763` |
+| Tag (superseded, **arm64 — do not use**) | `20261028T141920Z-cead763` | `20261028T142100Z-cead763` |
+| **Tag (correct, amd64)** | **`20261028T163450Z-cead763-amd64`** | **`20261028T163514Z-cead763-amd64`** |
+| **Digest (correct)** | **`sha256:983bab23dc84…717974`** | **`sha256:ccfb5d598d9b…199d1`** |
 | Local image id | `sha256:1dcb39ed5ddefcdda63c3c8087e57ca6a6dc1d59e0dd7be5e08c9bb1bac93011` | `sha256:5c9bc0d4636464c29a77954ecb3f4fbcb1f4312ac979da030730f1313baf0895` |
 | Source commit | `cead763957b4b5ef929ffa7849d0af40ffe301c2` | same |
 | Dockerfile | `etl/Dockerfile.loader` | `api/Dockerfile` |
+
+### ⚠️ MANDATORY before any push: verify the platform
+
+```bash
+scripts/verify-image-platform.sh \
+  research-archive-platform-dev-loader:<tag> \
+  research-archive-platform-dev-api:<tag>
+```
+
+Exits non-zero unless **every** image is `linux/amd64`. Builds on an Apple
+Silicon Mac default to arm64, push and register without complaint, and fail
+only when ECS tries to start the task — by which time the tag is consumed and
+a task-definition revision is burned. That happened on 2026-10-28; see
+`ops/migration/DEV_MIGRATION_RUNBOOK.md` §0.
+
+**Always build with `docker buildx build --platform linux/amd64`.**
 
 ### ✅ Pushed to ECR 2026-10-28, with owner approval
 

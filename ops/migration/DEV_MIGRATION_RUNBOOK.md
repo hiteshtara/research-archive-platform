@@ -7,6 +7,37 @@ Source commit `cead763` · loader image pushed to ECR 2026-10-28.
 
 ---
 
+## 0. ⚠️ Revision 253 is DEAD — use 254
+
+The first attempt (`task …/db8bfb8f65084fe98b09578cefb87aa0`, 2026-10-28)
+**failed before the container started**:
+
+```
+stopCode: TaskFailedToStart
+CannotPullContainerError: image Manifest does not contain descriptor
+                          matching platform 'linux/amd64'
+```
+
+The images had been built on an Apple Silicon Mac without `--platform`, so
+they were **arm64-only**; Fargate here is **amd64**. Nothing ran: no exit
+code, no CloudWatch stream, no database change — `authz` still absent and
+every `archive` count identical to the baseline.
+
+Everything verified before that push was **content** — migrations present,
+classes present, enforcement default, no secrets. Content was never the
+problem. **The one property that determines whether the image can run at all
+was not checked.** It is now: `scripts/verify-image-platform.sh`, which must
+pass before any push.
+
+| | Dead (arm64) | Correct (amd64) |
+|---|---|---|
+| Loader task definition | `:253` | **`:254`** |
+| Loader digest | `sha256:1dcb39ed5dde…` | **`sha256:983bab23dc84…`** |
+| API image | `20261028T142100Z-cead763` | **`20261028T163514Z-cead763-amd64`** |
+
+**Revision 253 must never be run.** It is left ACTIVE rather than deregistered
+so the failure stays visible in the task-definition history.
+
 ## 1. Target, verified
 
 | | |
@@ -37,7 +68,7 @@ the log configuration are byte-identical.
 The image is pinned **by digest, not by tag**:
 
 ```
-…/research-archive-platform-dev-loader@sha256:1dcb39ed5dde…c93011
+…/research-archive-platform-dev-loader@sha256:983bab23dc84…717974
 ```
 
 Both ECR repositories are **MUTABLE**, so a tag could be repointed later and
@@ -47,10 +78,10 @@ re-verified to contain all five migrations.
 ```bash
 aws ecs register-task-definition \
   --cli-input-json file://ops/migration/dev-loader-migrate-only.taskdef.json
-# -> note the new revision number, expected 253
+# -> note the new revision number
 ```
 
-> ⚠️ This registers revision **253** in the same family. That is safe:
+> ⚠️ This registers a new revision in the same family. That is safe:
 > the nightly Subaward schedule is pinned to **revision 237** and the
 > `run-*-loader.sh` scripts register their own revisions. **Nothing consumes
 > "latest".** Re-verify 237 afterwards anyway — it is one command.
@@ -75,7 +106,7 @@ aws ecs describe-services --cluster research-archive-platform-dev-api \
   --query 'services[0].taskDefinition' --output text                  # …api:81
 # 5. the digest is really in ECR
 aws ecr describe-images --repository-name research-archive-platform-dev-loader \
-  --image-ids imageDigest=sha256:1dcb39ed5ddefcdda63c3c8087e57ca6a6dc1d59e0dd7be5e08c9bb1bac93011 \
+  --image-ids imageDigest=sha256:983bab23dc84000af49ac972d3eb6e6704f5998c18ea58c48786077a7f717974 \
   --query 'imageDetails[0].imageTags' --output text   # 20261028T141920Z-cead763
 ```
 
@@ -109,7 +140,7 @@ UNION ALL SELECT 'archive tables',
 aws ecs run-task \
   --cluster research-archive-platform-dev-etl \
   --launch-type FARGATE \
-  --task-definition research-archive-platform-dev-loader:253 \
+  --task-definition research-archive-platform-dev-loader:254 \
   --network-configuration 'awsvpcConfiguration={subnets=[subnet-00fba12ee73ff0e3b,subnet-0c5b92d15314b93ed],securityGroups=[sg-0817befcc5b4affc9],assignPublicIp=DISABLED}' \
   --overrides '{"containerOverrides":[{"name":"loader","command":["python3","load_awards_from_csv.py","--ecs","--migrate-only"]}]}'
 ```

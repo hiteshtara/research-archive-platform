@@ -11,7 +11,7 @@
   "containerDefinitions": [
     {
       "name": "loader",
-      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:1dcb39ed5ddefcdda63c3c8087e57ca6a6dc1d59e0dd7be5e08c9bb1bac93011",
+      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:983bab23dc84000af49ac972d3eb6e6704f5998c18ea58c48786077a7f717974",
       "essential": true,
       "environment": [
         {
