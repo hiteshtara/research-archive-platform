@@ -21,7 +21,7 @@ class DashboardControllerTest {
         JdbcClient.MappedQuerySpec<DashboardDto> query =
                 mock(JdbcClient.MappedQuerySpec.class);
         DashboardDto expected = new DashboardDto(
-                1, 4, 5, 6,
+                1L, 4L, 5L, 6L,
                 43057, 281591,
                 7, 8,
                 9, 10, 0

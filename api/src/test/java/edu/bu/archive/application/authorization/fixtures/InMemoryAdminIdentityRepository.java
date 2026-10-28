@@ -23,7 +23,12 @@ public final class InMemoryAdminIdentityRepository implements AdminIdentityRepos
     private final List<IdentityLink> links = new ArrayList<>();
     private final Map<String, Boolean> suspensions = new LinkedHashMap<>();
     private final List<IdentitySearchResult> searchable = new ArrayList<>();
+    private final Map<String, Integer> grantCounts = new LinkedHashMap<>();
     private final AtomicLong ids = new AtomicLong();
+
+    public void setActiveGrantCount(String identity, int count) {
+        grantCounts.put(identity, count);
+    }
 
     public void addSearchable(IdentitySearchResult result) {
         searchable.add(result);
@@ -47,12 +52,41 @@ public final class InMemoryAdminIdentityRepository implements AdminIdentityRepos
         if (alreadyLinked) {
             throw new IllegalStateException("an active identity link already exists");
         }
+        if (hasEverBeenLinked(identity)) {
+            throw new IllegalStateException("this archive identity has been linked before");
+        }
         var created = new IdentityLink(ids.incrementAndGet(),
                 new ValidatedCognitoIdentity(cognitoIssuer, cognitoSubject),
                 identity, Optional.ofNullable(principal), loginName,
                 IdentityLinkStatus.ACTIVE, Instant.EPOCH);
         links.add(created);
         return created;
+    }
+
+    @Override
+    public IdentityLink relink(String cognitoIssuer, String cognitoSubject,
+                               InstitutionalIdentifier identity, KualiPersonId principal,
+                               String loginName, String verifiedBy) {
+        if (!hasEverBeenLinked(identity)) {
+            throw new IllegalStateException("never linked; use link()");
+        }
+        var created = new IdentityLink(ids.incrementAndGet(),
+                new ValidatedCognitoIdentity(cognitoIssuer, cognitoSubject),
+                identity, Optional.ofNullable(principal), loginName,
+                IdentityLinkStatus.ACTIVE, Instant.EPOCH);
+        links.add(created);
+        return created;
+    }
+
+    @Override
+    public int activeGrantCountFor(InstitutionalIdentifier identity) {
+        return grantCounts.getOrDefault(identity.value(), 0);
+    }
+
+    @Override
+    public boolean hasEverBeenLinked(InstitutionalIdentifier identity) {
+        return links.stream()
+                .anyMatch(link -> link.institutionalIdentifier().value().equals(identity.value()));
     }
 
     @Override
