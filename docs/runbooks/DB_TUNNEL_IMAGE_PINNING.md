@@ -1,8 +1,11 @@
 # Pinning the SSM tunnel's container image
 
-**Status (2026-10-28): the ECR image is protected; the Terraform apply has
-NOT been run.** The tunnel still runs task definition revision 1 from its
-mutable tag.
+**Status: APPLIED 2026-10-28.** The tunnel runs task definition
+**revision 2**, pinned to
+`…dev-loader@sha256:19972492…`, which also carries
+`protected-20260923T163946Z-443e507`. Verified end to end: a tunnel task
+started on revision 2, reached dev RDS as `archive_analyst`, and was
+stopped.
 
 ## The problem
 
@@ -151,7 +154,7 @@ In the untracked `terraform/environments/dev/terraform.tfvars`:
 db_tunnel_image = "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:19972492b07aae991577e52295694babd9792aa1cf69a79b547ba2987111bc53"
 ```
 
-## Step 3 — apply: **NOT RUN, awaiting approval**
+## Step 3 — apply: **DONE 2026-10-28**
 
 ```sh
 cd terraform/environments/dev
@@ -187,23 +190,57 @@ must keep reporting none when a new loader revision is registered.
 
 ## Rollback
 
-The pin is one tfvars line, so rolling back is removing it:
+> **Correction.** An earlier draft of this document said "revision 1
+> remains ACTIVE and `start-db-tunnel.sh` can be pointed at it." That is
+> **wrong**, and the apply proved it: replacing an
+> `aws_ecs_task_definition` **deregisters** the old revision. Revision 1 is
+> now `INACTIVE` and cannot be run. Plan rollback around revision 2 and
+> forward, not around going back to 1.
 
-```sh
-# delete the db_tunnel_image line from terraform.tfvars, then
-terraform apply -target=aws_ecs_task_definition.db_tunnel
+The pin is one tfvars line, but it can no longer simply be deleted — the
+`config_guard` precondition added in PR #86 refuses an enabled tunnel with
+no `db_tunnel_image`, which is the whole point of it. Rollback therefore
+means pinning to a **different** digest:
+
+```hcl
+# terraform/environments/dev/terraform.tfvars
+db_tunnel_image = "…/research-archive-platform-dev-loader@sha256:<other digest>"
 ```
 
-That registers revision 3, identical in substance to revision 1 (it
-resumes following the live loader image — which is now loader 254's
-`…-amd64` image, not the Sept 23 one).
+```sh
+terraform plan  -target=aws_ecs_task_definition.db_tunnel -out=rb.tfplan
+terraform apply rb.tfplan        # registers revision 3
+```
 
-To return to the *exact* previous state instead, revision 1 remains ACTIVE
-and `start-db-tunnel.sh` can be pointed at it; and because the ECR tag is
-protected, revision 1's image will still pull.
+Protect that digest first, exactly as in step 1, or the lifecycle policy
+will eventually expire it.
 
-Leave `protected-20260923T163946Z-443e507` in place either way — it costs
-nothing and removing it would re-expose the image to rule 2.
+In practice there is little to roll back to: revision 2 runs the **same
+image** revision 1 ran, merely addressed by digest instead of tag. If the
+tunnel fails, the cause is almost certainly not the image.
+
+Leave `protected-20260923T163946Z-443e507` in place regardless — it costs
+nothing, and removing it re-exposes the image to the "keep the newest 20"
+rule.
+
+## What was verified after the apply
+
+| Check | Result |
+|---|---|
+| Task definition revision | 1 → **2** |
+| Image | `@sha256:19972492…`, matching the protected tag |
+| Tunnel task runs | task on revision 2 reached `RUNNING` |
+| Reaches dev RDS | connected, `PostgreSQL 17.9`, `archive.award_version` = 267,386 rows |
+| `archive_analyst` read-only | INSERT / UPDATE / DELETE / CREATE TABLE all refused — by the role's read-only transaction default, and `authz` writes additionally by grant |
+| Roles | `archive_admin`, `archive_analyst` only — no `archive_api` |
+| `authz` tables | 8, unchanged; no migration ran |
+| API | still `dev-api:81`, 1/1 |
+| Nightly Subaward | still `loader:237`, ENABLED |
+| Secrets | the same two; none created |
+| ECR | 27 entries, unchanged |
+| Teardown | tunnel task stopped, no local Session Manager process, port 15432 closed |
+
+A follow-up `terraform plan` reports **No changes**.
 
 ## Why this image
 
