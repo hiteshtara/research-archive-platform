@@ -39,7 +39,7 @@ by enabling enforcement in production to create the first administrator.**
 
 ---
 
-## 1. V082–V084 migration safety
+## 1. V082–V086 migration safety
 
 ### What they do
 
@@ -48,8 +48,10 @@ by enabling enforcement in production to create the first administrator.**
 | `V082` | schema `authz`; `identity_link`, `person_status`, `access_grant`, `access_audit` + append-only trigger | none |
 | `V083` | `kim_principal`, `principal_crosswalk` | none |
 | `V084` | `admin_role_member` | none |
+| `V085` | unique index `ux_identity_link_active_identity` | none — but **fails if the table already holds two active links for one identity**, which is the correct outcome: two people would already share one archive identity, and that must be resolved deliberately rather than indexed over |
+| `V086` | `relink_approval` + 2 indexes | none |
 
-**All three are purely additive.** No `ALTER` of an existing table, no
+**All five are purely additive.** No `ALTER` of an existing table, no
 `UPDATE`, no `DELETE`, no `INSERT`, no backfill; every table and index is
 `CREATE ... IF NOT EXISTS`. The one `DROP` in the set is
 `DROP TRIGGER IF EXISTS tr_access_audit_append_only`, immediately before
@@ -214,7 +216,7 @@ identifier must be typed by the operator** — D-ID-2(c), still open.
 
 #### Prerequisites
 
-1. V082–V084 applied to the target database (stage 1).
+1. V082–V086 applied to the target database (stage 1).
 2. A deployed artefact containing this code — the running image predates it.
 3. Database credentials for the target environment.
 4. **D-ID-2(c) answered**: what value the institutional identifier takes.
@@ -254,7 +256,7 @@ definition.
 
 #### The procedure, once both blockers clear
 
-1. Apply V082–V084 to dev (stage 1), and deploy an API image containing them.
+1. Apply V082–V086 to dev (stage 1), and deploy an API image containing them.
 2. Run the operator path — once, by a named operator, with a witness:
    ```
    bootstrapFirstAdministrator(
@@ -510,17 +512,90 @@ asserted:
 
 ---
 
-## Open items blocking activation
+## Dev activation readiness — assessed 2026-10-28
 
-| | Blocks |
+### ⚠️ TWO images must be rebuilt, not one
+
+This is the dependency most likely to be missed, and it has bitten this
+project before (the V076 incident, 2026-08-14).
+
+| Image | Running | Built from | Contains what it needs? |
+|---|---|---|---|
+| **API** `…-dev-api:81` | deployed 2026-10-22 | `20261006T182647Z-b10e4e3` — commit **b10e4e3, 2026-10-06** | ❌ contains **none** of #56, #62, #64, #66, #71, #74, #76, #80 |
+| **ETL loader** `…-dev-loader:252` | registered 2026-09-23 | `20260923T163946Z-443e507` — commit **443e507, 2026-09-23** | ❌ **predates V082–V086** (V082–V084 added in `106ae5a` 2026-10-22; V085–V086 in `1e72a66` 2026-10-28) |
+
+So `--migrate-only` against the current loader image would find **nothing to
+apply** and report success. **The loader image must be rebuilt before the
+migrations can be applied at all**, and the API image before any of this code
+runs.
+
+Verified by ancestry, not by date:
+`git merge-base --is-ancestor 106ae5a 443e507` → false.
+
+### Ordered dependency chain
+
+```
+D-ID-3 (BU IAM)  ─────────────┐
+                              ▼
+                      D-ID-2(c): the identifier value
+                              │
+rebuild LOADER image ──► apply V082–V086 ──┐
+                                           ▼
+rebuild API image ──► deploy ──► run bootstrap (dry run, then --confirm)
+                                           │
+                                           ▼
+                        grant/revoke acceptance tests (§4)
+                                           │
+                                           ▼
+                        enable enforcement (§6) ──► rollback = 1 property
+```
+
+Nothing below the first box can start until BU IAM answers, **except** the two
+image rebuilds, which are independent and can be done now if approved.
+
+### What each prepared step needs
+
+| # | Step | Ready? | Needs |
+|---|---|---|---|
+| 1 | **V082–V086 migrations** | code ready, additive, no down migration | **rebuild the loader image**; approval to apply |
+| 2 | **API deployment** | code merged at `542f03c` | approval to build and push to ECR, then deploy. `ops/deploy-api.sh` from a clean detached worktree |
+| 3 | **Verified institutional identifier** | ⛔ **blocked** | **BU IAM** — D-ID-3. Everything identity-keyed waits here |
+| 4 | **Administrator bootstrap** | ✅ utility built and tested | steps 1–3; then dry run, then `--confirm` |
+| 5 | **Grant/revoke acceptance tests** | ✅ plan written (§4) | steps 1–4, plus enforcement temporarily on in a **non-production** environment |
+| 6 | **Rollback** | ✅ documented | nothing — `app.authorization.enforcement-enabled=false` and redeploy; non-destructive |
+
+### Remaining approvals, by owner
+
+| Owner | Approval |
 |---|---|
-| **D-ID-3** — which BU attribute is the institutional identifier (BU IAM) | stages 2–6 |
-| ~~**D-ID-2(a)** — who the first administrator is~~ — **answered 2026-10-28** | — |
-| ~~**D-ID-2(b)** — no operator path exists~~ — **built 2026-10-28**, dry-run by default, PR open | — |
-| **D-ID-2(c)** — which value goes in `institutional_identifier`, pending D-ID-3 | the bootstrap itself |
-| ~~**D2** — unscoped Proposal Dashboard count~~ | **closed 2026-10-27** |
-| ~~**D9** — IRB Dashboard figures stay archive-wide~~ | **decided and implemented 2026-10-27**; PR open for review |
-| **D-ID-4(a)** — approval for the KRIM backfill into dev RDS | stage 3's usability |
-| Approval to deploy an API image containing the admin surface | stage 2 |
+| **Project owner** | **SEC-008** — administrative actions only, or log record views and searches too. **The one open policy question.** |
+| **Project owner** | rebuild and deploy the **loader** image (V082–V086 cannot be applied without it) |
+| **Project owner** | rebuild and deploy the **API** image |
+| **Project owner** | apply **V082–V086** to dev |
+| **Project owner** | run the bootstrap with `--confirm` |
+| **Project owner** | enable enforcement in dev |
+| **Project owner** | D-ID-4(a) — KRIM backfill (usability, not blocking) |
+| BU IAM | *optional now*: whether a stable institutional identifier exists, as a crosswalk to automate re-linking after a Cognito pool replacement. **No longer a blocker** — see D-ID-5 |
 
-The first three are hard blocks. The last two are practical ones.
+### Decisions, current state
+
+| | |
+|---|---|
+| ~~**D-ID-3** — which BU attribute is the institutional identifier~~ | **no longer blocking.** D-ID-5 (merged `1e72a66`) makes the grant key an archive-issued `ARP-…` |
+| ~~**D-ID-2(a)** — who the first administrator is~~ | **answered 2026-10-28**: `mukadder@bu.edu`, dev only |
+| ~~**D-ID-2(b)** — no operator path exists~~ | **built**, merged `542f03c`; dry-run by default |
+| ~~**D-ID-2(c)** — what value the identifier takes~~ | **answered by D-ID-5**: a minted `ARP-…` via `--mint-archive-identifier` |
+| ~~**D2** — unscoped Proposal Dashboard count~~ | **closed**, merged `54a4254` |
+| ~~**D9** — IRB Dashboard figures archive-wide~~ | **closed**, merged `c341ed0` |
+| **D-ID-6** — the relink approval **API and UI are NOT built**. Service layer only; an administrator cannot perform a two-person relink through the product today | tracked, **not complete**; not an activation blocker |
+| **SEC-008** — audit scope | **OPEN** |
+
+### Still open, not blocking the bootstrap
+
+| | |
+|---|---|
+| **D9** — IRB Dashboard exclusion | implemented, **PR #77 open** |
+| **D-ID-4(a)** — KRIM backfill | identity search reaches 7.89% of people without it; manual entry works |
+| Second administrator | operational continuity, not a security requirement |
+| Contact-relationships review screen | designed, not built; nothing unprotected |
+| 270 unresolved Subaward families | unrelated to activation |
