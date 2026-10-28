@@ -1,6 +1,8 @@
 # Pinning the SSM tunnel's container image
 
-**Status: prepared, not applied.**
+**Status (2026-10-28): the ECR image is protected; the Terraform apply has
+NOT been run.** The tunnel still runs task definition revision 1 from its
+mutable tag.
 
 ## The problem
 
@@ -38,17 +40,20 @@ The loader ECR repository has a lifecycle policy:
 | 2 | **any**, more than 20 images | expire |
 
 Rule 1 exists precisely for images referenced by a pinned task definition,
-and **it is already in use**: `20260817T011034Z-4a82821` also carries
+and **it was already in use**: `20260817T011034Z-4a82821` also carries
 `protected-20260817T011034Z-4a82821`. So this is the established local
-pattern, not a new one being invented here.
+pattern, not one invented here.
 
-Measured 2026-10-28: the repository holds **27** entries, of which **1** is
-exempt via rule 1, leaving **26** subject to rule 2 — so the oldest **6**
-are already due for expiry. The image the tunnel runs today
-(`20260923T163946Z-443e507`, digest `sha256:19972492…`) sits at **#20 of
-26**: **13 entries**, roughly **four more loader builds**, of headroom
-before rule 2 sweeps it. Each build pushes about three entries (the tagged
-image plus two untagged).
+The image the tunnel runs (`20260923T163946Z-443e507`, digest
+`sha256:19972492…`) was **not** protected, so rule 2 would eventually have
+swept it and the tunnel would have failed with `CannotPullContainerError`.
+
+> **Correction.** An earlier revision of this document estimated "the
+> oldest 6 are due to expire" from the image count. That arithmetic was
+> wrong — ECR's own `get-lifecycle-policy-preview` is authoritative and
+> reports **3**, apparently because untagged manifests referenced by an
+> image index are not counted independently. The risk was real but less
+> imminent than stated. Use the preview, not arithmetic.
 
 So this is not only a tidiness problem. **The tunnel's current image is on
 a path to being deleted**, pinned or not; pinning to it without protecting
@@ -66,43 +71,116 @@ A new `var.db_tunnel_image`, digest-only, defaulting to `null`:
 Validation rejects a tag, because tags in this repository are `MUTABLE`
 and therefore not a stable reference.
 
-## Applying it, when approved — in this order
+## Step 1 — protect the image: **DONE 2026-10-28**
 
-1. **Protect the image first**, so rule 1 shields it from rule 2:
+```
+tag:    protected-20260923T163946Z-443e507
+digest: sha256:19972492b07aae991577e52295694babd9792aa1cf69a79b547ba2987111bc53
+```
 
-   ```sh
-   export AWS_PROFILE=bu-nprd
-   MANIFEST="$(aws ecr batch-get-image \
-     --repository-name research-archive-platform-dev-loader \
-     --image-ids imageTag=20260923T163946Z-443e507 \
-     --query 'images[0].imageManifest' --output text)"
-   aws ecr put-image \
-     --repository-name research-archive-platform-dev-loader \
-     --image-tag protected-dbtunnel-base \
-     --image-manifest "$MANIFEST"
-   ```
+Both tags now sit on **one** image entry — a tag was added, no image was
+pushed, no digest changed, and the repository still holds 27 entries. The
+pre-existing `protected-20260817T011034Z-4a82821` was not touched.
 
-   This adds a tag to an existing manifest. It pushes no new image and
-   changes no digest.
+Confirmed by `aws ecr get-lifecycle-policy-preview`: 3 images would expire,
+all under rule 2, and **the tunnel image is not among them**.
 
-2. Add to the untracked `terraform.tfvars`:
+### The trap in `put-image`, which caught me once
 
-   ```hcl
-   db_tunnel_image = "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:19972492b07aae991577e52295694babd9792aa1cf69a79b547ba2987111bc53"
-   ```
+The obvious command is wrong:
 
-3. `terraform plan -target=aws_ecs_task_definition.db_tunnel`
+```sh
+# WRONG - creates a NEW image with a DIFFERENT digest
+aws ecr batch-get-image ... --query 'images[0].imageManifest' --output text > manifest.json
+aws ecr put-image ... --image-manifest file://manifest.json
+```
 
-   **Expect exactly one replacement**, converting the same image from tag
-   to digest:
+A manifest's digest is the SHA-256 of its **exact bytes**. `--output text`
+appends a newline, so the pushed manifest is 857 bytes where the original
+is 856, and ECR stores a *second* image — same layers, different digest —
+and puts your `protected-` tag on the wrong one. I did this, saw digest
+`sha256:9e85ff3b…` come back instead of `…19972492…`, deleted the stray
+manifest, and redid it byte-exactly.
 
-   ```
-   before: …dev-loader:20260923T163946Z-443e507
-   after:  …dev-loader@sha256:19972492…
-   ```
+The reliable form verifies the bytes reproduce the digest **before**
+pushing:
 
-   One deliberate replacement to establish the pin; after it, loader
-   deploys cannot touch this resource.
+```python
+import json, subprocess, hashlib
+raw = subprocess.run(["aws","ecr","batch-get-image",
+    "--repository-name","research-archive-platform-dev-loader",
+    "--image-ids","imageTag=<tag>","--output","json"],
+    capture_output=True, text=True, check=True).stdout
+img = json.loads(raw)["images"][0]
+b = img["imageManifest"].encode()
+assert "sha256:"+hashlib.sha256(b).hexdigest() == img["imageId"]["imageDigest"]
+open("manifest.exact","wb").write(b)
+```
+
+then `put-image --image-manifest file://manifest.exact
+--image-manifest-media-type application/vnd.oci.image.index.v1+json`.
+
+## Step 2 — tfvars: **DONE 2026-10-28**
+
+In the untracked `terraform/environments/dev/terraform.tfvars`:
+
+```hcl
+db_tunnel_image = "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-loader@sha256:19972492b07aae991577e52295694babd9792aa1cf69a79b547ba2987111bc53"
+```
+
+## Step 3 — apply: **NOT RUN, awaiting approval**
+
+```sh
+cd terraform/environments/dev
+export AWS_PROFILE=bu-nprd
+terraform plan  -target=aws_ecs_task_definition.db_tunnel -out=tunnel-pin.tfplan
+terraform apply tunnel-pin.tfplan
+```
+
+Expect: **1 added, 0 changed, 1 destroyed** — the tunnel task definition
+only, going from **revision 1 to revision 2**, converting the same image
+from tag to digest:
+
+```
+before: …dev-loader:20260923T163946Z-443e507
+after:  …dev-loader@sha256:19972492…
+```
+
+No running task is disturbed: the tunnel has no ECS *service*, and
+`start-db-tunnel.sh` launches a one-off task against the family's latest
+revision each time. Zero tunnel tasks were running when this was prepared.
+
+### Verify after applying
+
+```sh
+aws ecs describe-task-definition --task-definition research-archive-platform-dev-dbtunnel \
+  --query 'taskDefinition.{rev:revision,image:containerDefinitions[0].image}'
+scripts/start-db-tunnel.sh      # must still reach dev RDS
+scripts/stop-db-tunnel.sh
+```
+
+A plan run afterwards must report **no changes** for this resource, and
+must keep reporting none when a new loader revision is registered.
+
+## Rollback
+
+The pin is one tfvars line, so rolling back is removing it:
+
+```sh
+# delete the db_tunnel_image line from terraform.tfvars, then
+terraform apply -target=aws_ecs_task_definition.db_tunnel
+```
+
+That registers revision 3, identical in substance to revision 1 (it
+resumes following the live loader image — which is now loader 254's
+`…-amd64` image, not the Sept 23 one).
+
+To return to the *exact* previous state instead, revision 1 remains ACTIVE
+and `start-db-tunnel.sh` can be pointed at it; and because the ECR tag is
+protected, revision 1's image will still pull.
+
+Leave `protected-20260923T163946Z-443e507` in place either way — it costs
+nothing and removing it would re-expose the image to rule 2.
 
 ## Why this image
 
