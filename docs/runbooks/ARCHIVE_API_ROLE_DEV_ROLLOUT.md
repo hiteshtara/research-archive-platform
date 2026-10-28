@@ -345,30 +345,138 @@ Then, in order:
 
 ## 6. Rollback
 
-Terraform owns the task definition, so rolling back by `update-service`
-alone leaves config and reality disagreeing — the next apply would re-apply
-the change. Prefer reverting the input:
+> **Corrected 2026-10-28.** Earlier revisions of this document said
+> "revision 81 keeps the `archive_admin` credential and stays ACTIVE."
+> **That was an assumption, and it is wrong by default.** Replacing an
+> `aws_ecs_task_definition` *deregisters* the superseded revision —
+> demonstrated when pinning the DB tunnel left its revision 1 `INACTIVE`,
+> and an `INACTIVE` revision cannot be run. Applied unchanged, the
+> secrets repoint would have deregistered revision 81 and destroyed the
+> rollback target this document names.
 
-```sh
-# Remove api_database_secret_arn from terraform.tfvars, then:
-terraform apply -target=module.api_service
+### Prerequisite 1 — make revision 81 survive
+
+`skip_destroy = true` on `aws_ecs_task_definition.api` keeps superseded
+revisions `ACTIVE`. Verified by plan to be an **in-place update**, not a
+replacement, so it registers no new revision and changes nothing running:
+
+```
+module.api_service.aws_ecs_task_definition.api will be updated in-place
+Plan: 0 to add, 1 to change, 0 to destroy.
 ```
 
-For an **urgent** rollback, pin the service back and reconcile afterwards:
+**Apply it before the credential cutover, not with it** — two changes in
+one apply means a failure is not attributable.
+
+### Prerequisite 2 — protect the known-good image
+
+`modules/api_ecr` had only a "keep the latest 20" rule and **no
+`protected-*` exemption**, unlike the loader repository — which gained one
+after the Subaward nightly sync missed 14 consecutive runs
+(2026-08-18..09-01) because the image its pinned task definition
+referenced had been swept. The API repository is exposed to exactly that:
+measured 2026-10-28 the running image is **#21 of 27** by push date,
+roughly **five more API builds** of headroom.
+
+**A task definition does not protect its image.** If the image is swept,
+no rollback to it is possible however many revisions stay `ACTIVE`.
+
+Add the rule, then tag the image **byte-exactly** — see
+[`DB_TUNNEL_IMAGE_PINNING.md`](DB_TUNNEL_IMAGE_PINNING.md) for the
+`put-image` trap that otherwise stores a second image and tags the wrong
+one.
+
+```
+protected-20261006T182647Z-b10e4e3
+  -> sha256:4b74cdbc2fc7ed3bf47260f53031df6a5c0accfa3c06607c63fa8ccb37216ce3
+```
+
+Both prerequisites are prepared in **PR #86's successor,
+`fix/api-rollback-safety`**, and are not applied.
+
+### Known-good baseline, recorded 2026-10-28
+
+| | |
+|---|---|
+| Service | `research-archive-platform-dev-api`, FARGATE, platform `LATEST`, desired 1, running 1 |
+| Task definition | `research-archive-platform-dev-api:81`, ACTIVE |
+| Image (tag) | `…/research-archive-platform-dev-api:20261006T182647Z-b10e4e3` |
+| Image (**digest**) | `sha256:4b74cdbc2fc7ed3bf47260f53031df6a5c0accfa3c06607c63fa8ccb37216ce3` |
+| cpu / memory | 512 / 1024, `awsvpc`, `X86_64` / `LINUX` |
+| Execution role | `research-archive-platform-dev-api-execution-role` |
+| Task role | `research-archive-platform-dev-api-task-role` |
+| Container | `api`, essential, port 8080/tcp, no health check |
+| Secrets | 5 × `…/dev/postgres-4k6Ngz:{dbname,host,password,port,username}::` |
+| Environment | `SPRING_PROFILES_ACTIVE=aws`, `COGNITO_ISSUER_URI`, `COGNITO_CLIENT_ID`, `ARCHIVE_DOCUMENTS_BUCKET`, `APP_CORS_ALLOWED_ORIGINS`, `APP_EXPLORER_ENABLED=true`, `APP_SEARCH_SEMANTIC_ENABLED=true`, `APP_SEARCH_TIMING_ENABLED=false` |
+| Enforcement | **no** authorization or enforcement variable is set — off by property default |
+
+The tag is **mutable** and `20261006T182647Z-b10e4e3` also carries
+`latest`, which moves. Any rollback must use the **digest**.
+
+### Rollback A — preferred, revision 81 still ACTIVE
 
 ```sh
 aws ecs update-service --cluster research-archive-platform-dev-api \
   --service research-archive-platform-dev-api \
   --task-definition research-archive-platform-dev-api:81 --force-new-deployment
+aws ecs wait services-stable --cluster research-archive-platform-dev-api \
+  --services research-archive-platform-dev-api
 ```
 
-Revision 81 carries the `archive_admin` credential and stays ACTIVE. If you
-use this form, revert the tfvars change in the same session — otherwise the
-next apply silently re-applies the switch.
+### Rollback B — revision 81 already INACTIVE
 
-`archive_api` itself can stay: an unused role grants nothing to anyone.
+An `INACTIVE` revision cannot be run, but it can still be **read**, so a
+fresh one can be registered from it rather than retyped from this table:
 
----
+```sh
+aws ecs describe-task-definition --task-definition research-archive-platform-dev-api:81 \
+  --query 'taskDefinition' > /tmp/td81.json
+
+python3 - <<'EOF'
+import json
+td = json.load(open("/tmp/td81.json"))
+for k in ("taskDefinitionArn","revision","status","requiresAttributes",
+          "compatibilities","registeredAt","registeredBy","deregisteredAt"):
+    td.pop(k, None)
+# Pin by digest - the tag is mutable and also carries "latest".
+td["containerDefinitions"][0]["image"] = (
+    "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api"
+    "@sha256:4b74cdbc2fc7ed3bf47260f53031df6a5c0accfa3c06607c63fa8ccb37216ce3")
+json.dump(td, open("/tmp/td-rollback.json","w"), indent=2)
+EOF
+
+aws ecs register-task-definition --cli-input-json file:///tmp/td-rollback.json
+aws ecs update-service --cluster research-archive-platform-dev-api \
+  --service research-archive-platform-dev-api \
+  --task-definition research-archive-platform-dev-api:<new revision> --force-new-deployment
+```
+
+It differs from 81 in one respect — the image is addressed by digest
+rather than tag — which is deliberate and strictly safer. Rollback B
+depends on the image still existing, which is why prerequisite 2 is a
+prerequisite and not a nicety.
+
+### Reconciling Terraform and ECS afterwards
+
+Either rollback leaves the service pointing somewhere Terraform did not
+put it. Close that drift:
+
+1. Remove `api_database_secret_arn` from the untracked `terraform.tfvars`.
+2. `terraform plan -target=module.api_service` → **No changes**.
+3. Confirm the service is on the intended revision:
+   ```sh
+   aws ecs describe-services --cluster research-archive-platform-dev-api \
+     --services research-archive-platform-dev-api --query 'services[0].taskDefinition'
+   ```
+4. Confirm the container is back on the owner credential:
+   ```sql
+   SELECT usename, count(*) FROM pg_stat_activity
+    WHERE datname = 'research_archive' GROUP BY usename;
+   ```
+
+Skipping step 1 is the trap: the service would be rolled back while the
+configuration still says otherwise, and the next apply would silently
+re-apply the switch.
 
 ## 7. After a clean soak
 
