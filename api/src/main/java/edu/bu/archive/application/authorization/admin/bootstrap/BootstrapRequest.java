@@ -8,6 +8,11 @@ package edu.bu.archive.application.authorization.admin.bootstrap;
  *        ARCHIVE_ADMIN membership is keyed on. It must be supplied, never
  *        derived from an email address, a Cognito username or a SAML NameID -
  *        which attribute it should be is decision D-ID-3 and is still open.
+ * @param mintArchiveIdentifier mint a fresh ARP-… identifier instead of
+ *        supplying one. The approved model (D-ID-5): the archive issues its
+ *        own identifier, so no BU attribute has to be settled first. Minting
+ *        happens ONLY on a confirmed run - a dry run reserves nothing, so the
+ *        value shown by a dry run could never be mistaken for the real one.
  * @param acceptProvisionalIdentifier explicit acknowledgement, required only
  *        when the supplied identifier looks like an email address or matches
  *        the Cognito username. Mirrors
@@ -26,6 +31,7 @@ public record BootstrapRequest(
         String loginName,
         String operator,
         String reason,
+        boolean mintArchiveIdentifier,
         boolean acceptProvisionalIdentifier,
         boolean dryRun,
         boolean confirmed) {

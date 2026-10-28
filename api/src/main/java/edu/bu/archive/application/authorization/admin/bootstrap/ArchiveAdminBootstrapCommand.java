@@ -6,6 +6,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import edu.bu.archive.application.authorization.ArchivePrincipalId;
 import edu.bu.archive.application.authorization.AuthorizationProperties;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.KualiPersonId;
@@ -96,8 +97,18 @@ public final class ArchiveAdminBootstrapCommand {
                     null);
         }
 
+        /*
+         * Minted HERE, past every check and past the dry-run return, so a dry
+         * run cannot create or reserve one. The value is reported back so the
+         * operator records the identifier that was actually written, never a
+         * sample from an earlier run.
+         */
+        InstitutionalIdentifier identity = request.mintArchiveIdentifier()
+                ? ArchivePrincipalId.mint()
+                : new InstitutionalIdentifier(request.institutionalIdentifier().trim());
+
         AdminRoleMember member = admin.bootstrapFirstAdministrator(
-                new InstitutionalIdentifier(request.institutionalIdentifier().trim()),
+                identity,
                 request.operator().trim(),
                 request.reason());
 
@@ -115,8 +126,6 @@ public final class ArchiveAdminBootstrapCommand {
          * reverse - a link to an identity holding no role - would not be
          * recoverable the same way.
          */
-        InstitutionalIdentifier identity =
-                new InstitutionalIdentifier(request.institutionalIdentifier().trim());
         admin.linkIdentity(
                 identity,
                 request.cognitoIssuer().trim(),
@@ -129,9 +138,11 @@ public final class ArchiveAdminBootstrapCommand {
         checks.add("WROTE  membership " + member.adminMemberId()
                 + " and an ADMIN_VERIFIED identity link");
         return new BootstrapOutcome(BootstrapOutcome.Result.APPLIED, checks, problems,
-                "Bootstrapped. No archive data access was granted: holding ARCHIVE_ADMIN "
-                        + "confers none, so this administrator will correctly see no records "
-                        + "until a grant is issued through the API.",
+                "Bootstrapped with archive identity " + identity.value()
+                        + " - RECORD THIS VALUE; it is the key every future grant uses. "
+                        + "No archive data access was granted: holding ARCHIVE_ADMIN confers "
+                        + "none, so this administrator will correctly see no records until a "
+                        + "grant is issued through the API.",
                 member.adminMemberId());
     }
 
@@ -169,6 +180,17 @@ public final class ArchiveAdminBootstrapCommand {
                     + "A username, an email address or a NameID is not the subject.");
         } else {
             checks.add("OK     Cognito subject is a well-formed immutable sub " + mask(subject));
+        }
+
+        if (r.mintArchiveIdentifier()) {
+            if (trim(r.institutionalIdentifier()) != null) {
+                problems.add("Supply an institutional identifier OR ask for one to be minted, "
+                        + "not both - otherwise it is unclear which one would be used.");
+            } else {
+                checks.add("OK     an archive identifier will be MINTED on confirmation. "
+                        + "Nothing is reserved now, so a dry run leaves no identifier behind.");
+            }
+            return;
         }
 
         String identifier = trim(r.institutionalIdentifier());

@@ -202,7 +202,9 @@ class AuthorizationSchemaAndAuditIntegrationTest {
                     // V083
                     "kim_principal", "principal_crosswalk",
                     // V084
-                    "admin_role_member");
+                    "admin_role_member",
+                    // V086 - two-person rule for re-linking an identity that holds grants
+                    "relink_approval");
         }
 
         @Test

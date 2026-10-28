@@ -38,6 +38,7 @@ import edu.bu.archive.application.authorization.admin.bootstrap.BootstrapTarget;
  * --cognito-user-pool-id=us-east-1_XXXXXXXXX
  * --cognito-issuer=https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXXXXXXXX
  * --cognito-subject=&lt;the immutable sub UUID&gt;
+ * --mint-archive-identifier           OR --institutional-identifier=&lt;value&gt;
  * --institutional-identifier=&lt;the approved value&gt;
  * --login-name=&lt;display only, optional&gt;
  * --operator=&lt;the person running this&gt;
@@ -89,6 +90,7 @@ public class ArchiveAdminBootstrapCli implements ApplicationRunner {
                 options.get("login-name"),
                 options.get("operator"),
                 options.get("reason"),
+                args.containsOption("mint-archive-identifier"),
                 args.containsOption("accept-provisional-identifier"),
                 args.containsOption("dry-run"),
                 args.containsOption("confirm"));
