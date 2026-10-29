@@ -36,7 +36,12 @@ public final class EcsTaskMetadataRuntimeIdentity implements RuntimeIdentity {
         this(System.getenv("ECS_CONTAINER_METADATA_URI_V4"));
     }
 
-    EcsTaskMetadataRuntimeIdentity(String metadataUri) {
+    /**
+     * Explicit endpoint, for tests and for any caller that already knows
+     * the URI. Public because an unreachable or nonsense endpoint must be
+     * exercisable: it has to read as "unknown", never as agreement.
+     */
+    public EcsTaskMetadataRuntimeIdentity(String metadataUri) {
         String body = metadataUri == null ? null : fetch(metadataUri + "/task");
         this.accountId = body == null ? null : accountFromTaskArn(body);
         this.cluster = body == null ? null : group(CLUSTER, body);

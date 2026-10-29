@@ -10,6 +10,7 @@ import edu.bu.archive.application.authorization.ArchivePrincipalId;
 import edu.bu.archive.application.authorization.AuthorizationProperties;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.KualiPersonId;
+import edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity;
 import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleMember;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
@@ -54,6 +55,7 @@ public final class ArchiveAdminBootstrapCommand {
     private final AdminRoleRepository adminRoles;
     private final AdminIdentityRepository identities;
     private final AuthorizationProperties properties;
+    private RuntimeIdentity runtime = RuntimeIdentity.UNKNOWN;
 
     public ArchiveAdminBootstrapCommand(
             BootstrapTarget target,
@@ -66,6 +68,16 @@ public final class ArchiveAdminBootstrapCommand {
         this.adminRoles = Objects.requireNonNull(adminRoles, "adminRoles");
         this.identities = Objects.requireNonNull(identities, "identities");
         this.properties = properties;
+    }
+
+    /**
+     * Where this process is REALLY running. Defaults to
+     * {@link RuntimeIdentity#UNKNOWN}, which refuses a confirmed bootstrap:
+     * a caller that does not supply one cannot write.
+     */
+    public ArchiveAdminBootstrapCommand withRuntime(RuntimeIdentity runtime) {
+        this.runtime = java.util.Objects.requireNonNull(runtime);
+        return this;
     }
 
     public BootstrapOutcome run(BootstrapRequest request) {
@@ -142,8 +154,19 @@ public final class ArchiveAdminBootstrapCommand {
     }
 
     private void checkTarget(BootstrapRequest r, List<String> checks, List<String> problems) {
+        /*
+         * These two comparisons were worthless until 2026-10-29. The CLI
+         * built the BootstrapTarget from the same --aws-account-id and
+         * --environment flags it then compared against, so both were
+         * x == x and always passed. The "OK AWS account matches" line in
+         * the first real DEV bootstrap confirmed nothing.
+         *
+         * They are kept because they still catch an internally inconsistent
+         * invocation, but the check that matters is verifyRuntime below.
+         */
         compare("AWS account", r.awsAccountId(), target.awsAccountId(), checks, problems);
         compare("environment", lower(r.environment()), target.environment(), checks, problems);
+        verifyRuntime(r, checks, problems);
         compare("Cognito user pool", r.cognitoUserPoolId(), target.cognitoUserPoolId(),
                 checks, problems);
 
@@ -163,6 +186,51 @@ public final class ArchiveAdminBootstrapCommand {
         if ("prod".equals(target.environment()) || "production".equals(target.environment())) {
             problems.add("This utility refuses to run against production. "
                     + "A production administrator needs its own approved procedure.");
+        }
+    }
+
+    /**
+     * Compare what the operator stated against what the runtime reports.
+     *
+     * <p>Fails closed: if the runtime cannot be established, a confirmed
+     * bootstrap is refused and only a dry run proceeds. The previous
+     * behaviour was to believe the flag.
+     */
+    private void verifyRuntime(BootstrapRequest r, List<String> checks, List<String> problems) {
+        java.util.Optional<String> actualAccount = runtime.awsAccountId();
+        if (actualAccount.isEmpty()) {
+            if (r.confirmed() && !r.dryRun()) {
+                problems.add("cannot determine the AWS account from the runtime "
+                        + "(ECS task metadata absent or unreachable), so the stated account "
+                        + "cannot be verified. Refusing to write. Run this as an ECS task; "
+                        + "a dry run is still available.");
+            } else {
+                checks.add("WARN   runtime account unknown - a dry run outside ECS cannot "
+                        + "verify where it is pointed");
+            }
+        } else if (!actualAccount.get().equals(trim(r.awsAccountId()))) {
+            problems.add("account mismatch: --aws-account-id says " + trim(r.awsAccountId())
+                    + " but this task is running in " + actualAccount.get() + ". Refusing.");
+        } else {
+            checks.add("OK     AWS account " + actualAccount.get()
+                    + " confirmed against the ECS task metadata, not just the flag");
+        }
+
+        java.util.Optional<String> cluster = runtime.clusterName();
+        if (cluster.isPresent()) {
+            String lowerCluster = cluster.get().toLowerCase(Locale.ROOT);
+            String stated = lower(r.environment());
+            if (stated != null && !lowerCluster.contains(stated)) {
+                problems.add("environment mismatch: --environment says " + stated
+                        + " but this task runs in cluster " + cluster.get() + ". Refusing.");
+            } else if (stated != null) {
+                checks.add("OK     environment " + stated
+                        + " is consistent with cluster " + cluster.get());
+            }
+            if (lowerCluster.contains("prod")) {
+                problems.add("This utility refuses to run against production. "
+                        + "The cluster name says prod regardless of what --environment claims.");
+            }
         }
     }
 

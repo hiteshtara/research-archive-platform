@@ -96,7 +96,12 @@ public class ArchiveAdminBootstrapCli implements ApplicationRunner {
                 args.containsOption("confirm"));
 
         BootstrapOutcome outcome = new ArchiveAdminBootstrapCommand(
-                target, admin, adminRoles, identities, properties).run(request);
+                target, admin, adminRoles, identities, properties)
+                // Read from the ECS task metadata endpoint, NOT from the
+                // flags - the flags are what is being checked.
+                .withRuntime(new edu.bu.archive.application.authorization.admin
+                        .provisioning.EcsTaskMetadataRuntimeIdentity())
+                .run(request);
 
         print(outcome);
         if (outcome.result() == BootstrapOutcome.Result.REFUSED) {
