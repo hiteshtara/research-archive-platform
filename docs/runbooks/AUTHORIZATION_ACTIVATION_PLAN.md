@@ -117,3 +117,72 @@ being consulted. That is deliberate: a rollback must not destroy
 provisioning work.
 
 Target: under 10 minutes, no database change, no grant change.
+
+---
+
+# Appendix A — running the grant CLI as an ECS task
+
+Packaging: **none**. The CLI ships inside the existing API image; the
+`grant-admin` profile is what activates it, and no deployment sets that
+profile. The same image serves revision 84 and runs this utility, so
+there is no second artefact to keep in step.
+
+## Task definition
+
+Derived from the running API revision with four changes and nothing else:
+
+| Field | Value |
+|---|---|
+| family | `research-archive-platform-dev-api-grant` (throwaway, deregistered after) |
+| image | the **same digest** the API service runs |
+| `portMappings` | `[]` |
+| command | `--spring.main.web-application-type=none`, `--spring.profiles.active=aws,grant-admin`, then the flags below |
+
+Everything else is inherited: the `archive_api` secrets, both IAM roles,
+the subnets and security group, the log group. No IAM change is needed —
+the execution role already reads `postgres-api-zVoc3j`.
+
+```
+--aws-account-id=770203350335
+--environment=dev
+--actor=ARP-FK7QY195-QW5HV7G0
+--grantee=<ARP>
+--type=CENTRAL|UNIT|IO|CONTACT_DERIVATION
+--unit-number=<n> [--include-descendants]        (UNIT only)
+--io-value=<v>                                   (IO only)
+--operator=<person>
+--reason="..."
+--approval-reference="..."
+[--confirm]
+```
+
+Run with `--dry-run` first, read the checks, then re-run with `--confirm`.
+Exit 0 for a passed dry run or a completed grant, 1 for a refusal.
+
+## Rollback and reconciliation
+
+A grant is a row, not a deployment. Rollback is a **revocation**, which is
+itself audited:
+
+```
+service.revokeAccess(actor, grantId, reason)   -- writes ACCESS_REVOKED
+```
+
+Reverting by deleting the row would destroy the audit trail and is
+forbidden by the append-only design elsewhere; revocation is the
+supported path. `AccessGrant.isActiveAt(now)` stops consulting a revoked
+grant immediately, so the effect is instant.
+
+Reconciliation after any rollback:
+
+1. `SELECT grant_id, institutional_identifier, grant_type, unit_number,
+   io_value, revoked_at, revoked_by FROM authz.access_grant;`
+2. one `ACCESS_GRANTED` and one `ACCESS_REVOKED` row per reverted grant
+3. `authz.admin_role_member` unchanged — revoking a data grant must not
+   touch administrator membership
+4. nothing in ECS or Terraform changes; this is a database row, so there
+   is no task definition or service to reconcile
+
+**Enforcement is unaffected either way.** Grants are only consulted when
+record-level enforcement is on; provisioning and revoking them while it
+is off changes nothing a user can observe.
