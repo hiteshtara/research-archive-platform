@@ -247,101 +247,144 @@ nothing away.
 
 ## 4. Repoint the API — in Terraform
 
-In `terraform/environments/dev/main.tf`, the `module "api_service"` block:
+**The code is merged and inert.** `var.api_database_secret_arn` defaults
+to `null`, which leaves the API on the owner credential. The cutover is
+one line in the untracked `terraform/environments/dev/terraform.tfvars`:
 
 ```hcl
-  additional_secrets = merge(
-    var.enable_openai_secret ? { OPENAI_API_KEY = "...unchanged..." } : {},
-    {
-      POSTGRES_HOST     = "${var.api_database_secret_arn}:host::"
-      POSTGRES_PORT     = "${var.api_database_secret_arn}:port::"
-      POSTGRES_DB       = "${var.api_database_secret_arn}:dbname::"
-      POSTGRES_USER     = "${var.api_database_secret_arn}:username::"
-      POSTGRES_PASSWORD = "${var.api_database_secret_arn}:password::"
-    },
-  )
+api_database_secret_arn = "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j"
 ```
 
-with a new `var.api_database_secret_arn`, set in the operator's untracked
-`terraform.tfvars` to the ARN from step 1.
+That line is deliberately **not** present yet, so an apply run for any
+other reason cannot cut the API over by accident.
 
-This needs **no module change**: `merge` puts `additional_secrets` last, so
-these five override `base_secrets`, and the execution role picks up the new
-ARN automatically through `local.additional_secret_arns`.
+`container_secrets` is `merge(base_secrets, var.additional_secrets)` and
+the later map wins, so the five entries override the owner-credential
+defaults. The execution role's grant is derived from the same ARNs
+(`local.additional_secret_arns`), so **no separate IAM change is
+needed**.
 
-### Resulting ECS container-definition diff
+### Verified plan, 2026-10-28
 
-Only the five `valueFrom` values change. No image change, no environment
-change, no command change, no role change:
-
-```diff
-   "secrets": [
--    {"name":"POSTGRES_DB",      "valueFrom":".../dev/postgres-4k6Ngz:dbname::"},
--    {"name":"POSTGRES_HOST",    "valueFrom":".../dev/postgres-4k6Ngz:host::"},
--    {"name":"POSTGRES_PASSWORD","valueFrom":".../dev/postgres-4k6Ngz:password::"},
--    {"name":"POSTGRES_PORT",    "valueFrom":".../dev/postgres-4k6Ngz:port::"},
--    {"name":"POSTGRES_USER",    "valueFrom":".../dev/postgres-4k6Ngz:username::"}
-+    {"name":"POSTGRES_DB",      "valueFrom":".../dev/postgres-api-XXXXXX:dbname::"},
-+    {"name":"POSTGRES_HOST",    "valueFrom":".../dev/postgres-api-XXXXXX:host::"},
-+    {"name":"POSTGRES_PASSWORD","valueFrom":".../dev/postgres-api-XXXXXX:password::"},
-+    {"name":"POSTGRES_PORT",    "valueFrom":".../dev/postgres-api-XXXXXX:port::"},
-+    {"name":"POSTGRES_USER",    "valueFrom":".../dev/postgres-api-XXXXXX:username::"}
-   ]
+```
+Plan: 1 to add, 2 to change, 1 to destroy.
+  update         module.api_service.aws_ecs_service.api
+  delete,create  module.api_service.aws_ecs_task_definition.api
+  update         module.api_service.aws_iam_role_policy.execution_secret_access
 ```
 
-`image` stays `…dev-api:20261006T182647Z-b10e4e3`, the revision 81 image.
-**Record-level enforcement stays OFF** — it is not set here, and its
-property defaults to `false`.
+Inspected at attribute level from the plan JSON:
 
-And the IAM policy gains one ARN:
+| Resource | Change |
+|---|---|
+| Task definition | the **five** `POSTGRES_*` `valueFrom` values, `…/postgres-4k6Ngz` → `…/postgres-api-zVoc3j`. Image, environment, task role, execution role, cpu, memory, ports: **unchanged**. Revision 81 → 82; `skip_destroy` keeps **81 ACTIVE** |
+| ECS service | `task_definition` only. desired_count, launch_type, network configuration, load balancer, health-check grace: **unchanged** |
+| IAM policy | **gains** `…postgres-api-zVoc3j` and **keeps** `…postgres-4k6Ngz` — deliberate, so rollback needs no IAM change |
 
-```diff
-   "Resource": [
-       ".../secret:research-archive-platform/dev/postgres-4k6Ngz"
-+  ,   ".../secret:research-archive-platform/dev/postgres-api-XXXXXX"
-   ]
-```
+Nothing else has a planned action: no Subaward scheduler, loader, RDS,
+Cognito, Shibboleth, Amplify, Route53, CloudShell, DB tunnel, ECR, VPC or
+security-group change, and no deletion other than the task-definition
+replacement.
 
-Both ARNs are present during cutover — deliberate, so rollback needs no IAM
-change. Narrowing to the new one alone is §7, after the soak.
+Enforcement stays **OFF** — no authorization variable is set anywhere in
+the task definition, and the property defaults to `false`.
+
+### Deploy
 
 ```sh
-terraform plan -target=module.api_service
-```
-
-**Expect exactly two changes**: `aws_ecs_task_definition.api` replaced (new
-revision), `aws_iam_role_policy.execution_secret_access` updated (second ARN
-added). Anything else — especially anything destroyed — stop.
-
-Note `api_image_tag` must already be pinned to whatever is actually running,
-or the rollback guard will refuse the plan. That guard is about the image and
-says nothing about secrets.
-
----
-
-## 5. Deploy and verify
-
-```sh
-terraform apply -target=module.api_service
-aws ecs wait services-stable --cluster research-archive-platform-dev-api \
+cd terraform/environments/dev
+export AWS_PROFILE=bu-nprd
+terraform plan -out=cutover.tfplan          # re-read the diff above
+terraform apply cutover.tfplan
+aws ecs wait services-stable \
+  --cluster research-archive-platform-dev-api \
   --services research-archive-platform-dev-api
 ```
 
-Then, in order:
+## 5. Verification — a health check is not enough
 
-1. `GET /actuator/health` → `UP`.
-2. An Award search, a Proposal search, a Dashboard load — plain reads.
-3. Confirm the container is actually on the new role — the decisive check,
-   because every test above passes just as well on the old credential:
-   ```sql
-   SELECT usename, count(*) FROM pg_stat_activity
-    WHERE datname = 'research_archive' GROUP BY usename;
-   ```
-   Expect `archive_api` connections and **no new** `archive_admin` ones.
-4. Record-level enforcement stays **OFF**. Admin endpoints are expected to
-   404 while it is off; that is unchanged behaviour, not a regression.
+`/actuator/health` returns `UP` on either credential, and so do searches.
+They prove the API is alive, not which database role it is using. The
+decisive checks are database-side.
 
----
+### A. Which role is actually connected — authoritative
+
+Through the SSM tunnel, as `archive_analyst`:
+
+```sql
+SELECT usename, count(*), min(backend_start) AS oldest
+  FROM pg_stat_activity
+ WHERE datname = 'research_archive' AND usename IS NOT NULL
+ GROUP BY usename ORDER BY usename;
+```
+
+**Pass:** `archive_api` present with the API's connection-pool count, and
+no `archive_admin` backend whose `backend_start` is later than the
+deployment. (The ETL connects as `archive_admin` too, so "zero
+`archive_admin`" is the wrong test — "no *new* `archive_admin` since the
+deploy" is the right one.)
+
+A second, independent confirmation that does not depend on timing:
+
+```sql
+SELECT usename, client_addr, application_name, state
+  FROM pg_stat_activity
+ WHERE datname='research_archive' AND client_addr <<= '10.30.0.0/16'
+ ORDER BY backend_start DESC LIMIT 10;
+```
+
+The API's task IP (from `aws ecs describe-tasks`) must appear with
+`usename = archive_api`.
+
+### B. The four research modules
+
+| Endpoint | Expect |
+|---|---|
+| `GET /api/v1/awards?page=0&size=5` | 200, non-empty |
+| `GET /api/v1/proposals?page=0&size=5` | 200, non-empty |
+| `GET /api/v1/subawards?page=0&size=5` | 200, non-empty |
+| `GET /api/v1/negotiations?page=0&size=5` | 200, non-empty |
+
+A single detail record from each as well — list endpoints can succeed
+while a detail query touching an ungranted table fails.
+
+### C. Dashboard, Global Search, attachments
+
+| Endpoint | Expect |
+|---|---|
+| `GET /api/v1/dashboard` | 200, counts match pre-deploy values |
+| `GET /api/v1/search?q=<term>` | 200 |
+| attachment metadata, then one download | 200, and bytes from S3 |
+
+Attachments are the one path that crosses from Postgres to S3 — the
+**task role** governs S3 and is unchanged, but exercise it so a missing
+`SELECT` on an attachment table surfaces here rather than from a user.
+
+Capture the Dashboard counts **before** deploying, and compare. Equal
+counts are the evidence; "200 OK" is not.
+
+### D. Things that must be unchanged
+
+| Check | Expect |
+|---|---|
+| Shibboleth / Cognito | `COGNITO_ISSUER_URI` and `COGNITO_CLIENT_ID` byte-identical to revision 81; a real browser sign-in still works |
+| Authorization enforcement | no `AUTHORIZATION`/`ENFORCE` variable in the task definition; admin endpoints still 404 |
+| Nightly Subaward | schedule still ENABLED on `loader:237` |
+| SSM tunnel | task definition revision 2, image `@sha256:19972492…`, protected tag intact |
+| Terraform | a follow-up full `terraform plan` reports **No changes** |
+| ECS consistency | the service's `taskDefinition` equals the revision Terraform just created |
+| Revision 81 | still **ACTIVE** (that is what makes rollback possible) |
+
+### E. Errors in the first minutes
+
+```sh
+aws logs tail /ecs/research-archive-platform-dev-api --since 10m \
+  --filter-pattern '?ERROR ?permission ?denied'
+```
+
+A missing grant shows up as `permission denied for table …`. That is the
+signature to watch for, and the reason to look at logs rather than only
+at status codes.
 
 ## 6. Rollback
 
