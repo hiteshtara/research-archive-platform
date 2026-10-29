@@ -519,10 +519,32 @@ class ArchiveAdminBootstrapIntegrationTest {
 
     // ------------------------------------------------------------------
 
+    /**
+     * A command whose runtime agrees with the flags, which is the normal
+     * case. Tests that care about the runtime override it explicitly with
+     * {@code withRuntime(...)}.
+     */
     private static ArchiveAdminBootstrapCommand command() {
         return new ArchiveAdminBootstrapCommand(
                 new BootstrapTarget(ACCOUNT, ENVIRONMENT, POOL, REGION),
-                service, adminRoles, identities, new AuthorizationProperties());
+                service, adminRoles, identities, new AuthorizationProperties())
+                .withRuntime(devRuntime());
+    }
+
+    /** Reports the DEV account and cluster, as a real DEV task would. */
+    private static edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity
+            devRuntime() {
+        return new edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity() {
+            @Override
+            public java.util.Optional<String> awsAccountId() {
+                return java.util.Optional.of(ACCOUNT);
+            }
+
+            @Override
+            public java.util.Optional<String> clusterName() {
+                return java.util.Optional.of("research-archive-platform-dev-api");
+            }
+        };
     }
 
     private static int administrators() {
@@ -835,6 +857,133 @@ class ArchiveAdminBootstrapIntegrationTest {
 
     private int grantCount() {
         return jdbc.sql("SELECT count(*) FROM authz.access_grant").query(Integer.class).single();
+    }
+
+    // ------------------------------------------------------------------
+    // Runtime identity.
+    //
+    // The account and environment checks were worthless until 2026-10-29:
+    // the CLI built the BootstrapTarget from the same flags it compared
+    // against, so both were x == x. The "OK AWS account matches" line in
+    // the first real DEV bootstrap confirmed nothing.
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Runtime identity is verified, not asserted")
+    class Runtime {
+
+        @Test
+        void aMatchingDevRuntimeIsAccepted() {
+            BootstrapOutcome outcome = command()
+                    .withRuntime(runtime(ACCOUNT, "research-archive-platform-dev-api"))
+                    .run(request().dryRun(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.DRY_RUN_OK);
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("confirmed against the ECS task metadata");
+        }
+
+        @Test
+        void aDifferentActualAccountIsRefused() {
+            BootstrapOutcome outcome = command()
+                    .withRuntime(runtime("999999999999", "research-archive-platform-dev-api"))
+                    .run(request().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems())).contains("account mismatch");
+            assertThat(administrators()).isZero();
+        }
+
+        @Test
+        void aClusterThatContradictsTheEnvironmentFlagIsRefused() {
+            BootstrapOutcome outcome = command()
+                    .withRuntime(runtime(ACCOUNT, "research-archive-platform-test-api"))
+                    .run(request().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems())).contains("environment mismatch");
+            assertThat(administrators()).isZero();
+        }
+
+        @Test
+        void aProductionRuntimeIsRefusedEvenWithDevFlags() {
+            // The exact spoofing case: every flag says dev, the cluster says prod.
+            BootstrapOutcome outcome = command()
+                    .withRuntime(runtime(ACCOUNT, "research-archive-platform-prod-api"))
+                    .run(request().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("refuses to run against production");
+            assertThat(administrators()).isZero();
+        }
+
+        @Test
+        void aConfirmedBootstrapWithNoRuntimeIsRefused() {
+            BootstrapOutcome outcome = command()
+                    .withRuntime(edu.bu.archive.application.authorization.admin.provisioning
+                            .RuntimeIdentity.UNKNOWN)
+                    .run(request().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("cannot determine the AWS account from the runtime");
+            assertThat(administrators()).isZero();
+            assertThat(auditActions()).isEmpty();
+        }
+
+        @Test
+        void aDryRunWithNoRuntimeIsAllowedButWarnsAndWritesNothing() {
+            BootstrapOutcome outcome = command()
+                    .withRuntime(edu.bu.archive.application.authorization.admin.provisioning
+                            .RuntimeIdentity.UNKNOWN)
+                    .run(request().dryRun(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.DRY_RUN_OK);
+            assertThat(String.join(" ", outcome.checks())).contains("runtime account unknown");
+            assertThat(administrators()).isZero();
+            assertThat(auditActions()).isEmpty();
+        }
+
+        @Test
+        void malformedMetadataIsTreatedAsUnknownNotAsSuccess() {
+            // A reachable endpoint returning nonsense must not be read as
+            // agreement. No TaskARN -> no account -> unknown -> refuse.
+            var malformed = new edu.bu.archive.application.authorization.admin.provisioning
+                    .EcsTaskMetadataRuntimeIdentity("http://127.0.0.1:1/not-a-metadata-endpoint");
+            assertThat(malformed.awsAccountId()).isEmpty();
+            assertThat(malformed.clusterName()).isEmpty();
+
+            BootstrapOutcome outcome = command().withRuntime(malformed)
+                    .run(request().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.REFUSED);
+            assertThat(administrators()).isZero();
+        }
+
+        @Test
+        void aCorrectRuntimeStillBootstrapsAtomically() {
+            BootstrapOutcome outcome = command()
+                    .withRuntime(runtime(ACCOUNT, "research-archive-platform-dev-api"))
+                    .run(request().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(BootstrapOutcome.Result.APPLIED);
+            assertThat(administrators()).isEqualTo(1);
+            assertThat(auditActions())
+                    .containsExactly("ADMIN_ROLE_BOOTSTRAPPED", "IDENTITY_LINKED");
+            assertThat(jdbc.sql("SELECT count(*) FROM authz.access_grant")
+                    .query(Integer.class).single())
+                    .as("bootstrap still grants no research data")
+                    .isZero();
+        }
+
+        private edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity
+                runtime(String account, String cluster) {
+            return new edu.bu.archive.application.authorization.admin.provisioning
+                    .RuntimeIdentity() {
+                @Override
+                public java.util.Optional<String> awsAccountId() {
+                    return java.util.Optional.ofNullable(account);
+                }
+
+                @Override
+                public java.util.Optional<String> clusterName() {
+                    return java.util.Optional.ofNullable(cluster);
+                }
+            };
+        }
     }
 
     private static <T> T transactional(
