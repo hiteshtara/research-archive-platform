@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 import edu.bu.archive.application.authorization.AccessGrant;
@@ -38,6 +39,7 @@ public final class GrantProvisioningCommand {
 
     private final String expectedAccountId;
     private final String expectedEnvironment;
+    private final RuntimeIdentity runtime;
     private final ArchiveAdminService admin;
     private final AdminRoleRepository adminRoles;
     private final AccessGrantRepository grants;
@@ -45,9 +47,10 @@ public final class GrantProvisioningCommand {
     public GrantProvisioningCommand(
             String expectedAccountId, String expectedEnvironment,
             ArchiveAdminService admin, AdminRoleRepository adminRoles,
-            AccessGrantRepository grants) {
+            AccessGrantRepository grants, RuntimeIdentity runtime) {
         this.expectedAccountId = Objects.requireNonNull(expectedAccountId);
         this.expectedEnvironment = expectedEnvironment.toLowerCase(Locale.ROOT);
+        this.runtime = Objects.requireNonNull(runtime);
         this.admin = Objects.requireNonNull(admin);
         this.adminRoles = Objects.requireNonNull(adminRoles);
         this.grants = Objects.requireNonNull(grants);
@@ -105,14 +108,71 @@ public final class GrantProvisioningCommand {
     }
 
     private void checkEnvironment(GrantRequest r, List<String> checks, List<String> problems) {
-        compare("AWS account", trim(r.awsAccountId()), expectedAccountId, checks, problems);
-        compare("environment", lower(r.environment()), expectedEnvironment, checks, problems);
+        String statedAccount = trim(r.awsAccountId());
+        String statedEnvironment = lower(r.environment());
+
+        if (statedAccount == null) {
+            problems.add("--aws-account-id is required");
+        }
+        if (statedEnvironment == null) {
+            problems.add("--environment is required");
+        }
+
         /*
-         * A separate, unconditional refusal. The comparison above already
-         * fails for production, but only if the utility happens to be
-         * configured for dev; this refuses regardless of configuration.
+         * The operator states an account; the runtime reports one. Compare
+         * the two.
+         *
+         * The first version of this compared the flag against itself - the
+         * CLI passed the same value as both expected and actual - so it
+         * always passed and verified nothing. A flag is an intention, not
+         * evidence.
          */
-        if ("prod".equals(expectedEnvironment) || "production".equals(expectedEnvironment)) {
+        Optional<String> actualAccount = runtime.awsAccountId();
+        if (actualAccount.isEmpty()) {
+            if (r.confirmed() && !r.dryRun()) {
+                problems.add("cannot determine the AWS account from the runtime "
+                        + "(ECS_CONTAINER_METADATA_URI_V4 is absent or unreachable), so the "
+                        + "stated account cannot be verified. Refusing to write. Run this as "
+                        + "an ECS task; a dry run is still available.");
+            } else {
+                checks.add("WARN   runtime account unknown - a dry run outside ECS cannot "
+                        + "verify where it is pointed");
+            }
+        } else if (statedAccount != null && !actualAccount.get().equals(statedAccount)) {
+            problems.add("account mismatch: --aws-account-id says " + statedAccount
+                    + " but this task is running in " + actualAccount.get()
+                    + ". Refusing.");
+        } else if (statedAccount != null) {
+            checks.add("OK     AWS account " + statedAccount
+                    + " confirmed against the ECS task metadata, not just the flag");
+        }
+
+        /*
+         * Environment is checked the same way where possible. The cluster
+         * name carries it, so a task running in a prod cluster cannot be
+         * relabelled dev with a flag.
+         */
+        Optional<String> cluster = runtime.clusterName();
+        if (cluster.isPresent()) {
+            String lowerCluster = cluster.get().toLowerCase(Locale.ROOT);
+            if (statedEnvironment != null && !lowerCluster.contains(statedEnvironment)) {
+                problems.add("environment mismatch: --environment says " + statedEnvironment
+                        + " but this task runs in cluster " + cluster.get() + ". Refusing.");
+            } else if (statedEnvironment != null) {
+                checks.add("OK     environment " + statedEnvironment
+                        + " is consistent with cluster " + cluster.get());
+            }
+            if (lowerCluster.contains("prod")) {
+                problems.add("This utility refuses to run against production. "
+                        + "The cluster name says prod regardless of what --environment claims.");
+            }
+        }
+
+        if (statedEnvironment != null && !statedEnvironment.equals(expectedEnvironment)) {
+            problems.add("environment does not match this build's expectation. Expected "
+                    + expectedEnvironment + ", got " + statedEnvironment);
+        }
+        if ("prod".equals(statedEnvironment) || "production".equals(statedEnvironment)) {
             problems.add("This utility refuses to run against production. "
                     + "Production grants need their own approved procedure.");
         }
@@ -261,18 +321,6 @@ public final class GrantProvisioningCommand {
         return Objects.equals(trim(grant.unitNumber()), trim(r.unitNumber()))
                 && Objects.equals(trim(grant.ioValue()), trim(r.ioValue()))
                 && grant.includeDescendants() == r.includeDescendants();
-    }
-
-    private void compare(String what, String actual, String expected,
-            List<String> checks, List<String> problems) {
-        if (actual == null) {
-            problems.add(what + " is required");
-        } else if (!actual.equals(expected)) {
-            problems.add(what + " does not match this environment. Expected " + expected
-                    + ", got " + actual);
-        } else {
-            checks.add("OK     " + what + " matches (" + expected + ")");
-        }
     }
 
     private static String trim(String value) {

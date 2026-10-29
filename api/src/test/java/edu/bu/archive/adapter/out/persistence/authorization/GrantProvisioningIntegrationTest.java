@@ -42,6 +42,8 @@ import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantOutcome;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantProvisioningCommand;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantRequest;
+import edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity;
+import java.util.Optional;
 
 /**
  * The operator-only grant utility, against a real schema.
@@ -194,13 +196,53 @@ class GrantProvisioningIntegrationTest {
     class Refusals {
 
         @Test
-        void aWrongAwsAccountIsRefused() {
-            assertRefused(req().account("999999999999").confirmed(true).build(), "AWS account");
+        void aStatedAccountThatDisagreesWithTheRuntimeIsRefused() {
+            // The flag claims one account; the task is really in another.
+            GrantOutcome outcome = command()
+                    .run(req().account("999999999999").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems())).contains("account mismatch");
+            assertThat(grantCount()).isZero();
         }
 
         @Test
-        void aWrongEnvironmentIsRefused() {
+        void aStatedEnvironmentThatDisagreesWithTheClusterIsRefused() {
             assertRefused(req().environment("test").confirmed(true).build(), "environment");
+        }
+
+        @Test
+        void confirmingWithNoVerifiableRuntimeIsRefused() {
+            /*
+             * The whole point of the runtime check. Outside ECS the account
+             * cannot be verified, so a WRITE must refuse rather than trust
+             * the flag - which is exactly what the first version did.
+             */
+            GrantOutcome outcome = command(RuntimeIdentity.UNKNOWN)
+                    .run(req().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("cannot determine the AWS account from the runtime");
+            assertThat(grantCount()).isZero();
+            assertThat(auditCount()).isZero();
+        }
+
+        @Test
+        void aDryRunWithNoVerifiableRuntimeIsAllowedButWarns() {
+            GrantOutcome outcome = command(RuntimeIdentity.UNKNOWN)
+                    .run(req().dryRun(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.DRY_RUN_OK);
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("runtime account unknown");
+        }
+
+        @Test
+        void aProductionClusterIsRefusedWhateverTheFlagClaims() {
+            GrantOutcome outcome = command(runtime(ACCOUNT, "research-archive-platform-prod-api"))
+                    .run(req().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("refuses to run against production");
+            assertThat(grantCount()).isZero();
         }
 
         @Test
@@ -331,7 +373,27 @@ class GrantProvisioningIntegrationTest {
     // ---------------- helpers ----------------
 
     private static GrantProvisioningCommand command() {
-        return new GrantProvisioningCommand(ACCOUNT, ENVIRONMENT, service, adminRoles, grants);
+        return command(runtime(ACCOUNT, "research-archive-platform-dev-api"));
+    }
+
+    private static GrantProvisioningCommand command(RuntimeIdentity runtime) {
+        return new GrantProvisioningCommand(
+                ACCOUNT, ENVIRONMENT, service, adminRoles, grants, runtime);
+    }
+
+    /** A runtime that reports a specific account and cluster. */
+    private static RuntimeIdentity runtime(String account, String cluster) {
+        return new RuntimeIdentity() {
+            @Override
+            public Optional<String> awsAccountId() {
+                return Optional.ofNullable(account);
+            }
+
+            @Override
+            public Optional<String> clusterName() {
+                return Optional.ofNullable(cluster);
+            }
+        };
     }
 
     private static Req req() {

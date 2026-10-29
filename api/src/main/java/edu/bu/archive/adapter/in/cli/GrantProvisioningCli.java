@@ -14,6 +14,7 @@ import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantOutcome;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantProvisioningCommand;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantRequest;
+import edu.bu.archive.application.authorization.admin.provisioning.EcsTaskMetadataRuntimeIdentity;
 
 /**
  * Operator entry point for issuing the first research-data grants.
@@ -87,7 +88,10 @@ public class GrantProvisioningCli implements ApplicationRunner {
         GrantOutcome outcome = new GrantProvisioningCommand(
                 options.getOrDefault("aws-account-id", ""),
                 options.getOrDefault("environment", ""),
-                admin, adminRoles, grants).run(request);
+                admin, adminRoles, grants,
+                // Read from the ECS task metadata endpoint, NOT from the
+                // flags - the flags are what we are checking.
+                new EcsTaskMetadataRuntimeIdentity()).run(request);
 
         print(outcome);
         if (outcome.result() == GrantOutcome.Result.REFUSED) {
