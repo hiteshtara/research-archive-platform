@@ -107,34 +107,29 @@ public final class ArchiveAdminBootstrapCommand {
                 ? ArchivePrincipalId.mint()
                 : new InstitutionalIdentifier(request.institutionalIdentifier().trim());
 
-        AdminRoleMember member = admin.bootstrapFirstAdministrator(
-                identity,
-                request.operator().trim(),
-                request.reason());
-
         /*
-         * The link goes through ArchiveAdminService, not straight to the
-         * repository: the repository write is MANDATORY and the service is
-         * what opens the transaction and writes the paired audit row. The
-         * actor is the administrator just created - by this point they hold
-         * an active membership, so requireAdministrator passes - and the
-         * operator who actually ran the utility is named in the reason, so
-         * the audit trail records the human rather than only the account.
+         * ONE call, ONE transaction: membership, identity link and both
+         * audit rows commit together or not at all.
          *
-         * A separate audited act, in its own transaction. If it fails the
-         * administrator still exists and can be linked through the API; the
-         * reverse - a link to an identity holding no role - would not be
-         * recoverable the same way.
+         * This used to be two calls - bootstrapFirstAdministrator then
+         * linkIdentity - each opening its own transaction. A failure in the
+         * second left an administrator nobody could ever act as: re-running
+         * is refused because an ACTIVE administrator exists, the admin API
+         * 404s while enforcement is off, and enabling enforcement does not
+         * help because no token resolves to an unlinked identity. The only
+         * exit was hand-written SQL as the database owner. Now a failure
+         * rolls everything back and the utility can simply be re-run.
          */
-        admin.linkIdentity(
-                identity,
-                request.cognitoIssuer().trim(),
-                request.cognitoSubject().trim(),
-                identity,
-                (KualiPersonId) null,
-                request.loginName(),
-                "bootstrap by operator=" + request.operator().trim());
-
+        ArchiveAdminService.BootstrapResult result =
+                admin.bootstrapFirstAdministratorWithIdentity(
+                        identity,
+                        request.operator().trim(),
+                        request.reason(),
+                        request.cognitoIssuer().trim(),
+                        request.cognitoSubject().trim(),
+                        (KualiPersonId) null,
+                        request.loginName());
+        AdminRoleMember member = result.member();
         checks.add("WROTE  membership " + member.adminMemberId()
                 + " and an ADMIN_VERIFIED identity link");
         return new BootstrapOutcome(BootstrapOutcome.Result.APPLIED, checks, problems,

@@ -37,6 +37,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import edu.bu.archive.application.authorization.AuthorizationProperties;
+import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
@@ -575,6 +576,265 @@ class ArchiveAdminBootstrapIntegrationTest {
                     identifier, "BUShibboleth_synthetic", operator, reason,
                     mint, acceptProvisional, dryRun, confirmed);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Atomicity of the first bootstrap.
+    //
+    // Membership, identity link and BOTH audit rows must commit together.
+    // They used to be two transactions, and a failure in the second left an
+    // administrator nobody could act as, with no route back: re-running is
+    // refused, the admin API 404s while enforcement is off, and enabling
+    // enforcement does not help because no token resolves to an unlinked
+    // identity.
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("The first bootstrap is atomic")
+    class AtomicBootstrap {
+
+        private static final String ISSUER =
+                "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_VJ4ekQ27c";
+        private static final String SUBJECT = "b438a418-d0a1-7071-2169-023a374a4038";
+
+        @Test
+        void successWritesMembershipLinkAndBothAuditRowsTogether() {
+            var identity = new InstitutionalIdentifier("ARP-ATOMIC01-00000001");
+
+            var result = service.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, SUBJECT, null, "login");
+
+            assertThat(result.member()).isNotNull();
+            assertThat(result.link()).isNotNull();
+            assertThat(activeAdministrators()).isEqualTo(1);
+            assertThat(linksFor(SUBJECT)).isEqualTo(1);
+            assertThat(auditActions())
+                    .containsExactlyInAnyOrder("ADMIN_ROLE_BOOTSTRAPPED", "IDENTITY_LINKED");
+            // Requirement: bootstrap grants no research data access.
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        void failureWhileLinkingRollsBackTheMembershipAndItsAuditRow() {
+            var identity = new InstitutionalIdentifier("ARP-ATOMIC02-00000001");
+
+            // A blank Cognito subject fails inside the link step, which runs
+            // AFTER the membership insert - exactly the window that used to
+            // leave an unusable administrator behind.
+            assertThatThrownBy(() -> service.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, "  ", null, "login"))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            assertThat(activeAdministrators()).as("membership rolled back").isZero();
+            assertThat(totalLinks()).as("no link written").isZero();
+            assertThat(auditActions()).as("audit rolled back too").isEmpty();
+        }
+
+        @Test
+        void failureWhileWritingTheLinkAuditRowRollsBackEverything() {
+            var identity = new InstitutionalIdentifier("ARP-ATOMIC03-00000001");
+
+            /*
+             * Fail on the SECOND audit row (the link), so the membership, its
+             * audit row and the link are all already written when the error
+             * arrives. Nothing may survive it.
+             */
+            ArchiveAdminService failing = transactionalClass(new ArchiveAdminService(
+                    adminRoles,
+                    transactional(new FailOnIdentityLinkAudit(new JdbcAdminAuditSink(jdbc)),
+                            edu.bu.archive.application.authorization.admin.AdminAuditSink.class,
+                            txManager),
+                    transactional(new JdbcAccessGrantRepository(jdbc),
+                            edu.bu.archive.application.authorization.AccessGrantRepository.class,
+                            txManager),
+                    identities,
+                    new JdbcAdminAuditRepository(jdbc)),
+                    ArchiveAdminService.class, txManager);
+
+            assertThatThrownBy(() -> failing.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, SUBJECT, null, "login"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("audit sink failure");
+
+            assertThat(activeAdministrators()).isZero();
+            assertThat(totalLinks()).isZero();
+            assertThat(auditActions()).isEmpty();
+        }
+
+        @Test
+        void aFailedAttemptCanSimplyBeRetried() {
+            var identity = new InstitutionalIdentifier("ARP-ATOMIC04-00000001");
+
+            assertThatThrownBy(() -> service.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, "", null, "login"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(activeAdministrators()).isZero();
+
+            // The whole point: no cleanup, no SQL, just run it again.
+            var retry = service.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, SUBJECT, null, "login");
+
+            assertThat(retry.member()).isNotNull();
+            assertThat(activeAdministrators()).isEqualTo(1);
+            assertThat(linksFor(SUBJECT)).isEqualTo(1);
+            assertThat(auditActions())
+                    .containsExactlyInAnyOrder("ADMIN_ROLE_BOOTSTRAPPED", "IDENTITY_LINKED");
+        }
+
+        @Test
+        void aSecondBootstrapIsStillRefusedAndChangesNothing() {
+            var first = new InstitutionalIdentifier("ARP-ATOMIC05-00000001");
+            service.bootstrapFirstAdministratorWithIdentity(
+                    first, "operator@bu.edu", "approved", ISSUER, SUBJECT, null, "login");
+
+            var second = new InstitutionalIdentifier("ARP-ATOMIC05-00000002");
+            assertThatThrownBy(() -> service.bootstrapFirstAdministratorWithIdentity(
+                    second, "operator@bu.edu", "approved", ISSUER,
+                    "99999999-0000-0000-0000-000000000000", null, "login"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("already exists");
+
+            assertThat(activeAdministrators()).isEqualTo(1);
+            assertThat(totalLinks()).isEqualTo(1);
+            assertThat(linksFor(SUBJECT)).isEqualTo(1);
+        }
+
+        @Test
+        void theLinkRecordsTheSubjectItWasGivenAndNotTheEmail() {
+            var identity = new InstitutionalIdentifier("ARP-ATOMIC06-00000001");
+            service.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, SUBJECT,
+                    null, "mukadder@bu.edu");
+
+            String stored = jdbc.sql(
+                            "SELECT cognito_subject FROM authz.identity_link WHERE status='ACTIVE'")
+                    .query(String.class).single();
+            assertThat(stored).isEqualTo(SUBJECT);
+            // login_name is display only; it must never become the subject.
+            assertThat(stored).isNotEqualTo("mukadder@bu.edu");
+        }
+
+        @Test
+        void anEmailIsRefusedAsTheCognitoSubjectAndWritesNothing() {
+            /*
+             * The identity must be the immutable sub. An email is the one
+             * wrong value most likely to be supplied by hand, and in this
+             * pool it is genuinely ambiguous: two Cognito users share
+             * mukadder@bu.edu - a native one and the federated
+             * BUShibboleth one - with different subs.
+             */
+            BootstrapOutcome outcome = command().run(
+                    request().subject("mukadder@bu.edu").mint(true).confirmed(true).build());
+
+            assertThat(outcome.result()).isNotEqualTo(BootstrapOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("immutable 'sub'");
+            assertThat(activeAdministrators()).isZero();
+            assertThat(totalLinks()).isZero();
+            assertThat(auditActions()).isEmpty();
+        }
+
+        @Test
+        void theOldTwoCallSequenceStrandsAnAdministrator() {
+            /*
+             * Characterisation of the defect this change fixes, so the
+             * rollback tests above cannot pass vacuously.
+             *
+             * Calling the two PUBLIC methods separately is what the bootstrap
+             * utility used to do. Each opens its own transaction, so a
+             * failure in the second commits the first anyway - leaving an
+             * ACTIVE administrator with no identity link, which nobody can
+             * act as and which blocks any retry.
+             */
+            var identity = new InstitutionalIdentifier("ARP-OLDPATH1-00000001");
+            service.bootstrapFirstAdministrator(identity, "operator@bu.edu", "approved");
+
+            assertThatThrownBy(() -> service.linkIdentity(
+                    identity, ISSUER, "   ", identity, null, "login", "r"))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            assertThat(activeAdministrators())
+                    .as("the OLD path commits the membership despite the failure")
+                    .isEqualTo(1);
+            assertThat(totalLinks()).as("but no link exists").isZero();
+
+            // And the stranding is real: a retry is refused outright.
+            assertThatThrownBy(() -> service.bootstrapFirstAdministratorWithIdentity(
+                    identity, "operator@bu.edu", "approved", ISSUER, SUBJECT, null, "login"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("already exists");
+        }
+
+        @Test
+        void everyWriteHappensInOneTransactionNotSeveral() {
+            /*
+             * The repositories are MANDATORY-propagation proxies, so they
+             * refuse to run without an inbound transaction. Calling the
+             * method on an UNPROXIED service - no @Transactional applied -
+             * must therefore fail at the very first write, which proves the
+             * writes depend on a transaction the method itself opens, rather
+             * than on each inner call opening its own.
+             */
+            ArchiveAdminService unproxied = new ArchiveAdminService(
+                    adminRoles,
+                    transactional(new JdbcAdminAuditSink(jdbc),
+                            edu.bu.archive.application.authorization.admin.AdminAuditSink.class,
+                            txManager),
+                    transactional(new JdbcAccessGrantRepository(jdbc),
+                            edu.bu.archive.application.authorization.AccessGrantRepository.class,
+                            txManager),
+                    identities,
+                    new JdbcAdminAuditRepository(jdbc));
+
+            assertThatThrownBy(() -> unproxied.bootstrapFirstAdministratorWithIdentity(
+                    new InstitutionalIdentifier("ARP-ATOMIC07-00000001"),
+                    "operator@bu.edu", "approved", ISSUER, SUBJECT, null, "login"))
+                    .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+
+            assertThat(activeAdministrators()).isZero();
+            assertThat(totalLinks()).isZero();
+        }
+    }
+
+    /** Audit sink that fails only on the identity-link row. */
+    private static final class FailOnIdentityLinkAudit
+            implements edu.bu.archive.application.authorization.admin.AdminAuditSink {
+
+        private final edu.bu.archive.application.authorization.admin.AdminAuditSink delegate;
+
+        private FailOnIdentityLinkAudit(
+                edu.bu.archive.application.authorization.admin.AdminAuditSink delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void record(String actor,
+                edu.bu.archive.application.authorization.admin.AdminAuditAction action,
+                InstitutionalIdentifier subject, String detail) {
+            if (action == edu.bu.archive.application.authorization.admin.AdminAuditAction
+                    .IDENTITY_LINKED) {
+                throw new IllegalStateException("audit sink failure (injected)");
+            }
+            delegate.record(actor, action, subject, detail);
+        }
+    }
+
+    private int activeAdministrators() {
+        return jdbc.sql("SELECT count(*) FROM authz.admin_role_member WHERE status='ACTIVE'")
+                .query(Integer.class).single();
+    }
+
+    private int totalLinks() {
+        return jdbc.sql("SELECT count(*) FROM authz.identity_link").query(Integer.class).single();
+    }
+
+    private int linksFor(String cognitoSubject) {
+        return jdbc.sql("SELECT count(*) FROM authz.identity_link WHERE cognito_subject = :s")
+                .param("s", cognitoSubject).query(Integer.class).single();
+    }
+
+    private int grantCount() {
+        return jdbc.sql("SELECT count(*) FROM authz.access_grant").query(Integer.class).single();
     }
 
     private static <T> T transactional(
