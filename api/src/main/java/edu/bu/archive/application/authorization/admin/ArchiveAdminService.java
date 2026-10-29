@@ -135,6 +135,64 @@ public class ArchiveAdminService {
     public AdminRoleMember bootstrapFirstAdministrator(
             InstitutionalIdentifier subject, String operator, String reason) {
 
+        return bootstrapInTransaction(subject, operator, reason);
+    }
+
+    /**
+     * Bootstrap the first administrator AND link the Cognito identity that
+     * will act as them, in ONE transaction.
+     *
+     * <p>This exists because doing it in two was a recovery trap. The
+     * bootstrap utility used to call {@link #bootstrapFirstAdministrator}
+     * and then {@link #linkIdentity} - two {@code @Transactional} methods,
+     * so two transactions. If the second failed, DEV was left with an
+     * administrator that nobody could ever act as:
+     *
+     * <ul>
+     *   <li>re-running the utility is refused, because an ACTIVE
+     *       administrator already exists;</li>
+     *   <li>the administrative API 404s while enforcement is off, so there
+     *       is no HTTP route to add the missing link;</li>
+     *   <li>turning enforcement on does not help either - with no link, no
+     *       token resolves to that archive identity, so there is still
+     *       nobody who can use the API to repair it.</li>
+     * </ul>
+     *
+     * <p>The only way out was a hand-written UPDATE against the database as
+     * its owner. The fix is to make the half-state impossible rather than to
+     * document how to escape it.
+     *
+     * <p>Both writes and both audit rows commit together or not at all, so a
+     * failure leaves nothing behind and the utility can simply be run again.
+     *
+     * <p>Note the two helpers are called directly rather than through
+     * {@code this.linkIdentity(...)}: a self-invocation would bypass the
+     * proxy and silently ignore the inner {@code @Transactional}, which
+     * happens to give the right behaviour here for the wrong reason. Calling
+     * the un-annotated internals makes the single transaction explicit.
+     */
+    @Transactional
+    public BootstrapResult bootstrapFirstAdministratorWithIdentity(
+            InstitutionalIdentifier subject, String operator, String reason,
+            String cognitoIssuer, String cognitoSubject,
+            KualiPersonId principal, String loginName) {
+
+        AdminRoleMember first = bootstrapInTransaction(subject, operator, reason);
+        /*
+         * The actor is the administrator created a moment ago, in this same
+         * transaction - requireAdministrator therefore sees the row and
+         * passes. Outside the transaction it would not exist yet.
+         */
+        IdentityLink link = linkInTransaction(
+                subject, cognitoIssuer, cognitoSubject, subject, principal, loginName,
+                "bootstrap by operator=" + operator);
+        return new BootstrapResult(first, link);
+    }
+
+    /** Membership plus its audit row. Caller supplies the transaction. */
+    private AdminRoleMember bootstrapInTransaction(
+            InstitutionalIdentifier subject, String operator, String reason) {
+
         requireSubject(subject);
         if (operator == null || operator.isBlank()) {
             throw new IllegalArgumentException(
@@ -148,6 +206,30 @@ public class ArchiveAdminService {
                 "operator=" + operator + (reason == null ? "" : "; " + reason));
         return first;
     }
+
+    /** Identity link plus its audit row. Caller supplies the transaction. */
+    private IdentityLink linkInTransaction(
+            InstitutionalIdentifier actor, String cognitoIssuer, String cognitoSubject,
+            InstitutionalIdentifier subject, KualiPersonId principal, String loginName,
+            String reason) {
+
+        requireAdministrator(actor);
+        requireSubject(subject);
+        if (cognitoIssuer == null || cognitoIssuer.isBlank()
+                || cognitoSubject == null || cognitoSubject.isBlank()) {
+            throw new IllegalArgumentException(
+                    "the Cognito issuer and subject identify who signed in; both are required");
+        }
+
+        IdentityLink link = identities.link(
+                cognitoIssuer, cognitoSubject, subject, principal, loginName, actor.value());
+        audit.record(actor.value(), AdminAuditAction.IDENTITY_LINKED, subject,
+                "link=" + link.id() + (reason == null ? "" : "; " + reason));
+        return link;
+    }
+
+    /** What one atomic bootstrap produced. */
+    public record BootstrapResult(AdminRoleMember member, IdentityLink link) { }
 
     /**
      * Record that an administrator changed a data-access grant.
@@ -253,19 +335,8 @@ public class ArchiveAdminService {
             InstitutionalIdentifier subject, KualiPersonId principal, String loginName,
             String reason) {
 
-        requireAdministrator(actor);
-        requireSubject(subject);
-        if (cognitoIssuer == null || cognitoIssuer.isBlank()
-                || cognitoSubject == null || cognitoSubject.isBlank()) {
-            throw new IllegalArgumentException(
-                    "the Cognito issuer and subject identify who signed in; both are required");
-        }
-
-        IdentityLink link = identities.link(
-                cognitoIssuer, cognitoSubject, subject, principal, loginName, actor.value());
-        audit.record(actor.value(), AdminAuditAction.IDENTITY_LINKED, subject,
-                "link=" + link.id() + (reason == null ? "" : "; " + reason));
-        return link;
+        return linkInTransaction(
+                actor, cognitoIssuer, cognitoSubject, subject, principal, loginName, reason);
     }
 
     /**
