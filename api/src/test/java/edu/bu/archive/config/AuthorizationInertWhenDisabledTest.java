@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.aop.framework.Advised;
+import org.springframework.aop.support.AopUtils;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -165,5 +168,32 @@ class AuthorizationInertWhenDisabledTest {
             return fromModule;
         }
         throw new IllegalStateException("cannot locate database/migrations");
+    }
+
+    /**
+     * The atomic bootstrap relies on ONE Spring-managed transaction. The
+     * integration tests build their own CGLIB proxy, which proves the
+     * behaviour but not the wiring - a missing {@code @Service}, or
+     * transaction management not being auto-configured, would leave the
+     * real bean unproxied and silently split the bootstrap back into
+     * separate, individually-committing repository calls.
+     *
+     * <p>So assert it against the REAL application context.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private edu.bu.archive.application.authorization.admin.ArchiveAdminService adminService;
+
+    @Test
+    void theAdminServiceIsTransactionallyProxiedInTheRealContext() {
+        assertThat(AopUtils.isAopProxy(adminService))
+                .as("ArchiveAdminService must be an AOP proxy, or @Transactional does nothing")
+                .isTrue();
+
+        boolean hasTransactionAdvice = java.util.Arrays
+                .stream(((Advised) adminService).getAdvisors())
+                .anyMatch(a -> a.getAdvice() instanceof TransactionInterceptor);
+        assertThat(hasTransactionAdvice)
+                .as("the proxy must carry transaction advice")
+                .isTrue();
     }
 }

@@ -53,34 +53,42 @@ equivalent to the original bootstrap:
 
 ### Preferred: remove and re-bootstrap
 
-Cleanest, because it goes back through the normal, tested path.
+Cleanest, because the replacement goes back through the normal, tested path.
+
+Run as the database **owner** (`archive_admin`). `archive_api` cannot do
+this and must not be given the privileges for a one-off repair.
 
 ```sql
 BEGIN;
 -- 1. Confirm exactly what is stranded.
 SELECT admin_member_id, institutional_identifier, status
-  FROM authz.admin_role_member WHERE status='ACTIVE';
+  FROM authz.admin_role_member WHERE status = 'ACTIVE';
 
--- 2. Revoke it, leaving the history rather than deleting it.
+-- 2. Revoke it, keeping the history rather than deleting it.
+--    ck_admin_role_member_revoked and ..._revoked_by require status,
+--    revoked_at and revoked_by to move together.
 UPDATE authz.admin_role_member
-   SET status = 'REVOKED', revoked_at = CURRENT_TIMESTAMP,
+   SET status     = 'REVOKED',
+       revoked_at = CURRENT_TIMESTAMP,
        revoked_by = '<operator>'
- WHERE status = 'ACTIVE' AND institutional_identifier = '<stranded ARP>';
+ WHERE status = 'ACTIVE'
+   AND institutional_identifier = '<stranded ARP>';
 
--- 3. The audit trail is append-only; record the intervention.
+-- 3. Record the intervention. detail is JSONB, not text: the application
+--    writes {"note": "..."} and this must match or the insert fails.
 INSERT INTO authz.access_audit (actor, action, institutional_identifier, detail)
 VALUES ('<operator>', 'ADMIN_ROLE_REVOKED', '<stranded ARP>',
-        'stranded bootstrap recovery; approved by <approver>; <incident ref>');
+        CAST('{"note":"stranded bootstrap recovery; approved by <approver>; <incident ref>"}' AS JSONB));
 COMMIT;
 ```
 
-Then run the bootstrap utility normally. It mints a **new** ARP — the
-stranded one is abandoned, which is correct: it never held grants, because
-bootstrap issues none.
+Then run the bootstrap utility normally. It mints a **new** ARP; the
+stranded one is abandoned, which is correct — it never held grants,
+because bootstrap issues none.
 
-Run as the database **owner** (`archive_admin`). `archive_api` cannot do
-this: it has no UPDATE path that sets `REVOKED` through the application, and
-giving it one would weaken the running API for a one-off repair.
+**Audit rows: 1 from this procedure** (`ADMIN_ROLE_REVOKED`), **plus 2
+written by the utility** (`ADMIN_ROLE_BOOTSTRAPPED` and `IDENTITY_LINKED`)
+= **3 in total**.
 
 ### Alternative: attach the link directly
 
@@ -89,6 +97,8 @@ grants were issued against it after the fact.
 
 ```sql
 BEGIN;
+-- method and status are CHECK-constrained; verified_by and verified_at
+-- are NOT NULL.
 INSERT INTO authz.identity_link
   (cognito_issuer, cognito_subject, institutional_identifier,
    method, status, verified_by, verified_at)
@@ -97,18 +107,28 @@ VALUES ('<issuer>', '<verified sub>', '<stranded ARP>',
 
 INSERT INTO authz.access_audit (actor, action, institutional_identifier, detail)
 VALUES ('<operator>', 'IDENTITY_LINKED', '<stranded ARP>',
-        'stranded bootstrap recovery; approved by <approver>; <incident ref>');
+        CAST('{"note":"stranded bootstrap recovery; approved by <approver>; <incident ref>"}' AS JSONB));
 COMMIT;
 ```
 
 `ux_identity_link_active_identity` (V085) refuses a second ACTIVE link for
 the same archive identity, so this cannot silently create a duplicate.
 
+**Audit rows: 1** (`IDENTITY_LINKED`). The administrator is not re-created,
+so there is no bootstrap row.
+
 ## Verification, in this order
 
-1. `active_links` is 1 for the administrator, and `status='ACTIVE'`.
+1. `active_links` is 1 for the administrator, and its `status` is `ACTIVE`.
 2. Exactly one ACTIVE administrator overall.
-3. Two new `access_audit` rows naming the operator and approver.
+3. The audit rows expected for the procedure you used — **3** after
+   remove-and-re-bootstrap, **1** after attaching the link directly — each
+   naming the operator, with the approver in the `note`:
+   ```sql
+   SELECT occurred_at, actor, action, institutional_identifier,
+          detail ->> 'note' AS note
+     FROM authz.access_audit ORDER BY audit_id;
+   ```
 4. `authz.access_grant` is **unchanged** — recovery grants no data access.
 5. The linked person signs in and the token's `sub` equals the stored
    `cognito_subject`.

@@ -131,6 +131,24 @@ public class ArchiveAdminService {
      * <p><strong>Phase 1: not invoked.</strong> No real administrator is
      * bootstrapped in this phase.
      */
+    /**
+     * @deprecated Creates the administrator WITHOUT linking a Cognito
+     *     identity, which on its own produces an administrator nobody can
+     *     act as. Pairing it with a separate {@link #linkIdentity} call is
+     *     what caused the original defect: two transactions, so a failure
+     *     in the second committed the first and stranded the administrator
+     *     with no route back - the utility refuses to re-run, the admin API
+     *     404s while enforcement is off, and enabling enforcement does not
+     *     help because no token resolves to an unlinked identity.
+     *
+     *     <p>Use {@link #bootstrapFirstAdministratorWithIdentity} instead;
+     *     it does both in one transaction.
+     *
+     *     <p>Retained only so the regression test can drive the old
+     *     sequence and prove it still strands an administrator. Nothing in
+     *     {@code src/main} calls it, and nothing new should.
+     */
+    @Deprecated(since = "2026-10-29", forRemoval = false)
     @Transactional
     public AdminRoleMember bootstrapFirstAdministrator(
             InstitutionalIdentifier subject, String operator, String reason) {

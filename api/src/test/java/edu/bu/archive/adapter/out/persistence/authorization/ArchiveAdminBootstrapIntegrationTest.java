@@ -715,6 +715,26 @@ class ArchiveAdminBootstrapIntegrationTest {
         }
 
         @Test
+        void anEmailIsRefusedAsTheCognitoSubjectAndWritesNothing() {
+            /*
+             * The identity must be the immutable sub. An email is the one
+             * wrong value most likely to be supplied by hand, and in this
+             * pool it is genuinely ambiguous: two Cognito users share
+             * mukadder@bu.edu - a native one and the federated
+             * BUShibboleth one - with different subs.
+             */
+            BootstrapOutcome outcome = command().run(
+                    request().subject("mukadder@bu.edu").mint(true).confirmed(true).build());
+
+            assertThat(outcome.result()).isNotEqualTo(BootstrapOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("immutable 'sub'");
+            assertThat(activeAdministrators()).isZero();
+            assertThat(totalLinks()).isZero();
+            assertThat(auditActions()).isEmpty();
+        }
+
+        @Test
         void theOldTwoCallSequenceStrandsAnAdministrator() {
             /*
              * Characterisation of the defect this change fixes, so the
