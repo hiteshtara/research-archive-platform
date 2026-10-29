@@ -29,7 +29,14 @@ data "aws_ecs_container_definition" "api_live" {
 locals {
   # Single source of truth for the API image this configuration intends to
   # run, used both by module.api_service and by the rollback guard below.
-  api_image_desired = "${module.api_ecr.repository_url}:${var.api_image_tag}"
+  # Digest wins when set: a digest names content, a tag names a pointer,
+  # and tags in this account are MUTABLE. Falls back to the tag so every
+  # existing configuration keeps working unchanged.
+  api_image_desired = (
+    var.api_image_digest != null
+    ? "${module.api_ecr.repository_url}@${var.api_image_digest}"
+    : "${module.api_ecr.repository_url}:${var.api_image_tag}"
+  )
 }
 
 # Cross-variable guards Terraform's per-variable validation blocks can't

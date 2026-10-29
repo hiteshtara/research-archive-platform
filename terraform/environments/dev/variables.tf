@@ -454,6 +454,17 @@ variable "amplify_custom_domain" {
   default     = null
 }
 
+variable "api_image_digest" {
+  description = "Immutable ECR image digest for the API, e.g. \"sha256:<64 hex>\". When set it REPLACES api_image_tag in the composed image reference, so the task definition pins content rather than a name. Image tags in this account are MUTABLE, so a tag can be moved to different content after review; a digest cannot. The digest should also carry a \"protected-*\" ECR tag, or the repository's keep-the-newest-20 lifecycle rule can expire it and the task will fail with CannotPullContainerError. Null (the default) keeps the existing tag-based behaviour exactly."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.api_image_digest == null || can(regex("^sha256:[0-9a-f]{64}$", var.api_image_digest))
+    error_message = "api_image_digest must look like sha256:<64 lowercase hex>, with no repository prefix - the repository URL is prepended for you."
+  }
+}
+
 variable "api_image_rollback_guard" {
   description = "Refuse to plan when api_image_tag does not match the image already registered on the newest ACTIVE revision of the API task-definition family. ops/deploy-api.sh deploys outside Terraform, so this pin goes stale, and any module.api_service change then silently reverts the API to an older build. Set false only for a deliberate rollback, or for an environment where the task family does not exist yet."
   type        = bool
