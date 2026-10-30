@@ -169,6 +169,80 @@ Cleanup was tested, not just read — with a stubbed AWS CLI:
 | Exec agent never reaches RUNNING | task stopped, exit 1 |
 | `run-task` itself fails | **no** spurious `stop-task`, exit 1 |
 
+## Deployed and verified 2026-10-26
+
+Applied to dev from merge commit `7d6e982`: 9 resources created, 0 changed,
+0 destroyed; a follow-up plan reports no changes. End-to-end run:
+
+| Check | Result |
+|---|---|
+| Task start, exec agent, SSM session | tunnel opened on `localhost:15432` |
+| `SELECT current_user, current_database()` | `archive_analyst`, `research_archive` |
+| `SHOW transaction_read_only` | `on` |
+| Write attempt (`CREATE TABLE`) | refused: *cannot execute CREATE TABLE in a read-only transaction* |
+| Data through the tunnel | 93,735 `archive.subaward` rows |
+| Ctrl-C teardown | session exited, task stopped (`stoppedReason: tunnel session ended`), port released |
+| Stray tasks afterwards | none |
+| Local Homebrew Postgres on 5432 | untouched, same PID, still reachable as `mukadder` |
+
+Two things the live run taught us, both now fixed or documented:
+
+**`TargetNotConnected` on first attempt.** `ExecuteCommandAgent` reporting
+RUNNING in the ECS API is necessary but not sufficient — SSM registers the
+channel a few seconds later. The first live run failed on a perfectly good
+tunnel. `start-db-tunnel.sh` now retries that specific error (12 × 5s) and
+nothing else.
+
+**Signalling a backgrounded script.** In a terminal, Ctrl-C signals the whole
+foreground process group and cleanup runs immediately. If you background the
+script instead, `kill -INT <pid>` reaches bash but not the blocking `aws`
+child, so cleanup is deferred. Use `kill -INT -<pgid>` or just run
+`scripts/stop-db-tunnel.sh`.
+
+## SSM Agent vulnerability status — INDETERMINATE
+
+Investigated inside a live tunnel task. The honest answer is that **the patch
+status cannot be determined from the task**, and an earlier draft of this
+document overstated it as confirmed-vulnerable. Evidence both ways:
+
+| Signal | Reading |
+|---|---|
+| `amazon-ssm-agent --version` | `3.3.0.0` — numerically **below** the fixed `3.3.4851.0` |
+| Binary mtime (`/managed-agents/execute-command/*`) | **2026-10-13** — over a month **after** the fix was published on 2026-09-10 |
+| `VERSION` file | absent |
+| Startup banner in `/var/log/amazon/ssm/amazon-ssm-agent.log` | no version line |
+
+The binary date is the stronger signal: a build shipped in mid-October is
+very unlikely to omit a September fix, which suggests `3.3.0.0` is a
+placeholder in the Fargate-managed build rather than a real build number.
+But it is inference, not proof, and nothing inside the task resolves it.
+
+So treat CVE-2026-89049 as **unresolved-but-probably-patched**, and rely on
+containment rather than on the agent:
+
+- The task role holds **only** the four `ssmmessages` actions. If an SSRF
+  did read the task credentials via `169.254.170.2`, they can open an SSM
+  channel and nothing else — no database credential, no S3, no Secrets
+  Manager, no Bedrock.
+- The operator policy scopes `ssm:StartSession` to this one document and
+  this one cluster, which is AWS's own published workaround.
+- The policy is attached to nobody.
+
+To re-check after a Fargate platform update:
+
+```bash
+aws ecs execute-command --cluster research-archive-platform-dev-dbtunnel \
+  --task <task> --container tunnel --interactive \
+  --command "sh -c '/managed-agents/execute-command/amazon-ssm-agent --version; \
+             ls -la /managed-agents/execute-command/'"
+```
+
+A definitive answer would have to come from AWS Support or a Fargate
+platform-version release note; the agent is AWS's to ship and there is no
+action available to us beyond the containment above.
+
+**CloudShell does not use this code path and is unaffected.**
+
 ## Security notes
 
 - **RDS stays private.** `PubliclyAccessible` is untouched. The ingress rule
