@@ -5,6 +5,7 @@ import edu.bu.archive.application.authorization.AccessNotProvisionedProblem;
 import edu.bu.archive.application.authorization.IdentityAccessDeniedException;
 import edu.bu.archive.application.authorization.PartialFamilyAccessException;
 import edu.bu.archive.application.authorization.ReauthenticationRequiredException;
+import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
 import edu.bu.archive.application.authorization.admin.LastArchiveAdministratorException;
 import edu.bu.archive.application.authorization.admin.NotAnArchiveAdministratorException;
 import edu.bu.archive.application.authorization.admin.RelinkApprovalRequiredException;
@@ -265,6 +266,38 @@ public class GlobalExceptionHandler {
                         body(
                                 HttpStatus.CONFLICT,
                                 "RELINK_APPROVAL_REQUIRED",
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 409, not 500. V087's ux_access_grant_active_scope refused the insert
+     * because an unrevoked grant for this grantee and scope already exists.
+     * The request is well formed and the same call succeeds once that grant
+     * is revoked, so this is a conflict with current state.
+     *
+     * Before this handler the violation escaped as an unhandled
+     * DataIntegrityViolationException and the caller saw a 500 - which reads
+     * as "the server is broken, retry later" rather than "that grant already
+     * exists, revoke it first".
+     *
+     * Only the one index maps here. ArchiveAdminService rethrows any other
+     * unique violation untouched, so an unrelated integrity failure still
+     * surfaces as a 500 rather than inviting a pointless retry.
+     */
+    @ExceptionHandler(DuplicateActiveGrantException.class)
+    public ResponseEntity<Map<String, Object>> handleDuplicateActiveGrant(
+            DuplicateActiveGrantException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(
+                        body(
+                                HttpStatus.CONFLICT,
+                                "DUPLICATE_ACTIVE_GRANT",
                                 exception.getMessage(),
                                 request
                         )

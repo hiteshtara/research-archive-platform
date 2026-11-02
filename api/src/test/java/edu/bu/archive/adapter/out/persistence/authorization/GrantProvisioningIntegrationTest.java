@@ -44,7 +44,11 @@ import edu.bu.archive.application.authorization.admin.provisioning.GrantProvisio
 import edu.bu.archive.application.authorization.admin.provisioning.GrantRequest;
 import edu.bu.archive.application.authorization.admin.provisioning.EcsTaskMetadataRuntimeIdentity;
 import edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity;
+import edu.bu.archive.application.authorization.admin.GrantSpecification;
+import edu.bu.archive.application.authorization.GrantType;
+import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 
 /**
  * The operator-only grant utility, against a real schema.
@@ -494,6 +498,104 @@ class GrantProvisioningIntegrationTest {
         assertThat(jdbc.sql("SELECT count(*) FROM authz.access_grant WHERE institutional_identifier = :g")
                 .param("g", ADMIN).query(Integer.class).single())
                 .isZero();
+    }
+
+    // ------------------------------------------------------------------
+    // The service-level translation of V087's index violation.
+    //
+    // The CLI tests above go through GrantProvisioningCommand, which has its
+    // own duplicate pre-check. These call ArchiveAdminService directly, which
+    // is the path the administrative HTTP API takes - no pre-check, so the
+    // index is the only thing standing in the way.
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("A duplicate grant through the service is a controlled failure")
+    class ServiceLevelDuplicate {
+
+        private GrantSpecification unitGrant() {
+            return new GrantSpecification(GrantType.UNIT, "1242040000", false, null, null,
+                    "service-level duplicate test");
+        }
+
+        @Test
+        void aSequentialDuplicateThrowsDuplicateActiveGrantException() {
+            service.grantAccess(actor(), grantee(), unitGrant());
+            assertThat(grantCount()).isEqualTo(1);
+            assertThat(auditActions()).containsExactly("ACCESS_GRANTED");
+
+            assertThatThrownBy(() -> service.grantAccess(actor(), grantee(), unitGrant()))
+                    .isInstanceOf(DuplicateActiveGrantException.class)
+                    .hasMessageContaining("already exists");
+
+            assertThat(grantCount()).as("the refusal wrote no second grant").isEqualTo(1);
+            assertThat(auditActions())
+                    .as("and no second audit row - audit.record is never reached")
+                    .containsExactly("ACCESS_GRANTED");
+        }
+
+        @Test
+        void concurrentDuplicatesLeaveExactlyOneGrantAndOneAuditRow() throws Exception {
+            int attempts = 8;
+            ExecutorService pool = Executors.newFixedThreadPool(attempts);
+            try {
+                List<Callable<Object>> jobs = java.util.Collections.nCopies(attempts,
+                        () -> service.grantAccess(actor(), grantee(), unitGrant()));
+
+                int applied = 0;
+                int duplicates = 0;
+                List<Throwable> unexpected = new java.util.ArrayList<>();
+                for (Future<Object> f : pool.invokeAll(jobs)) {
+                    try {
+                        f.get();
+                        applied++;
+                    } catch (ExecutionException e) {
+                        if (e.getCause() instanceof DuplicateActiveGrantException) {
+                            duplicates++;
+                        } else {
+                            unexpected.add(e.getCause());
+                        }
+                    }
+                }
+
+                assertThat(unexpected)
+                        .as("every loser must be a DuplicateActiveGrantException, "
+                                + "not a raw DataIntegrityViolationException")
+                        .isEmpty();
+                assertThat(applied).as("exactly one winner").isEqualTo(1);
+                assertThat(duplicates).isEqualTo(attempts - 1);
+
+                assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+                assertThat(grantCount()).isEqualTo(1);
+                assertThat(auditActions())
+                        .as("one grant, one audit row - the losers rolled back")
+                        .containsExactly("ACCESS_GRANTED");
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        /**
+         * The administrator gate is untouched by the translation: it runs
+         * before the insert, so a non-administrator is still refused for being
+         * one, never for a duplicate.
+         */
+        @Test
+        void theAdministratorCheckStillRunsFirst() {
+            assertThatThrownBy(() -> service.grantAccess(
+                    new InstitutionalIdentifier("ARP-N0TADMN1-00000001"), grantee(), unitGrant()))
+                    .isNotInstanceOf(DuplicateActiveGrantException.class);
+            assertThat(grantCount()).isZero();
+            assertThat(auditCount()).isZero();
+        }
+
+        private InstitutionalIdentifier actor() {
+            return new InstitutionalIdentifier(ADMIN);
+        }
+
+        private InstitutionalIdentifier grantee() {
+            return new InstitutionalIdentifier(GRANTEE);
+        }
     }
 
     // ---------------- helpers ----------------

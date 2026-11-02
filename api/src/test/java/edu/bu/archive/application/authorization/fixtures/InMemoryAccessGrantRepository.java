@@ -17,6 +17,19 @@ import java.util.Optional;
 /** TEST-ONLY in-memory grant store. */
 public final class InMemoryAccessGrantRepository implements AccessGrantRepository {
 
+    /**
+     * When set, the next {@link #create} throws this instead of storing.
+     *
+     * <p>Lets a web-layer test exercise the real translation that
+     * {@code ArchiveAdminService} performs on a unique-index violation,
+     * without pretending an in-memory map enforces V087.
+     */
+    private RuntimeException failNextCreate;
+
+    public void failNextCreateWith(RuntimeException failure) {
+        this.failNextCreate = failure;
+    }
+
     private final List<AccessGrant> grants = new ArrayList<>();
     private final AtomicLong ids = new AtomicLong();
 
@@ -51,6 +64,12 @@ public final class InMemoryAccessGrantRepository implements AccessGrantRepositor
     @Override
     public AccessGrant create(InstitutionalIdentifier grantee, GrantSpecification specification,
                               String grantedBy) {
+        if (failNextCreate != null) {
+            RuntimeException failure = failNextCreate;
+            failNextCreate = null;
+            throw failure;
+        }
+
         var created = new AccessGrant(ids.incrementAndGet(), grantee, specification.type(),
                 specification.unitNumber(), specification.includeDescendants(),
                 specification.ioValue(), Instant.EPOCH, specification.expiresAt(), null);
