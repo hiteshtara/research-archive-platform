@@ -1,8 +1,8 @@
 # DEV migration — V087 only
 
-**Prepared 2026-11-02. The image is pushed and protected. Nothing is
-registered and no migration has been applied.** This is the exact
-configuration for review, and §6 stops for approval before step 4.
+**Prepared 2026-11-02. The image is pushed and protected, and task-definition
+revision 255 is registered. No migration has been applied.** §6 stops for
+approval before step 4, which is the only remaining state change.
 
 Source commit `e2a0d80` (Merge pull request #96) · migration
 `V087__one_active_grant_per_scope.sql`, md5 `d3b5a822d7cd2d66980ff822ac1922f7`.
@@ -175,20 +175,57 @@ Checked before the push, not inferred from the scan:
 > the scan completed, but ECR basic scanning finds **CVEs, not secrets**. Its
 > result is reported below on its own terms.
 
-### CVE posture, stated plainly
+### Image security findings - all six HIGH reviewed, none reachable here
 
-The scan of the amd64 child manifest completed: **6 HIGH, 15 MEDIUM, 4 LOW**.
-All six HIGH are base-image OS packages - `sqlite3` (CVE-2026-119373,
--119374, -119379), `glibc` (CVE-2026-19499, -5435) and `zlib`
-(CVE-2026-85091). None is in our code or our Python dependencies.
+The amd64 child manifest scans **6 HIGH / 15 MEDIUM / 4 LOW**.
 
-That is **more** than the currently registered image (3 HIGH / 9 MEDIUM /
-3 LOW), because `etl/Dockerfile.loader` starts `FROM python:3.12-slim`
-unpinned, so a rebuild picks up a newer base carrying newly disclosed CVEs.
-For this task - one DDL statement, about 30 seconds, private subnet, no
-inbound path, no untrusted input - the practical exposure is minimal. The
-durable fix is to pin the base image by digest and rebuild deliberately; that
-is its own change, not a migration prerequisite.
+> **Correction to an earlier draft of this runbook.** It said the count had
+> risen from 3 HIGH "because `Dockerfile.loader` is `FROM python:3.12-slim`
+> unpinned, so a rebuild picks up a newer base". **That was wrong.** The base
+> package versions are byte-identical between this image and the registered
+> `cead763` one - `libc6 2.41-12+deb13u4`, `libsqlite3-0 3.46.1-7+deb13u2`,
+> `zlib1g 1:1.3.dfsg+really1.3.1-1+b1` - and **rescanning the registered image
+> today returns the same 6 / 15 / 4**. The "3 HIGH" figure was simply a stale
+> 2026-10-28 scan. This rebuild introduces **no new vulnerability** relative to
+> what is already registered, and none relative to what the nightly runs.
+
+**No fix exists to apply.** Inside the image, `apt-cache policy` reports
+Installed == Candidate for all three packages, and
+`apt-get install -s --only-upgrade` reports `0 upgraded`. Debian trixie has not
+published fixed versions. Pinning the base image by digest would therefore
+change nothing about these six findings; it remains good hygiene for
+reproducibility, not remediation.
+
+What the migration task actually does, which is the basis for every judgement
+below: resolve AWS identity via STS and one secret from Secrets Manager over
+TLS, connect to RDS PostgreSQL over TLS inside the VPC, read 85 `.sql` files
+baked into the image, execute them, exit. Roughly 30-60 seconds, in a private
+subnet with `assignPublicIp=DISABLED`, no listening port, no inbound path, no
+user input, no uploaded file, no untrusted database.
+
+| CVE | Package | Requires | Reachable in this task? |
+|---|---|---|---|
+| CVE-2026-119373 | sqlite3 3.46.1 | FTS5 `detail=none` table, negative rowids, prefix `MATCH` query | **No** - no FTS5 anywhere in the ETL; verified no `fts5`, `CREATE VIRTUAL TABLE`, changeset or secure-delete usage |
+| CVE-2026-119374 | sqlite3 3.46.1 | FTS5 index + secure-delete, crafted footer key offsets | **No** - same; secure-delete is never enabled |
+| CVE-2026-119379 | sqlite3 3.46.1 | session extension, `sqlite3changeset_apply()` with crafted changesets | **No** - the session extension is never used |
+| CVE-2026-19499 | glibc 2.41 | a code path calling `strfmon`/`strfmon_l` with right-justified width padding | **No** - Python exposes no `strfmon`; `locale.currency` is pure Python and was checked, it does not call it. The advisory itself says "no network-facing application impact is known" |
+| CVE-2026-5435 | glibc 2.41 | deprecated resolver printers `ns_printrrf`/`ns_printrr`/`fp_nquery`, printing TSIG records | **No** - name resolution here goes through `getaddrinfo`; these debug printers are never called |
+| CVE-2026-85091 | zlib 1.3.1 | `gzprintf`/`gzvprintf` on a non-blocking `gzFile` after a write stall | **No** - our code imports neither `gzip` nor `zlib`, and Python's `zlib` module uses the deflate API, never the `gzFile` stdio API. **Also a probable version mismatch**: the advisory states 1.3.1.2 through 1.3.2 affected, and the installed package is upstream **1.3.1**, below that range - worth confirming against Debian's security tracker |
+
+All six are memory-safety defects in library functions that require two things
+together: the vulnerable API must actually be called, and its input must be
+attacker-influenced. The `--migrate-only` path calls none of them and accepts
+no untrusted input.
+
+**SQLite is used elsewhere in this image, and that is worth knowing.**
+`archive_etl/attachments/manifest.py` opens SQLite databases with a plain
+`sqlite3.connect()` - for the attachment pipeline, not for migrations.
+`load_awards_from_csv.py` does not import it, so on this path SQLite is never
+even loaded. Plain SQLite use is outside all three CVEs, which need FTS5 or the
+session extension; but the attachment loaders handle real Oracle BLOB content
+and are the workload to re-examine if these findings ever do need acting on.
+
+**Verdict: no remediation required before this migration, and none available.**
 
 ## 4. Task definition
 
@@ -225,11 +262,33 @@ in a build script. Three reasons it is the right call:
 - It makes ECS reject a wrong-architecture image at task start with a clear
   platform error, instead of the opaque pull failure seen on 2026-10-28.
 
+**Registered 2026-11-02 as revision 255** (`status: ACTIVE`):
+
 ```bash
 aws ecs register-task-definition \
   --cli-input-json file://ops/migration/dev-loader-migrate-only-v087.taskdef.json
-# -> note the new revision number (expected: 255)
+# -> revision 255
 ```
+
+The stored revision was read back from AWS and diffed field by field against
+254. Exactly two fields differ, both intended:
+
+```
+  DIFF  runtimePlatform   254: None
+                          255: {cpuArchitecture: X86_64, operatingSystemFamily: LINUX}
+  DIFF  container.image   254: ...@sha256:983bab23...  (cead763, predates V087)
+                          255: ...@sha256:2497b4bb...  (e2a0d80, contains V087)
+```
+
+Everything else is identical: family, networkMode, requiresCompatibilities,
+cpu, memory, both role ARNs, all 6 environment variables, logConfiguration,
+placementConstraints and volumes. There is still **no `secrets` block**, which
+is deliberate - ECS-native secret injection would put
+`POSTGRES_USER`/`PASSWORD`/`HOST`/`PORT`/`DB` into the plain environment before
+the loader's own hardened startup validation runs.
+
+Confirmed after registering: the nightly is still pinned to **237**, revision
+237 is still `ACTIVE`, the API is still `...api:84`, and 0 tasks are running.
 
 > Registering a new revision in this family is safe. The nightly Subaward
 > schedule is pinned to revision **237** by explicit ARN, the `run-*-loader.sh`
@@ -630,7 +689,8 @@ restarted as part of this work.
 
 ## 9. What has and has not happened
 
-**Done:** the loader image is built from `e2a0d80`, pushed to ECR, tagged
+**Done:** task definition **revision 255** is registered; the loader image is
+built from `e2a0d80`, pushed to ECR, tagged
 `protected-v087-e2a0d80` so lifecycle cannot sweep it, and verified from the
 registry (platform, content, that its runner applies V087, and that it refuses
 duplicates without deleting them). The DEV preflight of §5 has been run as the
@@ -638,8 +698,7 @@ migration role and passes.
 
 **Not done, and each needs approval:**
 
-- registering the task definition in §4 (expected revision 255)
-- step 4 of §6 - applying V087
+- step 4 of §6 - applying V087 (the **only** remaining state change)
 - deploying the grant-provisioning CLI (#95) or the bootstrap fix (#97)
 
 **Explicitly not touched:** the nightly Subaward schedule (still
