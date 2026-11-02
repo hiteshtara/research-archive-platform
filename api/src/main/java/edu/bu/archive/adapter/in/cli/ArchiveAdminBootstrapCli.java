@@ -17,6 +17,7 @@ import edu.bu.archive.application.authorization.admin.bootstrap.ArchiveAdminBoot
 import edu.bu.archive.application.authorization.admin.bootstrap.BootstrapOutcome;
 import edu.bu.archive.application.authorization.admin.bootstrap.BootstrapRequest;
 import edu.bu.archive.application.authorization.admin.bootstrap.BootstrapTarget;
+import edu.bu.archive.application.authorization.admin.provisioning.EcsTaskMetadataRuntimeIdentity;
 
 /**
  * Operator entry point for the one-time ARCHIVE_ADMIN bootstrap.
@@ -96,7 +97,11 @@ public class ArchiveAdminBootstrapCli implements ApplicationRunner {
                 args.containsOption("confirm"));
 
         BootstrapOutcome outcome = new ArchiveAdminBootstrapCommand(
-                target, admin, adminRoles, identities, properties).run(request);
+                target, admin, adminRoles, identities, properties)
+                // Read from the ECS task metadata endpoint, NOT from the
+                // flags - the flags are what is being checked.
+                .withRuntime(new EcsTaskMetadataRuntimeIdentity())
+                .run(request);
 
         print(outcome);
         if (outcome.result() == BootstrapOutcome.Result.REFUSED) {
