@@ -14,6 +14,8 @@ import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleMember;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
+import edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity;
+import edu.bu.archive.application.authorization.admin.provisioning.RuntimeVerification;
 
 /**
  * The one-time operator path that creates the first ARCHIVE_ADMIN.
@@ -54,6 +56,7 @@ public final class ArchiveAdminBootstrapCommand {
     private final AdminRoleRepository adminRoles;
     private final AdminIdentityRepository identities;
     private final AuthorizationProperties properties;
+    private RuntimeIdentity runtime = RuntimeIdentity.UNKNOWN;
 
     public ArchiveAdminBootstrapCommand(
             BootstrapTarget target,
@@ -66,6 +69,16 @@ public final class ArchiveAdminBootstrapCommand {
         this.adminRoles = Objects.requireNonNull(adminRoles, "adminRoles");
         this.identities = Objects.requireNonNull(identities, "identities");
         this.properties = properties;
+    }
+
+    /**
+     * Where this process is REALLY running. Defaults to
+     * {@link RuntimeIdentity#UNKNOWN}, which refuses a confirmed bootstrap:
+     * a caller that does not supply one cannot write.
+     */
+    public ArchiveAdminBootstrapCommand withRuntime(RuntimeIdentity runtime) {
+        this.runtime = Objects.requireNonNull(runtime, "runtime");
+        return this;
     }
 
     public BootstrapOutcome run(BootstrapRequest request) {
@@ -142,8 +155,19 @@ public final class ArchiveAdminBootstrapCommand {
     }
 
     private void checkTarget(BootstrapRequest r, List<String> checks, List<String> problems) {
+        /*
+         * These two comparisons were worthless until 2026-10-29. The CLI
+         * built the BootstrapTarget from the same --aws-account-id and
+         * --environment flags it then compared against, so both were
+         * x == x and always passed. The "OK AWS account matches" line in
+         * the first real DEV bootstrap confirmed nothing.
+         *
+         * They are kept because they still catch an internally inconsistent
+         * invocation, but the check that matters is verifyRuntime below.
+         */
         compare("AWS account", r.awsAccountId(), target.awsAccountId(), checks, problems);
         compare("environment", lower(r.environment()), target.environment(), checks, problems);
+        verifyRuntime(r, checks, problems);
         compare("Cognito user pool", r.cognitoUserPoolId(), target.cognitoUserPoolId(),
                 checks, problems);
 
@@ -164,6 +188,24 @@ public final class ArchiveAdminBootstrapCommand {
             problems.add("This utility refuses to run against production. "
                     + "A production administrator needs its own approved procedure.");
         }
+    }
+
+    /**
+     * Compare what the operator stated against what the runtime reports.
+     *
+     * <p>The rules live in {@link RuntimeVerification} so that this utility
+     * and the grant-provisioning CLI cannot drift apart; see that class for
+     * why an unverifiable runtime refuses a write and why the cluster is
+     * required as well as the account.
+     */
+    private void verifyRuntime(BootstrapRequest r, List<String> checks, List<String> problems) {
+        RuntimeVerification.verify(
+                runtime,
+                trim(r.awsAccountId()),
+                lower(r.environment()),
+                r.confirmed() && !r.dryRun(),
+                checks,
+                problems);
     }
 
     private void checkIdentity(BootstrapRequest r, List<String> checks, List<String> problems) {
