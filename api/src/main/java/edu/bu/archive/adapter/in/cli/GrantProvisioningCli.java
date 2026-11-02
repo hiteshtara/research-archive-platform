@@ -41,8 +41,24 @@ import edu.bu.archive.application.authorization.admin.provisioning.EcsTaskMetada
  * --operator=&lt;the person running this&gt;
  * --reason="..."
  * --approval-reference="..."
+ * [--expires-at=2027-06-30T00:00:00Z]         optional; D-ADM-3, no expiry by default
  * [--confirm]                                 without it, this is a dry run
  * </pre>
+ *
+ * <p>To withdraw a grant instead, pass its immutable id and nothing
+ * grant-shaped:
+ *
+ * <pre>
+ * --revoke-grant-id=&lt;grant_id&gt;
+ * --actor=&lt;the acting administrator's ARP&gt;
+ * --operator=... --reason=... --approval-reference=...
+ * [--confirm]
+ * </pre>
+ *
+ * <p>Revocation is a status change, never a delete: the grant row keeps its
+ * history and an ACCESS_REVOKED audit row is written in the same transaction.
+ * It is the supported way to withdraw access while the administrative API is
+ * unreachable, which it is whenever enforcement is off.
  *
  * <p>Exit status is 0 for a dry run that passed and for a completed grant,
  * and 1 for a refusal, so a wrapper script can branch on it.
@@ -83,7 +99,9 @@ public class GrantProvisioningCli implements ApplicationRunner {
                 options.get("reason"),
                 options.get("approval-reference"),
                 args.containsOption("dry-run"),
-                args.containsOption("confirm"));
+                args.containsOption("confirm"),
+                options.get("expires-at"),
+                options.get("revoke-grant-id"));
 
         GrantOutcome outcome = new GrantProvisioningCommand(
                 options.getOrDefault("aws-account-id", ""),

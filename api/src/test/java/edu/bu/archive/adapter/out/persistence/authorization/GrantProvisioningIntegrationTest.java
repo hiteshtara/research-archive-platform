@@ -68,6 +68,7 @@ class GrantProvisioningIntegrationTest {
     private static final String ENVIRONMENT = "dev";
     private static final String ADMIN = "ARP-ADMN0001-00000001";
     private static final String GRANTEE = "ARP-GRANTEE1-00000001";
+    private static final String OTHER_GRANTEE = "ARP-GRANTEE2-00000002";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
@@ -598,6 +599,241 @@ class GrantProvisioningIntegrationTest {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Revocation: the lifecycle half the CLI could not reach before.
+    //
+    // While enforcement is OFF the administrative API 404s, so this is the
+    // ONLY supported way to withdraw a grant. Hand-written SQL is not an
+    // option: it would skip the ACCESS_REVOKED audit row.
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Revocation by immutable grant id")
+    class Revocation {
+
+        private long liveGrant() {
+            GrantOutcome created = command().run(req().confirmed(true).build());
+            assertThat(created.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            return created.grantId();
+        }
+
+        @Test
+        void revocationUpdatesTheCorrectGrantAndAuditsAtomically() {
+            long first = liveGrant();
+            GrantOutcome second = command().run(
+                    req().grantee(OTHER_GRANTEE).unit("1242030000").confirmed(true).build());
+            assertThat(second.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(grantCount()).isEqualTo(2);
+
+            GrantOutcome revoked = command().run(req().revokeOnly(first).confirmed(true).build());
+            assertThat(revoked.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+
+            assertThat(revokedAt(first)).as("the named grant is revoked").isNotNull();
+            assertThat(revokedAt(second.grantId())).as("the other grant is untouched").isNull();
+            assertThat(grantCount()).as("nothing was deleted").isEqualTo(2);
+            assertThat(auditActions())
+                    .containsExactly("ACCESS_GRANTED", "ACCESS_GRANTED", "ACCESS_REVOKED");
+        }
+
+        @Test
+        void aDryRunRevocationWritesNothing() {
+            long id = liveGrant();
+            GrantOutcome outcome = command().run(req().revokeOnly(id).dryRun(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.DRY_RUN_OK);
+            assertThat(revokedAt(id)).as("still live").isNull();
+            assertThat(auditActions()).containsExactly("ACCESS_GRANTED");
+        }
+
+        @Test
+        void omittingConfirmIsADryRunNotAWrite() {
+            long id = liveGrant();
+            GrantOutcome outcome = command().run(req().revokeOnly(id).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.DRY_RUN_OK);
+            assertThat(revokedAt(id)).isNull();
+        }
+
+        @Test
+        void anUnknownGrantIdIsRefused() {
+            GrantOutcome outcome = command().run(req().revokeOnly(999_999L).confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems())).contains("no grant has id 999999");
+            assertThat(auditCount()).isZero();
+        }
+
+        @Test
+        void aNonNumericOrNegativeGrantIdIsRefused() {
+            for (String bad : List.of("abc", "-1", "0")) {
+                GrantOutcome outcome = command().run(
+                        req().revoke(bad).type(null).grantee(null).unit(null)
+                                .confirmed(true).build());
+                assertThat(outcome.result()).as("id %s", bad).isEqualTo(GrantOutcome.Result.REFUSED);
+            }
+            assertThat(auditCount()).isZero();
+        }
+
+        /** The misleading-audit case: a second revocation must not look like one. */
+        @Test
+        void repeatedRevocationIsRefusedAndWritesNoSecondAuditRow() {
+            long id = liveGrant();
+            assertThat(command().run(req().revokeOnly(id).confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(auditActions()).containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED");
+
+            GrantOutcome again = command().run(req().revokeOnly(id).confirmed(true).build());
+            assertThat(again.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", again.problems())).contains("was already revoked");
+            assertThat(auditActions())
+                    .as("exactly one ACCESS_REVOKED - a second would imply a withdrawal "
+                            + "that did not happen")
+                    .containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED");
+        }
+
+        @Test
+        void concurrentRevocationsOfOneGrantLeaveExactlyOneAuditRow() throws Exception {
+            long id = liveGrant();
+            int attempts = 8;
+            ExecutorService pool = Executors.newFixedThreadPool(attempts);
+            try {
+                List<Callable<GrantOutcome>> jobs = java.util.Collections.nCopies(attempts,
+                        () -> command().run(req().revokeOnly(id).confirmed(true).build()));
+                int applied = 0;
+                for (Future<GrantOutcome> f : pool.invokeAll(jobs)) {
+                    try {
+                        if (f.get().result() == GrantOutcome.Result.APPLIED) {
+                            applied++;
+                        }
+                    } catch (ExecutionException ignored) {
+                        // A loser may surface the repository's NoSuchElementException
+                        // instead of a refusal; what matters is the row count below.
+                    }
+                }
+                assertThat(applied).as("at most one revocation can win").isLessThanOrEqualTo(1);
+                assertThat(revokedAt(id)).isNotNull();
+                assertThat(grantCount()).as("nothing deleted").isEqualTo(1);
+                assertThat(auditActions())
+                        .as("exactly one ACCESS_REVOKED however many raced")
+                        .containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED");
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        void aRevokedScopeCanBeGrantedAgainWithoutViolatingV087() {
+            long id = liveGrant();
+            command().run(req().revokeOnly(id).confirmed(true).build());
+
+            GrantOutcome replacement = command().run(req().confirmed(true).build());
+            assertThat(replacement.result())
+                    .as("V087 constrains UNREVOKED grants only")
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(replacement.grantId()).isNotEqualTo(id);
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+            assertThat(grantCount()).as("the revoked row survives alongside the new one")
+                    .isEqualTo(2);
+            assertThat(auditActions())
+                    .containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED", "ACCESS_GRANTED");
+        }
+
+        @Test
+        void aNonAdministratorCannotRevoke() {
+            long id = liveGrant();
+            GrantOutcome outcome = command().run(
+                    req().revokeOnly(id).actor("ARP-N0TADMN1-00000001").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("holds no ACTIVE ARCHIVE_ADMIN membership");
+            assertThat(revokedAt(id)).isNull();
+        }
+
+        @Test
+        void revocationIsRefusedAgainstAProductionRuntime() {
+            long id = liveGrant();
+            GrantOutcome outcome = command(runtime(ACCOUNT,
+                            "arn:aws:ecs:us-east-1:770203350335:cluster/"
+                                    + "research-archive-platform-prod-api"))
+                    .run(req().revokeOnly(id).confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("refuses to run against production");
+            assertThat(revokedAt(id)).isNull();
+        }
+
+        @Test
+        void revokingCannotBeCombinedWithGranting() {
+            long id = liveGrant();
+            GrantOutcome outcome = command().run(
+                    req().revoke(id).confirmed(true).build());   // keeps --type/--grantee
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("cannot be combined with");
+            assertThat(revokedAt(id)).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("Optional expiry (D-ADM-3)")
+    class Expiry {
+
+        @Test
+        void anExpiryIsPersistedToAccessGrant() {
+            GrantOutcome outcome = command()
+                    .run(req().expiresAt("2027-06-30T00:00:00Z").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(jdbc.sql("SELECT expires_at FROM authz.access_grant WHERE grant_id = :id")
+                    .param("id", outcome.grantId()).query(java.time.Instant.class).single())
+                    .isEqualTo(java.time.Instant.parse("2027-06-30T00:00:00Z"));
+        }
+
+        @Test
+        void noExpiryIsStillTheDefaultAndIsStatedOutLoud() {
+            GrantOutcome outcome = command().run(req().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(jdbc.sql("SELECT expires_at FROM authz.access_grant WHERE grant_id = :id")
+                    .param("id", outcome.grantId()).query(java.time.Instant.class).optional())
+                    .isEmpty();
+            assertThat(String.join(" ", outcome.checks())).contains("does not expire");
+        }
+
+        @Test
+        void aMalformedExpiryIsRefused() {
+            GrantOutcome outcome = command()
+                    .run(req().expiresAt("30 June 2027").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems())).contains("ISO-8601 instant");
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        void anExpiryInThePastIsRefused() {
+            GrantOutcome outcome = command()
+                    .run(req().expiresAt("2020-01-01T00:00:00Z").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems())).contains("not in the future");
+            assertThat(grantCount()).isZero();
+        }
+
+        /** The V087 interaction an operator must know about before choosing expiry. */
+        @Test
+        void anExpiredButUnrevokedGrantStillBlocksTheScope() {
+            GrantOutcome first = command()
+                    .run(req().expiresAt("2027-06-30T00:00:00Z").confirmed(true).build());
+            assertThat(first.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+
+            // Force it past its expiry without revoking it.
+            jdbc.sql("UPDATE authz.access_grant SET expires_at = now() - interval '1 day' "
+                    + "WHERE grant_id = :id").param("id", first.grantId()).update();
+
+            GrantOutcome replacement = command().run(req().confirmed(true).build());
+            assertThat(replacement.result())
+                    .as("V087's predicate is revoked_at IS NULL, not 'active now'")
+                    .isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", replacement.problems()))
+                    .contains("identical active grant already exists");
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+        }
+    }
+
     // ---------------- helpers ----------------
 
     private static GrantProvisioningCommand command() {
@@ -642,6 +878,8 @@ class GrantProvisioningIntegrationTest {
         private String approval = "APPROVAL-2026-10-29";
         private boolean dryRun;
         private boolean confirmed;
+        private String expiresAt;
+        private String revokeGrantId;
 
         Req account(String v) { this.account = v; return this; }
         Req environment(String v) { this.environment = v; return this; }
@@ -654,11 +892,26 @@ class GrantProvisioningIntegrationTest {
         Req approval(String v) { this.approval = v; return this; }
         Req dryRun(boolean v) { this.dryRun = v; return this; }
         Req confirmed(boolean v) { this.confirmed = v; return this; }
+        Req expiresAt(String v) { this.expiresAt = v; return this; }
+        Req revoke(Object v) { this.revokeGrantId = v == null ? null : String.valueOf(v); return this; }
+        /** A revocation carries no grant-shaped input at all. */
+        Req revokeOnly(Object id) {
+            this.revokeGrantId = String.valueOf(id);
+            this.type = null; this.grantee = null; this.unit = null; this.io = null;
+            this.descendants = false; this.expiresAt = null;
+            return this;
+        }
 
         GrantRequest build() {
             return new GrantRequest(account, environment, grantee, actor, type, unit,
-                    descendants, io, operator, reason, approval, dryRun, confirmed);
+                    descendants, io, operator, reason, approval, dryRun, confirmed,
+                    expiresAt, revokeGrantId);
         }
+    }
+
+    private static java.time.Instant revokedAt(long grantId) {
+        return jdbc.sql("SELECT revoked_at FROM authz.access_grant WHERE grant_id = :id")
+                .param("id", grantId).query(java.time.Instant.class).optional().orElse(null);
     }
 
     private static int grantCount() {
