@@ -42,6 +42,7 @@ import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantOutcome;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantProvisioningCommand;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantRequest;
+import edu.bu.archive.application.authorization.admin.provisioning.EcsTaskMetadataRuntimeIdentity;
 import edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity;
 import java.util.Optional;
 
@@ -236,6 +237,44 @@ class GrantProvisioningIntegrationTest {
         }
 
         @Test
+        void confirmingWithAVerifiedAccountButNoClusterIsRefused() {
+            /*
+             * The same hole the bootstrap utility had: the account verified,
+             * so the outcome read as confirmed - and the environment check
+             * and the production refusal were both skipped, because they sat
+             * inside if (cluster.isPresent()). Shared RuntimeVerification
+             * now refuses, so neither utility can drift back into it.
+             */
+            GrantOutcome outcome = command(runtime(ACCOUNT, null))
+                    .run(req().confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("cannot determine the ECS cluster from the runtime");
+            assertThat(grantCount()).isZero();
+            assertThat(auditCount()).isZero();
+        }
+
+        @Test
+        void aDryRunWithAVerifiedAccountButNoClusterWarnsAndWritesNothing() {
+            GrantOutcome outcome = command(runtime(ACCOUNT, null))
+                    .run(req().dryRun(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.DRY_RUN_OK);
+            assertThat(String.join(" ", outcome.checks())).contains("runtime cluster unknown");
+            assertThat(grantCount()).isZero();
+            assertThat(auditCount()).isZero();
+        }
+
+        @Test
+        void aProductionClusterIsRefusedEvenForADryRun() {
+            GrantOutcome outcome = command(runtime(ACCOUNT, "research-archive-platform-prod-api"))
+                    .run(req().dryRun(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("refuses to run against production");
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
         void aProductionClusterIsRefusedWhateverTheFlagClaims() {
             GrantOutcome outcome = command(runtime(ACCOUNT, "research-archive-platform-prod-api"))
                     .run(req().confirmed(true).build());
@@ -308,49 +347,136 @@ class GrantProvisioningIntegrationTest {
     }
 
     @Test
-    void concurrentIdenticalRequestsCanRaceAndThisIsNotYetGuarded() throws Exception {
+    void theActiveScopeIndexExists() {
         /*
-         * CHARACTERISATION, not a guarantee.
-         *
-         * The duplicate check is a read followed by a write, with no lock
-         * between them and - critically - NO database constraint behind it:
-         * authz.access_grant has only ix_access_grant_grantee, a plain
-         * index. Two concurrent identical requests can therefore both pass
-         * the check and both insert.
-         *
-         * Sequentially the check works, which is the realistic operator
-         * case for a utility run by a person one grant at a time. But the
-         * invariant "at most one active grant per grantee and scope" is NOT
-         * enforced, and a later revocation cannot tell two identical rows
-         * apart.
-         *
-         * The fix is a partial unique index (the same shape as
-         * ux_admin_role_member_active and ux_identity_link_active_identity),
-         * which is a migration and therefore out of scope here. This test
-         * records today's behaviour so the gap is visible rather than
-         * assumed away.
+         * The guarantee below rests on V087 having been applied to this
+         * container. Asserted directly, so a missing migration reads as
+         * "the index is not there" rather than as a race that happened not
+         * to collide on this run.
          */
-        int attempts = 4;
+        assertThat(jdbc.sql("""
+                SELECT count(*) FROM pg_indexes
+                 WHERE schemaname = 'authz' AND indexname = 'ux_access_grant_active_scope'
+                """).query(Integer.class).single())
+                .as("V087 must be applied for the concurrency guarantee to hold")
+                .isEqualTo(1);
+    }
+
+    @Test
+    void concurrentIdenticalRequestsProduceExactlyOneActiveGrant() throws Exception {
+        /*
+         * A GUARANTEE, not a characterisation. This test used to assert
+         * active >= 1 and print a note when it saw more, because nothing
+         * enforced the invariant: the duplicate check is a read followed by
+         * a write with no lock, and authz.access_grant had only
+         * ix_access_grant_grantee, a plain index. Four concurrent identical
+         * requests produced FOUR active grants, and a later revocation -
+         * which takes one grant_id - would have silently left the others in
+         * force while the audit trail read as though access was removed.
+         *
+         * V087 added ux_access_grant_active_scope, so the database now holds
+         * the invariant. Exactly one request wins; every loser is refused
+         * with the same message the sequential duplicate check gives, and
+         * writes neither a grant nor an audit row.
+         */
+        int attempts = 8;
         ExecutorService pool = Executors.newFixedThreadPool(attempts);
         try {
             List<Callable<GrantOutcome>> jobs = java.util.Collections.nCopies(attempts,
                     () -> command().run(req().confirmed(true).build()));
+
+            List<GrantOutcome> outcomes = new java.util.ArrayList<>();
             for (Future<GrantOutcome> f : pool.invokeAll(jobs)) {
-                try {
-                    f.get();
-                } catch (Exception ignored) {
-                    // a losing attempt may fail; the row count is what matters
-                }
+                // No exception is tolerated: a lost race must come back as a
+                // refusal, not as a DataIntegrityViolationException.
+                outcomes.add(f.get());
             }
-            int active = activeGrantsFor(GRANTEE);
-            assertThat(active).as("at least one succeeded").isGreaterThanOrEqualTo(1);
-            if (active > 1) {
-                System.out.println("NOTE: " + active + " identical active grants were created "
-                        + "concurrently - no unique index prevents this today");
-            }
+
+            assertThat(outcomes)
+                    .filteredOn(o -> o.result() == GrantOutcome.Result.APPLIED)
+                    .as("exactly one of %d concurrent identical requests may win", attempts)
+                    .hasSize(1);
+            assertThat(outcomes)
+                    .filteredOn(o -> o.result() == GrantOutcome.Result.REFUSED)
+                    .as("every loser is refused")
+                    .hasSize(attempts - 1);
+            assertThat(outcomes.stream()
+                    .filter(o -> o.result() == GrantOutcome.Result.REFUSED)
+                    .allMatch(o -> String.join(" ", o.problems())
+                            .contains("identical active grant already exists")))
+                    .as("a lost race reads as the duplicate it is")
+                    .isTrue();
+
+            assertThat(activeGrantsFor(GRANTEE))
+                    .as("the invariant: at most one active grant per grantee and scope")
+                    .isEqualTo(1);
+            assertThat(grantCount())
+                    .as("no revoked or orphaned duplicate was left behind either")
+                    .isEqualTo(1);
+            assertThat(auditActions())
+                    .as("one grant, one audit row - the losers rolled both back")
+                    .containsExactly("ACCESS_GRANTED");
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    @Test
+    void anUnreachableMetadataEndpointDoesNotInterruptTheCaller() {
+        /*
+         * EcsTaskMetadataRuntimeIdentity.fetch() caught every exception and
+         * called Thread.currentThread().interrupt(), so a refused connection
+         * - the normal outcome outside ECS - left the calling thread
+         * interrupted and whatever JDBC work followed ran on it.
+         */
+        var unreachable = new EcsTaskMetadataRuntimeIdentity(
+                "http://127.0.0.1:1/no-metadata-here");
+        assertThat(unreachable.awsAccountId()).isEmpty();
+        assertThat(unreachable.clusterName()).isEmpty();
+        assertThat(Thread.currentThread().isInterrupted())
+                .as("an unreachable metadata endpoint must not interrupt the caller")
+                .isFalse();
+    }
+
+    @Test
+    void aSecondGrantDifferingOnlyInIncludeDescendantsIsRefusedByTheIndex() {
+        /*
+         * The one single-threaded route into V087's constraint, and worth
+         * having for its own sake.
+         *
+         * The application's pre-check calls two grants identical only when
+         * includeDescendants agrees too (equalScope compares it). V087's
+         * index deliberately leaves that flag out of the key, so that
+         * modifyAccess can toggle it. The two therefore disagree by design
+         * for exactly one request shape: same grantee, same unit, opposite
+         * flag. The pre-check passes it and the index refuses it.
+         *
+         * That is the intended outcome - a grant including descendants
+         * subsumes one that does not, so the right action is to modify the
+         * existing grant rather than add a second. What matters is that the
+         * operator is TOLD that, instead of being handed the
+         * DataIntegrityViolationException this used to throw.
+         */
+        GrantOutcome first = command().run(req().confirmed(true).build());
+        assertThat(first.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+
+        GrantOutcome second = command().run(req().descendants(true).confirmed(true).build());
+        assertThat(second.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+        assertThat(String.join(" ", second.problems()))
+                .contains("identical active grant already exists")
+                .contains("the database constraint refused a duplicate");
+        assertThat(second.message()).doesNotContain("Exception");
+
+        assertThat(grantCount()).as("the refusal left no second row").isEqualTo(1);
+        assertThat(auditActions())
+                .as("and no audit row - the transaction rolled back")
+                .containsExactly("ACCESS_GRANTED");
+
+        // The documented way forward, which still works.
+        service.modifyAccess(new InstitutionalIdentifier(ADMIN), first.grantId(),
+                null, true, "widen to descendants");
+        assertThat(auditActions()).containsExactly("ACCESS_GRANTED", "ACCESS_MODIFIED");
+        assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
     }
 
     @Test
@@ -422,6 +548,7 @@ class GrantProvisioningIntegrationTest {
         Req type(String v) { this.type = v; return this; }
         Req unit(String v) { this.unit = v; return this; }
         Req io(String v) { this.io = v; return this; }
+        Req descendants(boolean v) { this.descendants = v; return this; }
         Req approval(String v) { this.approval = v; return this; }
         Req dryRun(boolean v) { this.dryRun = v; return this; }
         Req confirmed(boolean v) { this.confirmed = v; return this; }

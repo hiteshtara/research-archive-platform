@@ -36,7 +36,12 @@ public final class EcsTaskMetadataRuntimeIdentity implements RuntimeIdentity {
         this(System.getenv("ECS_CONTAINER_METADATA_URI_V4"));
     }
 
-    EcsTaskMetadataRuntimeIdentity(String metadataUri) {
+    /**
+     * Explicit endpoint, for tests and for any caller that already knows
+     * the URI. Public because an unreachable or nonsense endpoint must be
+     * exercisable: it has to read as "unknown", never as agreement.
+     */
+    public EcsTaskMetadataRuntimeIdentity(String metadataUri) {
         String body = metadataUri == null ? null : fetch(metadataUri + "/task");
         this.accountId = body == null ? null : accountFromTaskArn(body);
         this.cluster = body == null ? null : group(CLUSTER, body);
@@ -50,9 +55,20 @@ public final class EcsTaskMetadataRuntimeIdentity implements RuntimeIdentity {
                             .timeout(Duration.ofSeconds(3)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200 ? response.body() : null;
-        } catch (Exception e) {
-            // Unreachable metadata is "unknown", never "assume it is fine".
+        } catch (InterruptedException e) {
+            // Restore the flag only for the one exception that clears it.
             Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            /*
+             * Unreachable metadata is "unknown", never "assume it is fine".
+             *
+             * This used to call Thread.currentThread().interrupt() for every
+             * exception, so an ordinary connection refusal left the calling
+             * thread interrupted - and the caller then went on to do JDBC work
+             * on it. Only InterruptedException clears the flag, so only
+             * InterruptedException restores it.
+             */
             return null;
         }
     }

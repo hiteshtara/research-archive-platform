@@ -7,6 +7,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
+import org.springframework.dao.DuplicateKeyException;
+
 import edu.bu.archive.application.authorization.AccessGrant;
 import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.GrantType;
@@ -91,13 +93,39 @@ public final class GrantProvisioningCommand {
          * writes the ACCESS_GRANTED audit row inside that transaction, so
          * the grant and its audit row commit together or not at all.
          */
-        AccessGrant created = admin.grantAccess(actor, grantee,
-                new GrantSpecification(type, trim(request.unitNumber()),
-                        request.includeDescendants(), trim(request.ioValue()),
-                        null,
-                        "operator=" + request.operator().trim()
-                                + "; approval=" + request.approvalReference().trim()
-                                + "; " + request.reason().trim()));
+        AccessGrant created;
+        try {
+            created = admin.grantAccess(actor, grantee,
+                    new GrantSpecification(type, trim(request.unitNumber()),
+                            request.includeDescendants(), trim(request.ioValue()),
+                            null,
+                            "operator=" + request.operator().trim()
+                                    + "; approval=" + request.approvalReference().trim()
+                                    + "; " + request.reason().trim()));
+        } catch (DuplicateKeyException e) {
+            /*
+             * V087's ux_access_grant_active_scope fired. The duplicate check
+             * above is a read followed by a write with no lock, so two
+             * concurrent identical requests can both pass it; the index is
+             * what actually holds the invariant, and the loser arrives here.
+             *
+             * It is reported as the same refusal the sequential case gives,
+             * because it is the same situation: the grant already exists.
+             * Previously this escaped as a DataIntegrityViolationException
+             * and the operator saw a stack trace instead of an answer.
+             *
+             * Nothing partial survives: grantAccess is one transaction over
+             * the grant and its ACCESS_GRANTED audit row, so the violation
+             * rolled both back.
+             */
+            problems.add("an identical active grant already exists for this grantee and "
+                    + "scope - the database constraint refused a duplicate. Nothing was "
+                    + "written. If the existing grant is wrong, revoke it rather than "
+                    + "adding a second one.");
+            return new GrantOutcome(GrantOutcome.Result.REFUSED, checks, problems,
+                    "Refusing to provision: the grant already exists. Nothing was written.",
+                    null);
+        }
 
         checks.add("WROTE  grant " + created.id() + " (" + type + ") for " + grantee.value());
         return new GrantOutcome(GrantOutcome.Result.APPLIED, checks, problems,
@@ -119,54 +147,23 @@ public final class GrantProvisioningCommand {
         }
 
         /*
-         * The operator states an account; the runtime reports one. Compare
-         * the two.
+         * The operator states an account and an environment; the runtime
+         * reports what is actually true. The rules live in
+         * RuntimeVerification, shared with the bootstrap utility so the two
+         * cannot drift apart.
          *
          * The first version of this compared the flag against itself - the
          * CLI passed the same value as both expected and actual - so it
          * always passed and verified nothing. A flag is an intention, not
          * evidence.
          */
-        Optional<String> actualAccount = runtime.awsAccountId();
-        if (actualAccount.isEmpty()) {
-            if (r.confirmed() && !r.dryRun()) {
-                problems.add("cannot determine the AWS account from the runtime "
-                        + "(ECS_CONTAINER_METADATA_URI_V4 is absent or unreachable), so the "
-                        + "stated account cannot be verified. Refusing to write. Run this as "
-                        + "an ECS task; a dry run is still available.");
-            } else {
-                checks.add("WARN   runtime account unknown - a dry run outside ECS cannot "
-                        + "verify where it is pointed");
-            }
-        } else if (statedAccount != null && !actualAccount.get().equals(statedAccount)) {
-            problems.add("account mismatch: --aws-account-id says " + statedAccount
-                    + " but this task is running in " + actualAccount.get()
-                    + ". Refusing.");
-        } else if (statedAccount != null) {
-            checks.add("OK     AWS account " + statedAccount
-                    + " confirmed against the ECS task metadata, not just the flag");
-        }
-
-        /*
-         * Environment is checked the same way where possible. The cluster
-         * name carries it, so a task running in a prod cluster cannot be
-         * relabelled dev with a flag.
-         */
-        Optional<String> cluster = runtime.clusterName();
-        if (cluster.isPresent()) {
-            String lowerCluster = cluster.get().toLowerCase(Locale.ROOT);
-            if (statedEnvironment != null && !lowerCluster.contains(statedEnvironment)) {
-                problems.add("environment mismatch: --environment says " + statedEnvironment
-                        + " but this task runs in cluster " + cluster.get() + ". Refusing.");
-            } else if (statedEnvironment != null) {
-                checks.add("OK     environment " + statedEnvironment
-                        + " is consistent with cluster " + cluster.get());
-            }
-            if (lowerCluster.contains("prod")) {
-                problems.add("This utility refuses to run against production. "
-                        + "The cluster name says prod regardless of what --environment claims.");
-            }
-        }
+        RuntimeVerification.verify(
+                runtime,
+                statedAccount,
+                statedEnvironment,
+                r.confirmed() && !r.dryRun(),
+                checks,
+                problems);
 
         if (statedEnvironment != null && !statedEnvironment.equals(expectedEnvironment)) {
             problems.add("environment does not match this build's expectation. Expected "
