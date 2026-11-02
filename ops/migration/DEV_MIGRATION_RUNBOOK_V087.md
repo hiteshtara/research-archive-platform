@@ -98,6 +98,15 @@ Three things were verified about the built image, not assumed:
    This is the check that catches the V076 trap of 2026-08-14, where an image
    lacking the migration files discovered nothing, applied nothing and exited 0.
 
+4. **It refuses when it should.** With two identical unrevoked CENTRAL grants
+   seeded, the same image refused — `Cannot add ux_access_grant_active_scope:
+   duplicate unrevoked grants already exist: DUPA/CENTRAL/-/- (2 rows)` — and
+   left the database at V086 with **no** index created.
+
+Re-verified on a fresh build from `e2a0d80` on 2026-11-02: platform
+`linux/amd64`, V087 md5 `d3b5a822d7cd2d66980ff822ac1922f7` inside the
+container matching git, 85 migration files in both.
+
 > **Not done, and gated on approval: the ECR push.** The task definition
 > below therefore carries a placeholder digest. Push, then read the digest
 > **back from ECR** and substitute it — both repositories are MUTABLE, so a
@@ -147,46 +156,66 @@ aws ecr describe-images --repository-name research-archive-platform-dev-loader \
 scripts/verify-image-platform.sh <ecr ref pulled back from ECR>
 ```
 
-### The duplicate-grant preflight
+### The duplicate-grant preflight — RUN, as the migration role, and it PASSES
 
-V087 refuses to index over data that already violates it. Run the check first
-anyway, so a refusal is expected rather than discovered:
+V087 refuses to index over data that already violates it. The check was run
+against real DEV data on **2026-11-02** as `archive_admin` — the migration
+role — from inside a one-off loader task, so the credential was resolved by
+the loader from `POSTGRES_SECRET_ID` and never left the container:
 
 ```sql
 SELECT institutional_identifier, grant_type,
-       COALESCE(unit_number,'-') AS unit, COALESCE(io_value,'-') AS io, count(*)
+       COALESCE(unit_number,'-'), COALESCE(io_value,'-'), count(*)
   FROM authz.access_grant
  WHERE revoked_at IS NULL
  GROUP BY institutional_identifier, grant_type,
-          COALESCE(unit_number,''), COALESCE(io_value,'')
+          COALESCE(unit_number,''), COALESCE(io_value,''),
+          unit_number, io_value          -- see the note below
 HAVING count(*) > 1;
--- expect ZERO rows
+-- ZERO rows
 ```
 
-**This query needs the migration role, and that is a real gap in the
-read-only route.** `archive_analyst` is granted nothing on `authz` by design,
-so through the SSM tunnel it returns `permission denied for schema authz` —
-and `public.schema_migration` is likewise denied. Two things *are* readable
-from `pg_catalog`, which needs no table privilege, and both were checked on
-2026-11-02:
+> The trailing `unit_number, io_value` in that `GROUP BY` look redundant and
+> are not: without them PostgreSQL rejects the statement, because the select
+> list projects `COALESCE(unit_number,'-')` while the grouping key is
+> `COALESCE(unit_number,'')`. V087's own `DO` block groups by both for exactly
+> this reason. Dropping them produces
+> `column "access_grant.unit_number" must appear in the GROUP BY clause`.
 
-- `authz.access_grant` has **0 live tuples** (`pg_stat_all_tables`:
-  `n_tup_ins=1, n_tup_del=0, n_live_tup=0`, `relpages=0` — one insert that did
-  not survive, consistent with a rolled-back DEV experiment), and its only
-  indexes are `access_grant_pkey` and `ix_access_grant_grantee`.
-- `ux_access_grant_active_scope` does not exist.
+**And the migration's own fail-closed guard was executed verbatim** — the
+`DO $$ … $$` block lifted byte-for-byte out of V087 and run against live DEV
+data. It **passed**: V087 would not refuse on current data. Nothing was
+created; the block only `SELECT`s.
 
-So a collision is not possible on today's data. Close the gap properly in one
-of two ways before the run:
+| Check, as `archive_admin` on DEV, 2026-11-02 | Result |
+|---|---|
+| `max(version)` in `public.schema_migration` | **86** (84 rows — gaps at 73 and 81) |
+| `V086__relink_approval.sql` applied | 2026-10-28 16:56:24 UTC |
+| version 87 present | **no** |
+| `ux_access_grant_active_scope` | **absent**; only `access_grant_pkey` and `ix_access_grant_grantee` |
+| duplicate unrevoked scopes | **zero rows** |
+| V087's own `DO` block, run verbatim | **passed** |
+| `authz.access_grant` | **0 rows**, 0 unrevoked |
+| first administrator | `ARP-FK7QY195-QW5HV7G0`, member id 3, **ACTIVE**, `granted_by=BOOTSTRAP`, 2026-10-29 17:21:22 UTC, `revoked_at` NULL |
+| identity links | **1** — the administrator's own, `ADMIN_VERIFIED`/`ACTIVE`, no Kuali person id |
+| `authz.person_status` / `authz.relink_approval` | 0 / 0 |
+| audit trail | exactly **2** rows: `ADMIN_ROLE_BOOTSTRAPPED` then `IDENTITY_LINKED`, both at the bootstrap timestamp |
 
-1. run the query inside a one-off loader task as the migration role — the
-   authoritative answer; or
-2. accept V087's embedded `DO` block as the guard. It was exercised against a
-   seeded violation: it raised, named all three offending scopes, ignored a
-   revoked duplicate pair, and left `schema_migration` at 86 with no index
-   created. It fails closed.
+No unexpected grant, identity, suspension or relink exists.
 
-### Archive baseline — recorded 2026-11-02, must be identical afterwards
+> **One honest caveat about that diagnostic.** The script set
+> `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY` and
+> `default_transaction_read_only = on`, but a transaction was already open on
+> the pooled connection, so `current_setting('transaction_read_only')` read
+> `off` for the queries that followed — **the database-level guard did not
+> engage.** Safety rested on the script containing only `SELECT`s plus V087's
+> `SELECT`-only `DO` block, which was checked statically beforehand, and on
+> the after-state: 0 grant rows, the same 2 audit rows from 2026-10-29, and
+> archive counts unchanged. To make the guard actually bind next time, pass it
+> at connect time (`connect_args={"options": "-c default_transaction_read_only=on"}`)
+> rather than as a statement after the connection is in use.
+
+### Archive baseline — verified as the migration role 2026-11-02, must be identical afterwards
 
 | table | rows |
 |---|---|
@@ -257,6 +286,11 @@ SELECT indexdef FROM pg_indexes
 
 ### Through the SSM tunnel as `archive_analyst` — read-only, no authz privilege needed
 
+`archive_analyst` holds **no** privilege on `authz` and none on
+`public.schema_migration`; that is deliberate and must not be broadened. It can
+still confirm the index through `pg_catalog`, and that is all it needs to do
+here. The authoritative checks belong to the migration role (above).
+
 ```sql
 SELECT current_database(), current_user;   -- research_archive | archive_analyst
 SHOW transaction_read_only;                -- on
@@ -325,6 +359,12 @@ archive.
 Not included and not done: the ECR push, registering the revision, applying
 the migration, deploying the API, bootstrapping an administrator, creating a
 grant, enabling enforcement, or touching the nightly schedule. The only
-state changes made while preparing this document were an ephemeral read-only
-SSM tunnel task (stopped and verified gone) and local Docker containers
-(removed).
+state changes made while preparing this document were ephemeral read-only
+diagnostic tasks on the ETL cluster (two one-off `run-task` launches on
+revision **254** with a `containerOverrides` command of SELECT-only Python;
+the first exited 1 on a malformed `GROUP BY` in the diagnostic itself and wrote
+nothing, the second exited 0 and produced the table in §5), an ephemeral
+read-only SSM tunnel task, and local Docker containers. All stopped and
+verified gone: 0 tasks running on both the ETL and dbtunnel clusters, loader
+still at revision 254, no new ECR image, API still `…api:84`, nightly still
+`…loader:237`.
