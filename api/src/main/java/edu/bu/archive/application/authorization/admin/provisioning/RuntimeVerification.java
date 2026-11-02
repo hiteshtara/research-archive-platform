@@ -3,6 +3,9 @@ package edu.bu.archive.application.authorization.admin.provisioning;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The one implementation of "is this process really where the operator says
@@ -20,6 +23,19 @@ import java.util.Optional;
  * cannot be established. That is the whole point: the check this replaced
  * compared a flag against itself and therefore always passed.
  *
+ * <p><strong>The environment is matched EXACTLY, never as a substring.</strong>
+ * The first version compared the stated environment against the cluster name
+ * with {@code cluster.contains(stated)}. That let a deliberately short flag
+ * pass vacuously: {@code --environment=e} against
+ * {@code research-archive-platform-test-api} printed
+ * "OK environment e is consistent with cluster ..." and raised no problem at
+ * all. The account check was never fooled (it is an equality test) and the
+ * production refusal was never fooled (it was independent of the flag), so
+ * this was a weak-assurance bug rather than a privilege bypass - but a check
+ * that prints OK without constraining anything is exactly the class of defect
+ * this class exists to remove. The cluster name is now parsed into an
+ * environment segment and compared with {@code equals}.
+ *
  * <p><strong>Both halves are required for a write, not just the account.</strong>
  * The first version verified the account and then wrapped every cluster check
  * in {@code if (cluster.isPresent())}, so a runtime that reported an account
@@ -30,6 +46,38 @@ import java.util.Optional;
  * costs a correct invocation nothing and closes that hole.
  */
 public final class RuntimeVerification {
+
+    /**
+     * The only cluster shape this project accepts:
+     * {@code research-archive-platform-<environment>-<component>}, where
+     * neither trailing segment may itself contain a hyphen. The real DEV
+     * clusters are {@code …-dev-api}, {@code …-dev-etl} and
+     * {@code …-dev-dbtunnel}.
+     *
+     * <p>The project prefix is deliberately hard-coded rather than passed in.
+     * A caller-supplied project name would be one more operator-influenced
+     * input in a check whose whole purpose is to not trust operator input,
+     * and this repository builds exactly one project. If the project is ever
+     * renamed, this stops matching and the check fails CLOSED - a refusal to
+     * write, which is the correct direction to fail in.
+     */
+    private static final Pattern APPROVED_CLUSTER = Pattern.compile(
+            "^research-archive-platform-(?<environment>[a-z0-9]+)-(?<component>[a-z0-9]+)$");
+
+    /** Environment segments that mean production, compared as whole segments. */
+    private static final Set<String> PRODUCTION_ENVIRONMENTS =
+            Set.of("prod", "production", "prd");
+
+    /**
+     * Environment segments this project knows about. Anything else is
+     * "unrecognised", which fails closed rather than being creatively parsed -
+     * a cluster called {@code wp-b-wp-cluster-beta-test} really does exist in
+     * this AWS account, and guessing an environment out of it would be worse
+     * than refusing.
+     */
+    private static final Set<String> RECOGNISED_ENVIRONMENTS =
+            Set.of("dev", "test", "qa", "stage", "staging", "stg", "sandbox",
+                   "prod", "production", "prd");
 
     private RuntimeVerification() {
     }
@@ -120,26 +168,95 @@ public final class RuntimeVerification {
             return;
         }
 
-        String lowerCluster = cluster.get().toLowerCase(Locale.ROOT);
+        String raw = cluster.get();
+        String lower = raw.toLowerCase(Locale.ROOT);
+        Matcher matched = APPROVED_CLUSTER.matcher(lower);
+
+        if (!matched.matches()) {
+            /*
+             * An unrecognised cluster name yields no environment at all, so
+             * there is nothing to compare and nothing ruling out production.
+             *
+             * The production sweep still runs, on whole hyphen-separated
+             * segments: an unparseable name whose segments include a
+             * production marker is refused outright rather than merely
+             * left unverified, so it cannot even be dry-run against.
+             */
+            if (hasProductionSegment(lower)) {
+                problems.add("This utility refuses to run against production. Cluster "
+                        + raw + " does not match the approved "
+                        + "research-archive-platform-<environment>-<component> shape, and one "
+                        + "of its segments names production.");
+            } else if (willWrite) {
+                problems.add("cluster " + raw + " does not match the approved "
+                        + "research-archive-platform-<environment>-<component> shape, so the "
+                        + "environment cannot be identified and production cannot be ruled "
+                        + "out. Refusing to write.");
+            } else {
+                checks.add("WARN   cluster " + raw + " is not an approved "
+                        + "research-archive-platform cluster name - a dry run cannot confirm "
+                        + "the environment from it");
+            }
+            return;
+        }
+
+        String actualEnvironment = matched.group("environment");
 
         /*
-         * Checked before the environment comparison and regardless of
-         * willWrite: a production cluster is refused outright, so not even a
-         * dry run executes there.
+         * Checked before the comparison and regardless of willWrite: a
+         * production cluster is refused outright, so not even a dry run
+         * executes there. Matched as a WHOLE segment, which is both stricter
+         * and more precise than the substring test this replaced - that one
+         * would have fired on a cluster named "...-reproduction-..." and, far
+         * worse, could be satisfied by a one-character --environment.
          */
-        if (lowerCluster.contains("prod")) {
-            problems.add("This utility refuses to run against production. "
-                    + "The cluster name says prod regardless of what --environment claims.");
+        if (PRODUCTION_ENVIRONMENTS.contains(actualEnvironment)) {
+            problems.add("This utility refuses to run against production. The cluster's "
+                    + "environment segment is '" + actualEnvironment + "' (cluster " + raw
+                    + ") regardless of what --environment claims.");
+            return;
+        }
+
+        if (!RECOGNISED_ENVIRONMENTS.contains(actualEnvironment)) {
+            if (willWrite) {
+                problems.add("cluster " + raw + " names an unrecognised environment '"
+                        + actualEnvironment + "', so it cannot be confirmed as a "
+                        + "non-production environment. Refusing to write.");
+            } else {
+                checks.add("WARN   cluster " + raw + " names an unrecognised environment '"
+                        + actualEnvironment + "' - a dry run cannot confirm it");
+            }
+            return;
         }
 
         if (statedEnvironment == null) {
-            checks.add("OK     runtime reports cluster " + cluster.get());
-        } else if (!lowerCluster.contains(statedEnvironment)) {
-            problems.add("environment mismatch: --environment says " + statedEnvironment
-                    + " but this task runs in cluster " + cluster.get() + ". Refusing.");
+            // The missing flag is the caller's complaint to make.
+            checks.add("OK     runtime reports cluster " + raw + ", environment '"
+                    + actualEnvironment + "'");
+        } else if (!actualEnvironment.equals(statedEnvironment)) {
+            problems.add("environment mismatch: --environment says '" + statedEnvironment
+                    + "' but this task runs in cluster " + raw + ", whose environment is '"
+                    + actualEnvironment + "'. Refusing.");
         } else {
-            checks.add("OK     environment " + statedEnvironment
-                    + " is consistent with cluster " + cluster.get());
+            checks.add("OK     environment '" + actualEnvironment + "' matched EXACTLY against "
+                    + "the ECS cluster name " + raw + " - not a substring of it");
         }
+    }
+
+    /**
+     * True when any whole hyphen-separated segment names production.
+     *
+     * <p>Segment-wise on purpose. {@code contains("prod")} would also fire on
+     * "reproduction", and - the reason this class was changed - a substring
+     * test in the opposite direction let a one-character {@code --environment}
+     * match any cluster name at all.
+     */
+    private static boolean hasProductionSegment(String lowerCluster) {
+        for (String segment : lowerCluster.split("-")) {
+            if (PRODUCTION_ENVIRONMENTS.contains(segment)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
