@@ -15,7 +15,7 @@
   "containerDefinitions": [
     {
       "name": "grant-admin",
-      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api@sha256:1eefe868c2945273b7f619118c661a9c6d8d7462b756f4ff4e7a05e61297ee06",
+      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api@sha256:86e577d097daa8f2146fd45e4dbb34884aa630a76460d9dc93754029e20fc3eb",
       "essential": true,
       "environment": [
         {
