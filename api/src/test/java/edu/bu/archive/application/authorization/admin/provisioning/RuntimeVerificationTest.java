@@ -63,6 +63,148 @@ class RuntimeVerificationTest {
         };
     }
 
+    /**
+     * The real value ECS task metadata reports, captured from a live DEV task
+     * on 2026-11-02. Every pre-existing fixture used the bare name, which is
+     * exactly why the ARN defect reached production code.
+     */
+    private static final String DEV_CLUSTER_ARN =
+            "arn:aws:ecs:us-east-1:770203350335:cluster/research-archive-platform-dev-api";
+
+    @Nested
+    @DisplayName("The real ECS cluster ARN form")
+    class ClusterArn {
+
+        @Test
+        void theActualDevArnIsAcceptedForAConfirmedWrite() {
+            Result r = verify(ACCOUNT, "dev", ACCOUNT, DEV_CLUSTER_ARN, true);
+            assertThat(r.refused())
+                    .as("a confirmed grant from a real DEV ECS task must be possible")
+                    .isFalse();
+            assertThat(r.allChecks())
+                    .contains("cluster ARN is well formed, ECS, account 770203350335 "
+                            + "and region us-east-1")
+                    .contains("matched EXACTLY");
+        }
+
+        @Test
+        void everyRealDevClusterArnIsAccepted() {
+            for (String name : List.of("research-archive-platform-dev-api",
+                                       "research-archive-platform-dev-etl",
+                                       "research-archive-platform-dev-dbtunnel")) {
+                String arn = "arn:aws:ecs:us-east-1:770203350335:cluster/" + name;
+                assertThat(verify(ACCOUNT, "dev", ACCOUNT, arn, true).refused())
+                        .as("ARN for %s", name).isFalse();
+            }
+        }
+
+        @Test
+        void anArnFromAnotherAccountIsRefusedEvenIfTheNameLooksRight() {
+            // The ARN account is cross-checked against the TaskARN account,
+            // never against the flag.
+            String arn = "arn:aws:ecs:us-east-1:999999999999:cluster/"
+                    + "research-archive-platform-dev-api";
+            Result r = verify(ACCOUNT, "dev", ACCOUNT, arn, true);
+            assertThat(r.refused()).isTrue();
+            assertThat(r.allProblems())
+                    .contains("belongs to account 999999999999")
+                    .contains("the runtime contradicts itself");
+        }
+
+        @Test
+        void anArnFromAnotherRegionIsRefused() {
+            String arn = "arn:aws:ecs:us-west-2:770203350335:cluster/"
+                    + "research-archive-platform-dev-api";
+            Result r = verify(ACCOUNT, "dev", ACCOUNT, arn, true);
+            assertThat(r.refused()).isTrue();
+            assertThat(r.allProblems()).contains("is in region 'us-west-2', not us-east-1");
+        }
+
+        @Test
+        void aNonEcsArnIsRefused() {
+            String arn = "arn:aws:eks:us-east-1:770203350335:cluster/"
+                    + "research-archive-platform-dev-api";
+            Result r = verify(ACCOUNT, "dev", ACCOUNT, arn, true);
+            assertThat(r.refused()).isTrue();
+            assertThat(r.allProblems()).contains("is not an ECS ARN");
+        }
+
+        @Test
+        void anEcsArnForTheWrongResourceTypeIsRefused() {
+            // A task ARN, not a cluster ARN - the adjacent metadata field.
+            String arn = "arn:aws:ecs:us-east-1:770203350335:task/"
+                    + "research-archive-platform-dev-api";
+            Result r = verify(ACCOUNT, "dev", ACCOUNT, arn, true);
+            assertThat(r.refused()).isTrue();
+            assertThat(r.allProblems()).contains("not a cluster ARN");
+        }
+
+        @Test
+        void aMalformedArnIsRefused() {
+            for (String bad : List.of("arn:aws:ecs:us-east-1:770203350335:cluster",
+                                      "arn:aws:ecs:us-east-1:cluster/x-dev-api",
+                                      "arn:",
+                                      "arn:aws:ecs:us-east-1:770203350335:cluster/")) {
+                Result r = verify(ACCOUNT, "dev", ACCOUNT, bad, true);
+                assertThat(r.refused()).as("malformed: %s", bad).isTrue();
+            }
+        }
+
+        @Test
+        void aMalformedArnIsRefusedForADryRunToo() {
+            // Present-but-invalid is a stronger signal than absent: something
+            // is actively wrong about where this is running.
+            Result r = verify(ACCOUNT, "dev", ACCOUNT, "arn:aws:ecs:bogus", false);
+            assertThat(r.refused()).isTrue();
+        }
+
+        @Test
+        void aProductionArnIsRefusedEvenForADryRun() {
+            for (String env : List.of("prod", "production", "prd")) {
+                String arn = "arn:aws:ecs:us-east-1:770203350335:cluster/"
+                        + "research-archive-platform-" + env + "-api";
+                Result r = verify(ACCOUNT, "dev", ACCOUNT, arn, false);
+                assertThat(r.refused()).as("environment %s", env).isTrue();
+                assertThat(r.allProblems()).contains("refuses to run against production");
+            }
+        }
+
+        @Test
+        void anArnFromAnotherProjectIsRefused() {
+            for (String name : List.of("wp-b-wp-cluster-beta-test",
+                                       "phpbin-test-ecscluster",
+                                       "kuali-ecs-stg-cluster")) {
+                String arn = "arn:aws:ecs:us-east-1:770203350335:cluster/" + name;
+                assertThat(verify(ACCOUNT, "dev", ACCOUNT, arn, true).refused())
+                        .as("other project: %s", name).isTrue();
+            }
+        }
+
+        @Test
+        void aShortEnvironmentStillCannotPassAgainstAnArn() {
+            String arn = "arn:aws:ecs:us-east-1:770203350335:cluster/"
+                    + "research-archive-platform-test-api";
+            Result r = verify(ACCOUNT, "e", ACCOUNT, arn, true);
+            assertThat(r.refused()).isTrue();
+            assertThat(r.allProblems()).contains("environment mismatch");
+        }
+
+        @Test
+        void bareNamesStillWork() {
+            // Compatibility: a RuntimeIdentity need not come from ECS metadata.
+            assertThat(verify(ACCOUNT, "dev", ACCOUNT, DEV_CLUSTER, true).refused()).isFalse();
+        }
+
+        @Test
+        void anArnWithNoRuntimeAccountIsStillRefusedForAWrite() {
+            // The account half is unknown, so the write fails closed even
+            // though the cluster ARN itself parses.
+            Result r = verify(ACCOUNT, "dev", null, DEV_CLUSTER_ARN, true);
+            assertThat(r.refused()).isTrue();
+            assertThat(r.allProblems()).contains("cannot determine the AWS account");
+        }
+    }
+
     /** A correct DEV write: the baseline everything else deviates from. */
     @Test
     void aMatchingDevRuntimeIsAccepted() {

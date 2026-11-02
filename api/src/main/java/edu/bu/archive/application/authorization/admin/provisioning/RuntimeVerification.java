@@ -64,6 +64,38 @@ public final class RuntimeVerification {
     private static final Pattern APPROVED_CLUSTER = Pattern.compile(
             "^research-archive-platform-(?<environment>[a-z0-9]+)-(?<component>[a-z0-9]+)$");
 
+    /**
+     * The shape ECS task metadata actually reports, confirmed against a live
+     * DEV task on 2026-11-02:
+     *
+     * <pre>
+     *   "Cluster": "arn:aws:ecs:us-east-1:770203350335:cluster/research-archive-platform-dev-etl"
+     * </pre>
+     *
+     * <p>It is the full ARN, not the bare name. The first version of this
+     * class matched the bare form only, so a real confirmed grant from an ECS
+     * task was REFUSED - the dry run passed only because an unparseable
+     * cluster merely warns when nothing is being written. Found by the first
+     * live dry run, not by CI, because every fixture passed a bare name.
+     *
+     * <p>Parsed here rather than normalised away in
+     * {@code EcsTaskMetadataRuntimeIdentity} on purpose: the ARN carries the
+     * region and the account as well as the name, and those are two more
+     * pieces of independent evidence. Stripping them in the adapter would
+     * discard them before reaching the one class that makes trust decisions.
+     */
+    private static final Pattern CLUSTER_ARN = Pattern.compile(
+            "^arn:(?<partition>aws[a-z0-9-]*):(?<service>[a-z0-9-]+):(?<region>[a-z0-9-]*)"
+                    + ":(?<account>[0-9]*):(?<resourceType>[a-zA-Z0-9-]+)/(?<name>[^/]+)$");
+
+    /**
+     * Every resource in this project is in us-east-1 - the RDS instance, both
+     * ECR repositories, the clusters and the Cognito pool. A cluster ARN in
+     * another region means the task is not where it is supposed to be, which
+     * is worth refusing rather than explaining.
+     */
+    private static final String EXPECTED_REGION = "us-east-1";
+
     /** Environment segments that mean production, compared as whole segments. */
     private static final Set<String> PRODUCTION_ENVIRONMENTS =
             Set.of("prod", "production", "prd");
@@ -104,8 +136,10 @@ public final class RuntimeVerification {
             List<String> checks,
             List<String> problems) {
 
-        verifyAccount(runtime.awsAccountId(), statedAccount, willWrite, checks, problems);
-        verifyCluster(runtime.clusterName(), statedEnvironment, willWrite, checks, problems);
+        Optional<String> runtimeAccount = runtime.awsAccountId();
+        verifyAccount(runtimeAccount, statedAccount, willWrite, checks, problems);
+        verifyCluster(runtime.clusterName(), runtimeAccount, statedEnvironment, willWrite,
+                checks, problems);
     }
 
     private static void verifyAccount(
@@ -143,6 +177,7 @@ public final class RuntimeVerification {
 
     private static void verifyCluster(
             Optional<String> cluster,
+            Optional<String> runtimeAccount,
             String statedEnvironment,
             boolean willWrite,
             List<String> checks,
@@ -170,24 +205,106 @@ public final class RuntimeVerification {
 
         String raw = cluster.get();
         String lower = raw.toLowerCase(Locale.ROOT);
-        Matcher matched = APPROVED_CLUSTER.matcher(lower);
 
-        if (!matched.matches()) {
+        /*
+         * The production sweep runs on the WHOLE raw value first, before any
+         * parsing can fail. An ARN naming a production cluster must be refused
+         * even if some other part of it is malformed, and refused outright
+         * rather than merely left unverified - nothing executes against
+         * production, not even a dry run.
+         */
+        if (hasProductionSegment(lower)) {
+            problems.add("This utility refuses to run against production. Cluster " + raw
+                    + " names production in one of its segments, whatever --environment claims.");
+            return;
+        }
+
+        String clusterName;
+        if (lower.startsWith("arn:")) {
+            clusterName = clusterNameFromArn(raw, lower, runtimeAccount, checks, problems);
+            if (clusterName == null) {
+                return;      // the specific reason has already been recorded
+            }
+        } else {
             /*
-             * An unrecognised cluster name yields no environment at all, so
-             * there is nothing to compare and nothing ruling out production.
-             *
-             * The production sweep still runs, on whole hyphen-separated
-             * segments: an unparseable name whose segments include a
-             * production marker is refused outright rather than merely
-             * left unverified, so it cannot even be dry-run against.
+             * A bare name. Supported because a RuntimeIdentity need not come
+             * from ECS task metadata, and because it is the readable form in
+             * tests. It carries NO account or region evidence, so it is held
+             * to the name rules alone - which is why the ARN form is preferred
+             * wherever it is available.
              */
-            if (hasProductionSegment(lower)) {
-                problems.add("This utility refuses to run against production. Cluster "
-                        + raw + " does not match the approved "
-                        + "research-archive-platform-<environment>-<component> shape, and one "
-                        + "of its segments names production.");
-            } else if (willWrite) {
+            clusterName = lower;
+        }
+
+        verifyClusterName(raw, clusterName, statedEnvironment, willWrite, checks, problems);
+    }
+
+    /**
+     * Validate a cluster ARN and return its cluster name, or null having
+     * recorded why it was rejected.
+     *
+     * <p>A present-but-invalid ARN is refused OUTRIGHT, for a dry run as well
+     * as a write. An absent cluster means "we do not know"; an ARN that is
+     * malformed, points at another service, another resource type, another
+     * account or another region means something is actively wrong about where
+     * this process is running, which is a stronger signal than ignorance.
+     */
+    private static String clusterNameFromArn(
+            String raw, String lower, Optional<String> runtimeAccount,
+            List<String> checks, List<String> problems) {
+
+        Matcher arn = CLUSTER_ARN.matcher(lower);
+        if (!arn.matches()) {
+            problems.add("cluster " + raw + " is not a well-formed ARN. Refusing: a runtime "
+                    + "identity that cannot be parsed cannot be trusted.");
+            return null;
+        }
+
+        if (!"ecs".equals(arn.group("service"))) {
+            problems.add("cluster " + raw + " is not an ECS ARN (service '"
+                    + arn.group("service") + "'). Refusing.");
+            return null;
+        }
+
+        if (!"cluster".equals(arn.group("resourceType"))) {
+            problems.add("cluster " + raw + " is an ECS '" + arn.group("resourceType")
+                    + "' ARN, not a cluster ARN. Refusing.");
+            return null;
+        }
+
+        /*
+         * Cross-check against the account established from the TaskARN, NOT
+         * against --aws-account-id. Two independent fields of the metadata
+         * document have to agree; a flag is not consulted here at all.
+         */
+        String arnAccount = arn.group("account");
+        if (runtimeAccount.isPresent() && !runtimeAccount.get().equals(arnAccount)) {
+            problems.add("cluster " + raw + " belongs to account " + arnAccount
+                    + " but this task runs in " + runtimeAccount.get()
+                    + ". Refusing: the runtime contradicts itself.");
+            return null;
+        }
+
+        String region = arn.group("region");
+        if (!EXPECTED_REGION.equals(region)) {
+            problems.add("cluster " + raw + " is in region '" + region + "', not "
+                    + EXPECTED_REGION + ". Refusing.");
+            return null;
+        }
+
+        checks.add("OK     cluster ARN is well formed, ECS, account " + arnAccount
+                + " and region " + region + " - all agreeing with the task metadata");
+        return arn.group("name");
+    }
+
+    /** The name rules, applied to a bare name or to one extracted from an ARN. */
+    private static void verifyClusterName(
+            String raw, String clusterName, String statedEnvironment,
+            boolean willWrite, List<String> checks, List<String> problems) {
+
+        Matcher matched = APPROVED_CLUSTER.matcher(clusterName);
+        if (!matched.matches()) {
+            if (willWrite) {
                 problems.add("cluster " + raw + " does not match the approved "
                         + "research-archive-platform-<environment>-<component> shape, so the "
                         + "environment cannot be identified and production cannot be ruled "
@@ -203,12 +320,10 @@ public final class RuntimeVerification {
         String actualEnvironment = matched.group("environment");
 
         /*
-         * Checked before the comparison and regardless of willWrite: a
-         * production cluster is refused outright, so not even a dry run
-         * executes there. Matched as a WHOLE segment, which is both stricter
-         * and more precise than the substring test this replaced - that one
-         * would have fired on a cluster named "...-reproduction-..." and, far
-         * worse, could be satisfied by a one-character --environment.
+         * Belt and braces. hasProductionSegment already swept the raw value,
+         * so this cannot normally fire - but the environment segment is the
+         * authoritative place to decide, and a future change to the sweep
+         * must not be able to let production through here.
          */
         if (PRODUCTION_ENVIRONMENTS.contains(actualEnvironment)) {
             problems.add("This utility refuses to run against production. The cluster's "
@@ -239,7 +354,7 @@ public final class RuntimeVerification {
                     + actualEnvironment + "'. Refusing.");
         } else {
             checks.add("OK     environment '" + actualEnvironment + "' matched EXACTLY against "
-                    + "the ECS cluster name " + raw + " - not a substring of it");
+                    + "the ECS cluster " + raw + " - not a substring of it");
         }
     }
 

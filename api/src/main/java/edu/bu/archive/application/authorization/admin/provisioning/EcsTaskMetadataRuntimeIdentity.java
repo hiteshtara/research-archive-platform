@@ -93,6 +93,22 @@ public final class EcsTaskMetadataRuntimeIdentity implements RuntimeIdentity {
         return Optional.ofNullable(accountId);
     }
 
+    /**
+     * The {@code Cluster} field exactly as ECS reports it, which on Fargate is
+     * the full ARN:
+     *
+     * <pre>
+     *   arn:aws:ecs:us-east-1:770203350335:cluster/research-archive-platform-dev-etl
+     * </pre>
+     *
+     * <p><strong>Deliberately not normalised to the bare name here.</strong>
+     * The ARN also carries the region and the account, and those are two more
+     * pieces of independent evidence about where this process is running.
+     * {@code RuntimeVerification} cross-checks the ARN's account against the
+     * one derived from {@code TaskARN}; stripping the ARN in this adapter
+     * would throw that away before it reached the one class that makes trust
+     * decisions. This class stays a faithful reporter of what AWS said.
+     */
     @Override
     public Optional<String> clusterName() {
         return Optional.ofNullable(cluster);
