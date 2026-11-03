@@ -1,7 +1,12 @@
 # Grant lifecycle acceptance tests — plan
 
-**Status:** prepared, not executed. No grant has been created or revoked, and
-enforcement is OFF.
+**Status:** prepared, not executed. No grant has been created or revoked, no
+identity has been enrolled, and enforcement is OFF.
+
+**Revised 2026-11-03** to add prerequisite A0 (the grantee identity has to be
+created before any of this can run, and it must not be the administrator), a
+24-hour expiry on A2 and A8, the audit-trail provenance checks P1–P3, and the
+active-versus-historical counting rule.
 
 > ## ⚠️ Every step marked WRITE is NOT YET APPROVED
 >
@@ -28,6 +33,63 @@ the migration-role read-only check before and after each step.
 
 ---
 
+## Prerequisite A0 — the grantee must exist, and it must not be the administrator
+
+**This plan cannot be executed as first written.** It assumed a grantee
+identity was available. DEV has exactly **one** row in
+`authz.identity_link` — the administrator's own — against 7 federated and 6
+native Cognito users, because until now there was no way to create a second
+one: `ArchiveAdminService.bootstrapFirstAdministratorWithIdentity` is
+bootstrap-only, and nothing else linked an identity.
+
+Granting to the ARCHIVE_ADMIN identity instead would invalidate Group B
+outright. B14 asserts that an administrator with no data grant sees **no**
+records; if the administrator is also the grantee, B14 and B1 contradict each
+other and neither result means anything. The grantee must be an ordinary
+non-administrator identity.
+
+| # | Mode | Step | Expected |
+|---|---|---|---|
+| A0a | DRY RUN | `--enrol-cognito-subject=<sub> --dry-run` | `DRY_RUN_OK`, 0 rows in `authz.identity_link`, **no identifier minted** |
+| A0b | **WRITE — not approved** | same `--confirm` | `APPLIED`, **1** new `identity_link` (`method = ADMIN_VERIFIED`, `status = ACTIVE`), **1** `IDENTITY_LINKED`, **0** `admin_role_member` rows added, **0** grants |
+
+The archive identifier is **minted by the utility**, never supplied, so A0b's
+output is the only place the grantee's `ARP-…` identifier appears. Record it:
+every later step in Group A needs it as `--grantee`.
+
+A0b is blocked on two things that do not exist yet — see "Remaining blockers"
+in the enrollment PR: the Cognito SDK dependency and a `cognito-idp:AdminGetUser`
+permission on the task role. Until both are present the subject cannot be
+corroborated against the pool, and a confirmed enrollment is **refused** by
+design (a dry run only warns). Do not work around this by removing the check:
+it is the reason the utility can be trusted to link the right human.
+
+### Infrastructure baseline
+
+Before and after Group A, `terraform plan` in `terraform/environments/dev`
+must report **"No changes. Your infrastructure matches the configuration."**
+That is the verified baseline as of 2026-11-03 (run against `main` at
+`ca7fe5b`), not an assumption — none of these steps touch Terraform-managed
+state, so any drift that appears belongs to something else and must be
+explained before continuing.
+
+> **Run the plan from `main`, and check which commit you are on first.**
+> Planning dev from a branch that predates the infrastructure commits reports
+> **3 to add, 6 to change, 19 to destroy** — including
+> `aws_cognito_identity_provider.shibboleth`, the entire `db_tunnel` and
+> `cloudshell_analyst` read-only database path, and the Subaward failure-alert
+> wiring, each "because … is not in configuration". That is the *branch*
+> missing `db_tunnel.tf` and the Shibboleth provider, not the environment
+> having drifted. Confirmed 2026-11-03: the same state planned clean from
+> `main` minutes later.
+>
+> Do not treat such a plan as drift to be reconciled, and never `apply` it —
+> it would delete BU Shibboleth federation and the approved read-only database
+> access path. `terraform.tfvars` and `backend.hcl` are both gitignored, so a
+> fresh worktree also needs them copied in before `plan` means anything.
+
+---
+
 ## Group A — lifecycle mechanics (enforcement OFF)
 
 Image: the post-`f82672d` API image. Task family
@@ -39,13 +101,13 @@ Each row is marked **DRY RUN** (approved) or **WRITE** (not yet approved).
 | # | Mode | Step | Command | Expected |
 |---|---|---|---|---|
 | A1 | DRY RUN | dry run a create | `--type=UNIT --unit-number=… --dry-run` | `DRY_RUN_OK`, 0 grants, 0 new audit rows |
-| A2 | **WRITE — not approved** | create | same `--confirm` | `APPLIED`, **1** grant, **1** `ACCESS_GRANTED` |
+| A2 | **WRITE — not approved** | create, **expiring in 24 hours** | same `--confirm --expires-at=<now + 24h, ISO-8601>` | `APPLIED`, **1** grant, **1** `ACCESS_GRANTED`; `expires_at` persisted |
 | A3 | **WRITE — not approved** | duplicate create | repeat A2 | `REFUSED` "identical active grant already exists", still 1 grant, **no second audit row** |
 | A4 | **WRITE — not approved** | duplicate differing only in `--include-descendants` | `--include-descendants --confirm` | `REFUSED` by the V087 index (the app pre-check does not catch it), 1 grant |
 | A5 | DRY RUN | dry run a revoke | `--revoke-grant-id=<id> --dry-run` | `DRY_RUN_OK`, grant still live |
 | A6 | **WRITE — not approved** | revoke | same `--confirm` | `APPLIED`, `revoked_at` set, **1** `ACCESS_REVOKED`, grant row still present |
 | A7 | **WRITE — not approved** | repeat revoke | repeat A6 | `REFUSED` "was already revoked", **still exactly one** `ACCESS_REVOKED` |
-| A8 | **WRITE — not approved** | re-grant the same scope | A2 again | `APPLIED` — V087 constrains unrevoked grants only; 2 grant rows, 1 live |
+| A8 | **WRITE — not approved** | re-grant the same scope, **expiring in 24 hours** | A2 again, with a fresh `--expires-at=<now + 24h>` | `APPLIED` — V087 constrains unrevoked grants only; **2** grant rows, **1** active, the A2 row still present and still revoked |
 | A9 | **WRITE — not approved** | create with expiry | `--expires-at=<future> --confirm` | `APPLIED`, `expires_at` persisted |
 | A10 | **WRITE — not approved** | past expiry | `--expires-at=<past> --confirm` | `REFUSED` "not in the future", nothing written |
 | A11 | **WRITE — not approved** | combine verbs | `--revoke-grant-id=… --type=UNIT --confirm` | `REFUSED` "cannot be combined with" |
@@ -54,6 +116,44 @@ Each row is marked **DRY RUN** (approved) or **WRITE** (not yet approved).
 **Invariants after every step:** no row deleted from `authz.access_grant`; no
 row changed or deleted in `authz.access_audit` (append-only by trigger);
 `archive.*` counts unchanged; API revision 84 untouched; nightly at 237.
+
+### Every grant expires
+
+A2 and A8 both set `--expires-at` 24 hours ahead. Under D-ADM-3 a grant with
+no `--expires-at` **never expires**, so an unbounded test grant would outlive
+the test; an expiry is the backstop for a revoke step that is skipped, refused
+or forgotten. It does not replace A6 — `AccessGrant.isActiveAt(now)` requires
+`revoked_at IS NULL` **and** `valid_from <= now < expires_at`, and V087's
+unique index is **not** time-aware, so an expired-but-unrevoked grant still
+occupies its scope and still blocks a re-grant. Revoke explicitly; let the
+expiry catch what revocation misses.
+
+### Provenance must be read from the audit trail, not from the grant row
+
+| Check | Read from | Expected |
+|---|---|---|
+| P1 — creation reason and approval | the `ACCESS_GRANTED` row in `authz.access_audit` | the full `operator=…; approval=…; <reason>` string the operator passed to A2 |
+| P2 — revocation reason and approval | the `ACCESS_REVOKED` row | the revocation's own `operator=…; approval=…; <reason>`, distinct from P1's |
+| P3 — the grant row after revocation | `authz.access_grant.reason` | now holds the **revocation** reason |
+
+**P3 is a trap, not a nicety.** `JdbcAccessGrantRepository.revoke` writes
+`reason = COALESCE(:reason, reason)` on the grant row, so a revocation
+**overwrites the original creation reason in place**. After A6 the grant row
+can no longer answer "why was this granted?" — only the append-only
+`ACCESS_GRANTED` audit row can. Capture P1 **before** running A6, and never
+cite `access_grant.reason` as creation provenance.
+
+### Historical and active grants are different questions
+
+After A6 and A8 there are two rows for one scope. Keep them distinct in every
+count:
+
+- **active** — `revoked_at IS NULL AND valid_from <= now() AND now() < expires_at`
+- **historical** — every row, including revoked and expired ones
+
+Nothing is ever deleted, so a rising `COUNT(*)` on `authz.access_grant` is the
+expected outcome of a correct lifecycle test, not evidence of a duplicate. A
+step that reports "1 grant" must say which of the two it counted.
 
 Every one of A1–A12 already has an automated equivalent in
 `GrantProvisioningIntegrationTest` (67 tests across the combined suite). Group
