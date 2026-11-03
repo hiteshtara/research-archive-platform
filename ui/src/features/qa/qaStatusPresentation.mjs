@@ -181,17 +181,25 @@ export function requirementsWithConflicts(requirements) {
  * once its acceptance criteria have been checked in the environment the
  * case requires, with the date, environment and result recorded.
  */
+/*
+ * A stage description says where the work has got to. It must NOT say
+ * what the site currently does: a shared label cannot know which build
+ * a reader is looking at, and the UI and API release separately, so any
+ * present-tense behaviour claim here will contradict the case's own
+ * dated observation. Behaviour belongs in that observation, attributed
+ * to the builds it was seen on.
+ */
 export const PROGRESS_STAGES = [
   {
     key: "inProgress",
     label: "In progress",
-    description: "Being worked on. The behaviour below is still what the site does.",
+    description: "Being worked on. Verification is pending; see the dated observation below.",
   },
   {
     key: "fixedInCode",
     label: "Fixed in code, not released",
     description:
-      "A fix exists and its tests pass, but it is not on this website yet, so the behaviour below is still what you will see.",
+      "A fix exists and its tests pass, but it has not been released here. Verification is pending; see the dated observation below.",
   },
   {
     key: "deployedAwaitingVerification",
