@@ -26,6 +26,7 @@ import edu.bu.archive.application.authorization.fixtures.InMemoryAdminIdentityRe
 import edu.bu.archive.application.authorization.fixtures.InMemoryAdminRoleRepository;
 import edu.bu.archive.application.authorization.fixtures.InMemoryIdentityLinkRepository;
 import edu.bu.archive.application.authorization.fixtures.RecordingAdminAuditSink;
+import org.springframework.dao.DuplicateKeyException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -35,6 +36,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The administrative HTTP surface.
@@ -373,6 +375,72 @@ class AdminAuthorizationControllerTest {
         return MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    @Nested
+    @DisplayName("A duplicate active grant is 409, not 500")
+    class DuplicateGrant {
+
+        @BeforeEach
+        void bootstrap() {
+            adminRoles.bootstrap(ADMIN, "operator", "test");
+        }
+
+        /**
+         * V087's ux_access_grant_active_scope refuses a second unrevoked grant
+         * for one grantee and scope. Before this, the violation escaped as an
+         * unhandled DataIntegrityViolationException and the caller saw a 500 -
+         * which reads as "the server is broken, retry later" rather than "that
+         * grant already exists, revoke it first".
+         *
+         * The repository is made to throw the exception PostgreSQL really
+         * produces; the translation under test is the service's and the
+         * handler's, not the fixture's.
+         */
+        @Test
+        void theIndexViolationBecomesAControlled409() throws Exception {
+            grants.failNextCreateWith(duplicateKeyViolation("ux_access_grant_active_scope"));
+
+            mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")
+                            .contentType("application/json")
+                            .content("{\"type\":\"UNIT\",\"unitNumber\":\"1242040000\","
+                                    + "\"includeDescendants\":false,\"reason\":\"duplicate\"}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("DUPLICATE_ACTIVE_GRANT"))
+                    .andExpect(jsonPath("$.message").value(
+                            org.hamcrest.Matchers.containsString("already exists")));
+        }
+
+        /**
+         * The guard that stops this handler becoming a catch-all. A unique
+         * violation on a DIFFERENT index is not "that grant already exists",
+         * and telling the caller to retry after revoking a grant would be
+         * wrong, so it must not be reported as 409.
+         */
+        @Test
+        void aUniqueViolationOnAnotherIndexIsNot409() throws Exception {
+            grants.failNextCreateWith(duplicateKeyViolation("ux_identity_link_active_cognito"));
+
+            assertThatThrownBy(() ->
+                    mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")
+                            .contentType("application/json")
+                            .content("{\"type\":\"CENTRAL\",\"reason\":\"other index\"}")))
+                    .as("an unrelated unique violation must NOT be translated")
+                    .hasCauseInstanceOf(DuplicateKeyException.class);
+
+            // and nothing was written
+            assertThat(grants.findForGrantee(new InstitutionalIdentifier("inst-subject"))).isEmpty();
+            assertThat(audit.events()).isEmpty();
+        }
+
+        /** The real shape: Spring's wrapper over a pgjdbc 23505. */
+        private DuplicateKeyException duplicateKeyViolation(String indexName) {
+            String detail = "ERROR: duplicate key value violates unique constraint \""
+                    + indexName + "\"";
+            return new DuplicateKeyException(detail,
+                    new org.postgresql.util.PSQLException(
+                            detail, org.postgresql.util.PSQLState.UNIQUE_VIOLATION));
+        }
     }
 
     private static ValidatedCognitoIdentity cognito(String subject) {

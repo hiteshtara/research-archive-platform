@@ -12,6 +12,8 @@ import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.IdentityLink;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.KualiPersonId;
+import org.springframework.dao.DuplicateKeyException;
+import java.sql.SQLException;
 
 /**
  * The one place administrative changes happen.
@@ -279,6 +281,39 @@ public class ArchiveAdminService {
     // ---------------------------------------------------------------------
 
     /**
+     * The index V087 added. Named explicitly so an unrelated unique violation
+     * is never reported as a duplicate grant.
+     */
+    private static final String ACTIVE_GRANT_SCOPE_INDEX = "ux_access_grant_active_scope";
+
+    /**
+     * True only for a unique violation naming {@code ux_access_grant_active_scope}.
+     *
+     * <p>Both conditions are required. SQLSTATE 23505 alone would also match
+     * {@code ux_admin_role_member_active}, {@code ux_identity_link_active_cognito},
+     * {@code ux_identity_link_active_identity} and {@code ux_relink_approval_live},
+     * none of which means "this grant already exists".
+     *
+     * <p>The constraint name is read from the message rather than from
+     * {@code PSQLException.getServerErrorMessage().getConstraint()} because the
+     * PostgreSQL driver is a runtime-scope dependency and is deliberately not
+     * on the compile classpath. If PostgreSQL ever changed that message, this
+     * returns false and the original exception propagates - a 500 rather than
+     * a wrong 409, which is the safe direction to fail in.
+     */
+    private static boolean violatesActiveGrantScope(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql
+                    && "23505".equals(sql.getSQLState())
+                    && sql.getMessage() != null
+                    && sql.getMessage().contains(ACTIVE_GRANT_SCOPE_INDEX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Grant archive access.
      *
      * <p>Approved decision D-ADM-2: no second approver is required, so this
@@ -296,7 +331,36 @@ public class ArchiveAdminService {
             throw new IllegalArgumentException("grant specification is required");
         }
 
-        AccessGrant granted = grants.create(subject, specification, actor.value());
+        /*
+         * V087's ux_access_grant_active_scope is what actually holds "at most
+         * one unrevoked grant per grantee and scope". It is translated here,
+         * once, so the HTTP API and the provisioning CLI agree on what a
+         * duplicate is rather than each deciding separately.
+         *
+         * The audit row is written AFTER the insert on purpose: if the index
+         * refuses, audit.record is never reached, so a refusal cannot leave an
+         * ACCESS_GRANTED row behind. The surrounding @Transactional would roll
+         * one back anyway - this just means there is nothing to roll back.
+         */
+        AccessGrant granted;
+        try {
+            granted = grants.create(subject, specification, actor.value());
+        } catch (DuplicateKeyException e) {
+            if (!violatesActiveGrantScope(e)) {
+                /*
+                 * Some other unique index. Not ours to reinterpret: turning
+                 * an unrelated integrity failure into 409 would tell the
+                 * caller to retry something that will never succeed.
+                 */
+                throw e;
+            }
+            throw new DuplicateActiveGrantException(
+                    "an unrevoked grant for this grantee and scope already exists. "
+                            + "Revoke it before granting the same scope again; two identical "
+                            + "active grants cannot be told apart when one is later revoked.",
+                    e);
+        }
+
         audit.record(actor.value(), AdminAuditAction.ACCESS_GRANTED, subject,
                 describe(granted, specification.reason()));
         return granted;

@@ -7,13 +7,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-import org.springframework.dao.DuplicateKeyException;
-
 import edu.bu.archive.application.authorization.AccessGrant;
 import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.GrantType;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
+import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.GrantSpecification;
 
@@ -102,7 +101,7 @@ public final class GrantProvisioningCommand {
                             "operator=" + request.operator().trim()
                                     + "; approval=" + request.approvalReference().trim()
                                     + "; " + request.reason().trim()));
-        } catch (DuplicateKeyException e) {
+        } catch (DuplicateActiveGrantException e) {
             /*
              * V087's ux_access_grant_active_scope fired. The duplicate check
              * above is a read followed by a write with no lock, so two
@@ -111,8 +110,12 @@ public final class GrantProvisioningCommand {
              *
              * It is reported as the same refusal the sequential case gives,
              * because it is the same situation: the grant already exists.
-             * Previously this escaped as a DataIntegrityViolationException
-             * and the operator saw a stack trace instead of an answer.
+             * ArchiveAdminService translates the index violation into
+             * DuplicateActiveGrantException, so this CLI and the
+             * administrative API agree on what a duplicate is instead of each
+             * deciding separately. Previously this escaped as a raw
+             * DataIntegrityViolationException and the operator saw a stack
+             * trace instead of an answer.
              *
              * Nothing partial survives: grantAccess is one transaction over
              * the grant and its ACCESS_GRANTED audit row, so the violation
