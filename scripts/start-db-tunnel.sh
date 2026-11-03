@@ -192,9 +192,41 @@ cat <<BANNER
 
 BANNER
 
-aws ssm start-session --region "$REGION" \
-  --target "ecs:${CLUSTER}_${TASK_ID}_${RUNTIME_ID}" \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters "{\"host\":[\"$RDS_HOST\"],\"portNumber\":[\"$REMOTE_PORT\"],\"localPortNumber\":[\"$LOCAL_PORT\"]}"
+#
+# Retried, because ExecuteCommandAgent reporting RUNNING in the ECS API is
+# necessary but NOT sufficient: SSM registers the channel a few seconds
+# later, and StartSession in that window fails with TargetNotConnected.
+# Observed on the very first live run - the task was RUNNING, the agent was
+# RUNNING, and the session still refused. Without this the first thing a
+# new user sees is a confusing failure on a correctly built tunnel.
+#
+# Only TargetNotConnected is retried. Any other error (denied, bad
+# parameters) fails immediately rather than being masked by a retry loop.
+SESSION_ERR="$(mktemp -t dbtunnel)"
+# shellcheck disable=SC2064  # expand SESSION_ERR now, not at trap time
+trap "rm -f '$SESSION_ERR'; cleanup" EXIT INT TERM
+
+ATTEMPTS=12
+for attempt in $(seq 1 "$ATTEMPTS"); do
+  aws ssm start-session --region "$REGION" \
+    --target "ecs:${CLUSTER}_${TASK_ID}_${RUNTIME_ID}" \
+    --document-name AWS-StartPortForwardingSessionToRemoteHost \
+    --parameters "{\"host\":[\"$RDS_HOST\"],\"portNumber\":[\"$REMOTE_PORT\"],\"localPortNumber\":[\"$LOCAL_PORT\"]}" \
+    2> >(tee "$SESSION_ERR" >&2)
+  SESSION_STATUS=$?
+
+  [ "$SESSION_STATUS" -eq 0 ] && break
+  if ! grep -q "TargetNotConnected" "$SESSION_ERR" 2>/dev/null; then
+    err "Session failed for a reason other than TargetNotConnected - not retrying."
+    exit "$SESSION_STATUS"
+  fi
+  if [ "$attempt" -eq "$ATTEMPTS" ]; then
+    err "SSM never accepted a session after $ATTEMPTS attempts."
+    err "If this persists, the ssmmessages VPC endpoint is the thing to check."
+    exit 1
+  fi
+  log "SSM target not ready yet (attempt $attempt/$ATTEMPTS) - retrying in 5s..."
+  sleep 5
+done
 
 # Falls through to cleanup() on exit.
