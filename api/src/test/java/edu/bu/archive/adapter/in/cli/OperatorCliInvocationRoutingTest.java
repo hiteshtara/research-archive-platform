@@ -49,7 +49,7 @@ class OperatorCliInvocationRoutingTest {
 
     @Test
     void theEnrollmentRunnerDoesNothingWithoutItsOwnVerb() {
-        IdentityEnrollmentCli cli = new IdentityEnrollmentCli(null, null, null, null);
+        IdentityEnrollmentCli cli = new IdentityEnrollmentCli(null, null, null, null, null);
         assertThatCode(() -> cli.run(args("--grantee=ARP-ADMN0001-00000001", "--dry-run")))
                 .as("a grant invocation must not be touched by the enrollment runner,"
                         + " and the null collaborators prove nothing was reached")
@@ -58,7 +58,7 @@ class OperatorCliInvocationRoutingTest {
 
     @Test
     void anInvocationCarryingBothVerbsIsRefusedBeforeAnythingIsWritten() {
-        IdentityEnrollmentCli cli = new IdentityEnrollmentCli(null, null, null, null);
+        IdentityEnrollmentCli cli = new IdentityEnrollmentCli(null, null, null, null, null);
         for (String grantVerb : new String[] {
             "--grantee=ARP-ADMN0001-00000001", "--revoke-grant-id=1"}) {
             assertThatThrownBy(() -> cli.run(args(

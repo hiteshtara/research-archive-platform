@@ -3,6 +3,7 @@ package edu.bu.archive.adapter.in.cli;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
@@ -62,13 +63,16 @@ public class IdentityEnrollmentCli implements ApplicationRunner {
     private final AdminRoleRepository adminRoles;
     private final AdminIdentityRepository identities;
     private final IdentityLinkRepository links;
+    private final ObjectProvider<CognitoDirectory> directories;
 
     public IdentityEnrollmentCli(ArchiveAdminService admin, AdminRoleRepository adminRoles,
-                                 AdminIdentityRepository identities, IdentityLinkRepository links) {
+                                 AdminIdentityRepository identities, IdentityLinkRepository links,
+                                 ObjectProvider<CognitoDirectory> directories) {
         this.admin = admin;
         this.adminRoles = adminRoles;
         this.identities = identities;
         this.links = links;
+        this.directories = directories;
     }
 
     @Override
@@ -131,14 +135,24 @@ public class IdentityEnrollmentCli implements ApplicationRunner {
     }
 
     /*
-     * No Cognito directory ships yet - the AWS SDK's Cognito client is not a
-     * dependency of this module, and the task role has no cognito-idp
-     * permission. Until both exist, a confirmed enrollment is REFUSED and a
-     * dry run warns, which is the correct direction: the subject check is the
-     * reason this utility can be trusted at all.
+     * The real pool when CognitoDirectoryConfiguration contributed one - it
+     * is behind @Profile("aws"), which only the grant-admin task sets - and
+     * otherwise UNAVAILABLE, which refuses a confirmed enrollment and only
+     * warns for a dry run.
+     *
+     * That direction is the point: a missing directory degrades to "cannot
+     * verify", never to "verified". It also means no test context can reach
+     * Cognito, because no test context activates the aws profile.
      */
-    private static CognitoDirectory directory() {
-        return CognitoDirectory.UNAVAILABLE;
+    private CognitoDirectory directory() {
+        CognitoDirectory configured =
+                directories == null ? null : directories.getIfAvailable();
+        if (configured == null) {
+            System.out.println("  NOTE   no Cognito directory is configured (profile 'aws' inactive);"
+                    + " the subject cannot be corroborated against the user pool");
+            return CognitoDirectory.UNAVAILABLE;
+        }
+        return configured;
     }
 
     private static void print(EnrollmentOutcome outcome) {
