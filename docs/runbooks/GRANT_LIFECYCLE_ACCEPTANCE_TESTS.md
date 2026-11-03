@@ -3,6 +3,18 @@
 **Status:** prepared, not executed. No grant has been created or revoked, and
 enforcement is OFF.
 
+> ## ⚠️ Every step marked WRITE is NOT YET APPROVED
+>
+> Steps that use `--confirm`, and every step in Group B, require **separate,
+> explicit approval before each run**. They are written down so they can be
+> reviewed, not so they can be run.
+>
+> As of 2026-11-03 the approved scope is **dry runs only**: `--dry-run` with no
+> `--confirm`. The outstanding business decisions in
+> `docs/security/AUTHORIZATION_POLICY_DECISIONS_OUTSTANDING.md` - in particular
+> who the first grantee should be - are unresolved, so no real grant can be
+> approved yet regardless of whether the tooling is ready.
+
 Two groups, because they need different environments:
 
 - **Group A — lifecycle mechanics.** Needs no enforcement. Can run against DEV
@@ -22,20 +34,22 @@ Image: the post-`f82672d` API image. Task family
 `research-archive-platform-dev-grant-admin`, registered and deregistered per
 run.
 
-| # | Step | Command | Expected |
-|---|---|---|---|
-| A1 | dry run a create | `--type=UNIT --unit-number=… --dry-run` | `DRY_RUN_OK`, 0 grants, 0 new audit rows |
-| A2 | create | same `--confirm` | `APPLIED`, **1** grant, **1** `ACCESS_GRANTED` |
-| A3 | duplicate create | repeat A2 | `REFUSED` "identical active grant already exists", still 1 grant, **no second audit row** |
-| A4 | duplicate differing only in `--include-descendants` | `--include-descendants --confirm` | `REFUSED` by the V087 index (the app pre-check does not catch it), 1 grant |
-| A5 | dry run a revoke | `--revoke-grant-id=<id> --dry-run` | `DRY_RUN_OK`, grant still live |
-| A6 | revoke | same `--confirm` | `APPLIED`, `revoked_at` set, **1** `ACCESS_REVOKED`, grant row still present |
-| A7 | repeat revoke | repeat A6 | `REFUSED` "was already revoked", **still exactly one** `ACCESS_REVOKED` |
-| A8 | re-grant the same scope | A2 again | `APPLIED` — V087 constrains unrevoked grants only; 2 grant rows, 1 live |
-| A9 | create with expiry | `--expires-at=<future> --confirm` | `APPLIED`, `expires_at` persisted |
-| A10 | past expiry | `--expires-at=<past> --confirm` | `REFUSED` "not in the future", nothing written |
-| A11 | combine verbs | `--revoke-grant-id=… --type=UNIT --confirm` | `REFUSED` "cannot be combined with" |
-| A12 | non-administrator actor | `--actor=<not an admin> --confirm` | `REFUSED` "holds no ACTIVE ARCHIVE_ADMIN membership" |
+Each row is marked **DRY RUN** (approved) or **WRITE** (not yet approved).
+
+| # | Mode | Step | Command | Expected |
+|---|---|---|---|---|
+| A1 | DRY RUN | dry run a create | `--type=UNIT --unit-number=… --dry-run` | `DRY_RUN_OK`, 0 grants, 0 new audit rows |
+| A2 | **WRITE — not approved** | create | same `--confirm` | `APPLIED`, **1** grant, **1** `ACCESS_GRANTED` |
+| A3 | **WRITE — not approved** | duplicate create | repeat A2 | `REFUSED` "identical active grant already exists", still 1 grant, **no second audit row** |
+| A4 | **WRITE — not approved** | duplicate differing only in `--include-descendants` | `--include-descendants --confirm` | `REFUSED` by the V087 index (the app pre-check does not catch it), 1 grant |
+| A5 | DRY RUN | dry run a revoke | `--revoke-grant-id=<id> --dry-run` | `DRY_RUN_OK`, grant still live |
+| A6 | **WRITE — not approved** | revoke | same `--confirm` | `APPLIED`, `revoked_at` set, **1** `ACCESS_REVOKED`, grant row still present |
+| A7 | **WRITE — not approved** | repeat revoke | repeat A6 | `REFUSED` "was already revoked", **still exactly one** `ACCESS_REVOKED` |
+| A8 | **WRITE — not approved** | re-grant the same scope | A2 again | `APPLIED` — V087 constrains unrevoked grants only; 2 grant rows, 1 live |
+| A9 | **WRITE — not approved** | create with expiry | `--expires-at=<future> --confirm` | `APPLIED`, `expires_at` persisted |
+| A10 | **WRITE — not approved** | past expiry | `--expires-at=<past> --confirm` | `REFUSED` "not in the future", nothing written |
+| A11 | **WRITE — not approved** | combine verbs | `--revoke-grant-id=… --type=UNIT --confirm` | `REFUSED` "cannot be combined with" |
+| A12 | **WRITE — not approved** | non-administrator actor | `--actor=<not an admin> --confirm` | `REFUSED` "holds no ACTIVE ARCHIVE_ADMIN membership" |
 
 **Invariants after every step:** no row deleted from `authz.access_grant`; no
 row changed or deleted in `authz.access_audit` (append-only by trigger);
@@ -49,6 +63,10 @@ once and not repeatedly.
 ---
 
 ## Group B — authorization behaviour (enforcement ON, isolated only)
+
+> **NOT YET APPROVED, in full.** Every case below needs enforcement ON and is
+> blocked on the outstanding policy decisions. Nothing in this group may run
+> against the shared API service under any circumstances.
 
 **Not on the shared API service.** Either a disposable Testcontainers fixture
 or a one-off task with `app.authorization.enforcement-enabled=true` plus all
