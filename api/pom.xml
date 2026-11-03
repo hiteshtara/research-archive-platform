@@ -96,6 +96,21 @@
         </dependency>
 
         <!--
+          Read-only Cognito user-pool access for operator identity
+          enrollment: the subject an operator types is corroborated against
+          the real DEV pool before any identity link is written
+          (CognitoIdentityProviderDirectory). AdminGetUser is the only
+          operation used, and the task role is granted only that action on
+          only the DEV pool - see
+          docs/security/IDENTITY_ENROLLMENT_IAM.md.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cognitoidentityprovider</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!--
           Explicit direct dependency (was previously only an
           undeclared transitive one, not resolvable at this module's
           compile scope) so SemanticSearchConfiguration can configure

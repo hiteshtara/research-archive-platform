@@ -81,6 +81,23 @@ public class GrantProvisioningCli implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        /*
+         * This runner shares the grant-admin profile with the identity
+         * enrollment runner, and Spring runs every ApplicationRunner. An
+         * enrollment invocation is not ours. Letting it run anyway refuses on
+         * the absent grant options and exits 1 - either after a successful
+         * enrollment, making it look failed, or before it, depending on runner
+         * order.
+         *
+         * The condition is the presence of somebody else's verb, not the
+         * absence of ours: skipping whenever --grantee is missing would turn a
+         * mistyped flag into a silent exit 0. A grant invocation with no verb
+         * at all must still be refused out loud, as it is today.
+         */
+        if (isEnrollment(args)) {
+            return;
+        }
+
         Map<String, String> options = new HashMap<>();
         for (String name : args.getOptionNames()) {
             options.put(name, args.getOptionValues(name).stream().findFirst().orElse(null));
@@ -138,5 +155,11 @@ public class GrantProvisioningCli implements ApplicationRunner {
                     + " FROM authz.access_audit ORDER BY audit_id;");
         }
         System.out.println();
+    }
+
+    /** True when this invocation addresses the identity enrollment runner. */
+    static boolean isEnrollment(ApplicationArguments args) {
+        return args.containsOption("enrol-cognito-subject")
+                || args.containsOption("enroll-cognito-subject");
     }
 }
