@@ -22,7 +22,7 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 
 import { getDashboard } from "../api/client";
 import { LoadingState } from "../components/common/LoadingState";
@@ -173,18 +173,25 @@ export function DashboardPage() {
 
               return (
                 <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 3 }}>
+                  {/*
+                    * A real link, not a div that navigates (QA TC-053).
+                    * The card used to be role="button" with tabIndex and
+                    * a keydown handler: that gave keyboard access, but a
+                    * control with no address cannot be middle-clicked
+                    * into a new tab, cannot have its address copied, and
+                    * is announced as a button although it navigates.
+                    * Rendering the Card as a RouterLink gives all of
+                    * that from the platform, and lets the hand-rolled
+                    * Enter/Space handling go.
+                    */}
                   <Card
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => navigate(card.path)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        navigate(card.path);
-                      }
-                    }}
+                    component={RouterLink}
+                    to={card.path}
                     sx={{
                       height: "100%",
+                      display: "block",
+                      textDecoration: "none",
+                      color: "inherit",
                       cursor: "pointer",
                       transition:
                         "transform 160ms ease, box-shadow 160ms ease",
@@ -254,18 +261,15 @@ export function DashboardPage() {
 
             return (
               <Grid key={card.key} size={{ xs: 12, sm: 6, lg: 4 }}>
+                {/* Same as the cards above - a real link. */}
                 <Card
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(card.path)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      navigate(card.path);
-                    }
-                  }}
+                  component={RouterLink}
+                  to={card.path}
                   sx={{
                     height: "100%",
+                    display: "block",
+                    textDecoration: "none",
+                    color: "inherit",
                     cursor: "pointer",
                     opacity: value === 0 ? 0.78 : 1,
                   }}

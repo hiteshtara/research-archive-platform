@@ -296,3 +296,45 @@ test("the ordinary Proposals card still opens the family-level page", () => {
   );
   assert.notEqual(proposals.path, history.path);
 });
+
+test("dashboard cards navigate as links, not as buttons (QA TC-053)", () => {
+  // A card that navigates must BE a link. As a div with role="button"
+  // it had keyboard access and a visible focus ring, but no address -
+  // so it could not be middle-clicked into a new tab, its address could
+  // not be copied, and a screen reader announced a button where the
+  // control navigates.
+  const source = readFileSync(
+    fileURLToPath(new URL("../../pages/DashboardPage.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  // Both card blocks render as a router link.
+  const linkCards = source.match(/<Card\s+component=\{RouterLink\}/g) || [];
+  assert.equal(linkCards.length, 2, "expected both card blocks to be router links");
+
+  // And neither fakes it any more.
+  assert.ok(
+    !/<Card\s+role="button"/.test(source),
+    "a navigating Card must not be a role=button div",
+  );
+  // The hand-rolled Enter/Space handling is gone - the platform does it.
+  assert.ok(
+    !/event\.key === "Enter" \|\| event\.key === " "/.test(source),
+    "Enter/Space handling should come from the anchor, not a keydown handler",
+  );
+
+  // Anchors are inline and inherit link colour; without these the cards
+  // would lose their layout and pick up underlined blue text.
+  assert.match(source, /display: "block"/);
+  assert.match(source, /textDecoration: "none"/);
+  assert.match(source, /color: "inherit"/);
+});
+
+test("every dashboard card still has a path to link to", () => {
+  // component={RouterLink} with an undefined `to` renders an anchor with
+  // no href - exactly the defect, reintroduced quietly.
+  for (const card of [...primaryBusinessCards, ...historicalActivityCards, ...futureModuleCards]) {
+    assert.ok(card.path, `${card.key} has no path`);
+    assert.ok(card.path.startsWith("/"), `${card.key} path is not site-internal`);
+  }
+});
