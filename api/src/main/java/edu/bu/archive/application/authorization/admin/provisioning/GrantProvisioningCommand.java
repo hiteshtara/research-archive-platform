@@ -1,5 +1,8 @@
 package edu.bu.archive.application.authorization.admin.provisioning;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +47,8 @@ public final class GrantProvisioningCommand {
     private final ArchiveAdminService admin;
     private final AdminRoleRepository adminRoles;
     private final AccessGrantRepository grants;
+    /** Test seam: a fixed Clock makes expiry assertions deterministic. */
+    private Clock clock = Clock.systemUTC();
 
     public GrantProvisioningCommand(
             String expectedAccountId, String expectedEnvironment,
@@ -57,7 +62,134 @@ public final class GrantProvisioningCommand {
         this.grants = Objects.requireNonNull(grants);
     }
 
+    /** Override the clock used to judge whether an expiry is in the future. */
+    public GrantProvisioningCommand withClock(Clock clock) {
+        this.clock = Objects.requireNonNull(clock, "clock");
+        return this;
+    }
+
     public GrantOutcome run(GrantRequest request) {
+        return request.isRevocation() ? revoke(request) : create(request);
+    }
+
+    /**
+     * Withdraw a grant by its immutable id.
+     *
+     * <p>Delegates the write to {@link ArchiveAdminService#revokeAccess}, the
+     * same method the administrative API uses, so there is ONE revocation
+     * implementation: it checks the acting administrator, flips revoked_at and
+     * writes the ACCESS_REVOKED audit row in a single transaction. Nothing is
+     * deleted - revocation is a status change, and the grant row and both
+     * audit rows survive.
+     */
+    private GrantOutcome revoke(GrantRequest request) {
+        List<String> checks = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
+
+        checkEnvironment(request, checks, problems);
+        rejectCreateOnlyInputs(request, problems);
+        InstitutionalIdentifier actor = checkIdentifier(
+                request.actorIdentifier(), "acting administrator", checks, problems);
+        checkProvenance(request, checks, problems);
+        Long grantId = checkGrantId(request, checks, problems);
+
+        AccessGrant target = null;
+        if (grantId != null) {
+            target = grants.findById(grantId).orElse(null);
+            if (target == null) {
+                problems.add("no grant has id " + grantId
+                        + ". Revocation takes the immutable grant_id, not a grantee.");
+            } else if (target.revokedAt() != null) {
+                /*
+                 * Refused rather than treated as success. ArchiveAdminService
+                 * would throw here anyway, before writing the audit row - this
+                 * just says so in a sentence instead of a stack trace, and
+                 * means a repeated revocation cannot leave a second
+                 * ACCESS_REVOKED entry suggesting it happened twice.
+                 */
+                problems.add("grant " + grantId + " was already revoked at "
+                        + target.revokedAt() + ". Nothing to do; a second revocation would "
+                        + "imply a withdrawal that did not happen.");
+            } else {
+                checks.add("OK     grant " + grantId + " is live: " + describe(target));
+            }
+        }
+
+        if (actor != null && adminRoles.findActive(actor).isEmpty()) {
+            problems.add("the acting administrator " + mask(actor.value())
+                    + " holds no ACTIVE ARCHIVE_ADMIN membership. "
+                    + "Revocations must be issued by a real administrator.");
+        } else if (actor != null) {
+            checks.add("OK     acting administrator holds an ACTIVE membership");
+        }
+
+        if (!problems.isEmpty()) {
+            return new GrantOutcome(GrantOutcome.Result.REFUSED, checks, problems,
+                    "Refusing to revoke: " + problems.size() + " problem(s). Nothing was written.",
+                    null);
+        }
+        if (request.dryRun() || !request.confirmed()) {
+            return new GrantOutcome(GrantOutcome.Result.DRY_RUN_OK, checks, problems,
+                    request.dryRun()
+                            ? "Dry run: every check passed. Nothing was written."
+                            : "Not confirmed: every check passed, but --confirm was not given. "
+                                    + "Nothing was written.",
+                    grantId);
+        }
+
+        admin.revokeAccess(actor, grantId,
+                "operator=" + request.operator().trim()
+                        + "; approval=" + request.approvalReference().trim()
+                        + "; " + request.reason().trim());
+
+        checks.add("WROTE  grant " + grantId + " revoked; ACCESS_REVOKED audit row written");
+        return new GrantOutcome(GrantOutcome.Result.APPLIED, checks, problems,
+                "Revoked grant " + grantId + ". The row survives with revoked_at set, and the "
+                        + "scope is free to be granted again - V087 constrains unrevoked grants "
+                        + "only. Enforcement is unchanged.",
+                grantId);
+    }
+
+    /** One invocation is a creation or a revocation, never both. */
+    private static void rejectCreateOnlyInputs(GrantRequest r, List<String> problems) {
+        if (trim(r.grantType()) != null || trim(r.granteeIdentifier()) != null
+                || trim(r.unitNumber()) != null || trim(r.ioValue()) != null
+                || r.includeDescendants() || trim(r.expiresAt()) != null) {
+            problems.add("--revoke-grant-id cannot be combined with --type, --grantee, "
+                    + "--unit-number, --io-value, --include-descendants or --expires-at. "
+                    + "Revoking and granting are separate, separately audited acts.");
+        }
+    }
+
+    private Long checkGrantId(GrantRequest r, List<String> checks, List<String> problems) {
+        String raw = trim(r.revokeGrantId());
+        try {
+            long id = Long.parseLong(raw);
+            if (id <= 0) {
+                problems.add("--revoke-grant-id must be a positive grant_id, got " + raw);
+                return null;
+            }
+            checks.add("OK     revoking by immutable grant_id " + id);
+            return id;
+        } catch (NumberFormatException e) {
+            problems.add("--revoke-grant-id must be a number, got '" + raw + "'");
+            return null;
+        }
+    }
+
+    private static String describe(AccessGrant grant) {
+        StringBuilder text = new StringBuilder(grant.type().name());
+        if (grant.unitNumber() != null) {
+            text.append(" unit ").append(grant.unitNumber());
+            text.append(grant.includeDescendants() ? " including descendants" : " only");
+        }
+        if (grant.ioValue() != null) {
+            text.append(" IO ").append(mask(grant.ioValue()));
+        }
+        return text.append(" for ").append(mask(grant.grantee().value())).toString();
+    }
+
+    private GrantOutcome create(GrantRequest request) {
         List<String> checks = new ArrayList<>();
         List<String> problems = new ArrayList<>();
 
@@ -68,6 +200,7 @@ public final class GrantProvisioningCommand {
         InstitutionalIdentifier actor = checkIdentifier(
                 request.actorIdentifier(), "acting administrator", checks, problems);
         checkScope(request, type, checks, problems);
+        Instant expiresAt = checkExpiry(request, checks, problems);
         checkProvenance(request, checks, problems);
         if (grantee != null && actor != null && type != null) {
             checkSubjects(request, grantee, actor, type, checks, problems);
@@ -97,7 +230,7 @@ public final class GrantProvisioningCommand {
             created = admin.grantAccess(actor, grantee,
                     new GrantSpecification(type, trim(request.unitNumber()),
                             request.includeDescendants(), trim(request.ioValue()),
-                            null,
+                            expiresAt,
                             "operator=" + request.operator().trim()
                                     + "; approval=" + request.approvalReference().trim()
                                     + "; " + request.reason().trim()));
@@ -176,6 +309,50 @@ public final class GrantProvisioningCommand {
             problems.add("This utility refuses to run against production. "
                     + "Production grants need their own approved procedure.");
         }
+    }
+
+    /**
+     * Parse {@code --expires-at}, which is optional.
+     *
+     * <p>Approved decision D-ADM-3: a grant does not expire unless an
+     * administrator explicitly sets an expiry, so absence is a deliberate
+     * choice. Until now the CLI could not express the other half of that
+     * decision at all - it passed null unconditionally - so an expiring grant
+     * could only be created through the administrative API, which 404s while
+     * enforcement is off.
+     *
+     * <p><strong>An expiry is not a substitute for revocation.</strong>
+     * V087's index predicate is {@code revoked_at IS NULL}, which is not
+     * time-aware, so an expired-but-unrevoked grant still occupies its scope
+     * and still blocks a replacement. The check below says so rather than
+     * letting an operator discover it from a duplicate-key refusal months
+     * later.
+     */
+    private Instant checkExpiry(GrantRequest r, List<String> checks, List<String> problems) {
+        String raw = trim(r.expiresAt());
+        if (raw == null) {
+            checks.add("NOTE   no --expires-at: this grant does not expire (D-ADM-3). "
+                    + "It ends when it is revoked, which is audited.");
+            return null;
+        }
+        Instant when;
+        try {
+            when = Instant.parse(raw);
+        } catch (DateTimeParseException e) {
+            problems.add("--expires-at must be an ISO-8601 instant such as "
+                    + "2027-06-30T00:00:00Z, got '" + raw + "'");
+            return null;
+        }
+        if (!when.isAfter(clock.instant())) {
+            problems.add("--expires-at " + raw + " is not in the future. A grant that is "
+                    + "already expired on creation would occupy its scope while granting "
+                    + "nothing, and would still need revoking before the scope could be "
+                    + "granted again.");
+            return null;
+        }
+        checks.add("OK     expires at " + when + ". NOTE V087 constrains UNREVOKED grants, so "
+                + "after expiry this grant still occupies its scope until it is revoked.");
+        return when;
     }
 
     private GrantType checkType(GrantRequest r, List<String> checks, List<String> problems) {

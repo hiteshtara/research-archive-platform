@@ -19,4 +19,23 @@ public record GrantRequest(
         String reason,
         String approvalReference,
         boolean dryRun,
-        boolean confirmed) { }
+        boolean confirmed,
+        /**
+         * {@code --expires-at}, an ISO-8601 instant, or null for a grant that
+         * does not expire. Approved decision D-ADM-3: grants do not expire
+         * automatically unless an administrator explicitly sets an expiry, so
+         * null here is a deliberate choice and not a missing value.
+         */
+        String expiresAt,
+        /**
+         * {@code --revoke-grant-id}. When present this is a REVOCATION and
+         * every create-only input is rejected, so one invocation can never be
+         * both.
+         */
+        String revokeGrantId) {
+
+    /** True when the operator asked to revoke rather than to create. */
+    public boolean isRevocation() {
+        return revokeGrantId != null && !revokeGrantId.isBlank();
+    }
+}
