@@ -11,6 +11,11 @@ import java.util.Set;
  * never a reason: only this record's (or, under FAMILY_WIDE, its own
  * family's) facts count.
  *
+ * <p><strong>One exception, and it is SEC-003.</strong> Contact-derived
+ * Research Staff access is decided against the version being read even under
+ * FAMILY_WIDE. {@code versionScope} governs the explicit CENTRAL, UNIT and IO
+ * grants only.
+ *
  * <p>Module rules (approved requirements vs proposals):
  * <ul>
  *   <li>Central reaches every module (ID 1).</li>
@@ -18,7 +23,8 @@ import java.util.Set;
  *       unit (ID 2; "lead unit" itself is proposal P6/D-E). Subaward and IRB
  *       have no approved department rule and are central-only (proposal P8).</li>
  *   <li>Research Staff: Award and Proposal contacts only (ID 3; qualifying
- *       roles are proposal P4 and come from the policy).</li>
+ *       roles are proposal P4 and come from the policy). Always scoped to
+ *       the version being read (SEC-003).</li>
  *   <li>IO: any record whose resolver supplied IO values (ID 4; field pending D-A).</li>
  * </ul>
  */
@@ -38,9 +44,11 @@ public class RecordAccessEvaluator {
     }
 
     /**
-     * @param record        the version being read
+     * @param record        the version being read; the ONLY version contact
+     *                      derivation is ever decided against (SEC-003)
      * @param familyVersions every version of the same family (including
-     *                       {@code record}); used only under FAMILY_WIDE
+     *                       {@code record}); used only under FAMILY_WIDE, and
+     *                       then only for department and IO grants
      */
     public AccessDecision decide(AccessOutcome outcome, RecordFacts record, List<RecordFacts> familyVersions) {
         if (!(outcome instanceof AccessOutcome.Scoped scoped)) {
@@ -60,12 +68,23 @@ public class RecordAccessEvaluator {
             if (departmentMatches(scope, version)) {
                 reasons.add(AccessReason.DEPARTMENT);
             }
-            if (contactMatches(scope, version)) {
-                reasons.add(AccessReason.RESEARCH_STAFF_CONTACT);
-            }
             if (ioMatches(scope, version)) {
                 reasons.add(AccessReason.IO_GRANT);
             }
+        }
+        /*
+         * SEC-003, decided by the business 2026-11-05: contact-derived access
+         * is ALWAYS version-specific, whatever versionScope says - being
+         * listed on one version of a family must not reach the rest of it.
+         * So this is evaluated against `record`, never against `considered`.
+         *
+         * Hard-coded rather than made configurable on purpose: the business
+         * decided this rule instead of delegating it, and a setting could be
+         * configured back into non-compliance. The explicit CENTRAL, UNIT and
+         * IO grants above were deliberately left under versionScope.
+         */
+        if (contactMatches(scope, record)) {
+            reasons.add(AccessReason.RESEARCH_STAFF_CONTACT);
         }
         return reasons.isEmpty() ? AccessDecision.deny("OUT_OF_SCOPE") : AccessDecision.allow(reasons);
     }

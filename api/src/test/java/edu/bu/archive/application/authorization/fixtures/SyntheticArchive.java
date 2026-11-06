@@ -151,6 +151,32 @@ public final class SyntheticArchive {
     public static final RecordFacts AWARD_U200 = award("SYN-AWD-E-1", "SYN-AWD-E", "SYN-U-200", List.of(), Set.of());
     public static final RecordFacts AWARD_IO_5 = award("SYN-AWD-F-1", "SYN-AWD-F", "SYN-U-300", List.of(), Set.of("SYN-IO-0005"));
 
+    /*
+     * SEC-003 families. The business rejected family-wide contact access on
+     * 2026-11-05, so the shape that matters is a family whose contact list
+     * CHANGES between versions. All three sit in SYN-U-300, which is nobody's
+     * granted department, so contact derivation is the only thing that could
+     * authorise them - a department grant cannot mask the result.
+     */
+
+    /** Family H: the contact is listed on v1 and REMOVED on v2. */
+    public static final RecordFacts AWARD_H_V1 = award("SYN-AWD-H-1", "SYN-AWD-H", "SYN-U-300",
+            List.of(RecordContact.employee("SYNP-1003", "PI")), Set.of());
+    public static final RecordFacts AWARD_H_V2 = award("SYN-AWD-H-2", "SYN-AWD-H", "SYN-U-300",
+            List.of(RecordContact.nonEmployee("COI")), Set.of());
+
+    /** Family I: the contact is listed on EVERY version. */
+    public static final RecordFacts AWARD_I_V1 = award("SYN-AWD-I-1", "SYN-AWD-I", "SYN-U-300",
+            List.of(RecordContact.employee("SYNP-1003", "PI")), Set.of());
+    public static final RecordFacts AWARD_I_V2 = award("SYN-AWD-I-2", "SYN-AWD-I", "SYN-U-300",
+            List.of(RecordContact.employee("SYNP-1003", "PI")), Set.of());
+
+    /** Proposal family J: the contact is listed on v1 only. */
+    public static final RecordFacts PROPOSAL_J_V1 = new RecordFacts(RecordModule.PROPOSAL, "SYN-PRP-J-1", "SYN-PRP-J",
+            "SYN-U-300", List.of(RecordContact.employee("SYNP-1003", "MPI")), Set.of());
+    public static final RecordFacts PROPOSAL_J_V2 = new RecordFacts(RecordModule.PROPOSAL, "SYN-PRP-J-2", "SYN-PRP-J",
+            "SYN-U-300", List.of(), Set.of());
+
     public static final RecordFacts PROPOSAL_MPI = new RecordFacts(RecordModule.PROPOSAL, "SYN-PRP-A-1", "SYN-PRP-A",
             "SYN-U-300", List.of(RecordContact.employee("SYNP-1003", "MPI")), Set.of());
     public static final RecordFacts PROPOSAL_DEPT = new RecordFacts(RecordModule.PROPOSAL, "SYN-PRP-B-1", "SYN-PRP-B",
