@@ -469,3 +469,92 @@ export function pendingModules(modules) {
     (module) => module.state !== "working" && module.state !== "implemented",
   );
 }
+
+/*
+ * ---------------------------------------------------------------------
+ * Derived evidence dating
+ * ---------------------------------------------------------------------
+ *
+ * The snapshot carries an `evidenceUpdated` field that is maintained by
+ * hand, and it drifts. On 2026-11-06 the live page still announced
+ * "evidence last updated 2026-09-30" while cases recorded against Amplify
+ * job #123 inside the same file were dated 2026-10-06 - the header
+ * disagreed with the evidence printed underneath it.
+ *
+ * Deriving the date from the cases removes the only number on this page a
+ * person had to remember to update. Dates live inside each case's
+ * free-text `environment` string rather than in a field of their own, so
+ * they are parsed out; adding a real `evidenceDate` per case later would
+ * let these two functions read it directly without changing any caller.
+ */
+
+const ISO_DATE_ANYWHERE = /\d{4}-\d{2}-\d{2}/g;
+
+/*
+ * Every real ISO date mentioned by a case, newest first.
+ *
+ * Only `environment` and `note` are scanned. `title`, `steps` and
+ * `expected` describe what a tester should do, and a date quoted there is
+ * part of the instruction, not a record of when anything ran.
+ */
+export function evidenceDatesIn(testCase) {
+  if (!testCase) {
+    return [];
+  }
+  const haystack = [testCase.environment, testCase.note]
+    .filter((value) => typeof value === "string")
+    .join(" ");
+  const found = haystack.match(ISO_DATE_ANYWHERE) || [];
+  return [...new Set(found.filter((value) => isRealIsoDate(value)))].sort().reverse();
+}
+
+/*
+ * The newest evidence date actually present in the case records, or null.
+ *
+ * Returns null rather than a fallback when nothing parseable is found, so
+ * a caller shows "unknown" instead of printing a date it cannot support.
+ */
+export function latestEvidenceDate(cases) {
+  const all = (cases || []).flatMap((testCase) => evidenceDatesIn(testCase));
+  if (all.length === 0) {
+    return null;
+  }
+  return all.sort().reverse()[0];
+}
+
+/*
+ * Whether the hand-maintained `evidenceUpdated` field still agrees with
+ * the cases. `stale` is the case that matters: the field is OLDER than
+ * evidence that exists, which is what shipped on 2026-11-06.
+ */
+export function evidenceDateDrift(declared, derived) {
+  const declaredOk = isRealIsoDate(declared);
+  const derivedOk = isRealIsoDate(derived);
+  if (!declaredOk || !derivedOk) {
+    return { drifted: false, direction: "unknown", declared, derived };
+  }
+  if (declared === derived) {
+    return { drifted: false, direction: "none", declared, derived };
+  }
+  return {
+    drifted: true,
+    direction: declared < derived ? "stale" : "ahead",
+    declared,
+    derived,
+  };
+}
+
+/*
+ * Cases NOT proven against the deployed development website - the exact
+ * complement of `deployedEvidenceCount`, so the two always partition the
+ * checklist and the page cannot report more evidence than it has.
+ *
+ * Keyed off the structured `scope` field rather than the free-text
+ * `environment` string. An earlier draft of this function matched on
+ * phrases like "source review" inside `environment` and produced 4 cases
+ * against a deployed count of 52 out of 54 - two numbers that cannot both
+ * be true. `scope` is the field the QA author actually sets.
+ */
+export function sourceOnlyCases(cases) {
+  return (cases || []).filter((item) => item.scope !== "Development website");
+}

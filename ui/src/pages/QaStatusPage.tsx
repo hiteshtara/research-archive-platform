@@ -38,7 +38,10 @@ import {
   caseAreas,
   countByStatus,
   deployedEvidenceCount,
+  evidenceDateDrift,
   filterCases,
+  latestEvidenceDate,
+  sourceOnlyCases,
   openCaseCount,
   progressStage,
   requirementsWithConflicts,
@@ -63,6 +66,27 @@ const cases = snapshot.cases as QaCase[];
 const requirements = securityData.requirements as SecurityRequirement[];
 const areas = caseAreas(cases);
 const statusCounts = countByStatus(cases);
+
+/*
+ * The newest date the evidence itself supports, rather than the snapshot's
+ * hand-maintained `evidenceUpdated` field. That field read 2026-09-30 on
+ * 2026-11-06 while cases inside the same file were dated 2026-10-06, so the
+ * page announced a date its own rows contradicted. Deriving it removes the
+ * last number on this page someone had to remember to update.
+ */
+const derivedEvidenceDate = latestEvidenceDate(cases);
+const dateDrift = evidenceDateDrift(snapshot.evidenceUpdated, derivedEvidenceDate);
+
+/* Cases never exercised on the deployed site - the complement of deployedEvidenceCount. */
+const notOnDeployed = sourceOnlyCases(cases);
+
+/*
+ * Injected by vite `define`. A static snapshot compiled into the bundle cannot
+ * tell a reader whether stale numbers mean bad data or an old build; naming
+ * the commit does. Falls back to "unknown" rather than failing a build.
+ */
+const buildCommit =
+  typeof __QA_BUILD_COMMIT__ === "string" ? __QA_BUILD_COMMIT__ : "unknown";
 const security = securitySummary(requirements);
 const conflicts = requirementsWithConflicts(requirements);
 const progress = securityProgress(requirements);
@@ -112,18 +136,35 @@ export function QaStatusPage() {
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           {cases.length} cases in scope &middot; {statusCounts.passed} passed,{" "}
-          {openCaseCount(cases)} still open &middot; evidence last updated{" "}
-          {snapshot.evidenceUpdated} &middot; from {snapshot.source}
+          {statusCounts.issue ?? 0} known{" "}
+          {(statusCounts.issue ?? 0) === 1 ? "issue" : "issues"},{" "}
+          {statusCounts.blocked ?? 0} blocked, {openCaseCount(cases)} still open{" "}
+          &middot; newest evidence {derivedEvidenceDate ?? "date not recorded"}{" "}
+          &middot; from {snapshot.source} &middot; built from {buildCommit}
         </Typography>
       </Box>
+
+      {dateDrift.drifted && dateDrift.direction === "stale" && (
+        <Alert severity="warning">
+          <AlertTitle>The recorded evidence date was out of date</AlertTitle>
+          This snapshot declares <strong>{String(dateDrift.declared)}</strong>, but
+          cases inside it carry evidence as recent as{" "}
+          <strong>{String(dateDrift.derived)}</strong>. The heading above shows the
+          derived date. The declared field is maintained by hand and is no longer
+          used for display.
+        </Alert>
+      )}
 
       <Alert severity="info">
         <AlertTitle>These are recorded results, not a live health check</AlertTitle>
         The website may have changed since a case was tested. Each case names the
         environment it was tested in: {deployedEvidenceCount(cases)} of{" "}
-        {cases.length} were checked on this development website, and the rest only
-        locally or on a candidate build. A local pass or a merged fix does not
-        establish a pass here.
+        {cases.length} were checked on this development website. The remaining{" "}
+        {notOnDeployed.length === 1 ? "case" : `${notOnDeployed.length} cases`} (
+        {notOnDeployed.map((item) => item.id).join(", ")}) were proven only in
+        source, locally or on a candidate build and must not be read as working in
+        the deployed application. A local pass or a merged fix does not establish a
+        pass here.
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>
