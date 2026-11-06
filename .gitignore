@@ -114,3 +114,13 @@ Award_*_Complete_Report.pdf
 # api/src/**/.obsidian/ collision currently exists - anchor defensively.
 /bu/
 /.obsidian/
+
+# Browser-automation output (Playwright MCP). Generated, never source.
+# These artifacts capture whole rendered pages as text, so a browser's
+# autofill of the BU login form writes a plaintext password into a page
+# snapshot - confirmed 2026-11-06, where 17 snapshots dating back to
+# 2026-10-01 had captured the BU IdP login page. They also accumulate real
+# archive record data (PI names, proposals) and downloaded attachment PDFs.
+# Anchored to the repo root so no src/**/.playwright-mcp/ collision is
+# possible, per the /bu/ lesson above.
+/.playwright-mcp/
