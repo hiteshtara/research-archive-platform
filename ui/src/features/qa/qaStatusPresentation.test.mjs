@@ -9,7 +9,11 @@ import {
   caseAreas,
   countByStatus,
   deployedEvidenceCount,
+  evidenceDateDrift,
+  evidenceDatesIn,
   filterCases,
+  latestEvidenceDate,
+  sourceOnlyCases,
   isKnownStatus,
   openCaseCount,
   requirementsWithConflicts,
@@ -1055,4 +1059,120 @@ test("the page renders the progress block and earlier findings", () => {
   assert.match(source, /item\.progress/);
   assert.match(source, /Earlier findings/);
   assert.match(source, /Remaining limitations/);
+});
+
+/*
+ * ---------------------------------------------------------------------
+ * Derived evidence dating
+ * ---------------------------------------------------------------------
+ *
+ * These exist because of a real defect: on 2026-11-06 the deployed page
+ * announced "evidence last updated 2026-09-30" while cases inside the very
+ * same snapshot were dated 2026-10-06. The date was a hand-maintained field
+ * nobody had bumped. Each test below fails if the page goes back to
+ * trusting that field.
+ */
+
+test("evidenceDatesIn reads dates out of environment and note, newest first", () => {
+  const dates = evidenceDatesIn({
+    environment: "dev: Amplify job #123, 2026-10-06",
+    note: "first seen 2026-09-30",
+  });
+  assert.deepEqual(dates, ["2026-10-06", "2026-09-30"]);
+});
+
+test("evidenceDatesIn ignores dates in instructions, not records", () => {
+  // A date quoted in steps/expected tells a tester what to type. It is not
+  // evidence that anything ran, so it must never date the page.
+  assert.deepEqual(
+    evidenceDatesIn({
+      title: "Filter awards from 2026-01-01",
+      steps: "Enter 2026-01-01 in the start date field",
+      expected: "Only awards after 2026-01-01 appear",
+    }),
+    [],
+  );
+});
+
+test("evidenceDatesIn rejects impossible dates", () => {
+  assert.deepEqual(evidenceDatesIn({ environment: "ran 2026-13-45" }), []);
+});
+
+test("latestEvidenceDate is null when nothing parseable is recorded", () => {
+  // Null means the page prints "date not recorded" rather than a date it
+  // cannot support.
+  assert.equal(latestEvidenceDate([{ environment: "local run" }]), null);
+  assert.equal(latestEvidenceDate([]), null);
+});
+
+test("latestEvidenceDate takes the newest across every case", () => {
+  assert.equal(
+    latestEvidenceDate([
+      { environment: "2026-09-30" },
+      { environment: "2026-10-06" },
+      { environment: "2026-10-05" },
+    ]),
+    "2026-10-06",
+  );
+});
+
+test("evidenceDateDrift names a stale declared field", () => {
+  const drift = evidenceDateDrift("2026-09-30", "2026-10-06");
+  assert.equal(drift.drifted, true);
+  assert.equal(drift.direction, "stale");
+});
+
+test("evidenceDateDrift reports agreement and unusable input distinctly", () => {
+  assert.deepEqual(evidenceDateDrift("2026-10-06", "2026-10-06").direction, "none");
+  assert.deepEqual(evidenceDateDrift("2026-10-07", "2026-10-06").direction, "ahead");
+  assert.equal(evidenceDateDrift(undefined, "2026-10-06").direction, "unknown");
+  assert.equal(evidenceDateDrift("2026-10-06", null).direction, "unknown");
+  assert.equal(evidenceDateDrift(undefined, null).drifted, false);
+});
+
+test("the real snapshot's declared date is not newer than its own evidence", () => {
+  // The failure this guards is specifically a declared date that is OLDER
+  // than evidence present in the file - what shipped on 2026-11-06.
+  const derived = latestEvidenceDate(snapshot.cases);
+  assert.ok(derived, "the snapshot must carry at least one real evidence date");
+  assert.ok(isRealIsoDate(derived));
+  assert.ok(
+    snapshot.evidenceUpdated <= derived,
+    `declared ${snapshot.evidenceUpdated} is newer than any evidence (${derived})`,
+  );
+});
+
+test("deployed and source-only cases partition the checklist exactly", () => {
+  // Two numbers that cannot both be true is how the first draft of
+  // sourceOnlyCases was caught: it matched free text and reported 4
+  // source-only against 52 of 54 deployed.
+  const deployed = deployedEvidenceCount(snapshot.cases);
+  const sourceOnly = sourceOnlyCases(snapshot.cases).length;
+  assert.equal(
+    deployed + sourceOnly,
+    snapshot.cases.length,
+    "every case is either proven on the deployed site or it is not",
+  );
+});
+
+test("sourceOnlyCases keys off scope, not the environment wording", () => {
+  const cases = [
+    { id: "A", scope: "Development website", environment: "source review" },
+    { id: "B", scope: "Candidate build", environment: "dev" },
+  ];
+  assert.deepEqual(
+    sourceOnlyCases(cases).map((item) => item.id),
+    ["B"],
+  );
+});
+
+test("every status in the real snapshot is one the page can render", () => {
+  // A status the page does not know about would silently vanish from the
+  // filter tabs and the totals.
+  for (const testCase of snapshot.cases) {
+    assert.ok(
+      isKnownStatus(testCase.status),
+      `${testCase.id} has unrenderable status ${testCase.status}`,
+    );
+  }
 });

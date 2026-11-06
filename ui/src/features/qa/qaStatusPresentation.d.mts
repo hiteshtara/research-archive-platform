@@ -164,3 +164,18 @@ export function isPlaceholderEvidence(value: unknown): boolean;
 export function requiredEnvironment(item: QaCase): string;
 export function verificationShortfalls(item: QaCase): string[];
 export function isRealIsoDate(value: unknown): boolean;
+
+export interface EvidenceDateDrift {
+  drifted: boolean;
+  direction: "none" | "stale" | "ahead" | "unknown";
+  declared: unknown;
+  derived: unknown;
+}
+
+export function evidenceDatesIn(testCase: QaCase): string[];
+export function latestEvidenceDate(cases: QaCase[]): string | null;
+export function evidenceDateDrift(
+  declared: unknown,
+  derived: unknown,
+): EvidenceDateDrift;
+export function sourceOnlyCases(cases: QaCase[]): QaCase[];
