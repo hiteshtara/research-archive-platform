@@ -112,6 +112,50 @@ GRANT SELECT ON ALL TABLES IN SCHEMA archive TO archive_api;   -- includes views
 GRANT USAGE ON SCHEMA authz TO archive_api;
 GRANT SELECT ON ALL TABLES IN SCHEMA authz TO archive_api;
 
+-- SEC-008: the activity audit is WRITE-ONLY for archive_api, and that has to
+-- survive this script being run in any order relative to V089.
+--
+-- The blanket GRANT SELECT above is a one-shot over the tables that exist when
+-- it runs. If V089 has already been applied, it hands archive_api read access
+-- to the activity audit - and to every PARTITION of it, because partitions are
+-- separate relations with their own ACLs and "ALL TABLES IN SCHEMA" includes
+-- them. Measured: without this block, all four partitions were readable.
+--
+-- So the revoke is part of the role script itself rather than a follow-up,
+-- and it walks the partitions. Idempotent: revoking a privilege that is not
+-- held is a no-op, and the guard makes it safe before V089 exists.
+--
+-- Partitions created LATER inherit the parent's ACL, which by then has no
+-- SELECT for archive_api - asserted by ActivityAuditGrantIntegrationTest
+-- rather than assumed.
+DO $$
+DECLARE
+    target record;
+BEGIN
+    IF to_regclass('authz.activity_audit') IS NULL THEN
+        RAISE NOTICE 'authz.activity_audit absent (V089 not applied) - '
+                     'nothing to revoke; archive_api gets no read access when '
+                     'it is later created, because this script revokes on '
+                     'every run';
+        RETURN;
+    END IF;
+
+    FOR target IN
+        SELECT c.oid::regclass AS relation
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'authz'
+           AND (c.oid = 'authz.activity_audit'::regclass
+                OR c.oid IN (SELECT inhrelid
+                               FROM pg_inherits
+                              WHERE inhparent = 'authz.activity_audit'::regclass))
+    LOOP
+        EXECUTE format('REVOKE SELECT ON %s FROM archive_api', target.relation);
+    END LOOP;
+END
+$$;
+
+
 -- Written by the API. UPDATE is required on person_status and
 -- identity_link even though no bare UPDATE statement appears in the
 -- source: both are written with INSERT ... ON CONFLICT DO UPDATE.

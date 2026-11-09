@@ -191,7 +191,9 @@ public class ProposalV1Controller {
 
             Authentication authentication
     ) {
-        attachmentAuthorizationService.requireAttachmentAccess(authentication);
+        // SEC-008: audited before the attachment is resolved or streamed.
+        attachmentAuthorizationService.requireAttachmentDownload(
+                authentication, "PROPOSAL", String.valueOf(proposalId));
         ProposalAttachmentDownload download =
                 service.downloadAttachment(proposalId, attachmentId);
 

@@ -133,7 +133,7 @@ public class GrantProvisioningCli implements ApplicationRunner {
             System.out.println();
             System.out.println("Audit evidence - keep this:");
             System.out.println("  SELECT grant_id, grantee_identifier, grant_type, unit_number,"
-                    + " io_value, granted_by, granted_at FROM authz.access_grant;");
+                    + " io_value, award_number, granted_by, granted_at FROM authz.access_grant;");
             System.out.println("  SELECT actor, action, occurred_at, detail ->> 'note'"
                     + " FROM authz.access_audit ORDER BY audit_id;");
         }

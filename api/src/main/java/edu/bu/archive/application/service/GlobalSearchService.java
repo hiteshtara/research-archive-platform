@@ -64,6 +64,9 @@ import java.util.stream.Collectors;
 @Service
 public class GlobalSearchService {
 
+    /** SEC-008; a disabled recorder unless activity auditing is switched on. */
+    private final edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity;
+
     private static final Logger log =
             LoggerFactory.getLogger(GlobalSearchService.class);
 
@@ -129,6 +132,7 @@ public class GlobalSearchService {
             edu.bu.archive.application.authorization.AuthorizationProperties>
             authorizationProperties;
 
+    /** Collection off: what every existing caller and test gets. */
     public GlobalSearchService(
             GlobalSearchRepository irbSearchRepository,
             AwardArchiveService awardArchiveService,
@@ -145,6 +149,30 @@ public class GlobalSearchService {
             ObjectProvider<edu.bu.archive.application.authorization.AuthorizationProperties>
                     authorizationProperties
     ) {
+        this(irbSearchRepository, awardArchiveService, negotiationArchiveService, subawardArchiveService, proposalArchiveRepository, semanticSearchRepository, semanticSearchProperties, embeddingProviderObjectProvider, timingLog, visibility, proposalAccessProvider, authorizationProperties,
+             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public GlobalSearchService(
+            GlobalSearchRepository irbSearchRepository,
+            AwardArchiveService awardArchiveService,
+            NegotiationArchiveService negotiationArchiveService,
+            SubawardArchiveService subawardArchiveService,
+            ProposalArchiveRepository proposalArchiveRepository,
+            SemanticSearchRepository semanticSearchRepository,
+            SemanticSearchProperties semanticSearchProperties,
+            ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider,
+            SearchTimingLog timingLog,
+            ObjectProvider<edu.bu.archive.application.authorization.RecordVisibility> visibility,
+            ObjectProvider<edu.bu.archive.application.authorization.ProposalRecordAccess>
+                    proposalAccessProvider,
+            ObjectProvider<edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity) {
+        this.activity = activity;
+
         this.authorizationProperties = authorizationProperties;
         this.irbSearchRepository = irbSearchRepository;
         this.awardArchiveService = awardArchiveService;
@@ -340,6 +368,11 @@ public class GlobalSearchService {
                 (System.nanoTime() - requestStartNanos) / 1_000_000,
                 deduplicated.size()
         );
+
+        // SEC-008: that a search ran, and how many rows came back. The
+        // query itself is deliberately not passed - the recorder has no
+        // parameter that could carry it.
+        activity.searchPerformed("GLOBAL", deduplicated.size());
 
         return new GlobalSearchResponse(
                 normalizedQuery,

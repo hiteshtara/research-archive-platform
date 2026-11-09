@@ -30,7 +30,8 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
 
     private static final String SELECT_COLUMNS = """
             SELECT grant_id, institutional_identifier, grant_type, unit_number,
-                   include_descendants, io_value, valid_from, expires_at, revoked_at
+                   include_descendants, io_value, award_number,
+                   valid_from, expires_at, revoked_at
             FROM authz.access_grant
             """;
 
@@ -64,8 +65,10 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
         Long grantId = jdbc.sql("""
                         INSERT INTO authz.access_grant
                             (institutional_identifier, grant_type, unit_number,
-                             include_descendants, io_value, granted_by, reason, expires_at)
-                        VALUES (:grantee, :type, :unit, :descendants, :io, :grantedBy, :reason, :expires)
+                             include_descendants, io_value, award_number,
+                             granted_by, reason, expires_at)
+                        VALUES (:grantee, :type, :unit, :descendants, :io, :awardNumber,
+                                :grantedBy, :reason, :expires)
                         RETURNING grant_id
                         """)
                 .param("grantee", grantee.value())
@@ -73,6 +76,7 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
                 .param("unit", specification.unitNumber())
                 .param("descendants", specification.includeDescendants())
                 .param("io", specification.ioValue())
+                .param("awardNumber", specification.awardNumber())
                 .param("grantedBy", grantedBy)
                 .param("reason", specification.reason())
                 .param("expires", toTimestamp(specification.expiresAt()))
@@ -143,7 +147,8 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
                 rs.getString("io_value"),
                 toInstant(rs.getTimestamp("valid_from")),
                 toInstant(rs.getTimestamp("expires_at")),
-                toInstant(rs.getTimestamp("revoked_at")));
+                toInstant(rs.getTimestamp("revoked_at")),
+                rs.getString("award_number"));
     }
 
     private static Instant toInstant(Timestamp timestamp) {

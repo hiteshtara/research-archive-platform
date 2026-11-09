@@ -1,0 +1,270 @@
+{
+  "_comment": "Security Readiness dashboard data. Every 'verified' field below records WHEN something was measured and HOW, never an assumption. Nothing here is refreshed at page load - the page says 'Last verified' for exactly that reason.",
+  "verifiedAt": "2026-11-09",
+  "verifiedBy": "read-only AWS and PostgreSQL inspection",
+  "deployment": {
+    "environment": "Development",
+    "apiTaskDefinition": "research-archive-platform-dev-api:84",
+    "taskDefinitionIsNewest": true,
+    "imageCommit": "66f3cfe",
+    "imageCommitDate": "2026-10-29",
+    "imageDigest": "sha256:c9f3bc99be9a99fb480c577c0d78d82ea7ebdad3b7d6f3eb3aeb72114ddd4821",
+    "imagePushed": "2026-10-29",
+    "mainCommit": "7442a8e",
+    "mainCommitDate": "2026-11-03",
+    "commitsBehindMain": 30,
+    "runningTasks": "1 of 1",
+    "verifiedAt": "2026-11-09",
+    "verifiedHow": "aws ecs describe-services, describe-task-definition and ecr describe-images",
+    "note": "The 30 commits the running image is missing are entirely the authorization and operator-tooling work (#93-#106). The Proposal-history and search-filter fixes ARE in the running image."
+  },
+  "enforcement": {
+    "state": "off",
+    "verifiedAt": "2026-11-09",
+    "verifiedHow": "task definition 84 carries 8 environment variables and no APP_AUTHORIZATION_* of any kind",
+    "businessMeaning": "Every signed-in user can see every archived record. Record-level restrictions are built and tested but are not switched on.",
+    "whyNotOn": "Turning it on today would show nobody anything: with no access grants issued, a denial is indistinguishable from a record that does not exist, so dashboards would read zero. Grants have to be issued and checked first."
+  },
+  "database": {
+    "migrationsApplied": "V082-V087",
+    "migrationsPending": "V088 (Parent Award), V089 (activity audit)",
+    "verifiedAt": "2026-11-09",
+    "verifiedHow": "read-only SQL over pg_indexes and pg_tables through the SSM tunnel as archive_analyst; the migration ledger itself is deliberately unreadable by that role, so the catalog is the evidence",
+    "v087Confirmed": true,
+    "grantCountsVerified": false,
+    "grantCountsNote": "Access grants, identity links and administrators could NOT be re-measured on 2026-11-09: the read-only analyst role has no access to the authorization schema. The last known figures are from 2026-11-03 and are shown as such.",
+    "lastKnownGrants": {
+      "administrators": 1,
+      "identityLinks": 1,
+      "activeGrants": 0,
+      "asOf": "2026-11-03"
+    }
+  },
+  "knownMismatch": {
+    "title": "The deployed API is older than the deployed database",
+    "businessMeaning": "Nothing is broken today, because no access grants exist. But the database already enforces a rule the running application does not know about, so the first grant issued against the current image could fail with an unhelpful error instead of a clear one.",
+    "technical": "The database carries V087 (at most one unrevoked grant per grantee and scope). The fix that answers 409 rather than 500 for that constraint (#100, 8bc1e52) is not an ancestor of the running image 66f3cfe.",
+    "resolution": "Carried on the integration branch. Needs a rebuilt image to reach DEV.",
+    "verifiedAt": "2026-11-09"
+  },
+  "stateLabels": {
+    "implemented": "Built in source",
+    "merged": "Merged to main",
+    "deployed": "In the deployed DEV image",
+    "migrationApplied": "Database migration applied",
+    "configured": "Switched on in DEV",
+    "tested": "Tested",
+    "enforcing": "Actually restricting access"
+  },
+  "capabilities": [
+    {
+      "id": "SEC-001",
+      "name": "Central administrator access",
+      "businessSummary": "A central administrator can see every archived record in every module.",
+      "states": {
+        "implemented": "yes",
+        "merged": "yes",
+        "deployed": "yes",
+        "migrationApplied": "yes",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "GrantType.CENTRAL; AccessScope.central short-circuits every module rule.",
+        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit 66f3cfe (verified by file presence at that commit).",
+        "migrationApplied": "V082 authz.access_grant exists in DEV (catalog-verified 2026-11-09).",
+        "configured": "No APP_AUTHORIZATION_* on task definition 84.",
+        "tested": "Covered by the four record-authorization integration suites against real PostgreSQL.",
+        "enforcing": "Enforcement flag is off, so no grant of any type restricts anything."
+      },
+      "pendingApproval": null
+    },
+    {
+      "id": "SEC-002",
+      "name": "Department and unit access",
+      "businessSummary": "Someone can be given access to the records of one department, optionally including its sub-units. Bulk assignment lets an administrator give the same department access to many people in one reviewed action.",
+      "states": {
+        "implemented": "yes",
+        "merged": "partial",
+        "deployed": "partial",
+        "migrationApplied": "yes",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "Single-grant department access is in main. Bulk assignment (grantAccessInBulk) is new on the integration branch.",
+        "merged": "Single-grant: yes. Bulk assignment: not yet merged.",
+        "deployed": "Single-grant: yes, in image 66f3cfe. Bulk assignment: no.",
+        "tested": "8 tests for bulk assignment; department access covered by the Award, Proposal and Negotiation authorization suites.",
+        "enforcing": "Enforcement flag is off."
+      },
+      "pendingApproval": null
+    },
+    {
+      "id": "SEC-003",
+      "name": "Research staff access by version",
+      "businessSummary": "Research staff listed on an award see the versions they are actually listed on - not the whole award history. Someone added to an award partway through does not retrospectively gain access to earlier versions.",
+      "states": {
+        "implemented": "yes",
+        "merged": "no",
+        "deployed": "no",
+        "migrationApplied": "n/a",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "PR #109, integrated on this branch. Contact-derived access is decided against the version being read, regardless of the version-scope policy.",
+        "merged": "PR #109 is still a draft.",
+        "migrationApplied": "No migration needed - award_person.award_id is already a version key.",
+        "tested": "RecordAccessEvaluator and RecordScopeSqlBuilder tests, plus Sec003AiPartialFamilyAccessTest which proves a partially-visible award family is refused for the AI and history endpoints.",
+        "enforcing": "Enforcement flag is off."
+      },
+      "pendingApproval": "Whether research staff should keep access to Subawards linked to award versions from before they joined. The current behaviour is the stricter reading."
+    },
+    {
+      "id": "SEC-004",
+      "name": "SAP account (IO) access",
+      "businessSummary": "Someone can be given access to awards carrying a particular SAP account number. This reaches awards only - it does not travel to proposals, subawards or negotiations.",
+      "states": {
+        "implemented": "yes",
+        "merged": "yes",
+        "deployed": "yes",
+        "migrationApplied": "yes",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "AwardAccountNumberIoResolver and AwardAccountNumberIoSql are wired in AuthorizationConfiguration - verified in both main and the running image commit, not inferred from comments.",
+        "deployed": "Present at image commit 66f3cfe.",
+        "enforcing": "Enforcement flag is off."
+      },
+      "pendingApproval": null
+    },
+    {
+      "id": "SEC-005",
+      "name": "Parent award access",
+      "businessSummary": "Someone can be given access to an award and the awards directly beneath it in the award hierarchy. It never crosses into an unrelated award family, and it stops at the configured depth - one level by default.",
+      "states": {
+        "implemented": "yes",
+        "merged": "no",
+        "deployed": "no",
+        "migrationApplied": "no",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "New on this branch: GrantType.PARENT_AWARD, bounded cycle-safe traversal of archive.award_hierarchy.",
+        "migrationApplied": "V088 is written but NOT applied to any shared database.",
+        "tested": "10 Testcontainers tests for the traversal (depth limit, a real two-row cycle, a cross-family row that must not be followed) and 22 for resolution, decisions, list SQL and grant shape.",
+        "enforcing": "Enforcement flag is off."
+      },
+      "pendingApproval": "Depth default of 1 (maximum 10) is the working value, pending business confirmation. Broader inheritance to subawards and negotiations is deliberately NOT enabled."
+    },
+    {
+      "id": "SEC-005b",
+      "name": "Fund Center access",
+      "businessSummary": "Not built, on purpose. In Kuali, 'Fund Center' is the award's lead unit number padded to ten characters for SAP - so department access already covers it. A separate Fund Center permission would duplicate what department access does.",
+      "states": {
+        "implemented": "n/a",
+        "merged": "n/a",
+        "deployed": "n/a",
+        "migrationApplied": "n/a",
+        "configured": "n/a",
+        "tested": "n/a",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "SapIntegrationServiceImpl.java:688 sets ZZFUNDCENTER from the award lead unit number. The term appears in no other file in BU's Kuali source."
+      },
+      "pendingApproval": "If BU's business definition of Fund Center differs from the value Kuali sends to SAP, the SAP owners need to say so before anything is built."
+    },
+    {
+      "id": "SEC-006",
+      "name": "Removing access",
+      "businessSummary": "An administrator can revoke someone's access, and can set an expiry date when granting it. Revoked grants are kept, not deleted, so the record of who had access and when survives.",
+      "states": {
+        "implemented": "yes",
+        "merged": "yes",
+        "deployed": "partial",
+        "migrationApplied": "yes",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "deployed": "The revocation endpoint is in the running image. The operator command-line tool's revocation support (#103) is in main but NOT in the running image.",
+        "tested": "Revocation and optional expiry are covered by the grant provisioning integration suite against real PostgreSQL.",
+        "enforcing": "Enforcement flag is off, so revoking changes nothing visible today."
+      },
+      "pendingApproval": null
+    },
+    {
+      "id": "SEC-007",
+      "name": "Record-level enforcement readiness",
+      "businessSummary": "The machinery that applies all of the above is built, tested and deployed - but switched off. Switching it on is the last step, and it needs access grants to exist first.",
+      "states": {
+        "implemented": "yes",
+        "merged": "yes",
+        "deployed": "yes",
+        "migrationApplied": "yes",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "deployed": "Present in image 66f3cfe - but see 'The deployed API is older than the deployed database' above.",
+        "migrationApplied": "V082-V087 confirmed in DEV from the PostgreSQL catalog on 2026-11-09.",
+        "configured": "Off, confirmed from the task definition on 2026-11-09.",
+        "enforcing": "No. This is the deliberate state."
+      },
+      "pendingApproval": "Approval to issue the first access grants, and then to switch enforcement on."
+    },
+    {
+      "id": "SEC-008",
+      "name": "Archive activity auditing",
+      "businessSummary": "A record of who looked at what, who was refused, what was downloaded or exported, and that a search happened. Search words themselves are never stored, and neither is document content. All five recording points are built; collection is switched off and the database permission has not been granted.",
+      "states": {
+        "implemented": "yes",
+        "merged": "no",
+        "deployed": "no",
+        "migrationApplied": "no",
+        "configured": "no",
+        "tested": "yes",
+        "enforcing": "no"
+      },
+      "evidence": {
+        "implemented": "All five recording points are wired: record views and refusals at the single authorization decision point, attachment downloads and report exports before any file is released, and searches in the global, document, file-finder and evidence search services.",
+        "migrationApplied": "V089 is written but NOT applied anywhere. The database permission to write audit rows is a separate reviewed script, also not applied - and it explicitly removes the read access a blanket grant would otherwise have given.",
+        "tested": "50 tests. An audit failure can never grant access - proved under both failure settings. Downloads and exports stop if their audit record cannot be written; routine views and searches continue and the gap is counted and logged.",
+        "configured": "Collection is off. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one."
+      },
+      "pendingApproval": "How long audit records should be kept (90 days is proposed, not approved; automatic deletion is not implemented). Whether the proposed failure settings - continue on a failed view audit, stop on a failed download audit - are accepted as BU policy. And approval to apply the migration and grant the database permission."
+    },
+    {
+      "id": "SEC-009",
+      "name": "The archive cannot be changed",
+      "businessSummary": "The application can read archived research data and cannot write to it. This is enforced by the database itself, not by application code, and it has now been checked against the real development database.",
+      "states": {
+        "implemented": "yes",
+        "merged": "no",
+        "deployed": "yes",
+        "migrationApplied": "n/a",
+        "configured": "n/a",
+        "tested": "yes",
+        "enforcing": "yes"
+      },
+      "evidence": {
+        "implemented": "The database role grants SELECT and nothing else on the archive schema. The regression tests that keep it that way are PR #112, not yet merged.",
+        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script.",
+        "tested": "17 tests, including a catalog-wide sweep that fails if any future grant widens it.",
+        "enforcing": "Yes - this one is in force today, independently of the enforcement flag."
+      },
+      "pendingApproval": null
+    }
+  ]
+}

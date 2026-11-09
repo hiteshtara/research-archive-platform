@@ -33,9 +33,13 @@ import java.util.List;
 @Service
 public class DocumentSearchService {
 
+    /** SEC-008; disabled unless activity auditing is switched on. */
+    private final edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity;
+
     private final DocumentSearchRepository repository;
     private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
 
+    /** Collection off: what every existing caller and test gets. */
     public DocumentSearchService(DocumentSearchRepository repository,
             org.springframework.beans.factory.ObjectProvider<
                     edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
@@ -43,6 +47,21 @@ public class DocumentSearchService {
                     edu.bu.archive.application.authorization.AuthorizationProperties>
                     authorizationProperties
     ) {
+        this(repository, recordAccessProvider, authorizationProperties,
+             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DocumentSearchService(DocumentSearchRepository repository,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity) {
+        this.activity = activity;
+
         edu.bu.archive.application.authorization.AwardRecordAccess resolvedAccess =
                 recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
         this.recordAccess = resolvedAccess != null
@@ -119,6 +138,9 @@ public class DocumentSearchService {
         List<DocumentSearchResultResponse> content = rows.stream()
                 .map(this::toResponse)
                 .toList();
+
+        // SEC-008: the fact of the search and its result count, never the terms.
+        activity.searchPerformed("DOCUMENT", (int) Math.min(totalElements, Integer.MAX_VALUE));
 
         return new PageResponse<>(
                 content,

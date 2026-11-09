@@ -205,6 +205,20 @@ class AuthorizationSchemaAndAuditIntegrationTest {
                     "admin_role_member",
                     // V086 - two-person rule for re-linking an identity that holds grants
                     "relink_approval");
+        /*
+         * V089's authz.activity_audit is deliberately NOT here. It is held in
+         * database/migrations-pending-approval/ until SEC-008's retention,
+         * privacy, failure-policy and privilege approvals land, so it is not
+         * applied by this suite - which applies database/migrations/, exactly
+         * as the ETL runner does.
+         *
+         * If activity_audit ever appears in this assertion's actual set, V089
+         * has moved back into the release without that approval. See
+         * MigrationReleaseScopeTest.
+         */
+        assertThat(tables)
+                .as("V089 is held back from the release; its table must not be applied here")
+                .doesNotContain("activity_audit");
         }
 
         @Test

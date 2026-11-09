@@ -143,11 +143,18 @@ class RecordAccessEvaluatorTest {
             assertThat(decide(PER_VERSION_EXACT, archive.department, AWARD_B_V2, familyB).allowed()).isFalse();
         }
 
+        /*
+         * Split from one test on 2026-11-06. It used to assert that BOTH a
+         * department grant and a contact listing reached the whole family
+         * under FAMILY_WIDE. SEC-003 changed the contact half and left the
+         * department half alone, so they are now two tests: changing one
+         * rule can no longer silently change the other.
+         */
         @Test
-        void familyWideReachesEveryVersionOfTheSameFamilyOnly() {
+        void familyWideDepartmentAccessReachesEveryVersionOfTheSameFamily() {
             var familyWide = policy(AuthorizationPolicy.VersionScope.FAMILY_WIDE,
                     AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
-            assertThat(decide(familyWide, archive.researchStaff, AWARD_B_V1, familyB).allowed()).isTrue();
+            // The department unit is v1's; v2 moved to SYN-U-300.
             assertThat(decide(familyWide, archive.department, AWARD_B_V2, familyB).allowed()).isTrue();
         }
 
@@ -177,6 +184,126 @@ class RecordAccessEvaluatorTest {
             // Multi's SYN-U-200 grant does not ask for descendants.
             var childOf200 = award("SYN-AWD-G-1", "SYN-AWD-G", "SYN-U-210", List.of(), Set.of());
             assertThat(decide(withDescendants, archive.multi, childOf200, List.of()).allowed()).isFalse();
+        }
+    }
+
+    /**
+     * SEC-003, decided by the business on 2026-11-05: research-staff access
+     * derived from a contact listing applies ONLY to the version the person
+     * is listed on. Appearing on one version of a family must not reach the
+     * rest of it.
+     *
+     * <p>This rule is deliberately NOT governed by
+     * {@link AuthorizationPolicy.VersionScope}: the business settled contact
+     * derivation and explicitly left explicit CENTRAL, UNIT and IO grants
+     * under the existing version-scope strategy. So every test here that
+     * asserts a contact restriction runs under FAMILY_WIDE - the scope under
+     * which the old behaviour was wrong - and the guard tests assert the
+     * explicit grants still reach the whole family.
+     */
+    @Nested
+    class Sec003ContactAccessIsAlwaysVersionSpecific {
+
+        private final AuthorizationPolicy familyWide = policy(
+                AuthorizationPolicy.VersionScope.FAMILY_WIDE,
+                AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT);
+
+        private final List<RecordFacts> familyB = List.of(AWARD_B_V1, AWARD_B_V2);
+        private final List<RecordFacts> familyH = List.of(AWARD_H_V1, AWARD_H_V2);
+        private final List<RecordFacts> familyI = List.of(AWARD_I_V1, AWARD_I_V2);
+        private final List<RecordFacts> familyJ = List.of(PROPOSAL_J_V1, PROPOSAL_J_V2);
+
+        @Test
+        void aContactAddedOnALaterVersionDoesNotReachTheEarlierOne() {
+            // Research staff is PI on AWARD_B v2 only. v1 must stay closed.
+            assertThat(decide(familyWide, archive.researchStaff, AWARD_B_V1, familyB).allowed()).isFalse();
+            assertThat(decide(familyWide, archive.researchStaff, AWARD_B_V1, familyB).denialCode())
+                    .isEqualTo("OUT_OF_SCOPE");
+        }
+
+        @Test
+        void aContactRemovedOnALaterVersionKeepsTheVersionTheyWereListedOnAndLosesTheOther() {
+            assertThat(decide(familyWide, archive.researchStaff, AWARD_H_V1, familyH).allowed()).isTrue();
+            assertThat(decide(familyWide, archive.researchStaff, AWARD_H_V2, familyH).allowed()).isFalse();
+        }
+
+        @Test
+        void aContactListedOnEveryVersionReachesEveryVersion() {
+            for (RecordFacts version : familyI) {
+                assertThat(decide(familyWide, archive.researchStaff, version, familyI).allowed())
+                        .as(version.versionKey()).isTrue();
+                assertThat(decide(PER_VERSION_EXACT, archive.researchStaff, version, familyI).allowed())
+                        .as(version.versionKey()).isTrue();
+            }
+        }
+
+        @Test
+        void theVersionTheContactIsListedOnIsAllowedUnderEitherVersionScope() {
+            assertThat(decide(familyWide, archive.researchStaff, AWARD_B_V2, familyB).allowed()).isTrue();
+            assertThat(decide(PER_VERSION_EXACT, archive.researchStaff, AWARD_B_V2, familyB).allowed()).isTrue();
+        }
+
+        @Test
+        void proposalContactAccessIsVersionSpecificTheSameWay() {
+            assertThat(decide(familyWide, archive.researchStaff, PROPOSAL_J_V1, familyJ).allowed()).isTrue();
+            assertThat(decide(familyWide, archive.researchStaff, PROPOSAL_J_V2, familyJ).allowed()).isFalse();
+        }
+
+        @Test
+        void theContactReasonIsReportedOnlyForTheVersionTheyAreListedOn() {
+            /*
+             * The sharpest form of the rule: one caller holding BOTH a
+             * department grant on v1's unit and a contact listing on v2.
+             * Under FAMILY_WIDE the department reason reaches both versions,
+             * but the contact reason must appear on v2 alone - so asserting
+             * the boolean is not enough, the reason SET is the assertion.
+             */
+            ValidatedCognitoIdentity who = departmentAndContact();
+
+            assertThat(decide(familyWide, who, AWARD_B_V1, familyB).reasons())
+                    .containsExactly(AccessReason.DEPARTMENT);
+            assertThat(decide(familyWide, who, AWARD_B_V2, familyB).reasons())
+                    .containsExactlyInAnyOrder(AccessReason.DEPARTMENT, AccessReason.RESEARCH_STAFF_CONTACT);
+        }
+
+        // --- guards: the explicit grants were NOT part of this decision ---
+
+        @Test
+        void aDepartmentGrantStillReachesTheWholeFamilyUnderFamilyWide() {
+            // v2 moved to SYN-U-300; the department's grant is on v1's unit.
+            assertThat(decide(familyWide, archive.department, AWARD_B_V2, familyB).allowed()).isTrue();
+        }
+
+        @Test
+        void anIoGrantStillReachesTheWholeFamilyUnderFamilyWide() {
+            // AWARD_IO_V2 carries no IO value of its own; v1 does.
+            var familyD = List.of(AWARD_IO_V1, AWARD_IO_V2);
+            assertThat(decide(familyWide, archive.authorizedViewer, AWARD_IO_V2, familyD).allowed()).isTrue();
+        }
+
+        @Test
+        void centralIsUnaffectedByContactVersionScoping() {
+            for (RecordFacts version : familyH) {
+                assertThat(decide(familyWide, archive.central, version, familyH).reasons())
+                        .as(version.versionKey()).containsExactly(AccessReason.CENTRAL);
+            }
+        }
+
+        @Test
+        void perVersionBehaviourIsUnchangedForContacts() {
+            // PER_VERSION was already compliant; this must not have regressed.
+            assertThat(decide(PER_VERSION_EXACT, archive.researchStaff, AWARD_H_V1, familyH).allowed()).isTrue();
+            assertThat(decide(PER_VERSION_EXACT, archive.researchStaff, AWARD_H_V2, familyH).allowed()).isFalse();
+        }
+
+        /** A caller holding a UNIT grant on SYN-U-100 and contact derivation as SYNP-1003. */
+        private ValidatedCognitoIdentity departmentAndContact() {
+            var identity = new ValidatedCognitoIdentity(
+                    "https://idp.test.invalid/synthetic", "syn-nameid-2001", "syn-dept-pi", NOW);
+            archive.links.link(identity, "SYN-INST-2001", "SYNP-1003", "syn-dept-pi", IdentityLinkStatus.ACTIVE);
+            archive.grants.grant("SYN-INST-2001", GrantType.UNIT, "SYN-U-100", false, null);
+            archive.grants.grant("SYN-INST-2001", GrantType.CONTACT_DERIVATION, null, false, null);
+            return identity;
         }
     }
 }

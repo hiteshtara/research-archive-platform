@@ -20,8 +20,16 @@ public record GrantSpecification(
         String unitNumber,
         boolean includeDescendants,
         String ioValue,
+        /** PARENT_AWARD only (SEC-005): the Award the grant is rooted at. */
+        String awardNumber,
         Instant expiresAt,
         String reason) {
+
+    /** The shape before SEC-005 added PARENT_AWARD. */
+    public GrantSpecification(GrantType type, String unitNumber, boolean includeDescendants,
+                              String ioValue, Instant expiresAt, String reason) {
+        this(type, unitNumber, includeDescendants, ioValue, null, expiresAt, reason);
+    }
 
     public GrantSpecification {
         if (type == null) {
@@ -29,6 +37,7 @@ public record GrantSpecification(
         }
         unitNumber = trimToNull(unitNumber);
         ioValue = trimToNull(ioValue);
+        awardNumber = trimToNull(awardNumber);
         reason = trimToNull(reason);
 
         switch (type) {
@@ -39,6 +48,9 @@ public record GrantSpecification(
                 if (ioValue != null) {
                     throw new IllegalArgumentException("UNIT grant must not carry an IO value");
                 }
+                if (awardNumber != null) {
+                    throw new IllegalArgumentException("UNIT grant must not carry an award number");
+                }
             }
             case IO -> {
                 if (ioValue == null) {
@@ -47,16 +59,40 @@ public record GrantSpecification(
                 if (unitNumber != null) {
                     throw new IllegalArgumentException("IO grant must not carry a unit number");
                 }
+                if (awardNumber != null) {
+                    throw new IllegalArgumentException("IO grant must not carry an award number");
+                }
                 if (includeDescendants) {
                     // ck_access_grant_shape forbids it: descendants are a unit-hierarchy
                     // notion and an IO value has no hierarchy to descend.
                     throw new IllegalArgumentException("IO grant cannot include descendants");
                 }
             }
-            case CENTRAL, CONTACT_DERIVATION -> {
+            case PARENT_AWARD -> {
+                if (awardNumber == null) {
+                    throw new IllegalArgumentException(
+                            "PARENT_AWARD grant requires an award number");
+                }
                 if (unitNumber != null || ioValue != null) {
                     throw new IllegalArgumentException(
-                            type + " grant must not carry a unit number or IO value");
+                            "PARENT_AWARD grant must not carry a unit number or IO value");
+                }
+                if (includeDescendants) {
+                    /*
+                     * ck_access_grant_shape forbids it, and it would be
+                     * ambiguous anyway: Award descendants are governed by
+                     * app.authorization.parent-award-depth, not by a
+                     * per-grant flag that means "unit descendants" everywhere
+                     * else in this type.
+                     */
+                    throw new IllegalArgumentException(
+                            "PARENT_AWARD grant cannot include descendants; depth is a policy setting");
+                }
+            }
+            case CENTRAL, CONTACT_DERIVATION -> {
+                if (unitNumber != null || ioValue != null || awardNumber != null) {
+                    throw new IllegalArgumentException(
+                            type + " grant must not carry a unit number, IO value or award number");
                 }
                 if (includeDescendants) {
                     // ck_access_grant_shape forbids it: there is no unit to descend from.

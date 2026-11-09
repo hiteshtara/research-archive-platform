@@ -27,6 +27,8 @@ import {
 import { useState } from "react";
 
 import snapshot from "../features/qa/qaSnapshot.json";
+import { SecurityReadinessSection } from "../features/qa/SecurityReadinessSection";
+import readiness from "../features/qa/securityReadiness.json";
 import securityData from "../features/qa/securityRequirements.json";
 import type { SecurityModule } from "../features/qa/qaStatusPresentation.d.mts";
 import type {
@@ -101,19 +103,38 @@ export function QaStatusPage() {
     <Stack spacing={3} sx={{ maxWidth: 1200, mx: "auto" }}>
       <Box>
         <Typography variant="overline" color="primary.main">
-          Testing the Research Archive
+          Research Archive
         </Typography>
         <Typography component="h1" variant="h4">
-          QA status &amp; testing guide
+          Security readiness &amp; QA status
         </Typography>
         <Typography color="text.secondary" sx={{ mt: 1, maxWidth: "80ch" }}>
-          What has been tested, what to expect when you test it, and where your
-          feedback is needed.
+          What is protecting records today, and what has been tested. Security
+          readiness comes first; the testing guide and recorded QA results follow
+          it unchanged.
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           {cases.length} cases in scope &middot; {statusCounts.passed} passed,{" "}
           {openCaseCount(cases)} still open &middot; evidence last updated{" "}
           {snapshot.evidenceUpdated} &middot; from {snapshot.source}
+        </Typography>
+      </Box>
+
+      <SecurityReadinessSection today={readiness.verifiedAt} />
+
+      <Divider />
+
+      <Box>
+        <Typography variant="overline" color="primary.main">
+          Historical QA results
+        </Typography>
+        <Typography component="h2" variant="h5">
+          Testing guide and recorded cases
+        </Typography>
+        <Typography color="text.secondary" sx={{ mt: 1, maxWidth: "80ch" }}>
+          These are the QA cases as they were recorded. They are kept exactly as
+          tested - an outcome is never rewritten to match a later fix, because the
+          date and the environment are what make a result mean anything.
         </Typography>
       </Box>
 

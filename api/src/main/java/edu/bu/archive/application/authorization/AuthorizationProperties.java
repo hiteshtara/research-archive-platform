@@ -23,6 +23,12 @@ public class AuthorizationProperties {
     private AuthorizationPolicy.DepartmentMatch departmentMatch;
     private Set<String> researchStaffRoles = new LinkedHashSet<>();
     private AuthorizationPolicy.ContactDerivation contactDerivation;
+
+    /**
+     * SEC-005: parent-to-child hops a PARENT_AWARD grant may follow.
+     * Conservative default of one level; raising it is a policy change.
+     */
+    private int parentAwardDepth = AuthorizationPolicy.DEFAULT_PARENT_AWARD_DEPTH;
     /**
      * The longest time since the caller's last BU sign-in ({@code auth_time})
      * that an enforced request accepts. A Cognito refresh keeps the original
@@ -41,7 +47,8 @@ public class AuthorizationProperties {
         }
         Set<String> roles = new LinkedHashSet<>();
         researchStaffRoles.forEach(role -> roles.add(role.trim().toUpperCase()));
-        return Optional.of(new AuthorizationPolicy(versionScope, departmentMatch, roles, contactDerivation));
+        return Optional.of(new AuthorizationPolicy(
+                versionScope, departmentMatch, roles, parentAwardDepth, contactDerivation));
     }
 
     public boolean isEnforcementEnabled() {
@@ -78,6 +85,14 @@ public class AuthorizationProperties {
 
     public AuthorizationPolicy.ContactDerivation getContactDerivation() {
         return contactDerivation;
+    }
+
+    public int getParentAwardDepth() {
+        return parentAwardDepth;
+    }
+
+    public void setParentAwardDepth(int parentAwardDepth) {
+        this.parentAwardDepth = parentAwardDepth;
     }
 
     public void setContactDerivation(AuthorizationPolicy.ContactDerivation contactDerivation) {

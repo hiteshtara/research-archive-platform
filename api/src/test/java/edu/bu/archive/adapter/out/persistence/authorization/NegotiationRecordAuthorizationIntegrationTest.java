@@ -90,6 +90,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
     private static final long NEG_COLLISION = 105L;       // type None, id collides
     private static final long NEG_NO_BASIS = 106L;        // no lead unit, type None
     private static final long NEG_AWARD_OTHER_UNIT = 107L; // Award CHEM, lead unit 1234
+    /** Award CHEM-00002, whose contact is on the SUPERSEDED version only (SEC-003). */
+    private static final long NEG_AWARD_SUPERSEDED_CONTACT = 108L;
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
@@ -125,7 +127,13 @@ class NegotiationRecordAuthorizationIntegrationTest {
                     INSERT INTO archive.unit (unit_number, unit_name, parent_unit_number) VALUES
                     ('7000', 'SCIENCES',  NULL),
                     ('7777', 'CHEMISTRY', '7000'),
-                    ('1234', 'PHYSICS',   NULL)
+                    ('1234', 'PHYSICS',   NULL),
+                    -- Nobody holds a grant on 8888, so the SEC-003 fixture
+                    -- below can only ever be reached by contact derivation.
+                    -- NOT 9999: two tests use that as the unit with nothing
+                    -- in it, and putting a record there would make them pass
+                    -- or fail for an unrelated reason.
+                    ('8888', 'GEOLOGY',   NULL)
                     """);
 
             /*
@@ -143,14 +151,30 @@ class NegotiationRecordAuthorizationIntegrationTest {
                     (5002, 'CHEM-00001', 1, 'Chemistry award', 'Active',
                      '0200', 'NIH', '7777', 'CHEMISTRY', TRUE, 'DOC-COLLIDE'),
                     (6001, 'PHYS-00001', 1, 'Physics award',   'Active',
-                     '0100', 'NSF', '1234', 'PHYSICS',   TRUE, 'DOC-PHYS')
+                     '0100', 'NSF', '1234', 'PHYSICS',   TRUE, 'DOC-PHYS'),
+                    /*
+                     * SEC-003 fixture: a two-version Award family whose
+                     * research-staff contact appears on the SUPERSEDED
+                     * version only. A Negotiation associates with an Award
+                     * by award_number, which names a family rather than a
+                     * version, so the inherited predicate has to pick one -
+                     * and it must pick the same one canSeeAwardNumber does,
+                     * which is is_primary_current = TRUE.
+                     */
+                    (5010, 'CHEM-00002', 1, 'Geology award v1', 'Closed',
+                     '0200', 'NIH', '8888', 'GEOLOGY',   FALSE, 'DOC-GEO-1'),
+                    (5011, 'CHEM-00002', 2, 'Geology award v2', 'Active',
+                     '0200', 'NIH', '8888', 'GEOLOGY',   TRUE,  'DOC-GEO-2')
                     """);
             statement.execute("""
                     INSERT INTO archive.award_person (
                         award_person_id, award_id, award_number, sequence_number,
                         full_name, contact_role_code, person_id
                     ) VALUES
-                    (101, 5002, 'CHEM-00001', 1, 'L FARRER', 'PI', 'P-FARRER')
+                    (101, 5002, 'CHEM-00001', 1, 'L FARRER', 'PI', 'P-FARRER'),
+                    -- On the superseded version of CHEM-00002, and nowhere
+                    -- else in that family.
+                    (102, 5010, 'CHEM-00002', 1, 'L FARRER', 'PI', 'P-FARRER')
                     """);
             statement.execute("""
                     INSERT INTO archive.proposal_version (
@@ -178,7 +202,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
                     (104, 'NDOC-104', 'SWD', 'Subaward',               'DOC-COLLIDE', 'P-NEG', 'A Negotiator'),
                     (105, 'NDOC-105', 'NO',  'None',                   'DOC-COLLIDE', 'P-NEG', 'A Negotiator'),
                     (106, 'NDOC-106', 'NO',  'None',                   'NDOC-106',    'P-NEG', 'A Negotiator'),
-                    (107, 'NDOC-107', 'AWD', 'Award',                  'CHEM-00001',  'P-NEG', 'A Negotiator')
+                    (107, 'NDOC-107', 'AWD', 'Award',                  'CHEM-00001',  'P-NEG', 'A Negotiator'),
+                    (108, 'NDOC-108', 'AWD', 'Award',                  'CHEM-00002',  'P-NEG', 'A Negotiator')
                     """);
 
             // 1:1 with archive.negotiation, FK-enforced. NEG_NO_BASIS has a
@@ -194,7 +219,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
                     (104, 'UNASSOCIATED_DETAIL', 'Subaward neg',      '1234', 'PHYSICS'),
                     (105, 'UNASSOCIATED_DETAIL', 'Collision neg',     '1234', 'PHYSICS'),
                     (106, 'NONE',                'No basis neg',      NULL,   NULL),
-                    (107, 'AWARD',               'Award other unit',  '1234', 'PHYSICS')
+                    (107, 'AWARD',               'Award other unit',  '1234', 'PHYSICS'),
+                    (108, 'AWARD',               'Superseded contact', '8888', 'GEOLOGY')
                     """);
         }
 
@@ -207,8 +233,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
     void permitAllReturnsEveryNegotiationAndMatchesPreAuthorizationBehaviour() {
         PageResponse<NegotiationSummaryResponse> page = search(NegotiationRecordAccess.PERMIT_ALL);
 
-        assertThat(page.totalElements()).isEqualTo(8);
-        assertThat(page.content()).hasSize(8);
+        assertThat(page.totalElements()).isEqualTo(9);
+        assertThat(page.content()).hasSize(9);
     }
 
     @Test
@@ -232,7 +258,7 @@ class NegotiationRecordAuthorizationIntegrationTest {
     void centralSeesEveryNegotiationIncludingThoseWithNoBasis() {
         PageResponse<NegotiationSummaryResponse> page = search(centralScope());
 
-        assertThat(page.totalElements()).isEqualTo(8);
+        assertThat(page.totalElements()).isEqualTo(9);
         assertThatCode(() -> service(centralScope()).findWorkspace(NEG_NO_BASIS))
                 .doesNotThrowAnyException();
     }
@@ -577,6 +603,36 @@ class NegotiationRecordAuthorizationIntegrationTest {
                 .doesNotContain("restricted");
     }
 
+    // --- SEC-003: inherited contact access is version-specific --------------
+
+    @Test
+    void aContactOnASupersededAwardVersionDoesNotReachTheNegotiationAssociatedWithIt() {
+        /*
+         * FARRER is PI on CHEM-00002 sequence 1, which is NOT the current
+         * version, and on nothing else in that family. Negotiation 108
+         * associates with CHEM-00002 by award_number.
+         *
+         * canSeeAwardNumber resolves is_primary_current = TRUE and decides
+         * THAT version, so the record endpoint denies it. The list predicate
+         * must deny it too: an unpinned join over the family would let the
+         * superseded version authorise the Negotiation, and the caller would
+         * see a row whose workspace then 404s.
+         */
+        List<Long> listed = ids(search(contactScope(FARRER)));
+
+        assertThat(listed).doesNotContain(NEG_AWARD_SUPERSEDED_CONTACT);
+        assertThat(contactScope(FARRER).canSeeNegotiation(NEG_AWARD_SUPERSEDED_CONTACT)).isFalse();
+    }
+
+    @Test
+    void aContactOnTheCurrentAwardVersionStillReachesItsNegotiations() {
+        // The guard for the test above: CHEM-00001's only version carries
+        // FARRER, so both of its Negotiations must stay reachable.
+        List<Long> listed = ids(search(contactScope(FARRER)));
+
+        assertThat(listed).contains(NEG_AWARD, NEG_AWARD_OTHER_UNIT);
+    }
+
     // --- The two paths must agree -------------------------------------------
 
     @Test
@@ -588,7 +644,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
             List<Long> listed = ids(service(access).findPage(NegotiationSearchFilters.none(), 0, 50));
 
             for (long id : List.of(NEG_UNIT_CHEM, NEG_UNIT_PHYS, NEG_AWARD, NEG_PROPOSAL,
-                    NEG_SUBAWARD, NEG_COLLISION, NEG_NO_BASIS, NEG_AWARD_OTHER_UNIT)) {
+                    NEG_SUBAWARD, NEG_COLLISION, NEG_NO_BASIS, NEG_AWARD_OTHER_UNIT,
+                    NEG_AWARD_SUPERSEDED_CONTACT)) {
                 assertThat(access.canSeeNegotiation(id))
                         .as("negotiation %d under %s", id, access)
                         .isEqualTo(listed.contains(id));
@@ -723,7 +780,7 @@ class NegotiationRecordAuthorizationIntegrationTest {
 
     private static final java.util.Map<Long, String> LEAD_UNITS = java.util.Map.of(
             100L, "7777", 101L, "1234", 102L, "7777", 103L, "7777",
-            104L, "1234", 105L, "1234", 107L, "1234");
+            104L, "1234", 105L, "1234", 107L, "1234", 108L, "8888");
 
     private static NegotiationRecordAccess unprovisioned() {
         return new BaseAccess() {

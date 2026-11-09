@@ -35,6 +35,7 @@ public class RecordAuthorizationService
     private final UnitHierarchy unitHierarchy;
     private final DescendantUnits descendantUnits;
     private final IoSqlStrategy ioSql;
+    private final edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity;
     private final IdentityEnrollment enrollment;
     private final Clock clock;
 
@@ -87,6 +88,32 @@ public class RecordAuthorizationService
             IdentityEnrollment enrollment,
             Clock clock
     ) {
+        this(properties, identities, identityResolver, scopeResolver, facts, unitHierarchy,
+                descendantUnits, ioSql, enrollment, clock,
+                edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder
+                        .disabled(clock));
+    }
+
+    /**
+     * @param activity SEC-008. Defaults to a disabled recorder in every other
+     *                 constructor, so wiring the call sites changes nothing
+     *                 until collection is switched on and the database
+     *                 privilege is granted.
+     */
+    public RecordAuthorizationService(
+            AuthorizationProperties properties,
+            CurrentIdentityProvider identities,
+            IdentityResolver identityResolver,
+            AccessScopeResolver scopeResolver,
+            RecordFactsRepository facts,
+            UnitHierarchy unitHierarchy,
+            DescendantUnits descendantUnits,
+            IoSqlStrategy ioSql,
+            IdentityEnrollment enrollment,
+            Clock clock,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity
+    ) {
+        this.activity = Objects.requireNonNull(activity);
         this.clock = Objects.requireNonNull(clock);
         this.enrollment = Objects.requireNonNull(enrollment);
         this.properties = Objects.requireNonNull(properties);
@@ -315,7 +342,14 @@ public class RecordAuthorizationService
             return true;
         }
         try {
-            return facts.subawardFamilyFundingAwardIds(subawardId).stream().anyMatch(this::canSeeAward);
+            /*
+             * canSeeAwardForInheritance, not canSeeAward: SEC-005 restricts
+             * PARENT_AWARD grants to Award records, so a funding Award that
+             * is visible ONLY through such a grant does not authorise this
+             * Subaward. Every other grant type behaves exactly as before.
+             */
+            return facts.subawardFamilyFundingAwardIds(subawardId).stream()
+                    .anyMatch(this::canSeeAwardForInheritance);
         } catch (RuntimeException failure) {
             // Fail closed: an error resolving funding is not permission.
             return false;
@@ -375,7 +409,8 @@ public class RecordAuthorizationService
                     && leadUnitInScope(negotiation.leadUnitNumber())) {
                 return true;
             }
-            if (negotiation.awardNumber() != null && canSeeAwardNumber(negotiation.awardNumber())) {
+            if (negotiation.awardNumber() != null
+                    && canSeeAwardNumberForInheritance(negotiation.awardNumber())) {
                 return true;
             }
             return negotiation.proposalNumber() != null
@@ -536,15 +571,73 @@ public class RecordAuthorizationService
     }
 
     private void requireVersion(List<RecordFacts> family, String versionKey) {
+        requireVersion(family, versionKey, RecordAccessEvaluator.DecisionContext.DIRECT);
+    }
+
+    private void requireVersion(List<RecordFacts> family, String versionKey,
+                                RecordAccessEvaluator.DecisionContext context) {
         RecordFacts version = family.stream()
                 .filter(v -> v.versionKey().equals(versionKey))
                 .findFirst()
                 .orElseThrow(RecordNotAccessibleException::new);
         AuthorizationPolicy policy = properties.policy().orElseThrow(IdentityAccessDeniedException::new);
-        AccessDecision decision = new RecordAccessEvaluator(policy, unitHierarchy).decide(outcome(), version, family);
+        AccessDecision decision = new RecordAccessEvaluator(policy, unitHierarchy)
+                .decide(outcome(), version, family, context);
+
+        /*
+         * SEC-008 call sites, at the one place every record decision passes
+         * through. Recording here rather than in each controller means a new
+         * endpoint is audited by construction instead of by remembering to.
+         *
+         * An INHERITED decision is NOT recorded as a record view: it is an
+         * internal question asked on behalf of a Subaward or Negotiation, and
+         * recording it would report a view of an Award the caller never
+         * opened.
+         */
+        boolean reportable = context == RecordAccessEvaluator.DecisionContext.DIRECT;
         if (!decision.allowed()) {
+            if (reportable) {
+                activity.recordAccessDenied(version.module().name(), version.familyKey(),
+                        decision.denialCode());
+            }
             throw new RecordNotAccessibleException();
         }
+        if (reportable) {
+            // May throw under a FAIL_CLOSED routine-read policy. Deliberately
+            // not caught: swallowing it would reinstate FAIL_OPEN silently.
+            activity.recordViewed(version.module().name(), version.familyKey(),
+                    decision.reasons().isEmpty() ? null : decision.reasons().iterator().next().name());
+        }
+    }
+
+    /**
+     * Can this caller see this Award <em>for the purpose of deciding a
+     * Subaward or Negotiation</em>?
+     *
+     * <p>SEC-005: identical to {@link #canSeeAward} except that PARENT_AWARD
+     * grants do not count. A separate method rather than a flag on the public
+     * one, so no caller can reach the inherited semantics by accident, and so
+     * the two uses are visible in a call hierarchy.
+     */
+    private boolean canSeeAwardForInheritance(long awardId) {
+        return silently(() -> {
+            requireProvisioned();
+            String awardNumber = facts.awardNumberForId(awardId)
+                    .orElseThrow(RecordNotAccessibleException::new);
+            requireVersion(facts.awardFamily(awardNumber), String.valueOf(awardId),
+                    RecordAccessEvaluator.DecisionContext.INHERITED);
+        });
+    }
+
+    /** As {@link #canSeeAwardNumber}, ignoring PARENT_AWARD grants (SEC-005). */
+    private boolean canSeeAwardNumberForInheritance(String awardNumber) {
+        return silently(() -> {
+            requireProvisioned();
+            String versionKey = facts.currentAwardVersionKey(awardNumber)
+                    .orElseThrow(RecordNotAccessibleException::new);
+            requireVersion(facts.awardFamily(awardNumber), versionKey,
+                    RecordAccessEvaluator.DecisionContext.INHERITED);
+        });
     }
 
     /** Units in scope, expanded with descendants only where policy and grant both allow it. */

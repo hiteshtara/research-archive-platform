@@ -445,18 +445,34 @@ class ProposalRecordAuthorizationIntegrationTest {
     }
 
     @Test
-    void dashboardForResearchStaffCountsTheFamilyTheyAreListedOn() {
-        // CONTACT is PI on CHEM-P1 version 2 only, and OTHER on PHYS-P1.
-        // The policy is FAMILY_WIDE, so the whole CHEM-P1 family counts and
-        // PHYS-P1 does not: OTHER is not an approved research-staff role.
+    void dashboardForResearchStaffCountsOnlyTheVersionsTheyAreListedOn() {
+        /*
+         * CONTACT is PI on CHEM-P1 version 2 only, and OTHER on PHYS-P1
+         * (not an approved research-staff role, so PHYS-P1 never counts).
+         *
+         * Changed 2026-11-06 for SEC-003: proposalHistoryRecords was 2 and
+         * is now 1. The two counts have different grains and the change
+         * shows exactly where - the BUSINESS count (distinct
+         * proposal_number) is still 1, because CHEM-P1 remains reachable
+         * through the version CONTACT is listed on, while the HISTORICAL
+         * count (version rows) drops to 1 because version 1 no longer is.
+         * A research-staff caller now sees a partial family, by design.
+         *
+         * documents() falls from 3 to 2 for the same reason and is worth
+         * stating separately: it counts version documents, so the caller
+         * keeps DOC-CHEM-2 and the IRB document but loses DOC-CHEM-1 with
+         * the version it belongs to. Compare
+         * dashboardForADepartmentCountsOnlyItsOwnProposals, which still
+         * counts all three - department access stayed family-wide.
+         */
         var counts = dashboard(dashboardScope(
                 new AccessScope(false, Set.of(), Optional.of(CONTACT), Set.of()),
                 Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT,
                 Set.of("CHEM-P1")));
 
         assertThat(counts.proposals()).isEqualTo(1);
-        assertThat(counts.proposalHistoryRecords()).isEqualTo(2);
-        assertThat(counts.documents()).isEqualTo(3);   // + the IRB document
+        assertThat(counts.proposalHistoryRecords()).isEqualTo(1);
+        assertThat(counts.documents()).isEqualTo(2);   // DOC-CHEM-2 + the IRB document
     }
 
     @Test
@@ -1088,5 +1104,46 @@ class ProposalRecordAuthorizationIntegrationTest {
     private static Path locateMigrationsDirectory() {
         Path candidate = Path.of("database", "migrations");
         return Files.isDirectory(candidate) ? candidate : Path.of("..", "database", "migrations");
+    }
+
+    // --- SEC-003: contact-derived access is version-specific --------------
+
+    @Test
+    void theContactPredicateSelectsOnlyTheProposalVersionTheyAreListedOn() {
+        /*
+         * CONTACT is PI on CHEM-P1 version 2 (proposal_id 8002) and not on
+         * version 1 (8001). The Proposal list query is latest-version
+         * grained, so the rule is only visible at version grain - which is
+         * what this runs the rendered predicate against directly.
+         */
+        assertThat(versionsSelectedBy(contactPredicate(CONTACT))).containsExactly(8002L);
+    }
+
+    @Test
+    void theDepartmentPredicateStillSelectsEveryProposalVersionOfTheFamily() {
+        // Guard against over-fixing: department grants stayed family-wide.
+        assertThat(versionsSelectedBy(departmentPredicate("7777")))
+                .containsExactly(8001L, 8002L);
+    }
+
+    private static SqlFragment contactPredicate(KualiPersonId person) {
+        return scopeFor(new AccessScope(false, Set.of(), Optional.of(person), Set.of()),
+                Set.of(), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT, "pv");
+    }
+
+    private static SqlFragment departmentPredicate(String unit) {
+        return scopeFor(
+                new AccessScope(false, Set.of(new UnitGrant(unit, false)), Optional.empty(), Set.of()),
+                Set.of(unit), AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT, "pv");
+    }
+
+    /** The proposal_ids a rendered predicate actually selects, version by version. */
+    private static List<Long> versionsSelectedBy(SqlFragment fragment) {
+        var statement = jdbcClient.sql("SELECT pv.proposal_id FROM archive.proposal_version pv"
+                + " WHERE TRUE " + fragment.sql() + " ORDER BY pv.proposal_id");
+        for (var parameter : fragment.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        return statement.query(Long.class).list();
     }
 }

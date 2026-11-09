@@ -14,12 +14,30 @@ public record AuthorizationPolicy(
         VersionScope versionScope,
         DepartmentMatch departmentMatch,
         Set<String> researchStaffRoles,
+        /**
+         * SEC-005: how many parent to child hops a PARENT_AWARD grant may
+         * follow. 0 is the granted Award alone, 1 adds its direct children.
+         * Conservative by default: access that is too narrow is a support
+         * request, access that is too wide is a disclosure.
+         */
+        int parentAwardDepth,
         ContactDerivation contactDerivation
 ) {
 
     /** Earlier three-setting form: contact access only through an explicit grant. */
+    /** Default parent-award depth: one level. */
+    public static final int DEFAULT_PARENT_AWARD_DEPTH = 1;
+
     public AuthorizationPolicy(VersionScope versionScope, DepartmentMatch departmentMatch, Set<String> researchStaffRoles) {
-        this(versionScope, departmentMatch, researchStaffRoles, ContactDerivation.EXPLICIT_GRANT);
+        this(versionScope, departmentMatch, researchStaffRoles,
+             DEFAULT_PARENT_AWARD_DEPTH, ContactDerivation.EXPLICIT_GRANT);
+    }
+
+    /** The shape before SEC-005 added a depth. */
+    public AuthorizationPolicy(VersionScope versionScope, DepartmentMatch departmentMatch,
+                               Set<String> researchStaffRoles, ContactDerivation contactDerivation) {
+        this(versionScope, departmentMatch, researchStaffRoles,
+             DEFAULT_PARENT_AWARD_DEPTH, contactDerivation);
     }
 
     /**
@@ -56,6 +74,9 @@ public record AuthorizationPolicy(
         Objects.requireNonNull(departmentMatch, "departmentMatch");
         Objects.requireNonNull(contactDerivation, "contactDerivation");
         researchStaffRoles = Set.copyOf(researchStaffRoles);
+        if (parentAwardDepth < 0) {
+            throw new IllegalArgumentException("parentAwardDepth must not be negative");
+        }
         if (researchStaffRoles.isEmpty()) {
             throw new IllegalArgumentException("researchStaffRoles must be configured (P4)");
         }
