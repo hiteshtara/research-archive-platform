@@ -429,9 +429,12 @@ class SubawardRecordAuthorizationIntegrationTest {
 
     @Test
     void scenario9_aResearchStaffContactReachesTheSubawardsOfTheirAward() {
+        // SUB-CHEMV1 left this list on 2026-11-06: its only funding row
+        // names CHEM version 1, which FARRER is not listed on. See
+        // scenario9_contactAccessDoesNotReachASubawardFundedByAVersionTheyAreNotOn.
         assertThat(codes(search(contactScope(FARRER))))
                 .containsExactlyInAnyOrder("SUB-CHEM", "SUB-BOTH", "SUB-FAM", "SUB-FAM",
-                        "SUB-CHEMV1", "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB",
+                        "SUB-TRIPLE", "SUB-TWINA", "SUB-TWINB",
                         "SUB-HIST", "SUB-HIST", "SUB-HIST", "SUB-HIST");
     }
 
@@ -443,16 +446,42 @@ class SubawardRecordAuthorizationIntegrationTest {
         assertThat(codes(search(contactScope(STRANGER)))).isEmpty();
     }
 
+    /**
+     * INVERTED on 2026-11-06 for SEC-003. This test previously asserted the
+     * opposite - that family-wide contact access DID reach SUB-CHEMV1 - and
+     * was correct for the rule in force at the time.
+     *
+     * <p>It is the sharpest expression of what the business decided, and of
+     * what it costs. Subaward access is inherited from the funding Award
+     * VERSION ({@code subaward_funding.award_id} is a version key), so once
+     * contact derivation is version-specific, a Subaward funded by a version
+     * the person is not listed on is no longer reachable through their
+     * contact listing. "Fail closed: if the requested version cannot be
+     * verified as authorized, do not grant contact-derived access."
+     *
+     * <p><strong>Reviewable consequence.</strong> Funding rows sit
+     * predominantly on the newest version of an Award family, so in real
+     * data this mainly bites research staff who joined an Award after some
+     * of its Subawards were linked. Department, IO and Central access are
+     * unaffected - scenario8 still reaches SUB-CHEMV1 through unit 7777,
+     * which is the guard that this was not over-fixed.
+     */
     @Test
-    void scenario9_familyWideContactAccessReachesASubawardFundedByANonCurrentVersion() {
+    void scenario9_contactAccessDoesNotReachASubawardFundedByAVersionTheyAreNotOn() {
         /*
-         * SUB-CHEMV1's only funding row names award_id 5001, the version
-         * FARRER is NOT named on; the PI row is on 5002. Under FAMILY_WIDE,
-         * canSeeAward(5001) is true, so the SQL predicate must say the same.
-         * A predicate that tested only the funded version would deny here
-         * and disagree with the Java evaluator.
+         * SUB-CHEMV1's only funding row names award_id 5001; FARRER's PI row
+         * is on 5002. canSeeAward(5001) is now false, so the SQL predicate
+         * must say the same - and the workspace must refuse it too, or a
+         * listed row would 404.
          */
-        assertThat(codes(search(contactScope(FARRER)))).contains("SUB-CHEMV1");
+        assertThat(codes(search(contactScope(FARRER)))).doesNotContain("SUB-CHEMV1");
+        assertThatThrownBy(() -> service(contactScope(FARRER)).findWorkspace(SUB_CHEM_V1_ONLY))
+                .isInstanceOf(RecordNotAccessibleException.class);
+
+        // Not over-fixed: the Subaward funded by the version FARRER IS on
+        // stays reachable, and a department grant still reaches both.
+        assertThat(codes(search(contactScope(FARRER)))).contains("SUB-CHEM");
+        assertThat(codes(search(departmentScope("7777")))).contains("SUB-CHEMV1");
     }
 
     // --- 10. Immediate revocation ----------------------------------------
@@ -1308,17 +1337,22 @@ class SubawardRecordAuthorizationIntegrationTest {
     }
 
     /**
-     * FAMILY_WIDE contact access: FARRER is PI on CHEM-00001's current
-     * version, which under this policy reaches EVERY version of that family,
-     * version 5001 included. The visible-Award set says so explicitly rather
-     * than deriving it, so the fixture cannot quietly agree with a bug.
+     * Contact access under SEC-003: FARRER is PI on CHEM-00001 version 2 and
+     * on nothing else in that family, so <strong>only 5002</strong> is
+     * visible - 5001 is not, even though the policy is FAMILY_WIDE, because
+     * contact derivation is no longer governed by versionScope.
+     *
+     * <p>Changed 2026-11-06. This set used to be {@code {CHEM_V1, CHEM_V2}},
+     * which encoded the family-wide rule the business rejected. The set is
+     * still written out explicitly rather than derived, so the fixture cannot
+     * quietly agree with a bug in the thing it is checking.
      */
     private static SubawardRecordAccess contactScope(KualiPersonId person) {
         AccessScope scope = new AccessScope(false, Set.of(), Optional.of(person), Set.of());
         return scoped(
                 alias -> scopeFor(scope, Set.of(),
                         AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT, alias),
-                FARRER.equals(person) ? Set.of(CHEM_V1, CHEM_V2) : Set.of());
+                FARRER.equals(person) ? Set.of(CHEM_V2) : Set.of());
     }
 
     /**

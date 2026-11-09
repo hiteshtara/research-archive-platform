@@ -15,8 +15,31 @@ import java.util.Set;
  * <p>Collections are bound as IN lists (Spring expands them); a clause whose
  * collection is empty is omitted, and a scope with no usable clause renders
  * FALSE.
+ *
+ * <p><strong>SEC-003 (business decision 2026-11-05).</strong> Each row
+ * predicate is built in two halves: a family-scoped half (department and IO)
+ * which {@link #familyWrap} may widen to the whole family, and a per-version
+ * half (the contact clause) which is ORed in OUTSIDE that wrap and therefore
+ * only ever matches the row being tested. The two halves are assembled by
+ * {@link #combine}, so the rule lives in one place and applies identically to
+ * all four modules - including Subaward and Negotiation, which inherit these
+ * predicates and bind them to a joined Award or Proposal version.
  */
 public final class RecordScopeSqlBuilder {
+
+    /**
+     * The latest version of {@code az_np}'s own proposal family, ordered
+     * exactly as {@code JdbcRecordFactsRepository.latestProposalVersionKey}
+     * orders it. The two must stay identical: if they ever disagree, the
+     * list predicate and the record decision pick different versions of the
+     * same Proposal, which is the class of disagreement SEC-003 exposed.
+     */
+    private static final String LATEST_PROPOSAL_VERSION =
+            "(SELECT az_npl.proposal_id FROM archive.proposal_version az_npl"
+            + " WHERE az_npl.proposal_number = az_np.proposal_number"
+            + " ORDER BY az_npl.version_number DESC,"
+            + " az_npl.source_update_timestamp DESC NULLS LAST,"
+            + " az_npl.proposal_id DESC LIMIT 1)";
 
     private final AuthorizationPolicy policy;
     private final IoSqlStrategy io;
@@ -41,8 +64,8 @@ public final class RecordScopeSqlBuilder {
         }
         Map<String, Object> params = new LinkedHashMap<>();
         String row = switch (module) {
-            case AWARD -> familyWrap(module, alias, awardRow(scope, expandedUnits, params));
-            case PROPOSAL -> familyWrap(module, alias, proposalRow(scope, expandedUnits, params));
+            case AWARD -> awardRow(scope, expandedUnits, params);
+            case PROPOSAL -> proposalRow(scope, expandedUnits, params);
             case SUBAWARD -> subawardRow(scope, expandedUnits, params);
             case NEGOTIATION -> negotiationRow(scope, expandedUnits, params);
             // No approved non-Central rule is implemented for IRB yet (P8).
@@ -54,7 +77,19 @@ public final class RecordScopeSqlBuilder {
         return new SqlFragment(" AND " + row.replace("{row}", alias) + " ", params);
     }
 
-    private String familyWrap(RecordModule module, String alias, String rowPredicate) {
+    /**
+     * Wraps the FAMILY-SCOPED half of a predicate so that any version of the
+     * same family can satisfy it.
+     *
+     * <p>SEC-003: only department and IO clauses are ever passed here.
+     * Contact clauses are ORed in outside the wrap by {@link #combine}, so
+     * that being listed on one version cannot reach another. The emitted
+     * string still carries {@code {row}} for the correlation, which the
+     * caller resolves - which is how the same predicate serves the outer
+     * Award/Proposal row and the joined {@code az_sa} / {@code az_na} /
+     * {@code az_np} rows without knowing which it is.
+     */
+    private String familyWrap(RecordModule module, String rowPredicate) {
         if (rowPredicate == null) {
             return null;
         }
@@ -73,26 +108,54 @@ public final class RecordScopeSqlBuilder {
         };
     }
 
+    /**
+     * The complete Award rule for one row: the family-scoped clauses wrapped
+     * per {@link AuthorizationPolicy.VersionScope}, ORed with the per-version
+     * contact clause which is NEVER wrapped (SEC-003).
+     *
+     * <p>The contact clause needed no change to become version-specific: it
+     * already correlates on {@code award_id}, which is the version key. Only
+     * its position relative to the family wrap moved.
+     */
     private String awardRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
-        List<String> clauses = new ArrayList<>();
+        List<String> familyScoped = new ArrayList<>();
         if (!units.isEmpty()) {
             params.put("az_units", List.copyOf(units));
-            clauses.add("{row}.lead_unit_number IN (:az_units)");
+            familyScoped.add("{row}.lead_unit_number IN (:az_units)");
         }
-        scope.contactPersonId().ifPresent(person -> {
-            params.put("az_person", person.value());
-            params.put("az_roles", List.copyOf(policy.researchStaffRoles()));
-            clauses.add("EXISTS (SELECT 1 FROM archive.award_person az_ap"
-                    + " WHERE az_ap.award_id = {row}.award_id AND az_ap.person_id = :az_person"
-                    + " AND UPPER(TRIM(az_ap.contact_role_code)) IN (:az_roles))");
-        });
         if (!scope.ioValues().isEmpty()) {
             io.ioPredicate(RecordModule.AWARD, "{row}").ifPresent(predicate -> {
                 params.put("az_ios", List.copyOf(scope.ioValues()));
-                clauses.add(predicate);
+                familyScoped.add(predicate);
             });
         }
-        return clauses.isEmpty() ? "FALSE" : "(" + String.join(" OR ", clauses) + ")";
+        List<String> perVersion = new ArrayList<>();
+        scope.contactPersonId().ifPresent(person -> {
+            params.put("az_person", person.value());
+            params.put("az_roles", List.copyOf(policy.researchStaffRoles()));
+            perVersion.add("EXISTS (SELECT 1 FROM archive.award_person az_ap"
+                    + " WHERE az_ap.award_id = {row}.award_id AND az_ap.person_id = :az_person"
+                    + " AND UPPER(TRIM(az_ap.contact_role_code)) IN (:az_roles))");
+        });
+        return combine(RecordModule.AWARD, familyScoped, perVersion);
+    }
+
+    /**
+     * ORs the family-scoped half (wrapped when FAMILY_WIDE) with the
+     * per-version half (never wrapped). Renders FALSE when the scope yields
+     * no usable clause at all, so an empty scope can never match a row.
+     */
+    private String combine(RecordModule module, List<String> familyScoped, List<String> perVersion) {
+        List<String> parts = new ArrayList<>();
+        if (!familyScoped.isEmpty()) {
+            // Non-null for AWARD and PROPOSAL, the only modules combine serves.
+            String wrapped = familyWrap(module, "(" + String.join(" OR ", familyScoped) + ")");
+            if (wrapped != null) {
+                parts.add(wrapped);
+            }
+        }
+        parts.addAll(perVersion);
+        return parts.isEmpty() ? "FALSE" : "(" + String.join(" OR ", parts) + ")";
     }
 
     /**
@@ -155,12 +218,18 @@ public final class RecordScopeSqlBuilder {
      * so the disagreement is a test failure, not a silent one.
      */
     private String subawardRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
-        String fundedAward = awardRow(scope, units, params);
-        if (fundedAward == null || "FALSE".equals(fundedAward)) {
+        String awardPredicate = awardRow(scope, units, params);
+        if (awardPredicate == null || "FALSE".equals(awardPredicate)) {
             return "FALSE";
         }
-        // Alias is unused by familyWrap - it emits {row}, resolved below.
-        String awardPredicate = familyWrap(RecordModule.AWARD, "{row}", fundedAward);
+        /*
+         * awardRow already applied the family wrap to its family-scoped half
+         * and left the contact clause per-row, so everything here needs is to
+         * bind {row} to az_sa - the funded Award VERSION. That is what makes
+         * the contact clause correlate on az_sa.award_id, which is exactly
+         * how canSeeSubaward decides it: each funding award_id in turn, as
+         * canSeeAward would. The outer Subaward row has no award_id at all.
+         */
         return "EXISTS (SELECT 1 FROM archive.subaward az_fam"
                 + " JOIN archive.subaward_funding az_sf ON az_sf.subaward_id = az_fam.subaward_id"
                 + " JOIN archive.award_version az_sa ON az_sa.award_id = az_sf.award_id"
@@ -223,42 +292,67 @@ public final class RecordScopeSqlBuilder {
                     + " AND az_nsa.lead_unit_number IN (:az_units))");
         }
 
+        /*
+         * Both inherited predicates arrive already family-wrapped where the
+         * policy asks for it, with their contact clause left per-version
+         * (SEC-003). What remains is to bind {row} to the joined version -
+         * and to say WHICH version that is.
+         *
+         * An association names a FAMILY: associated_document_id holds an
+         * award_number or a proposal_number, not a version key. So the join
+         * has to pick a version, and it must pick the same one the Java path
+         * picks. RecordAuthorizationService reaches these through
+         * canSeeAwardNumber / canSeeProposalNumber, which resolve
+         * is_primary_current = TRUE and the latest proposal_version
+         * respectively, and then decide THAT version.
+         *
+         * Before SEC-003 the choice did not matter: every clause was
+         * family-wrapped, so any version of the family that satisfied the
+         * predicate satisfied it for all of them. Now that the contact
+         * clause is per-version, an unpinned join would let a contact on a
+         * SUPERSEDED version authorise the Negotiation in a list while the
+         * workspace endpoint denies it - a visible row that 404s, with the
+         * looser of the two answers winning. Pinning the join is both the
+         * agreeing answer and the fail-closed one.
+         */
         String awardPredicate = awardRow(scope, units, params);
         if (!"FALSE".equals(awardPredicate)) {
-            String wrapped = familyWrap(RecordModule.AWARD, "{row}", awardPredicate);
             paths.add("EXISTS (SELECT 1 FROM archive.award_version az_na"
                     + " WHERE {row}.negotiation_association_type_description = 'Award'"
                     + " AND az_na.award_number = TRIM({row}.associated_document_id)"
-                    + " AND " + wrapped.replace("{row}", "az_na") + ")");
+                    + " AND az_na.is_primary_current = TRUE"
+                    + " AND " + awardPredicate.replace("{row}", "az_na") + ")");
         }
 
         String proposalPredicate = proposalRow(scope, units, params);
         if (!"FALSE".equals(proposalPredicate)) {
-            String wrapped = familyWrap(RecordModule.PROPOSAL, "{row}", proposalPredicate);
             paths.add("EXISTS (SELECT 1 FROM archive.proposal_version az_np"
                     + " WHERE {row}.negotiation_association_type_description"
                     + " = 'Institutional Proposal'"
                     + " AND az_np.proposal_number = TRIM({row}.associated_document_id)"
-                    + " AND " + wrapped.replace("{row}", "az_np") + ")");
+                    + " AND az_np.proposal_id = " + LATEST_PROPOSAL_VERSION
+                    + " AND " + proposalPredicate.replace("{row}", "az_np") + ")");
         }
 
         return paths.isEmpty() ? "FALSE" : "(" + String.join(" OR ", paths) + ")";
     }
 
+    /** As {@link #awardRow}: the proposal_person clause is per-version (SEC-003). */
     private String proposalRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
-        List<String> clauses = new ArrayList<>();
+        List<String> familyScoped = new ArrayList<>();
         if (!units.isEmpty()) {
             params.put("az_units", List.copyOf(units));
-            clauses.add("{row}.lead_unit_number IN (:az_units)");
+            familyScoped.add("{row}.lead_unit_number IN (:az_units)");
         }
+        List<String> perVersion = new ArrayList<>();
         scope.contactPersonId().ifPresent(person -> {
             params.put("az_person", person.value());
             params.put("az_roles", List.copyOf(policy.researchStaffRoles()));
-            clauses.add("EXISTS (SELECT 1 FROM archive.proposal_person az_pp"
+            perVersion.add("EXISTS (SELECT 1 FROM archive.proposal_person az_pp"
                     + " WHERE az_pp.proposal_id = {row}.proposal_id AND az_pp.person_id = :az_person"
                     + " AND UPPER(TRIM(az_pp.contact_role_code)) IN (:az_roles))");
         });
         // IO grants: no Proposal rule (design 4.6).
-        return clauses.isEmpty() ? "FALSE" : "(" + String.join(" OR ", clauses) + ")";
+        return combine(RecordModule.PROPOSAL, familyScoped, perVersion);
     }
 }
