@@ -18,7 +18,24 @@ public class ActivityAuditProperties {
     public static final int PROPOSED_RETENTION_DAYS = 90;
 
     private boolean enabled = false;
-    private ActivityAuditor.FailurePolicy failurePolicy;
+
+    /**
+     * Attachment downloads and exports. Defaulted to FAIL_CLOSED by business
+     * direction 2026-11-09 for planning and testing: a file leaving the
+     * system with no record of it is the case the audit exists for. Still
+     * overridable, and still not an approved production policy.
+     */
+    private ActivityAuditor.FailurePolicy sensitiveReleaseFailurePolicy =
+            ActivityAuditor.FailurePolicy.FAIL_CLOSED;
+
+    /**
+     * Record views and searches. <strong>No default.</strong> The
+     * availability-versus-audit-completeness tradeoff for ordinary reads is a
+     * business decision, and enabling collection without making it is a
+     * startup failure.
+     */
+    private ActivityAuditor.FailurePolicy routineReadFailurePolicy;
+
     private int retentionDays = PROPOSED_RETENTION_DAYS;
 
     /**
@@ -26,13 +43,20 @@ public class ActivityAuditProperties {
      *         explicit failure policy
      */
     public void validate() {
-        if (enabled && failurePolicy == null) {
+        if (enabled && routineReadFailurePolicy == null) {
             throw new IllegalStateException(
                     "app.authorization.activity-audit.enabled is true but "
-                            + "failure-policy is not set. Choose FAIL_OPEN (prefer "
-                            + "availability: serve the read, log the audit gap) or "
+                            + "routine-read-failure-policy is not set. Choose FAIL_OPEN "
+                            + "(prefer availability: serve the read, log the audit gap) or "
                             + "FAIL_CLOSED (prefer audit completeness: refuse the read). "
-                            + "There is no default - see docs/security/SEC_008_ACTIVITY_AUDIT.md.");
+                            + "There is no default for routine reads - see "
+                            + "docs/security/SEC_008_ACTIVITY_AUDIT.md. Attachment downloads "
+                            + "and exports are FAIL_CLOSED unless explicitly overridden.");
+        }
+        if (enabled && sensitiveReleaseFailurePolicy == null) {
+            throw new IllegalStateException(
+                    "sensitive-release-failure-policy must not be null when activity "
+                            + "auditing is enabled");
         }
         if (retentionDays <= 0) {
             throw new IllegalStateException("activity-audit retention-days must be positive");
@@ -47,12 +71,20 @@ public class ActivityAuditProperties {
         this.enabled = enabled;
     }
 
-    public ActivityAuditor.FailurePolicy getFailurePolicy() {
-        return failurePolicy;
+    public ActivityAuditor.FailurePolicy getSensitiveReleaseFailurePolicy() {
+        return sensitiveReleaseFailurePolicy;
     }
 
-    public void setFailurePolicy(ActivityAuditor.FailurePolicy failurePolicy) {
-        this.failurePolicy = failurePolicy;
+    public void setSensitiveReleaseFailurePolicy(ActivityAuditor.FailurePolicy policy) {
+        this.sensitiveReleaseFailurePolicy = policy;
+    }
+
+    public ActivityAuditor.FailurePolicy getRoutineReadFailurePolicy() {
+        return routineReadFailurePolicy;
+    }
+
+    public void setRoutineReadFailurePolicy(ActivityAuditor.FailurePolicy policy) {
+        this.routineReadFailurePolicy = policy;
     }
 
     public int getRetentionDays() {

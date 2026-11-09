@@ -70,7 +70,7 @@ class ActivityAuditorTest {
             for (FailurePolicy policy : FailurePolicy.values()) {
                 var port = new RecordingPort();
                 port.broken = true;
-                var auditor = new ActivityAuditor(port, policy);
+                var auditor = new ActivityAuditor(port, policy, policy);
                 assertThatCode(() -> auditor.recordDenied(denied()))
                         .as("recordDenied must never throw under " + policy)
                         .doesNotThrowAnyException();
@@ -81,7 +81,7 @@ class ActivityAuditorTest {
         void thePermittedPathRefusesToAcceptADeniedEvent() {
             // Structural: a DENIED outcome cannot be routed through the only
             // method that can throw, so it cannot be converted into one.
-            var auditor = new ActivityAuditor(new RecordingPort(), FailurePolicy.FAIL_CLOSED);
+            var auditor = new ActivityAuditor(new RecordingPort(), FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_CLOSED);
             assertThatThrownBy(() -> auditor.recordPermitted(denied()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("use recordDenied");
@@ -93,7 +93,7 @@ class ActivityAuditorTest {
             // permitted. There is no path from an audit failure to a permit.
             var port = new RecordingPort();
             port.broken = true;
-            var auditor = new ActivityAuditor(port, FailurePolicy.FAIL_CLOSED);
+            var auditor = new ActivityAuditor(port, FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_CLOSED);
             assertThatThrownBy(() -> auditor.recordPermitted(permitted()))
                     .isInstanceOf(AuditUnavailableException.class);
             assertThat(AuditUnavailableException.CODE).isEqualTo("AUDIT_UNAVAILABLE");
@@ -110,7 +110,7 @@ class ActivityAuditorTest {
         void failOpenServesTheReadAndLosesTheRow() {
             var port = new RecordingPort();
             port.broken = true;
-            var auditor = new ActivityAuditor(port, FailurePolicy.FAIL_OPEN);
+            var auditor = new ActivityAuditor(port, FailurePolicy.FAIL_OPEN, FailurePolicy.FAIL_OPEN);
 
             assertThatCode(() -> auditor.recordPermitted(permitted())).doesNotThrowAnyException();
             assertThat(port.written).as("the row is genuinely lost, not queued").isEmpty();
@@ -120,7 +120,7 @@ class ActivityAuditorTest {
         void failClosedRefusesTheRead() {
             var port = new RecordingPort();
             port.broken = true;
-            var auditor = new ActivityAuditor(port, FailurePolicy.FAIL_CLOSED);
+            var auditor = new ActivityAuditor(port, FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_CLOSED);
 
             assertThatThrownBy(() -> auditor.recordPermitted(permitted()))
                     .isInstanceOf(AuditUnavailableException.class)
@@ -131,7 +131,7 @@ class ActivityAuditorTest {
         void aHealthyStoreBehavesIdenticallyUnderBothPolicies() {
             for (FailurePolicy policy : FailurePolicy.values()) {
                 var port = new RecordingPort();
-                new ActivityAuditor(port, policy).recordPermitted(permitted());
+                new ActivityAuditor(port, policy, policy).recordPermitted(permitted());
                 assertThat(port.written).as(policy.toString()).hasSize(1);
             }
         }
@@ -160,11 +160,11 @@ class ActivityAuditorTest {
         properties.setEnabled(true);
         assertThatThrownBy(properties::validate)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failure-policy is not set")
+                .hasMessageContaining("routine-read-failure-policy is not set")
                 .hasMessageContaining("FAIL_OPEN")
                 .hasMessageContaining("FAIL_CLOSED");
 
-        properties.setFailurePolicy(FailurePolicy.FAIL_OPEN);
+        properties.setRoutineReadFailurePolicy(FailurePolicy.FAIL_OPEN);
         assertThatCode(properties::validate).doesNotThrowAnyException();
     }
 
@@ -173,11 +173,77 @@ class ActivityAuditorTest {
     void disabledNeedsNoPolicy() {
         var properties = new ActivityAuditProperties();
         assertThat(properties.isEnabled()).isFalse();
-        assertThat(properties.getFailurePolicy()).isNull();
+        assertThat(properties.getRoutineReadFailurePolicy())
+                .as("routine reads have no default - the business must choose")
+                .isNull();
+        assertThat(properties.getSensitiveReleaseFailurePolicy())
+                .as("attachment downloads and exports default to FAIL_CLOSED")
+                .isEqualTo(FailurePolicy.FAIL_CLOSED);
         assertThatCode(properties::validate).doesNotThrowAnyException();
         assertThat(properties.getRetentionDays())
                 .as("proposed for review, not an approved BU retention policy")
                 .isEqualTo(90);
+    }
+
+    // ── two policies, because the tradeoff differs ──────────────────────
+
+    @Nested
+    @DisplayName("Sensitive releases and routine reads are governed separately")
+    class TwoTierPolicy {
+
+        @Test
+        void downloadsAndExportsAreClassedAsSensitiveReleases() {
+            assertThat(ActivityAuditor.isSensitiveRelease(ActivityAction.ATTACHMENT_DOWNLOADED)).isTrue();
+            assertThat(ActivityAuditor.isSensitiveRelease(ActivityAction.EXPORT_GENERATED)).isTrue();
+            assertThat(ActivityAuditor.isSensitiveRelease(ActivityAction.RECORD_VIEWED)).isFalse();
+            assertThat(ActivityAuditor.isSensitiveRelease(ActivityAction.SEARCH_PERFORMED)).isFalse();
+        }
+
+        @Test
+        void aDownloadIsRefusedWhileARoutineReadIsServed() {
+            /*
+             * The whole point of two policies: with the business direction
+             * applied - FAIL_CLOSED for releases, FAIL_OPEN for routine reads
+             * - the same audit outage stops a file leaving the system while
+             * letting someone keep reading a record on screen.
+             */
+            var port = new RecordingPort();
+            port.broken = true;
+            var auditor = new ActivityAuditor(port,
+                    FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_OPEN);
+
+            assertThatThrownBy(() -> auditor.recordPermitted(
+                    ActivityAuditEvent.of(NOW, "ARP-SYN-0001", ActivityAction.ATTACHMENT_DOWNLOADED,
+                            "AWARD", "SYN-AWD-A", ActivityOutcome.PERMITTED, null, "c")))
+                    .isInstanceOf(AuditUnavailableException.class);
+
+            assertThatCode(() -> auditor.recordPermitted(permitted()))
+                    .as("a routine record view still succeeds")
+                    .doesNotThrowAnyException();
+        }
+
+        @Test
+        void policyForNamesWhichSettingGovernsAnAction() {
+            var auditor = new ActivityAuditor(new RecordingPort(),
+                    FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_OPEN);
+            assertThat(auditor.policyFor(ActivityAction.EXPORT_GENERATED))
+                    .isEqualTo(FailurePolicy.FAIL_CLOSED);
+            assertThat(auditor.policyFor(ActivityAction.RECORD_VIEWED))
+                    .isEqualTo(FailurePolicy.FAIL_OPEN);
+        }
+
+        @Test
+        void aDeniedRecordStillNeverThrowsEvenForASensitiveAction() {
+            // The invariant outranks both policies.
+            var port = new RecordingPort();
+            port.broken = true;
+            var auditor = new ActivityAuditor(port,
+                    FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_CLOSED);
+            assertThatCode(() -> auditor.recordDenied(
+                    ActivityAuditEvent.of(NOW, "ARP-SYN-0001", ActivityAction.RECORD_ACCESS_DENIED,
+                            "AWARD", "SYN-AWD-B", ActivityOutcome.DENIED, "OUT_OF_SCOPE", "c")))
+                    .doesNotThrowAnyException();
+        }
     }
 
     // ── privacy defaults, enforced by the type ──────────────────────────

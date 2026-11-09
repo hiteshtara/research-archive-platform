@@ -2,8 +2,8 @@
 
 Status: **implemented in source, not deployed, not enabled.** No migration has
 been applied to any shared database, no grant of this type exists anywhere, and
-record-level enforcement remains OFF. Two behaviours below are marked **pending
-business sign-off** and must not be read as approved.
+record-level enforcement remains OFF. Inheritance was **decided 2026-11-09**
+(restricted); depth remains **pending business confirmation**.
 
 ## 1. Fund Center — investigated, and deliberately not built
 
@@ -102,8 +102,9 @@ is never silently worthless.
 
 - `AwardHierarchyExpansionIntegrationTest` — 10 tests, Testcontainers, every
   migration applied, against the real schema.
-- `ParentAwardAccessTest` — 19 tests: resolution at policy depth, evaluator
-  decisions, list SQL, and grant-shape validation mirroring the V088 CHECKs.
+- `ParentAwardAccessTest` — 22 tests: resolution at policy depth, evaluator
+  decisions, list SQL, grant-shape validation mirroring the V088 CHECKs, and
+  the evaluator-versus-SQL agreement on inheritance.
 
 ## 3. Pending business sign-off
 
@@ -145,4 +146,4 @@ hard clamp in `JdbcAwardHierarchy`, independent of configuration.
 No migration applied anywhere. No grant of this type exists. Enforcement
 remains OFF, so none of this is reachable in DEV today. The admin API accepts
 the new type and the operator CLI does not yet offer it — adding it there is a
-follow-up, deliberately out of scope until 3.1 is answered.
+follow-up, deliberately out of scope for this change.

@@ -44,9 +44,22 @@ import edu.bu.archive.application.authorization.audit.ActivityAuditEvent.Activit
  *       <td>an audit outage becomes an archive outage</td></tr>
  * </table>
  *
- * <p>Enabling collection without choosing one is a startup failure, not a
- * silent default — see {@code ActivityAuditProperties.validate()}. With
- * collection OFF the policy is moot and nothing is required.
+ * <p>There are TWO policies, not one, because the tradeoff is not the same
+ * for every action:
+ *
+ * <ul>
+ *   <li><b>Sensitive release</b> — an attachment download or an export. A file
+ *       leaves the system, and a release with no record of it is the case an
+ *       audit exists for. Business direction 2026-11-09: {@code FAIL_CLOSED}.
+ *   <li><b>Routine authorized read</b> — a record view or a search. The
+ *       information stays on screen, and the availability tradeoff is
+ *       genuinely open. Separately configured, with <b>no default</b>.
+ * </ul>
+ *
+ * <p>Enabling collection without choosing the routine policy is a startup
+ * failure, not a silent default — see
+ * {@code ActivityAuditProperties.validate()}. With collection OFF both are
+ * moot and nothing is required.
  */
 public class ActivityAuditor {
 
@@ -60,17 +73,53 @@ public class ActivityAuditor {
         FAIL_CLOSED
     }
 
-    private final ActivityAuditPort port;
-    private final FailurePolicy failurePolicy;
+    /**
+     * Actions that RELEASE sensitive archive information to the caller - a
+     * file leaves the system. Business direction 2026-11-09: these are
+     * FAIL_CLOSED, because a download that happened with no record of it
+     * having happened is the case an audit exists for.
+     *
+     * <p>A record view or a search is a different thing: the information
+     * stays on the screen, and the availability tradeoff is genuinely open.
+     * Those take the separately configured routine policy.
+     */
+    private static final java.util.Set<ActivityAuditEvent.ActivityAction> SENSITIVE_RELEASE =
+            java.util.EnumSet.of(
+                    ActivityAuditEvent.ActivityAction.ATTACHMENT_DOWNLOADED,
+                    ActivityAuditEvent.ActivityAction.EXPORT_GENERATED);
 
-    public ActivityAuditor(ActivityAuditPort port, FailurePolicy failurePolicy) {
+    private final ActivityAuditPort port;
+    private final FailurePolicy sensitiveReleasePolicy;
+    private final FailurePolicy routineReadPolicy;
+
+    public ActivityAuditor(ActivityAuditPort port,
+                           FailurePolicy sensitiveReleasePolicy,
+                           FailurePolicy routineReadPolicy) {
         this.port = Objects.requireNonNull(port, "port");
-        this.failurePolicy = Objects.requireNonNull(failurePolicy, "failurePolicy");
+        this.sensitiveReleasePolicy =
+                Objects.requireNonNull(sensitiveReleasePolicy, "sensitiveReleasePolicy");
+        this.routineReadPolicy =
+                Objects.requireNonNull(routineReadPolicy, "routineReadPolicy");
     }
 
     /** Collection off, and therefore no policy to apply. */
     public static ActivityAuditor disabled() {
-        return new ActivityAuditor(ActivityAuditPort.DISABLED, FailurePolicy.FAIL_OPEN);
+        return new ActivityAuditor(ActivityAuditPort.DISABLED,
+                FailurePolicy.FAIL_OPEN, FailurePolicy.FAIL_OPEN);
+    }
+
+    /**
+     * Which policy governs this action.
+     *
+     * <p>Exposed so the choice is testable and so an operator can be shown
+     * what will happen, rather than having to infer it.
+     */
+    public FailurePolicy policyFor(ActivityAuditEvent.ActivityAction action) {
+        return SENSITIVE_RELEASE.contains(action) ? sensitiveReleasePolicy : routineReadPolicy;
+    }
+
+    public static boolean isSensitiveRelease(ActivityAuditEvent.ActivityAction action) {
+        return SENSITIVE_RELEASE.contains(action);
     }
 
     /**
@@ -86,10 +135,11 @@ public class ActivityAuditor {
                     "recordPermitted received a DENIED event; use recordDenied - "
                             + "the two paths differ in whether they may throw");
         }
+        FailurePolicy policy = policyFor(event.action());
         try {
             port.append(event);
         } catch (RuntimeException failure) {
-            if (failurePolicy == FailurePolicy.FAIL_CLOSED) {
+            if (policy == FailurePolicy.FAIL_CLOSED) {
                 log.error("activity audit write failed; refusing the read (FAIL_CLOSED)", failure);
                 throw new AuditUnavailableException(failure);
             }
@@ -125,7 +175,11 @@ public class ActivityAuditor {
         }
     }
 
-    public FailurePolicy failurePolicy() {
-        return failurePolicy;
+    public FailurePolicy sensitiveReleasePolicy() {
+        return sensitiveReleasePolicy;
+    }
+
+    public FailurePolicy routineReadPolicy() {
+        return routineReadPolicy;
     }
 }

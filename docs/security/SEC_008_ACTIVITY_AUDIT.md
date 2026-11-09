@@ -86,7 +86,21 @@ Enforced by the shape of `ActivityAuditor`, not by care at call sites:
 
 Tested under **both** policies, because it is not a policy.
 
-### 4.2 Whether a failed write blocks an authorized read — **DECISION REQUIRED**
+### 4.2 Whether a failed write blocks a read — **two settings, not one**
+
+The tradeoff is not the same for every action, so there are two:
+
+| | **Sensitive release** | **Routine authorized read** |
+|---|---|---|
+| Actions | `ATTACHMENT_DOWNLOADED`, `EXPORT_GENERATED` | `RECORD_VIEWED`, `SEARCH_PERFORMED` |
+| What happens | a **file leaves the system** | information appears on screen |
+| Setting | `sensitive-release-failure-policy` | `routine-read-failure-policy` |
+| Value | **`FAIL_CLOSED`** — business direction 2026-11-09, for planning and testing | **no default** |
+
+A release that happened with no record of it having happened is the case the
+audit exists for, which is why the first tier is closed by default. A record
+view is a different question, and the availability tradeoff there is genuinely
+open:
 
 |  | `FAIL_OPEN` | `FAIL_CLOSED` |
 |---|---|---|
@@ -95,37 +109,72 @@ Tested under **both** policies, because it is not a policy.
 | Risk | a read happens with **no record that it did** | an audit outage becomes an **archive outage** |
 | Visible as | `ERROR` in the application log, request succeeds | `AUDIT_UNAVAILABLE` to the caller |
 
-**There is no default.** `ActivityAuditProperties.validate()` fails at startup
-if collection is enabled without an explicit choice, with a message naming both
-options. A default here would be this code quietly making a
-compliance-versus-availability decision on the business's behalf — exactly what
-the requirement says not to do.
+**The routine-read setting has no default.**
+`ActivityAuditProperties.validate()` fails at startup if collection is enabled
+without an explicit choice, naming both options. A default there would be this
+code quietly making a compliance-versus-availability decision on the
+business's behalf.
 
-With collection **off**, the policy is moot and nothing is required.
+With collection **off**, both are moot and nothing is required.
 
 For what it is worth as input rather than as a decision: this is a **read-only
 archive of retired data**, so an outage is an inconvenience rather than a
-blocked business process — which argues for `FAIL_CLOSED` being affordable
-here in a way it would not be in a transactional system. That is an argument to
-put to the business, not a conclusion.
+blocked business process — which argues for `FAIL_CLOSED` on routine reads
+being more affordable here than it would be in a transactional system. An
+argument to put to the business, not a conclusion.
 
-## 5. What is NOT built yet
+## 5. Call sites
 
-- **No call sites.** The auditor is not yet invoked from the record, attachment,
-  export or search paths. Wiring it is deliberate, separate work: with
-  collection off it would write nothing, and with it on it needs the privilege
-  and the policy decision first. Building the mechanism and proving its failure
-  behaviour is what this change delivers.
+`ArchiveActivityRecorder` is the single place the five SEC-008 events are
+raised from. Call sites do **not** build events: they call one of five methods,
+and the recorder decides the action, the outcome and which recording path to
+use. A call site therefore cannot route a denial through the path that may
+throw, because it never chooses the path.
+
+| Event | Where it is raised | Status |
+|---|---|---|
+| `RECORD_VIEWED` | `RecordAuthorizationService.requireVersion` | **wired** |
+| `RECORD_ACCESS_DENIED` | the same place, on the refusal branch | **wired** |
+| `ATTACHMENT_DOWNLOADED` | recorder API ready | **not yet wired** |
+| `EXPORT_GENERATED` | recorder API ready | **not yet wired** |
+| `SEARCH_PERFORMED` | recorder API ready | **not yet wired** |
+
+Record view and denial are raised at the one point every record decision
+passes through, so a new endpoint is audited by construction rather than by
+remembering to add a call. An `INHERITED` decision is deliberately **not**
+recorded as a view: it is an internal question asked on behalf of a Subaward or
+Negotiation, and recording it would report a view of an Award the caller never
+opened.
+
+`searchPerformed` takes a module and a result **count**. There is no parameter
+on any method that could carry a query string — the shape of the API is the
+privacy control, not a convention each call site has to remember.
+
+Every constructor that does not take a recorder defaults to
+`ArchiveActivityRecorder.disabled(clock)`, so wiring a call site changes
+nothing until collection is switched on.
+
+## 6. What is NOT built yet
+
+- **Three call sites remain unwired** — attachments, exports and searches. The
+  recorder API and its tests are complete; the remaining work is calling it
+  from those services.
 - **No retention job.** Operational, and it needs the retention period decided.
 - **No read side.** Nobody can query activity yet; who may read an audit of who
   read what is its own access-control question.
 
-## 6. Tests
+## 7. Tests
 
-`ActivityAuditorTest` — 13 tests: the never-grants-access invariant under both
+`ActivityAuditorTest` — 17 tests: the never-grants-access invariant under both
 policies, both failure behaviours, the startup failure when no policy is
 chosen, and the privacy constraints enforced by the type (including a
 reflection assertion that no search-term field exists).
+
+`ArchiveActivityRecorderTest` — 7 tests over the five call sites: every action
+is raised correctly, a denial never throws even with both tiers closed, the two
+tiers apply (a failed download audit refuses the release while a failed view
+audit does not), a search cannot carry its terms, and a disabled recorder is a
+safe no-op everywhere.
 
 `ActivityAuditSchemaIntegrationTest` — the V089 schema against a real
 PostgreSQL: partitions route by month, the default partition catches the rest,

@@ -35,6 +35,7 @@ public class RecordAuthorizationService
     private final UnitHierarchy unitHierarchy;
     private final DescendantUnits descendantUnits;
     private final IoSqlStrategy ioSql;
+    private final edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity;
     private final IdentityEnrollment enrollment;
     private final Clock clock;
 
@@ -87,6 +88,32 @@ public class RecordAuthorizationService
             IdentityEnrollment enrollment,
             Clock clock
     ) {
+        this(properties, identities, identityResolver, scopeResolver, facts, unitHierarchy,
+                descendantUnits, ioSql, enrollment, clock,
+                edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder
+                        .disabled(clock));
+    }
+
+    /**
+     * @param activity SEC-008. Defaults to a disabled recorder in every other
+     *                 constructor, so wiring the call sites changes nothing
+     *                 until collection is switched on and the database
+     *                 privilege is granted.
+     */
+    public RecordAuthorizationService(
+            AuthorizationProperties properties,
+            CurrentIdentityProvider identities,
+            IdentityResolver identityResolver,
+            AccessScopeResolver scopeResolver,
+            RecordFactsRepository facts,
+            UnitHierarchy unitHierarchy,
+            DescendantUnits descendantUnits,
+            IoSqlStrategy ioSql,
+            IdentityEnrollment enrollment,
+            Clock clock,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity
+    ) {
+        this.activity = Objects.requireNonNull(activity);
         this.clock = Objects.requireNonNull(clock);
         this.enrollment = Objects.requireNonNull(enrollment);
         this.properties = Objects.requireNonNull(properties);
@@ -556,8 +583,30 @@ public class RecordAuthorizationService
         AuthorizationPolicy policy = properties.policy().orElseThrow(IdentityAccessDeniedException::new);
         AccessDecision decision = new RecordAccessEvaluator(policy, unitHierarchy)
                 .decide(outcome(), version, family, context);
+
+        /*
+         * SEC-008 call sites, at the one place every record decision passes
+         * through. Recording here rather than in each controller means a new
+         * endpoint is audited by construction instead of by remembering to.
+         *
+         * An INHERITED decision is NOT recorded as a record view: it is an
+         * internal question asked on behalf of a Subaward or Negotiation, and
+         * recording it would report a view of an Award the caller never
+         * opened.
+         */
+        boolean reportable = context == RecordAccessEvaluator.DecisionContext.DIRECT;
         if (!decision.allowed()) {
+            if (reportable) {
+                activity.recordAccessDenied(version.module().name(), version.familyKey(),
+                        decision.denialCode());
+            }
             throw new RecordNotAccessibleException();
+        }
+        if (reportable) {
+            // May throw under a FAIL_CLOSED routine-read policy. Deliberately
+            // not caught: swallowing it would reinstate FAIL_OPEN silently.
+            activity.recordViewed(version.module().name(), version.familyKey(),
+                    decision.reasons().isEmpty() ? null : decision.reasons().iterator().next().name());
         }
     }
 
