@@ -27,7 +27,8 @@ Prepared 2026-11-09 against integration branch
   returns **0**. The View Access As harness is not on this branch at all, and
   `grep -ri viewaccessas ui/dist` after a production build returns 0.
 
-**Migrations added:** `V088` (Parent Award), `V089` (activity audit).
+**Migrations added to the release:** `V088` (Parent Award) only. `V089`
+(activity audit) is held in `database/migrations-pending-approval/` — see §2.
 **Role scripts:** `archive_api_role.sql` (modified), new
 `archive_api_activity_audit_grant.sql`.
 **Rollback scripts:** `database/rollback/V088…`, `database/rollback/V089…`.
@@ -183,7 +184,7 @@ a separate, later change with no code in it.
 ## 8. Evidence
 
 ```
-API  1812 tests, 0 failures, 0 errors   (mvn clean test, all Testcontainers suites)
+API  1816 tests, 0 failures, 0 errors   (mvn clean test, all Testcontainers suites)
 UI    741 tests, 0 failures · lint clean · production build clean
 ```
 
