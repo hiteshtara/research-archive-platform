@@ -82,6 +82,10 @@ class AwardRecordAuthorizationIntegrationTest {
             DockerImageName.parse("pgvector/pgvector:pg17").asCompatibleSubstituteFor("postgres"));
 
     private static AwardArchiveRepository repository;
+    /** For executing a rendered predicate directly, at VERSION grain. */
+    private static JdbcClient jdbc;
+    private static JdbcRecordFactsRepository facts;
+    private static JdbcUnitHierarchy unitHierarchy;
 
     @BeforeAll
     static void applyMigrationsAndSeed() throws Exception {
@@ -151,7 +155,13 @@ class AwardRecordAuthorizationIntegrationTest {
                     """);
         }
 
-        repository = new AwardArchiveRepository(JdbcClient.create(dataSource));
+        jdbc = JdbcClient.create(dataSource);
+        repository = new AwardArchiveRepository(jdbc);
+        // IO is not exercised here: the SQL side uses IoSqlStrategy.NONE, so
+        // the Java side must resolve no IO values either, or the two halves
+        // of the equivalence test would be comparing different rules.
+        facts = new JdbcRecordFactsRepository(jdbc, (module, versionKey) -> Set.of());
+        unitHierarchy = new JdbcUnitHierarchy(jdbc);
     }
 
     // --- Enforcement OFF -----------------------------------------------
@@ -795,5 +805,135 @@ class AwardRecordAuthorizationIntegrationTest {
             return candidate;
         }
         return Path.of("..", "database", "migrations");
+    }
+
+    // --- SEC-003: contact-derived access is version-specific --------------
+
+    /*
+     * The Award list query is family-grained (is_primary_current = TRUE), so
+     * the version rule is not visible through search(): every family shows
+     * its current version or nothing. These tests therefore run the rendered
+     * predicate directly against archive.award_version, which is the grain
+     * the rule is actually about - and then check the Java evaluator agrees
+     * row for row.
+     *
+     * CHEM-00001 is the fixture that matters: two versions, 5001 and 5002,
+     * with FARRER as PI on 5002 only.
+     */
+
+    @Test
+    void theContactPredicateSelectsOnlyTheVersionTheyAreListedOn() {
+        assertThat(versionsSelectedBy(contactPredicate(FARRER)))
+                .containsExactly(5002L);
+    }
+
+    @Test
+    void theContactPredicateSelectsNothingForAPersonListedNowhere() {
+        assertThat(versionsSelectedBy(contactPredicate(STRANGER))).isEmpty();
+    }
+
+    @Test
+    void theDepartmentPredicateStillSelectsEveryVersionOfTheFamily() {
+        // The guard against over-fixing: SEC-003 changed contact derivation
+        // and left department grants under FAMILY_WIDE, so 5001 - whose own
+        // unit is 7777 anyway - must still come back with 5002.
+        assertThat(versionsSelectedBy(departmentPredicate("7777")))
+                .containsExactly(5001L, 5002L);
+    }
+
+    @Test
+    void aDepartmentGrantAndAContactListingUnionWithoutWideningEitherRule() {
+        /*
+         * The discriminating union: a department grant on PHYS (1234) plus a
+         * contact listing on CHEM version 2.
+         *
+         * Expected: all of PHYS (6001) from the department rule, which is
+         * still family-wide, plus CHEM 5002 alone from the contact rule.
+         * CHEM 5001 must NOT appear - under the old rule it did, because the
+         * contact listing on 5002 reached its whole family. Unit 7777 would
+         * not show this, since the department grant covers both CHEM
+         * versions on its own.
+         */
+        assertThat(versionsSelectedBy(predicateFor(new AccessScope(
+                false, Set.of(new UnitGrant("1234", false)), Optional.of(FARRER), Set.of()),
+                Set.of("1234"))))
+                .containsExactly(5002L, 6001L);
+    }
+
+    @Test
+    void theRenderedPredicateAndTheJavaEvaluatorAgreeOnEveryAwardVersion() {
+        /*
+         * The two production paths over the same rule: RecordScopeSqlBuilder
+         * renders a predicate for lists, RecordAccessEvaluator decides one
+         * version for a record read. This compares them row for row over
+         * every version in the fixture, using the REAL facts repository and
+         * the REAL unit hierarchy - so a disagreement in either direction
+         * fails here rather than in production, where it would show up as a
+         * listed row that 404s or a hidden row that opens.
+         */
+        List<AccessScope> scopes = List.of(
+                new AccessScope(false, Set.of(), Optional.of(FARRER), Set.of()),
+                new AccessScope(false, Set.of(), Optional.of(STRANGER), Set.of()),
+                new AccessScope(false, Set.of(new UnitGrant("7777", false)), Optional.empty(), Set.of()),
+                new AccessScope(false, Set.of(new UnitGrant("1234", false)), Optional.empty(), Set.of()),
+                new AccessScope(false, Set.of(new UnitGrant("7777", false)), Optional.of(FARRER), Set.of()),
+                new AccessScope(false, Set.of(new UnitGrant("1234", false)), Optional.of(FARRER), Set.of()));
+
+        for (AccessScope scope : scopes) {
+            Set<String> units = scope.units().stream().map(UnitGrant::unitNumber)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            List<Long> fromSql = versionsSelectedBy(predicateFor(scope, units));
+            List<Long> fromJava = versionsAllowedByTheEvaluator(scope);
+
+            assertThat(fromSql)
+                    .as("units=%s contact=%s", units, scope.contactPersonId())
+                    .containsExactlyInAnyOrderElementsOf(fromJava);
+        }
+    }
+
+    // --- SEC-003 helpers --------------------------------------------------
+
+    private static SqlFragment contactPredicate(KualiPersonId person) {
+        return predicateFor(new AccessScope(false, Set.of(), Optional.of(person), Set.of()), Set.of());
+    }
+
+    private static SqlFragment departmentPredicate(String unit) {
+        return predicateFor(
+                new AccessScope(false, Set.of(new UnitGrant(unit, false)), Optional.empty(), Set.of()),
+                Set.of(unit));
+    }
+
+    private static SqlFragment predicateFor(AccessScope scope, Set<String> expandedUnits) {
+        return new RecordScopeSqlBuilder(
+                policy(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT), IoSqlStrategy.NONE)
+                .build(new AccessOutcome.Scoped(scope), RecordModule.AWARD, "av", expandedUnits);
+    }
+
+    /** The award_ids a rendered predicate actually selects, version by version. */
+    private static List<Long> versionsSelectedBy(SqlFragment fragment) {
+        var statement = jdbc.sql("SELECT av.award_id FROM archive.award_version av WHERE TRUE "
+                + fragment.sql() + " ORDER BY av.award_id");
+        for (var parameter : fragment.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        return statement.query(Long.class).list();
+    }
+
+    /** The same question asked of the Java evaluator, over the real facts. */
+    private static List<Long> versionsAllowedByTheEvaluator(AccessScope scope) {
+        var evaluator = new edu.bu.archive.application.authorization.RecordAccessEvaluator(
+                policy(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT), unitHierarchy);
+        var outcome = new AccessOutcome.Scoped(scope);
+        List<Long> allowed = new java.util.ArrayList<>();
+        for (String awardNumber : List.of("CHEM-00001", "PHYS-00001", "NULL-00001")) {
+            var family = facts.awardFamily(awardNumber);
+            for (var version : family) {
+                if (evaluator.decide(outcome, version, family).allowed()) {
+                    allowed.add(Long.parseLong(version.versionKey()));
+                }
+            }
+        }
+        return allowed;
     }
 }
