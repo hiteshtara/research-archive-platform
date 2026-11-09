@@ -315,7 +315,14 @@ public class RecordAuthorizationService
             return true;
         }
         try {
-            return facts.subawardFamilyFundingAwardIds(subawardId).stream().anyMatch(this::canSeeAward);
+            /*
+             * canSeeAwardForInheritance, not canSeeAward: SEC-005 restricts
+             * PARENT_AWARD grants to Award records, so a funding Award that
+             * is visible ONLY through such a grant does not authorise this
+             * Subaward. Every other grant type behaves exactly as before.
+             */
+            return facts.subawardFamilyFundingAwardIds(subawardId).stream()
+                    .anyMatch(this::canSeeAwardForInheritance);
         } catch (RuntimeException failure) {
             // Fail closed: an error resolving funding is not permission.
             return false;
@@ -375,7 +382,8 @@ public class RecordAuthorizationService
                     && leadUnitInScope(negotiation.leadUnitNumber())) {
                 return true;
             }
-            if (negotiation.awardNumber() != null && canSeeAwardNumber(negotiation.awardNumber())) {
+            if (negotiation.awardNumber() != null
+                    && canSeeAwardNumberForInheritance(negotiation.awardNumber())) {
                 return true;
             }
             return negotiation.proposalNumber() != null
@@ -536,15 +544,51 @@ public class RecordAuthorizationService
     }
 
     private void requireVersion(List<RecordFacts> family, String versionKey) {
+        requireVersion(family, versionKey, RecordAccessEvaluator.DecisionContext.DIRECT);
+    }
+
+    private void requireVersion(List<RecordFacts> family, String versionKey,
+                                RecordAccessEvaluator.DecisionContext context) {
         RecordFacts version = family.stream()
                 .filter(v -> v.versionKey().equals(versionKey))
                 .findFirst()
                 .orElseThrow(RecordNotAccessibleException::new);
         AuthorizationPolicy policy = properties.policy().orElseThrow(IdentityAccessDeniedException::new);
-        AccessDecision decision = new RecordAccessEvaluator(policy, unitHierarchy).decide(outcome(), version, family);
+        AccessDecision decision = new RecordAccessEvaluator(policy, unitHierarchy)
+                .decide(outcome(), version, family, context);
         if (!decision.allowed()) {
             throw new RecordNotAccessibleException();
         }
+    }
+
+    /**
+     * Can this caller see this Award <em>for the purpose of deciding a
+     * Subaward or Negotiation</em>?
+     *
+     * <p>SEC-005: identical to {@link #canSeeAward} except that PARENT_AWARD
+     * grants do not count. A separate method rather than a flag on the public
+     * one, so no caller can reach the inherited semantics by accident, and so
+     * the two uses are visible in a call hierarchy.
+     */
+    private boolean canSeeAwardForInheritance(long awardId) {
+        return silently(() -> {
+            requireProvisioned();
+            String awardNumber = facts.awardNumberForId(awardId)
+                    .orElseThrow(RecordNotAccessibleException::new);
+            requireVersion(facts.awardFamily(awardNumber), String.valueOf(awardId),
+                    RecordAccessEvaluator.DecisionContext.INHERITED);
+        });
+    }
+
+    /** As {@link #canSeeAwardNumber}, ignoring PARENT_AWARD grants (SEC-005). */
+    private boolean canSeeAwardNumberForInheritance(String awardNumber) {
+        return silently(() -> {
+            requireProvisioned();
+            String versionKey = facts.currentAwardVersionKey(awardNumber)
+                    .orElseThrow(RecordNotAccessibleException::new);
+            requireVersion(facts.awardFamily(awardNumber), versionKey,
+                    RecordAccessEvaluator.DecisionContext.INHERITED);
+        });
     }
 
     /** Units in scope, expanded with descendants only where policy and grant both allow it. */

@@ -239,27 +239,107 @@ class ParentAwardAccessTest {
         }
 
         @Test
-        void subawardAndNegotiationInheritTheAwardClause() {
+        void subawardAndNegotiationDoNotInheritAParentAwardGrant() {
             /*
-             * Inheritance is the approved 2026-10-26 rule applied to a new
-             * grant type, not a new rule: subawardRow and negotiationRow
-             * reuse the Award predicate verbatim, which is exactly why the
-             * list cannot disagree with RecordAuthorizationService - that
-             * resolves the same question through canSeeAward.
+             * Business decision 2026-11-09: a PARENT_AWARD grant is
+             * restricted to Award records and their history. It must NOT
+             * automatically authorise a Subaward funded by such an Award, or
+             * a Negotiation associated with one.
              *
-             * Asserted rather than assumed because the alternative - a grant
-             * type that silently does NOT travel, as design 4.6 specifies for
-             * IO - would be invisible until someone compared the two layers.
-             * Pending sign-off: docs/security/SEC_005_PARENT_AWARD.md.
+             * The inherited predicate is literally the Award predicate -
+             * subawardRow and negotiationRow reuse it - so the clause is
+             * omitted at that call site rather than filtered afterwards. The
+             * evaluator does the same thing through DecisionContext, and
+             * evaluatorAndSqlAgreeOnInheritance pins the two together.
              */
             AccessOutcome outcome = resolve(policy(1), new RecordingHierarchy(), "A-000");
             var builder = new RecordScopeSqlBuilder(policy(1), IoSqlStrategy.NONE);
             for (RecordModule module : List.of(RecordModule.SUBAWARD, RecordModule.NEGOTIATION)) {
                 SqlFragment fragment = builder.build(outcome, module, "x", Set.of());
                 assertThat(fragment.sql())
-                        .as(module + " inherits visibility from its funding/associated Award")
-                        .contains("az_parent_awards");
+                        .as(module + " must not be reachable through a PARENT_AWARD grant")
+                        .doesNotContain("az_parent_awards");
+                assertThat(fragment.params())
+                        .as(module + " must not even bind the parent-award parameter")
+                        .doesNotContainKey("az_parent_awards");
             }
+        }
+
+        @Test
+        void theOuterAwardListStillCarriesTheClause() {
+            // The restriction is about inheritance, not about the grant: an
+            // Award list must still be scoped by it, or the grant does nothing.
+            AccessOutcome outcome = resolve(policy(1), new RecordingHierarchy(), "A-000");
+            SqlFragment fragment = new RecordScopeSqlBuilder(policy(1), IoSqlStrategy.NONE)
+                    .build(outcome, RecordModule.AWARD, "av", Set.of());
+            assertThat(fragment.sql()).contains("az_parent_awards");
+        }
+    }
+
+    // ── the two layers must agree ───────────────────────────────────────
+
+    @Nested
+    @DisplayName("The evaluator and the list SQL agree about inheritance")
+    class EvaluatorAndSqlAgree {
+
+        @Test
+        void evaluatorAndSqlAgreeOnInheritance() {
+            /*
+             * The defect this guards is the one that is invisible until
+             * someone compares the layers: a row that appears in a list and
+             * then 404s when opened, or the reverse. Both must refuse a
+             * parent-award grant for an inherited decision, and both must
+             * honour it for a direct one.
+             */
+            AccessOutcome outcome = resolve(policy(1), new RecordingHierarchy(), "A-000");
+            var evaluator = new RecordAccessEvaluator(policy(1), new MapUnitHierarchy(Map.of()));
+            var builder = new RecordScopeSqlBuilder(policy(1), IoSqlStrategy.NONE);
+            RecordFacts granted = award("A-000", "1");
+
+            boolean evaluatorDirect = evaluator
+                    .decide(outcome, granted, List.of(granted),
+                            RecordAccessEvaluator.DecisionContext.DIRECT)
+                    .allowed();
+            boolean sqlDirect = builder.build(outcome, RecordModule.AWARD, "av", Set.of())
+                    .sql().contains("az_parent_awards");
+            assertThat(evaluatorDirect).as("direct: evaluator").isTrue();
+            assertThat(sqlDirect).as("direct: SQL").isTrue();
+
+            boolean evaluatorInherited = evaluator
+                    .decide(outcome, granted, List.of(granted),
+                            RecordAccessEvaluator.DecisionContext.INHERITED)
+                    .allowed();
+            boolean sqlInherited = builder.build(outcome, RecordModule.SUBAWARD, "s", Set.of())
+                    .sql().contains("az_parent_awards");
+            assertThat(evaluatorInherited).as("inherited: evaluator must refuse").isFalse();
+            assertThat(sqlInherited).as("inherited: SQL must refuse").isFalse();
+
+            assertThat(evaluatorInherited)
+                    .as("the two layers must give the same answer for the same question")
+                    .isEqualTo(sqlInherited);
+        }
+
+        @Test
+        void anInheritedDecisionStillHonoursEveryOtherGrantType() {
+            // The restriction is PARENT_AWARD-specific. A department grant
+            // must still travel to a Subaward exactly as it did before.
+            var grants = new InMemoryAccessGrantRepository();
+            grants.add(new AccessGrant(1L, new InstitutionalIdentifier(GRANTEE),
+                    GrantType.UNIT, "SYN-U-700", false, null, null, null, null));
+            var resolution = new IdentityResolution.Mapped(
+                    new ValidatedCognitoIdentity("https://issuer.test.invalid", "sub-5001"),
+                    new InstitutionalIdentifier(GRANTEE), Optional.empty());
+            AccessOutcome outcome = new AccessScopeResolver(grants,
+                    Clock.fixed(NOW, ZoneOffset.UTC), () -> Optional.of(policy(1)),
+                    ContactRelationships.NONE, new RecordingHierarchy()).resolve(resolution);
+
+            RecordFacts record = award("A-000", "1");
+            assertThat(new RecordAccessEvaluator(policy(1), new MapUnitHierarchy(Map.of()))
+                    .decide(outcome, record, List.of(record),
+                            RecordAccessEvaluator.DecisionContext.INHERITED)
+                    .allowed())
+                    .as("a UNIT grant still authorises an inherited decision")
+                    .isTrue();
         }
     }
 

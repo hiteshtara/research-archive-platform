@@ -107,27 +107,38 @@ is never silently worthless.
 
 ## 3. Pending business sign-off
 
-**3.1 — Subaward and Negotiation inheritance.** A PARENT_AWARD grant currently
-**does** reach Subawards funded by a reachable Award, and Negotiations
-associated with one.
+**3.1 — Subaward and Negotiation inheritance: DECIDED 2026-11-09 — restricted.**
 
-This is a *consequence* of the approved 2026-10-26 rule ("a user may access a
-Subaward when they are authorized to view at least ONE of its funding Awards")
-rather than a new decision: `subawardRow` reuses the Award predicate verbatim,
-and `RecordAuthorizationService` resolves the same question through
-`canSeeAward`. Both layers therefore agree, and a test asserts they do.
+A PARENT_AWARD grant reaches **Award records and their history, and nothing
+else**. It does **not** authorise a Subaward funded by a reachable Award, nor a
+Negotiation associated with one. This follows the design 4.6 precedent for IO
+rather than the general "at least one funding Award" rule, and it is in force
+until the business explicitly approves broader inheritance.
 
-But it has **not** been separately approved for this grant type, and there is a
-precedent for the opposite: design 4.6 specifies that an **IO** grant reaches
-no Proposal, Subaward or Negotiation. If the business wants PARENT_AWARD to
-behave like IO — Award-only, no travel — that is a small, contained change to
-`awardRow` plus the matching evaluator path. **It should be decided explicitly,
-not inherited by accident.**
+Implemented in **both** layers, because the inherited question is literally the
+same question as the direct one:
 
-**3.2 — Depth.** Default 1 is an engineering choice made conservatively, not an
-approved policy. If BU's Award hierarchies are routinely deeper and a grant is
-expected to cover a whole tree, the business should say so and the default
-should change deliberately.
+- `RecordAccessEvaluator.DecisionContext` — `DIRECT` honours the grant,
+  `INHERITED` ignores it. `RecordAuthorizationService` uses
+  `canSeeAwardForInheritance` / `canSeeAwardNumberForInheritance` on the
+  Subaward and Negotiation paths; separate methods rather than a flag, so no
+  caller reaches the inherited semantics by accident.
+- `RecordScopeSqlBuilder.awardRow(..., includeParentAward)` — the clause is
+  omitted when the predicate is being built for `subawardRow` or the
+  Negotiation Award arm, rather than filtered out afterwards.
+
+`evaluatorAndSqlAgreeOnInheritance` pins the two together, because the defect
+this guards is invisible until someone compares the layers: a row that appears
+in a list and then 404s when opened.
+
+Every other grant type is unaffected — a department grant still travels to a
+Subaward exactly as before, and a test asserts that too.
+
+**3.2 — Depth: default 1, maximum 10, PENDING BUSINESS CONFIRMATION.**
+Confirmed as the working values 2026-11-09, explicitly not as an approved
+policy. If BU's Award hierarchies are routinely deeper and a grant is expected
+to cover a whole tree, the default should change deliberately. The maximum is a
+hard clamp in `JdbcAwardHierarchy`, independent of configuration.
 
 ## 4. What this does not do
 

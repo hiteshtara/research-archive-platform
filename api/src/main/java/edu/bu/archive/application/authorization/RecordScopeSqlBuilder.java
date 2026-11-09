@@ -64,7 +64,7 @@ public final class RecordScopeSqlBuilder {
         }
         Map<String, Object> params = new LinkedHashMap<>();
         String row = switch (module) {
-            case AWARD -> awardRow(scope, expandedUnits, params);
+            case AWARD -> awardRow(scope, expandedUnits, params, true);
             case PROPOSAL -> proposalRow(scope, expandedUnits, params);
             case SUBAWARD -> subawardRow(scope, expandedUnits, params);
             case NEGOTIATION -> negotiationRow(scope, expandedUnits, params);
@@ -117,7 +117,16 @@ public final class RecordScopeSqlBuilder {
      * already correlates on {@code award_id}, which is the version key. Only
      * its position relative to the family wrap moved.
      */
-    private String awardRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
+    /**
+     * @param includeParentAward false when this predicate is being built to
+     *        decide a Subaward or Negotiation. SEC-005 (business decision
+     *        2026-11-09) restricts PARENT_AWARD grants to Award records, and
+     *        the inherited predicate is literally the Award predicate - so
+     *        the clause is omitted there rather than filtered afterwards.
+     *        Mirrors {@code RecordAccessEvaluator.DecisionContext}.
+     */
+    private String awardRow(AccessScope scope, Set<String> units, Map<String, Object> params,
+                            boolean includeParentAward) {
         List<String> familyScoped = new ArrayList<>();
         if (!units.isEmpty()) {
             params.put("az_units", List.copyOf(units));
@@ -141,7 +150,7 @@ public final class RecordScopeSqlBuilder {
          * Wrapping it under FAMILY_WIDE is therefore a no-op rather than a
          * widening.
          */
-        if (!scope.parentAwardNumbers().isEmpty()) {
+        if (includeParentAward && !scope.parentAwardNumbers().isEmpty()) {
             params.put("az_parent_awards", List.copyOf(scope.parentAwardNumbers()));
             familyScoped.add("TRIM({row}.award_number) IN (:az_parent_awards)");
         }
@@ -234,7 +243,7 @@ public final class RecordScopeSqlBuilder {
      * so the disagreement is a test failure, not a silent one.
      */
     private String subawardRow(AccessScope scope, Set<String> units, Map<String, Object> params) {
-        String awardPredicate = awardRow(scope, units, params);
+        String awardPredicate = awardRow(scope, units, params, false);
         if (awardPredicate == null || "FALSE".equals(awardPredicate)) {
             return "FALSE";
         }
@@ -331,7 +340,7 @@ public final class RecordScopeSqlBuilder {
          * looser of the two answers winning. Pinning the join is both the
          * agreeing answer and the fail-closed one.
          */
-        String awardPredicate = awardRow(scope, units, params);
+        String awardPredicate = awardRow(scope, units, params, false);
         if (!"FALSE".equals(awardPredicate)) {
             paths.add("EXISTS (SELECT 1 FROM archive.award_version az_na"
                     + " WHERE {row}.negotiation_association_type_description = 'Award'"

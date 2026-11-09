@@ -30,6 +30,27 @@ import java.util.Set;
  */
 public class RecordAccessEvaluator {
 
+    /**
+     * Why this record is being decided.
+     *
+     * <p>SEC-005, business decision 2026-11-09: a PARENT_AWARD grant reaches
+     * Award records and their history, and must NOT automatically authorise a
+     * Subaward or a Negotiation that happens to reference such an Award.
+     *
+     * <p>Subaward and Negotiation access is resolved by asking whether an
+     * Award is visible, so without this distinction the restriction would be
+     * unimplementable in Java: the inherited question is literally the same
+     * question. The context says which one is being asked, and the SQL side
+     * mirrors it by omitting the parent-award clause from the inherited
+     * Award predicate.
+     */
+    public enum DecisionContext {
+        /** The caller is reading this record itself. */
+        DIRECT,
+        /** This Award is being consulted to decide a Subaward or Negotiation. */
+        INHERITED
+    }
+
     private static final Set<RecordModule> DEPARTMENT_MODULES =
             EnumSet.of(RecordModule.AWARD, RecordModule.PROPOSAL, RecordModule.NEGOTIATION);
     private static final Set<RecordModule> CONTACT_MODULES =
@@ -51,6 +72,16 @@ public class RecordAccessEvaluator {
      *                       then only for department and IO grants
      */
     public AccessDecision decide(AccessOutcome outcome, RecordFacts record, List<RecordFacts> familyVersions) {
+        return decide(outcome, record, familyVersions, DecisionContext.DIRECT);
+    }
+
+    /**
+     * @param context {@link DecisionContext#INHERITED} when this Award is
+     *                being consulted on behalf of a Subaward or Negotiation.
+     *                PARENT_AWARD grants are ignored in that case (SEC-005).
+     */
+    public AccessDecision decide(AccessOutcome outcome, RecordFacts record,
+                                 List<RecordFacts> familyVersions, DecisionContext context) {
         if (!(outcome instanceof AccessOutcome.Scoped scoped)) {
             return AccessDecision.deny(denialCode(outcome));
         }
@@ -71,7 +102,7 @@ public class RecordAccessEvaluator {
             if (ioMatches(scope, version)) {
                 reasons.add(AccessReason.IO_GRANT);
             }
-            if (parentAwardMatches(scope, version)) {
+            if (context == DecisionContext.DIRECT && parentAwardMatches(scope, version)) {
                 reasons.add(AccessReason.PARENT_AWARD);
             }
         }
@@ -125,23 +156,14 @@ public class RecordAccessEvaluator {
      * used, and a list and a workspace answering differently about the same
      * Award is exactly the defect this design avoids.
      *
-     * <p>Award only, for a record evaluated DIRECTLY. A PARENT_AWARD grant
-     * never matches a Proposal or IRB record at all.
+     * <p>Award only, and only when the Award is being read DIRECTLY. A
+     * PARENT_AWARD grant never matches a Proposal or IRB record, and - by
+     * business decision 2026-11-09 - never authorises a Subaward or
+     * Negotiation through inheritance either. See {@link DecisionContext}.
      *
-     * <p>Subaward and Negotiation are a different question and are not
-     * decided here: their access is INHERITED, resolved by
-     * {@code RecordAuthorizationService} asking whether a funding Award (or
-     * an associated Award/Proposal) is visible. That indirection is
-     * grant-type agnostic by construction - it asks "can this caller see
-     * Award X", and a PARENT_AWARD grant answers yes exactly as a department
-     * grant does. {@code RecordScopeSqlBuilder.subawardRow} reuses the same
-     * Award clause for the same reason, so the list and the workspace agree.
-     *
-     * <p>That inheritance is a CONSEQUENCE of the approved 2026-10-26 rule
-     * ("authorized to view at least ONE of its funding Awards"), not a
-     * separate decision taken here - but it has not been separately approved
-     * for this grant type and is listed as pending sign-off in
-     * docs/security/SEC_005_PARENT_AWARD.md.
+     * <p>It DOES reach every version of the Awards it names, because
+     * award_number is the family key: "the Award and its authorized history"
+     * is one scope, not a per-version one.
      */
     private boolean parentAwardMatches(AccessScope scope, RecordFacts version) {
         return version.module() == RecordModule.AWARD
