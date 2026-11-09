@@ -140,6 +140,34 @@ Record the API revision and the UI Amplify job together at each rollout,
 so API/UI version compatibility is recoverable afterwards rather than
 inferred.
 
+## The deployment facts go stale unless someone updates them
+
+The Security Readiness panel names the API revision, image commit and digest
+running in DEV. None of it is read at page load: `/actuator/info` is exposed
+but empty, `/actuator` and `/actuator/env` answer 401, and every other field
+comes from AWS APIs the browser has no credentials for. It is a committed
+snapshot, and on 2026-11-09 it went on reporting revision 84 and commit
+`66f3cfe` for hours after revision 85 was deployed from main's tip.
+
+Three things now hold it together, and all three are needed:
+
+1. **A step in the release checklist** (§5b of
+   `DEV_RELEASE_CHECKLIST_SEC001_SEC009.md`) that updates
+   `securityReadiness.json` in the same change as the deployment.
+   `securityReadinessConsistency.test.mjs` fails if that step is deleted.
+2. **A consistency suite** that fails the build when the deployment block and
+   the evidence strings disagree — a half-finished refresh, which is the
+   likeliest future version of this mistake. It cannot detect data that is
+   uniformly old, because that data is self-consistent; be clear about that
+   rather than trusting the suite to catch staleness.
+3. **Provenance on the page itself** — "Recorded measurement, verified
+   `<date>`", plus why it is not live. A reader can then discount it
+   themselves, which is the only real protection while the snapshot is manual.
+
+The structural fix is FU-003: publish Spring Boot build-info on
+`/actuator/info` and have the panel read the running revision. Until then,
+treat any claim on this panel as "true on the date shown".
+
 ## How to remove it
 
 - `ui/src/pages/QaStatusPage.tsx`
@@ -149,6 +177,11 @@ inferred.
 - the `qaStatus` entry in `ui/src/features/navigation/navigationPresentation.mjs`
 - the `qaStatus` icon and its `FactCheckOutlined` import in `ui/src/layout/AppLayout.tsx`
 - `src/features/qa/*.test.mjs` from the `test` script in `ui/package.json`
+- section 5b of `docs/runbooks/DEV_RELEASE_CHECKLIST_SEC001_SEC009.md`, which
+  exists only to keep this page's deployment facts current - and which
+  `securityReadinessConsistency.test.mjs` asserts is still there
+- FU-003 in `docs/FOLLOW_UPS.md`, which is about this page's inability to read
+  the running revision
 - in `ui/src/features/archivedFiles/archivedFileFinderPresentation.test.mjs`,
   restore the single exact-list navigation assertion in place of the two that
   replaced it

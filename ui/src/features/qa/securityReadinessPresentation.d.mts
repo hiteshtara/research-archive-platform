@@ -29,13 +29,50 @@ export interface DeploymentFacts {
   apiTaskDefinition: string;
   taskDefinitionIsNewest: boolean;
   imageCommit: string;
+  imageCommitFull?: string;
   imageCommitDate: string;
   imageDigest: string;
   mainCommit: string;
   commitsBehindMain: number;
+  imageIsMainTip?: boolean;
   runningTasks: string;
   verifiedAt: string;
   verifiedHow: string;
+  note?: string;
+}
+
+export interface RuntimeSource {
+  available: boolean;
+  reason: string;
+  consequence?: string;
+  followUp?: string;
+}
+
+export interface KnownMismatch {
+  title: string;
+  businessMeaning: string;
+  technical?: string;
+  resolution: string;
+  verifiedAt?: string;
+}
+
+export interface ResolvedMismatch {
+  title: string;
+  reportedWhile?: string;
+  resolvedOn: string;
+  how: string;
+}
+
+export interface SmokeTestFacts {
+  performedAt: string;
+  revision: string;
+  checks: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  how?: string;
+  covered?: string;
+  recordsStillVisible?: boolean;
   note?: string;
 }
 
@@ -45,7 +82,10 @@ export interface SecurityReadiness {
   deployment: DeploymentFacts;
   enforcement: Record<string, string>;
   database: Record<string, unknown>;
-  knownMismatch: Record<string, string>;
+  knownMismatch: KnownMismatch | null;
+  resolvedMismatches?: ResolvedMismatch[];
+  runtimeSource?: RuntimeSource;
+  smokeTest?: SmokeTestFacts;
   stateLabels: Record<ReadinessStage, string>;
   capabilities: SecurityCapability[];
 }
@@ -75,12 +115,38 @@ export function deploymentSummary(deployment: DeploymentFacts | null): {
   environment: string;
   revision: string;
   commit: string;
+  commitFull: string | null;
   commitDate: string;
   digest: string;
   shortDigest: string;
   behind: number;
   isCurrent: boolean;
+  runningTasks: string | null;
   verifiedAt: string;
+} | null;
+export function provenanceNotice(
+  readiness: { runtimeSource?: RuntimeSource; deployment?: DeploymentFacts; verifiedAt?: string } | null,
+): {
+  sourced: "runtime" | "snapshot";
+  label: string;
+  detail: string;
+  followUp?: string | null;
+};
+export function resolvedMismatches(
+  readiness: { resolvedMismatches?: ResolvedMismatch[] } | null,
+): ResolvedMismatch[];
+export function smokeTestSummary(smokeTest: SmokeTestFacts | null | undefined): {
+  performedAt: string | null;
+  revision: string | null;
+  checks: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  allPassed: boolean;
+  tone: ReadinessTone;
+  text: string;
+  how: string | null;
+  note: string | null;
 } | null;
 export function shortenDigest(digest: string): string;
 export function grantFigures(database: Record<string, unknown> | null): {
