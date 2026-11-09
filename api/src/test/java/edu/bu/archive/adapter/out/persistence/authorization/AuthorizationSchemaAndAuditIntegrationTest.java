@@ -204,7 +204,20 @@ class AuthorizationSchemaAndAuditIntegrationTest {
                     // V084
                     "admin_role_member",
                     // V086 - two-person rule for re-linking an identity that holds grants
-                    "relink_approval");
+                    "relink_approval",
+                    /*
+                     * V089 - SEC-008 archive activity, deliberately a SEPARATE
+                     * table from access_audit: one records grant
+                     * administration (a few rows a year, undeletable by
+                     * design), the other records reads (every page view, with
+                     * a retention policy). The partitions are listed because
+                     * information_schema reports them as tables; the default
+                     * partition exists so an INSERT can never fail for want of
+                     * one, which matters when the write is an audit write.
+                     */
+                    "activity_audit",
+                    "activity_audit_2026_11", "activity_audit_2026_12",
+                    "activity_audit_2027_01", "activity_audit_overflow");
         }
 
         @Test
