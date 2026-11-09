@@ -362,13 +362,23 @@ test("the recorded image commit exists and is an ancestor of main", () => {
   if (!run(["rev-parse", "--is-inside-work-tree"]).ok) {
     return; // not a checkout; nothing to compare against
   }
+  /*
+   * CI checks out at depth 1, so the history this rule needs is genuinely not
+   * in the object store and asking for it fails against a perfectly correct
+   * file. Skip rather than fail: an absent object in a shallow clone is
+   * evidence about the clone, not about the recorded commit. Confirmed by
+   * cloning --depth 1 and watching this assertion fail on data that is right.
+   */
+  if (run(["rev-parse", "--is-shallow-repository"]).out === "true") {
+    return;
+  }
 
   const exists = run(["cat-file", "-e", `${DEPLOYMENT.imageCommitFull}^{commit}`]);
   assert.ok(exists.ok, `the recorded image commit ${DEPLOYMENT.imageCommitFull} is not in this repository`);
 
   const mainRef = ["origin/main", "main"].find((ref) => run(["rev-parse", "--verify", ref]).ok);
   if (!mainRef) {
-    return; // shallow or detached clone
+    return; // no main to compare against in this checkout
   }
   assert.ok(
     run(["merge-base", "--is-ancestor", DEPLOYMENT.imageCommitFull, mainRef]).ok,
