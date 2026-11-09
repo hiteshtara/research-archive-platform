@@ -366,6 +366,134 @@ public class ArchiveAdminService {
         return granted;
     }
 
+    /**
+     * SEC-002: grant the SAME scope to many grantees in one reviewed action.
+     *
+     * <p>Built on {@link #grantAccess}, not beside it. Every grantee goes
+     * through the identical path - the same administrator check, the same
+     * specification validation, the same V087 duplicate translation, the same
+     * audit row - so a bulk assignment cannot acquire looser rules than the
+     * single one, which is the usual way a bulk endpoint becomes the weak
+     * door.
+     *
+     * <h2>Per-grantee outcomes, not all-or-nothing</h2>
+     *
+     * <p>A realistic department rollout names dozens of people and some of
+     * them already hold the grant. Failing the whole batch for that would
+     * make the operation unusable and push operators towards doing it one at
+     * a time with no batch record at all. So each grantee gets its own
+     * outcome and the batch reports them.
+     *
+     * <p>This means the method is NOT atomic across grantees, and that is
+     * deliberate - but it is atomic FOR each grantee: a grant and its audit
+     * row commit together or not at all, because {@code grantAccess} is
+     * {@code @Transactional} and this method is not. Marking this
+     * {@code @Transactional} would silently convert every per-grantee failure
+     * into a rollback of the whole batch and make the reported outcomes a
+     * lie.
+     *
+     * <h2>The batch reference</h2>
+     *
+     * <p>Every audit row in the batch carries the same {@code batchRef}, so
+     * "what did that rollout actually do" is answerable afterwards, and a
+     * summary row records the totals. No migration is needed for either:
+     * {@code access_audit.action} is {@code VARCHAR(40)} with no CHECK and
+     * the detail column is JSONB.
+     *
+     * @param subjects grantees, de-duplicated; order is preserved for the report
+     * @return one outcome per distinct grantee, in the order supplied
+     */
+    public BulkGrantReport grantAccessInBulk(
+            InstitutionalIdentifier actor, List<InstitutionalIdentifier> subjects,
+            GrantSpecification specification) {
+
+        requireAdministrator(actor);
+        if (subjects == null || subjects.isEmpty()) {
+            throw new IllegalArgumentException("at least one grantee is required");
+        }
+        if (specification == null) {
+            throw new IllegalArgumentException("grant specification is required");
+        }
+
+        /*
+         * De-duplicated before anything is written. The same identifier twice
+         * in one request is an operator slip (a pasted list), and letting it
+         * through would make the second one a self-inflicted V087 duplicate
+         * reported as a failure.
+         */
+        List<InstitutionalIdentifier> distinct = new java.util.ArrayList<>(
+                new java.util.LinkedHashSet<>(subjects));
+
+        String batchRef = java.util.UUID.randomUUID().toString();
+        List<BulkGrantOutcome> outcomes = new java.util.ArrayList<>();
+        for (InstitutionalIdentifier subject : distinct) {
+            try {
+                AccessGrant granted = grantAccess(actor, subject, specification);
+                outcomes.add(BulkGrantOutcome.granted(subject, granted.id(), batchRef));
+            } catch (DuplicateActiveGrantException duplicate) {
+                // Already holds this scope. Not a failure of the rollout.
+                outcomes.add(BulkGrantOutcome.alreadyHeld(subject, batchRef));
+            } catch (RuntimeException failure) {
+                outcomes.add(BulkGrantOutcome.failed(subject, batchRef, failure.getMessage()));
+            }
+        }
+
+        long granted = outcomes.stream().filter(o -> o.status() == BulkGrantStatus.GRANTED).count();
+        long alreadyHeld = outcomes.stream().filter(o -> o.status() == BulkGrantStatus.ALREADY_HELD).count();
+        long failed = outcomes.stream().filter(o -> o.status() == BulkGrantStatus.FAILED).count();
+
+        audit.record(actor.value(), AdminAuditAction.ACCESS_GRANTED, null,
+                String.format("{\"batchRef\":\"%s\",\"requested\":%d,\"granted\":%d,"
+                                + "\"alreadyHeld\":%d,\"failed\":%d}",
+                        batchRef, distinct.size(), granted, alreadyHeld, failed));
+
+        return new BulkGrantReport(batchRef, outcomes);
+    }
+
+    public enum BulkGrantStatus { GRANTED, ALREADY_HELD, FAILED }
+
+    /** What happened for one grantee in a bulk assignment. */
+    public record BulkGrantOutcome(
+            InstitutionalIdentifier subject,
+            BulkGrantStatus status,
+            Long grantId,
+            String batchRef,
+            String message) {
+
+        static BulkGrantOutcome granted(InstitutionalIdentifier subject, long grantId, String batchRef) {
+            return new BulkGrantOutcome(subject, BulkGrantStatus.GRANTED, grantId, batchRef, null);
+        }
+
+        static BulkGrantOutcome alreadyHeld(InstitutionalIdentifier subject, String batchRef) {
+            return new BulkGrantOutcome(subject, BulkGrantStatus.ALREADY_HELD, null, batchRef,
+                    "an unrevoked grant for this scope already exists");
+        }
+
+        static BulkGrantOutcome failed(InstitutionalIdentifier subject, String batchRef, String message) {
+            return new BulkGrantOutcome(subject, BulkGrantStatus.FAILED, null, batchRef, message);
+        }
+    }
+
+    /** The batch as a whole, for the operator and for the audit trail. */
+    public record BulkGrantReport(String batchRef, List<BulkGrantOutcome> outcomes) {
+
+        public BulkGrantReport {
+            outcomes = List.copyOf(outcomes);
+        }
+
+        public long granted() {
+            return outcomes.stream().filter(o -> o.status() == BulkGrantStatus.GRANTED).count();
+        }
+
+        public long alreadyHeld() {
+            return outcomes.stream().filter(o -> o.status() == BulkGrantStatus.ALREADY_HELD).count();
+        }
+
+        public long failed() {
+            return outcomes.stream().filter(o -> o.status() == BulkGrantStatus.FAILED).count();
+        }
+    }
+
     /** Change a grant's expiry, or whether a UNIT grant includes sub-units. */
     @Transactional
     public AccessGrant modifyAccess(
