@@ -30,7 +30,8 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
 
     private static final String SELECT_COLUMNS = """
             SELECT grant_id, institutional_identifier, grant_type, unit_number,
-                   include_descendants, io_value, valid_from, expires_at, revoked_at
+                   include_descendants, io_value, award_number,
+                   valid_from, expires_at, revoked_at
             FROM authz.access_grant
             """;
 
