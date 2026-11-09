@@ -127,17 +127,49 @@ repository is wired.
    currently mean what a reader would assume it means. Changing it is a
    behaviour change and was deliberately left out of a test-only change.
 
-2. **The privilege sweep proves the role, not the deployment.** It runs against
-   a throwaway container built from committed migrations and the committed role
-   script. Whether **dev RDS** has drifted — a manual `GRANT` applied during an
-   incident, say — is a different question, answerable only by running the same
-   catalog queries against dev RDS read-only. The queries in
-   `ArchiveReadOnlyPrivilegeIntegrationTest` are written to be lifted for that
-   purpose. Not run here: it needs a read-only ECS task or the SSM tunnel, and
-   this change touches no environment.
+2. ~~**The privilege sweep proves the role, not the deployment.**~~
+   **CLOSED 2026-11-09 — verified against live dev RDS.** See the section
+   below.
 
 3. **The ETL role is out of scope.** SEC-009 is about the API being read-only.
    The ETL writes the archive by design; nothing here constrains it.
+
+## Live verification against dev RDS — 2026-11-09
+
+The gap above is closed. The same catalog sweep was lifted out of
+`ArchiveReadOnlyPrivilegeIntegrationTest` and run **read-only** against the
+real dev database, through `scripts/start-db-tunnel.sh` as `archive_analyst`
+(credential read from SSM into an environment variable, never printed; tunnel
+and its ephemeral Fargate task torn down afterwards and confirmed gone).
+
+```
+archive tables inspected                                     115
+archive_api INSERT / UPDATE / DELETE / TRUNCATE privileges     0
+```
+
+**There is no drift.** The committed role script and the deployed reality agree:
+`archive_api` holds no write privilege on any `archive.*` table in dev.
+
+Two other facts recorded by the same session, both relevant to this PR's
+context but not to its assertions:
+
+- **V087 is applied in dev**, verified from `pg_indexes` rather than from the
+  ledger: `ux_access_grant_active_scope` exists on `authz.access_grant` with
+  `WHERE revoked_at IS NULL`, keyed on `(institutional_identifier, grant_type,
+  COALESCE(unit_number,''), COALESCE(io_value,''))`. `include_descendants` is
+  deliberately not in the key. The catalog is the better evidence here anyway:
+  `archive_analyst` cannot read `public.schema_migration` at all (permission
+  denied — the same withholding that applies to `archive_api`), so the ledger
+  was not consulted.
+- **Grant, identity-link and administrator counts remain UNVERIFIED as of
+  2026-11-09.** `archive_analyst` has no `USAGE` on schema `authz`, so this
+  path cannot read them. The last known figures — 1 administrator, 1 identity
+  link, 0 grants — are the 2026-11-03 measurement and were not reconfirmed.
+  Re-measuring needs a path with `authz` access, which was deliberately not
+  taken.
+
+Sanity check that this was dev and not the disposable local copy: 267,386
+`archive.award_version` rows across 40,926 distinct `award_number` values.
 
 ## What this change does not do
 
