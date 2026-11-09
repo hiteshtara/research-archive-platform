@@ -129,6 +129,22 @@ public final class RecordScopeSqlBuilder {
                 familyScoped.add(predicate);
             });
         }
+        /*
+         * SEC-005. The set is already expanded through the hierarchy, bounded
+         * and family-checked, by AccessScopeResolver - the same set the
+         * evaluator tests - so this is a plain IN and the list cannot
+         * disagree with the workspace.
+         *
+         * Family-scoped by nature: award_number is the family key, identical
+         * across every version of an Award, so a PARENT_AWARD grant reaches
+         * all versions of the Awards it names whatever versionScope says.
+         * Wrapping it under FAMILY_WIDE is therefore a no-op rather than a
+         * widening.
+         */
+        if (!scope.parentAwardNumbers().isEmpty()) {
+            params.put("az_parent_awards", List.copyOf(scope.parentAwardNumbers()));
+            familyScoped.add("TRIM({row}.award_number) IN (:az_parent_awards)");
+        }
         List<String> perVersion = new ArrayList<>();
         scope.contactPersonId().ifPresent(person -> {
             params.put("az_person", person.value());

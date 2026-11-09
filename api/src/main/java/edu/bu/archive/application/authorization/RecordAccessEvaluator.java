@@ -71,6 +71,9 @@ public class RecordAccessEvaluator {
             if (ioMatches(scope, version)) {
                 reasons.add(AccessReason.IO_GRANT);
             }
+            if (parentAwardMatches(scope, version)) {
+                reasons.add(AccessReason.PARENT_AWARD);
+            }
         }
         /*
          * SEC-003, decided by the business 2026-11-05: contact-derived access
@@ -112,6 +115,39 @@ public class RecordAccessEvaluator {
             }
         }
         return false;
+    }
+
+    /**
+     * SEC-005. The scope's Award numbers are ALREADY expanded through the
+     * hierarchy by {@link AccessScopeResolver}, bounded and family-checked
+     * there, so this is a set membership test and nothing more. Deliberately
+     * so: a second traversal here could disagree with the one the list SQL
+     * used, and a list and a workspace answering differently about the same
+     * Award is exactly the defect this design avoids.
+     *
+     * <p>Award only, for a record evaluated DIRECTLY. A PARENT_AWARD grant
+     * never matches a Proposal or IRB record at all.
+     *
+     * <p>Subaward and Negotiation are a different question and are not
+     * decided here: their access is INHERITED, resolved by
+     * {@code RecordAuthorizationService} asking whether a funding Award (or
+     * an associated Award/Proposal) is visible. That indirection is
+     * grant-type agnostic by construction - it asks "can this caller see
+     * Award X", and a PARENT_AWARD grant answers yes exactly as a department
+     * grant does. {@code RecordScopeSqlBuilder.subawardRow} reuses the same
+     * Award clause for the same reason, so the list and the workspace agree.
+     *
+     * <p>That inheritance is a CONSEQUENCE of the approved 2026-10-26 rule
+     * ("authorized to view at least ONE of its funding Awards"), not a
+     * separate decision taken here - but it has not been separately approved
+     * for this grant type and is listed as pending sign-off in
+     * docs/security/SEC_005_PARENT_AWARD.md.
+     */
+    private boolean parentAwardMatches(AccessScope scope, RecordFacts version) {
+        return version.module() == RecordModule.AWARD
+                && !scope.parentAwardNumbers().isEmpty()
+                && version.familyKey() != null
+                && scope.parentAwardNumbers().contains(version.familyKey().trim());
     }
 
     private boolean contactMatches(AccessScope scope, RecordFacts version) {

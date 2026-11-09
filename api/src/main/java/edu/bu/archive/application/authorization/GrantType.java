@@ -9,5 +9,12 @@ public enum GrantType {
     /** ID 4: records carrying one authorized IO value (field pending D-A). */
     IO,
     /** ID 3: records on which the person is directly listed in a qualifying role. */
-    CONTACT_DERIVATION
+    CONTACT_DERIVATION,
+
+    /**
+     * SEC-005: reaches one named Award and its hierarchy descendants, bounded
+     * by {@code app.authorization.parent-award-depth} (default 1). The Award
+     * is carried in {@link AccessGrant#awardNumber()}.
+     */
+    PARENT_AWARD
 }

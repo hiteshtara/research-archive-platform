@@ -17,8 +17,22 @@ public record AccessGrant(
         String ioValue,
         Instant validFrom,
         Instant expiresAt,
-        Instant revokedAt
+        Instant revokedAt,
+        /** PARENT_AWARD only (SEC-005): the Award this grant is rooted at. */
+        String awardNumber
 ) {
+
+    /**
+     * The shape every grant type but PARENT_AWARD has. Kept so the existing
+     * call sites - and the stored procedure-free JDBC mapper - do not all
+     * have to pass a null they do not care about.
+     */
+    public AccessGrant(long id, InstitutionalIdentifier grantee, GrantType type, String unitNumber,
+                       boolean includeDescendants, String ioValue, Instant validFrom,
+                       Instant expiresAt, Instant revokedAt) {
+        this(id, grantee, type, unitNumber, includeDescendants, ioValue,
+             validFrom, expiresAt, revokedAt, null);
+    }
 
     public AccessGrant {
         Objects.requireNonNull(grantee, "grantee");
@@ -28,6 +42,17 @@ public record AccessGrant(
         }
         if (type == GrantType.IO && (ioValue == null || ioValue.isBlank())) {
             throw new IllegalArgumentException("IO grant needs an IO value");
+        }
+        if (type == GrantType.PARENT_AWARD && (awardNumber == null || awardNumber.isBlank())) {
+            throw new IllegalArgumentException("PARENT_AWARD grant needs an award number");
+        }
+        if (type != GrantType.PARENT_AWARD && awardNumber != null) {
+            /*
+             * Mirrors ck_access_grant_shape in V088. An Award number on a UNIT
+             * or IO grant would be silently ignored by the resolver, which is
+             * the kind of thing that reads as "the grant does not work".
+             */
+            throw new IllegalArgumentException(type + " grant must not carry an award number");
         }
     }
 

@@ -19,6 +19,8 @@ public record AdminGrantResponse(
         String unitNumber,
         boolean includeDescendants,
         String ioValue,
+        /** PARENT_AWARD only (SEC-005). */
+        String awardNumber,
         Instant validFrom,
         Instant expiresAt,
         Instant revokedAt,
@@ -33,6 +35,7 @@ public record AdminGrantResponse(
                 grant.unitNumber(),
                 grant.includeDescendants(),
                 grant.ioValue(),
+                grant.awardNumber(),
                 grant.validFrom(),
                 grant.expiresAt(),
                 grant.revokedAt(),
@@ -47,6 +50,7 @@ public record AdminGrantResponse(
                     + (grant.includeDescendants() ? " and sub-units" : " only");
             case IO -> "SAP Account " + grant.ioValue();
             case CONTACT_DERIVATION -> "Records where listed in a qualifying role";
+            case PARENT_AWARD -> "Award " + grant.awardNumber() + " and its child Awards";
         };
     }
 
@@ -57,9 +61,13 @@ public record AdminGrantResponse(
      * scope reads as a bug.
      */
     private static String scopeNote(AccessGrant grant) {
-        return grant.type() == edu.bu.archive.application.authorization.GrantType.IO
-                ? "Applies to Awards only; does not reach related Proposals, "
-                        + "Negotiations or Subawards."
-                : null;
+        return switch (grant.type()) {
+            case IO -> "Applies to Awards only; does not reach related Proposals, "
+                    + "Negotiations or Subawards.";
+            case PARENT_AWARD -> "Applies to Awards only, within one Award family, and "
+                    + "only as deep as the configured parent-award depth "
+                    + "(default: this Award and its direct children).";
+            default -> null;
+        };
     }
 }

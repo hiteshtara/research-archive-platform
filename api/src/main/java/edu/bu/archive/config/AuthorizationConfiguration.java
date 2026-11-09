@@ -81,8 +81,15 @@ public class AuthorizationConfiguration {
     @Bean
     AccessScopeResolver accessScopeResolver(AccessGrantRepository grants, AuthorizationProperties properties,
                                             org.springframework.jdbc.core.simple.JdbcClient jdbc) {
+        /*
+         * SEC-005: the real hierarchy, not AwardHierarchy.SELF_ONLY. With the
+         * SELF_ONLY default a PARENT_AWARD grant would quietly reach only the
+         * Award it names and look like a half-working feature, so the wiring
+         * is explicit here rather than left to a default.
+         */
         return new AccessScopeResolver(grants, Clock.systemUTC(), properties::policy,
-                new edu.bu.archive.adapter.out.persistence.authorization.JdbcContactRelationships(jdbc));
+                new edu.bu.archive.adapter.out.persistence.authorization.JdbcContactRelationships(jdbc),
+                new edu.bu.archive.adapter.out.persistence.authorization.JdbcAwardHierarchy(jdbc));
     }
 
     @Bean

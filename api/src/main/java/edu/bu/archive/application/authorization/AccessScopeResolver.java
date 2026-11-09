@@ -15,6 +15,7 @@ public class AccessScopeResolver {
     private final Clock clock;
     private final Supplier<Optional<AuthorizationPolicy>> policy;
     private final ContactRelationships contacts;
+    private final AwardHierarchy awardHierarchy;
 
     /** Contact access only through an explicit CONTACT_DERIVATION grant. */
     public AccessScopeResolver(AccessGrantRepository grants, Clock clock) {
@@ -23,10 +24,17 @@ public class AccessScopeResolver {
 
     public AccessScopeResolver(AccessGrantRepository grants, Clock clock,
                                Supplier<Optional<AuthorizationPolicy>> policy, ContactRelationships contacts) {
+        this(grants, clock, policy, contacts, AwardHierarchy.SELF_ONLY);
+    }
+
+    public AccessScopeResolver(AccessGrantRepository grants, Clock clock,
+                               Supplier<Optional<AuthorizationPolicy>> policy, ContactRelationships contacts,
+                               AwardHierarchy awardHierarchy) {
         this.grants = Objects.requireNonNull(grants);
         this.clock = Objects.requireNonNull(clock);
         this.policy = Objects.requireNonNull(policy);
         this.contacts = Objects.requireNonNull(contacts);
+        this.awardHierarchy = Objects.requireNonNull(awardHierarchy);
     }
 
     public AccessOutcome resolve(IdentityResolution resolution) {
@@ -54,12 +62,14 @@ public class AccessScopeResolver {
         Set<UnitGrant> units = new HashSet<>();
         Set<String> ios = new HashSet<>();
         boolean contactDerivation = false;
+        Set<String> grantedParentAwards = new HashSet<>();
         for (AccessGrant grant : active) {
             switch (grant.type()) {
                 case CENTRAL -> central = true;
                 case UNIT -> units.add(new UnitGrant(grant.unitNumber(), grant.includeDescendants()));
                 case IO -> ios.add(grant.ioValue());
                 case CONTACT_DERIVATION -> contactDerivation = true;
+                case PARENT_AWARD -> grantedParentAwards.add(grant.awardNumber());
             }
         }
         // Contact-derived access needs a Kuali employee PERSON_ID (a verified KIM
@@ -74,7 +84,23 @@ public class AccessScopeResolver {
         Optional<KualiPersonId> contactPerson =
                 contactDerivation ? mapped.kualiPersonId() : Optional.empty();
 
-        var scope = new AccessScope(central, units, contactPerson, ios);
+        /*
+         * SEC-005. Expanded HERE, once, rather than per record: the evaluator
+         * and RecordScopeSqlBuilder must agree about which Awards a grant
+         * reaches, and a WITH RECURSIVE cannot be rendered into a WHERE
+         * fragment anyway. The depth comes from the policy; with no policy
+         * configured the grant still reaches the Award it names.
+         */
+        Set<String> parentAwards = new HashSet<>();
+        if (!grantedParentAwards.isEmpty()) {
+            int depth = configured.map(AuthorizationPolicy::parentAwardDepth)
+                    .orElse(AuthorizationPolicy.DEFAULT_PARENT_AWARD_DEPTH);
+            for (String granted : grantedParentAwards) {
+                parentAwards.addAll(awardHierarchy.descendantsWithin(granted, depth));
+            }
+        }
+
+        var scope = new AccessScope(central, units, contactPerson, ios, parentAwards);
         return scope.isEmpty()
                 ? new AccessOutcome.NotProvisioned(AccessOutcome.NotProvisionedReason.NO_ACTIVE_GRANTS)
                 : new AccessOutcome.Scoped(scope);

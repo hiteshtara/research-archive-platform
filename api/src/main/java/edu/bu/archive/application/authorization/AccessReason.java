@@ -5,5 +5,7 @@ public enum AccessReason {
     CENTRAL,
     DEPARTMENT,
     RESEARCH_STAFF_CONTACT,
-    IO_GRANT
+    IO_GRANT,
+    /** SEC-005: a PARENT_AWARD grant reached this Award. */
+    PARENT_AWARD
 }
