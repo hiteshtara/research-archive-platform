@@ -91,15 +91,39 @@ public class ActivityAuditor {
     private final ActivityAuditPort port;
     private final FailurePolicy sensitiveReleasePolicy;
     private final FailurePolicy routineReadPolicy;
+    private final AuditGapMetrics metrics;
 
     public ActivityAuditor(ActivityAuditPort port,
                            FailurePolicy sensitiveReleasePolicy,
                            FailurePolicy routineReadPolicy) {
+        this(port, sensitiveReleasePolicy, routineReadPolicy, AuditGapMetrics.NONE);
+    }
+
+    public ActivityAuditor(ActivityAuditPort port,
+                           FailurePolicy sensitiveReleasePolicy,
+                           FailurePolicy routineReadPolicy,
+                           AuditGapMetrics metrics) {
         this.port = Objects.requireNonNull(port, "port");
         this.sensitiveReleasePolicy =
                 Objects.requireNonNull(sensitiveReleasePolicy, "sensitiveReleasePolicy");
         this.routineReadPolicy =
                 Objects.requireNonNull(routineReadPolicy, "routineReadPolicy");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+    }
+
+    /**
+     * Counts audit writes that were lost.
+     *
+     * <p>FAIL_OPEN trades audit completeness for availability, and the trade
+     * is only acceptable if the loss is VISIBLE. A log line alone is not
+     * monitoring: nobody alerts on one. This is the number an alert can be
+     * built on.
+     */
+    @FunctionalInterface
+    public interface AuditGapMetrics {
+        void auditGap(ActivityAuditEvent.ActivityAction action, String disposition);
+
+        AuditGapMetrics NONE = (action, disposition) -> { };
     }
 
     /** Collection off, and therefore no policy to apply. */
@@ -140,9 +164,18 @@ public class ActivityAuditor {
             port.append(event);
         } catch (RuntimeException failure) {
             if (policy == FailurePolicy.FAIL_CLOSED) {
-                log.error("activity audit write failed; refusing the read (FAIL_CLOSED)", failure);
+                /*
+                 * No row was written and nothing is released, so there is no
+                 * audit GAP - the access did not happen. Counted separately
+                 * so a refusal is not mistaken for a lost record.
+                 */
+                metrics.auditGap(event.action(), "refused");
+                log.error("activity audit write failed; refusing the read (FAIL_CLOSED). "
+                        + "action={} resourceType={} correlationId={}",
+                        event.action(), event.resourceType(), event.correlationId(), failure);
                 throw new AuditUnavailableException(failure);
             }
+            metrics.auditGap(event.action(), "served_unrecorded");
             /*
              * FAIL_OPEN. The read proceeds and the loss is recorded where it
              * can still be noticed. Logged at ERROR deliberately: an audit
@@ -169,6 +202,7 @@ public class ActivityAuditor {
         try {
             port.append(event);
         } catch (RuntimeException failure) {
+            metrics.auditGap(event.action(), "denial_unrecorded");
             log.error("activity audit write failed for a DENIED access; the denial stands. "
                     + "action={} resourceType={} correlationId={}",
                     event.action(), event.resourceType(), event.correlationId(), failure);

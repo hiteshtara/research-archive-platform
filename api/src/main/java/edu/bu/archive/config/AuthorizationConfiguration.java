@@ -54,6 +54,91 @@ import edu.bu.archive.application.authorization.RecordFactsRepository;
 @EnableConfigurationProperties(AuthorizationProperties.class)
 public class AuthorizationConfiguration {
 
+    /**
+     * SEC-008 activity auditing.
+     *
+     * <p>Three independent gates keep this inert: the V089 table must exist,
+     * {@code archive_api} must hold INSERT on it, and
+     * {@code app.authorization.activity-audit.enabled} must be true. None of
+     * the three is satisfied in any deployed environment, so this bean
+     * resolves to a disabled recorder and every call site is a no-op.
+     *
+     * <p>Wired as a bean even while disabled so the call sites compile,
+     * run and are tested in exactly the shape they will have when it is
+     * switched on - rather than being added hurriedly on the day it is.
+     */
+    @Bean
+    edu.bu.archive.application.authorization.audit.ActivityAuditProperties activityAuditProperties(
+            org.springframework.core.env.Environment environment) {
+        var properties =
+                new edu.bu.archive.application.authorization.audit.ActivityAuditProperties();
+        properties.setEnabled(environment.getProperty(
+                "app.authorization.activity-audit.enabled", Boolean.class, false));
+        String routine = environment.getProperty(
+                "app.authorization.activity-audit.routine-read-failure-policy");
+        if (routine != null && !routine.isBlank()) {
+            properties.setRoutineReadFailurePolicy(
+                    edu.bu.archive.application.authorization.audit.ActivityAuditor.FailurePolicy
+                            .valueOf(routine.trim().toUpperCase()));
+        }
+        String sensitive = environment.getProperty(
+                "app.authorization.activity-audit.sensitive-release-failure-policy");
+        if (sensitive != null && !sensitive.isBlank()) {
+            properties.setSensitiveReleaseFailurePolicy(
+                    edu.bu.archive.application.authorization.audit.ActivityAuditor.FailurePolicy
+                            .valueOf(sensitive.trim().toUpperCase()));
+        }
+        properties.setRetentionDays(environment.getProperty(
+                "app.authorization.activity-audit.retention-days", Integer.class,
+                edu.bu.archive.application.authorization.audit.ActivityAuditProperties
+                        .PROPOSED_RETENTION_DAYS));
+        properties.validate();
+        return properties;
+    }
+
+    @Bean
+    edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder archiveActivityRecorder(
+            edu.bu.archive.application.authorization.audit.ActivityAuditProperties properties,
+            org.springframework.beans.factory.ObjectProvider<
+                    org.springframework.jdbc.core.simple.JdbcClient> jdbc,
+            org.springframework.beans.factory.ObjectProvider<
+                    com.fasterxml.jackson.databind.ObjectMapper> json,
+            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry>
+                    meterRegistry,
+            AuthorizationProperties authorization) {
+
+        /*
+         * Resolved BEFORE the datasource is touched. With collection off -
+         * which is every deployed environment - this bean must not require a
+         * JdbcClient at all, or it would drag a datasource into contexts that
+         * deliberately have none.
+         */
+        if (!properties.isEnabled()) {
+            return edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder
+                    .disabled(Clock.systemUTC());
+        }
+
+        var registry = meterRegistry.getIfAvailable();
+        edu.bu.archive.application.authorization.audit.ActivityAuditor.AuditGapMetrics metrics =
+                registry == null
+                        ? edu.bu.archive.application.authorization.audit.ActivityAuditor
+                                .AuditGapMetrics.NONE
+                        : (action, disposition) -> registry.counter("archive.audit.gap",
+                                "action", action.name(), "disposition", disposition).increment();
+
+        var auditor = new edu.bu.archive.application.authorization.audit.ActivityAuditor(
+                new edu.bu.archive.adapter.out.persistence.authorization.JdbcActivityAuditPort(
+                        jdbc.getObject(), json.getObject()),
+                properties.getSensitiveReleaseFailurePolicy(),
+                properties.getRoutineReadFailurePolicy(),
+                metrics);
+
+        return new edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder(
+                auditor, Clock.systemUTC(),
+                () -> java.util.Optional.empty(),
+                () -> null);
+    }
+
     @Bean
     @ConditionalOnMissingBean
     CurrentIdentityProvider currentIdentityProvider() {

@@ -29,12 +29,21 @@ public class ActivityAuditProperties {
             ActivityAuditor.FailurePolicy.FAIL_CLOSED;
 
     /**
-     * Record views and searches. <strong>No default.</strong> The
-     * availability-versus-audit-completeness tradeoff for ordinary reads is a
-     * business decision, and enabling collection without making it is a
-     * startup failure.
+     * Record views and searches.
+     *
+     * <p>{@code FAIL_OPEN} as a <strong>proposed release policy</strong>
+     * (engineering direction 2026-11-09): a routine read keeps working when
+     * the audit store hiccups, and the gap is reported through structured
+     * logging and the {@code archive.audit.gap} counter rather than silently
+     * absorbed. This is NOT final BU security-policy approval, and it is
+     * overridable per environment.
+     *
+     * <p>Explicitly setting it to null with collection enabled is still a
+     * startup failure - the tradeoff must be a choice, even when a default
+     * exists.
      */
-    private ActivityAuditor.FailurePolicy routineReadFailurePolicy;
+    private ActivityAuditor.FailurePolicy routineReadFailurePolicy =
+            ActivityAuditor.FailurePolicy.FAIL_OPEN;
 
     private int retentionDays = PROPOSED_RETENTION_DAYS;
 

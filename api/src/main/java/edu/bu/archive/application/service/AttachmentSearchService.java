@@ -32,6 +32,9 @@ import java.util.List;
 @Service
 public class AttachmentSearchService {
 
+    /** SEC-008; disabled unless activity auditing is switched on. */
+    private final edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity;
+
     private static final String RECORD_TYPE_ALL = "ALL";
     private static final String RECORD_TYPE_AWARD = "AWARD";
     private static final String RECORD_TYPE_PROPOSAL = "PROPOSAL";
@@ -46,6 +49,7 @@ public class AttachmentSearchService {
     private final edu.bu.archive.application.authorization.AwardRecordAccess recordAccess;
     private final AttachmentSearchRepository repository;
 
+    /** Collection off: what every existing caller and test gets. */
     public AttachmentSearchService(
             AwardArchiveService awardArchiveService,
             AttachmentSearchRepository repository
@@ -56,6 +60,24 @@ public class AttachmentSearchService {
                     edu.bu.archive.application.authorization.AuthorizationProperties>
                     authorizationProperties
     ) {
+        this(awardArchiveService, repository, recordAccessProvider, authorizationProperties,
+             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AttachmentSearchService(
+            AwardArchiveService awardArchiveService,
+            AttachmentSearchRepository repository
+    ,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AwardRecordAccess> recordAccessProvider,
+            org.springframework.beans.factory.ObjectProvider<
+                    edu.bu.archive.application.authorization.AuthorizationProperties>
+                    authorizationProperties
+    ,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity) {
+        this.activity = activity;
+
         edu.bu.archive.application.authorization.AwardRecordAccess resolvedAccess =
                 recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable();
         this.recordAccess = resolvedAccess != null
@@ -67,7 +89,31 @@ public class AttachmentSearchService {
         this.repository = repository;
     }
 
+    /**
+     * SEC-008: the search is recorded once, around every record-type
+     * branch, so a new branch cannot be added without being audited. The
+     * query is not passed - the recorder has no parameter for it.
+     */
     public PageResponse<AttachmentSearchResultResponse> searchAttachments(
+            String recordType,
+            String recordNumber,
+            String awardNumberAlias,
+            String documentNumber,
+            String recordId,
+            String awardIdAlias,
+            String attachmentId,
+            String fileId,
+            String versionFilter,
+            int page,
+            int size
+    ) {
+        PageResponse<AttachmentSearchResultResponse> result = findAttachments(recordType, recordNumber, awardNumberAlias, documentNumber, recordId, awardIdAlias, attachmentId, fileId, versionFilter, page, size);
+        activity.searchPerformed("ATTACHMENT",
+                (int) Math.min(result.totalElements(), Integer.MAX_VALUE));
+        return result;
+    }
+
+    private PageResponse<AttachmentSearchResultResponse> findAttachments(
             String recordType,
             String recordNumber,
             String awardNumberAlias,

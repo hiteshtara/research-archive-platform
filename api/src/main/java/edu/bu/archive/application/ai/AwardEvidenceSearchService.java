@@ -45,6 +45,9 @@ import java.util.UUID;
 )
 public class AwardEvidenceSearchService {
 
+    /** SEC-008; disabled unless activity auditing is switched on. */
+    private final edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity;
+
     // Mirrors etl/build_evidence_embedding.py's own
     // APPROVED_DOCUMENT_TYPES tuple exactly - AWARD_SUMMARY (owned by
     // build_search_embedding.py) and AWARD_ATTACHMENT (attachment
@@ -89,6 +92,7 @@ public class AwardEvidenceSearchService {
     private final SensitiveFieldRedactor redactor;
     private final SemanticSearchProperties properties;
 
+    /** Collection off: what every existing caller and test gets. */
     public AwardEvidenceSearchService(
             AwardArchiveService awardArchiveService,
             AwardEvidenceRetrievalRepository repository,
@@ -96,6 +100,21 @@ public class AwardEvidenceSearchService {
             SensitiveFieldRedactor redactor,
             SemanticSearchProperties properties
     ) {
+        this(awardArchiveService, repository, embeddingProvider, redactor, properties,
+             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AwardEvidenceSearchService(
+            AwardArchiveService awardArchiveService,
+            AwardEvidenceRetrievalRepository repository,
+            EmbeddingProvider embeddingProvider,
+            SensitiveFieldRedactor redactor,
+            SemanticSearchProperties properties
+    ,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity) {
+        this.activity = activity;
+
         this.awardArchiveService = awardArchiveService;
         this.repository = repository;
         this.embeddingProvider = embeddingProvider;
@@ -140,6 +159,8 @@ public class AwardEvidenceSearchService {
             List<AwardEvidenceResultResponse> results = rows.stream()
                     .map(this::toResult)
                     .toList();
+
+            activity.searchPerformed("AWARD_EVIDENCE", results.size());
 
             return new AwardEvidenceSearchResponse(
                     query,

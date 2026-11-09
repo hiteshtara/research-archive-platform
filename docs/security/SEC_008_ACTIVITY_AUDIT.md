@@ -7,8 +7,17 @@ existing in any environment, and each is approved separately:
 1. the migration (`V089`) must be applied — **not done anywhere**;
 2. `GRANT INSERT ON authz.activity_audit TO archive_api` must be added to the
    role script — **deliberately not in the migration**;
-3. `app.authorization.activity-audit.enabled` must be set — **off**, and
-   setting it without also choosing a failure policy is a startup failure.
+3. `app.authorization.activity-audit.enabled` must be set — **off**.
+
+The privilege is `database/roles/archive_api_activity_audit_grant.sql`:
+`GRANT INSERT`, plus an **explicit `REVOKE SELECT`**. That revoke is not
+redundant — `archive_api_role.sql` grants `SELECT ON ALL TABLES IN SCHEMA
+authz`, so running the role script after V089 silently hands the API read
+access to the audit. Verified: without the revoke,
+`has_table_privilege(…,'SELECT')` is TRUE. Re-running the role script
+re-grants it, so the audit grant must be re-applied afterwards;
+`ActivityAuditGrantIntegrationTest` applies them in that order and asserts
+SELECT is absent.
 
 ## 1. Why a new table, not `authz.access_audit`
 
@@ -135,9 +144,23 @@ throw, because it never chooses the path.
 |---|---|---|
 | `RECORD_VIEWED` | `RecordAuthorizationService.requireVersion` | **wired** |
 | `RECORD_ACCESS_DENIED` | the same place, on the refusal branch | **wired** |
-| `ATTACHMENT_DOWNLOADED` | recorder API ready | **not yet wired** |
-| `EXPORT_GENERATED` | recorder API ready | **not yet wired** |
-| `SEARCH_PERFORMED` | recorder API ready | **not yet wired** |
+| `ATTACHMENT_DOWNLOADED` | `AttachmentAuthorizationService.requireAttachmentDownload`, called by the Award, Proposal, Subaward and Negotiation download endpoints | **wired** |
+| `EXPORT_GENERATED` | `AwardV1Controller.report` and `reportWithAttachments`, via `recordExport` | **wired** |
+| `SEARCH_PERFORMED` | `GlobalSearchService`, `DocumentSearchService`, `AttachmentSearchService`, `AwardEvidenceSearchService` | **wired** |
+
+### Ordering: the audit comes before the file
+
+For downloads and exports the recorder is called **before** the attachment is
+resolved and before the response body exists. Under the FAIL_CLOSED tier a
+failed audit write therefore throws out of the gate and **no byte is
+released** - which is the requirement, and the reason downloads have their own
+method rather than a flag on the listing gate. A listing must not be recorded
+as a download, and a download must not be served on a listing's weaker
+guarantee.
+
+`AttachmentSearchService.searchAttachments` wraps its three record-type
+branches so the search is recorded once, around all of them - a new branch
+cannot be added without being audited.
 
 Record view and denial are raised at the one point every record decision
 passes through, so a new endpoint is audited by construction rather than by
@@ -156,10 +179,9 @@ nothing until collection is switched on.
 
 ## 6. What is NOT built yet
 
-- **Three call sites remain unwired** — attachments, exports and searches. The
-  recorder API and its tests are complete; the remaining work is calling it
-  from those services.
 - **No retention job.** Operational, and it needs the retention period decided.
+  The process is documented in
+  [`docs/runbooks/ACTIVITY_AUDIT_PARTITIONS.md`](../runbooks/ACTIVITY_AUDIT_PARTITIONS.md).
 - **No read side.** Nobody can query activity yet; who may read an audit of who
   read what is its own access-control question.
 

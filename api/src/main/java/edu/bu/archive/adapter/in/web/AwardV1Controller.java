@@ -851,7 +851,9 @@ public class AwardV1Controller {
 
             Authentication authentication
     ) {
-        attachmentAuthorizationService.requireAttachmentAccess(authentication);
+        // SEC-008: audited before the attachment is resolved or streamed.
+        attachmentAuthorizationService.requireAttachmentDownload(
+                authentication, "AWARD", String.valueOf(awardId));
         AwardAttachmentDownload download =
                 service.downloadAttachment(awardId, attachmentId);
 
@@ -905,6 +907,10 @@ public class AwardV1Controller {
     ) {
         edu.bu.archive.application.award.report.AwardReportData data =
                 reportService.buildReportData(awardId);
+        // SEC-008: audited before the response body is produced. An export is
+        // a file leaving the system, so this is the FAIL_CLOSED tier.
+        attachmentAuthorizationService.recordExport(
+                "AWARD", data.summary().awardNumber());
 
         StreamingResponseBody body = output -> {
             try {
@@ -977,6 +983,11 @@ public class AwardV1Controller {
 
         edu.bu.archive.application.award.report.AwardReportData data =
                 reportService.buildReportData(awardId);
+        // SEC-008: audited before any attachment metadata is loaded and
+        // before the response body exists. FAIL_CLOSED tier - this export
+        // embeds attachment files.
+        attachmentAuthorizationService.recordExport(
+                "AWARD", data.summary().awardNumber());
         java.util.List<edu.bu.archive.application.award.report.AwardReportAttachment>
                 attachments = reportService.findReportAttachments(awardId);
 
