@@ -41,7 +41,33 @@ Prepared 2026-11-09 against integration branch
 | Purpose | `PARENT_AWARD` grant type, `award_number`, V087 index rebuild | `authz.activity_audit`, partitions, append-only trigger |
 | Required for this release? | **Yes** — the code reads `award_number` | **No** — defer until SEC-008 is approved |
 | Applied anywhere? | **No** | **No** |
+| In the release artifact? | **Yes**, `database/migrations/` | **No** — held in `database/migrations-pending-approval/` |
 | Rehearsed? | Yes, on top of V082–V087 **with existing grant rows** | Yes, both with and without V088 |
+
+### Why V089 is not merely "deferred" but physically separated
+
+The ETL migration runner has **no target-version parameter**. It globs
+`database/migrations/` and applies **every** version not already recorded in
+`public.schema_migration`:
+
+- `--migrate-only` applies all of them, not a chosen one;
+- `load_subawards_from_csv.py` — the **nightly Subaward sync at 02:00 ET** —
+  calls `apply_migrations` unconditionally on every run, as does every other
+  loader.
+
+So a file left in `database/migrations/` is not a proposal: it is an
+instruction to apply it the next time any loader runs from an image containing
+it, including a scheduled one. There is no "apply V088 but not V089" in that
+design.
+
+V089 therefore lives in `database/migrations-pending-approval/`, outside that
+glob. `MigrationReleaseScopeTest` fails the build if any version above V088
+reappears in the applied directory, so the separation is enforced rather than
+remembered.
+
+Spring does not apply migrations either: `spring.flyway.enabled: false` in
+`application.yml`, and no profile overrides it. CI applies migrations only to
+throwaway Testcontainers databases.
 
 **The V088 ordering trap.** The ETL loader applies migrations, and its image
 must be a descendant of the migration-adding commit. Check before running:

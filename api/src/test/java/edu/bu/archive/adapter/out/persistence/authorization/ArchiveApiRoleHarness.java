@@ -123,6 +123,44 @@ final class ArchiveApiRoleHarness {
         return m.matches() ? Integer.parseInt(m.group(1)) : Integer.MAX_VALUE;
     }
 
+    /**
+     * Applies the migrations held back from the release in
+     * {@code database/migrations-pending-approval/}.
+     *
+     * <p>Those files are deliberately outside the directory the ETL runner
+     * globs, because that runner applies EVERY pending version it finds and
+     * has no target-version parameter - so a file in
+     * {@code database/migrations/} is an instruction to apply it on the next
+     * loader run, including the nightly sync. Tests that need the schema ask
+     * for it explicitly here; nothing else can reach it.
+     *
+     * @return how many held-back migrations were applied
+     */
+    static int applyPendingApproval(Connection owner) throws Exception {
+        Path directory = locatePendingApprovalDirectory();
+        if (!Files.isDirectory(directory)) {
+            return 0;
+        }
+        List<Path> pending;
+        try (Stream<Path> files = Files.list(directory)) {
+            pending = files
+                    .filter(p -> MIGRATION_VERSION.matcher(p.getFileName().toString()).matches())
+                    .sorted(Comparator.comparingInt(ArchiveApiRoleHarness::migrationVersion))
+                    .toList();
+        }
+        try (Statement s = owner.createStatement()) {
+            for (Path migration : pending) {
+                s.execute(Files.readString(migration));
+            }
+        }
+        return pending.size();
+    }
+
+    static Path locatePendingApprovalDirectory() {
+        Path c = Path.of("database", "migrations-pending-approval");
+        return Files.isDirectory(c) ? c : Path.of("..", "database", "migrations-pending-approval");
+    }
+
     /** Resolves whether the suite runs from the repository root or from {@code api/}. */
     static Path locateMigrationsDirectory() {
         Path c = Path.of("database", "migrations");

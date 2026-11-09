@@ -76,6 +76,22 @@ class ActivityAuditSchemaIntegrationTest {
             for (Path migration : migrations) {
                 statement.execute(Files.readString(migration));
             }
+            /*
+             * V089 is held back from the release and lives outside the
+             * directory the ETL runner globs, so it has to be applied
+             * explicitly. See database/migrations-pending-approval/README.md.
+             */
+            Path pending = Files.isDirectory(Path.of("database", "migrations-pending-approval"))
+                    ? Path.of("database", "migrations-pending-approval")
+                    : Path.of("..", "database", "migrations-pending-approval");
+            try (Stream<Path> held = Files.list(pending)) {
+                for (Path migration : held
+                        .filter(p -> MIGRATION_VERSION.matcher(p.getFileName().toString()).matches())
+                        .sorted(Comparator.comparingInt(ActivityAuditSchemaIntegrationTest::version))
+                        .toList()) {
+                    statement.execute(Files.readString(migration));
+                }
+            }
         }
         port = new JdbcActivityAuditPort(jdbc, new ObjectMapper());
     }

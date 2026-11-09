@@ -55,6 +55,18 @@ class ActivityAuditGrantIntegrationTest {
         owner = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
         ArchiveApiRoleHarness.provision(owner, postgres);
+        /*
+         * V089 is held back from the release (see
+         * database/migrations-pending-approval/README.md). The audit schema
+         * is applied explicitly here so this suite still proves the grant,
+         * while no automated process can apply the migration itself.
+         */
+        ArchiveApiRoleHarness.applyPendingApproval(owner);
+        // The role script ran before the audit table existed, so re-run it:
+        // that is the order this suite exists to prove is safe.
+        try (Statement s = owner.createStatement()) {
+            s.execute(ArchiveApiRoleHarness.roleScriptFor(postgres));
+        }
 
         try (Statement s = owner.createStatement()) {
             s.execute(Files.readString(locateGrantScript()));

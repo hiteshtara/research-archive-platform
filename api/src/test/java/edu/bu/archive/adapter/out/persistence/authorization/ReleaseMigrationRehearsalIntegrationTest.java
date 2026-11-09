@@ -92,8 +92,16 @@ class ReleaseMigrationRehearsalIntegrationTest {
         }
     }
 
+    /**
+     * Applies one migration by version, from the release directory or - for a
+     * version held back from the release - from
+     * {@code database/migrations-pending-approval/}.
+     *
+     * <p>The rehearsal still exercises V089 so its schema and rollback stay
+     * proved, while the release artifact itself cannot apply it.
+     */
     private void apply(int version) throws Exception {
-        Path migration = migrations().stream()
+        Path migration = Stream.concat(migrations().stream(), pendingApproval().stream())
                 .filter(m -> version(m) == version)
                 .findFirst()
                 .orElseThrow();
@@ -367,6 +375,20 @@ class ReleaseMigrationRehearsalIntegrationTest {
             return files
                     .filter(p -> MIGRATION_VERSION.matcher(p.getFileName().toString()).matches())
                     .sorted(Comparator.comparingInt(ReleaseMigrationRehearsalIntegrationTest::version))
+                    .toList();
+        }
+    }
+
+    private static List<Path> pendingApproval() throws Exception {
+        Path dir = Files.isDirectory(Path.of("database", "migrations-pending-approval"))
+                ? Path.of("database", "migrations-pending-approval")
+                : Path.of("..", "database", "migrations-pending-approval");
+        if (!Files.isDirectory(dir)) {
+            return List.of();
+        }
+        try (Stream<Path> files = Files.list(dir)) {
+            return files
+                    .filter(p -> MIGRATION_VERSION.matcher(p.getFileName().toString()).matches())
                     .toList();
         }
     }
