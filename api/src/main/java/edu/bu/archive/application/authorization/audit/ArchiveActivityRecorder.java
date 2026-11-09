@@ -78,20 +78,50 @@ public class ArchiveActivityRecorder {
     }
 
     /**
-     * An attachment was released to the caller.
+     * Marks what a release event actually means.
      *
-     * <p>FAIL_CLOSED by default: a file left the system, and a release with no
-     * record of it is the case the audit exists for.
+     * <p><strong>A known and deliberate limitation.</strong> These rows record
+     * that the system AUTHORISED a file for release and committed the audit
+     * before any byte left - not that the caller successfully received it. A
+     * client that disconnects mid-stream, or an S3 read that fails after the
+     * headers are sent, still leaves this row behind.
+     *
+     * <p>It is deliberate because the alternative is worse. FAIL_CLOSED means
+     * "do not release the file unless the audit is written", which forces the
+     * write to happen BEFORE the stream starts. An event recorded after the
+     * stream completed could not refuse anything - by then the bytes are
+     * already with the caller - so it would be a weaker guarantee wearing a
+     * stronger name.
+     *
+     * <p>The value is written into every release row so the limitation is
+     * visible in the DATA, not only in a document someone has to find.
+     */
+    static final String RELEASE_PHASE = "release_authorized";
+
+    /**
+     * An attachment was authorised for release to the caller.
+     *
+     * <p>FAIL_CLOSED by default: a file leaving the system with no record of
+     * it is the case the audit exists for. Called BEFORE the attachment is
+     * resolved or streamed, so a failed audit write refuses the release.
+     *
+     * <p>See {@link #RELEASE_PHASE} for what this row does and does not prove.
      */
     public void attachmentDownloaded(String resourceType, String resourceKey, String reason) {
         auditor.recordPermitted(event(ActivityAction.ATTACHMENT_DOWNLOADED, resourceType,
-                resourceKey, ActivityOutcome.PERMITTED, reason));
+                resourceKey, ActivityOutcome.PERMITTED, reason)
+                .withDetail("phase", RELEASE_PHASE));
     }
 
-    /** An export (a report, a consolidated PDF) was generated. FAIL_CLOSED by default. */
+    /**
+     * An export (a report, a consolidated PDF) was authorised for release.
+     * FAIL_CLOSED by default; same phase caveat as
+     * {@link #attachmentDownloaded}.
+     */
     public void exportGenerated(String resourceType, String resourceKey, String reason) {
         auditor.recordPermitted(event(ActivityAction.EXPORT_GENERATED, resourceType,
-                resourceKey, ActivityOutcome.PERMITTED, reason));
+                resourceKey, ActivityOutcome.PERMITTED, reason)
+                .withDetail("phase", RELEASE_PHASE));
     }
 
     /**

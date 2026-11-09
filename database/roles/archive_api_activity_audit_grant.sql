@@ -45,24 +45,51 @@ GRANT INSERT ON authz.activity_audit TO archive_api;
 
 -- And an explicit REVOKE of SELECT, which is NOT redundant.
 --
--- archive_api_role.sql contains:
---     GRANT SELECT ON ALL TABLES IN SCHEMA authz TO archive_api;
---
--- That is a one-shot grant over the tables existing when it runs - so if the
--- role script is run AFTER V089, archive_api silently acquires read access to
--- the activity audit. Verified: without this revoke,
--- has_table_privilege('archive_api','authz.activity_audit','SELECT') is TRUE.
+-- archive_api_role.sql grants SELECT ON ALL TABLES IN SCHEMA authz. Running it
+-- after V089 hands archive_api read access to the audit AND to every partition
+-- of it. The role script now revokes that itself on every run, so the two
+-- scripts are order-independent - this block repeats it so that applying the
+-- grant alone is also sufficient.
 --
 -- The API writes the audit; it does not read it. Who may read an audit of who
--- read what is a separate access-control question, and inheriting SELECT from
--- a blanket grant would answer it by accident.
+-- read what is a separate access-control question.
+-- The blanket GRANT SELECT above is a one-shot over the tables that exist when
+-- it runs. If V089 has already been applied, it hands archive_api read access
+-- to the activity audit - and to every PARTITION of it, because partitions are
+-- separate relations with their own ACLs and "ALL TABLES IN SCHEMA" includes
+-- them. Measured: without this block, all four partitions were readable.
 --
--- OPERATIONAL CONSEQUENCE, and it is easy to get wrong: re-running
--- archive_api_role.sql after this script RE-GRANTS the SELECT. This script
--- must be re-applied after any run of the role script. The integration test
--- ActivityAuditGrantIntegrationTest applies them in that order and asserts
--- SELECT is absent, so the ordering is checked rather than remembered.
-REVOKE SELECT ON authz.activity_audit FROM archive_api;
+-- So the revoke is part of the role script itself rather than a follow-up,
+-- and it walks the partitions. Idempotent: revoking a privilege that is not
+-- held is a no-op, and the guard makes it safe before V089 exists.
+--
+DO $$
+DECLARE
+    target record;
+BEGIN
+    IF to_regclass('authz.activity_audit') IS NULL THEN
+        RAISE NOTICE 'authz.activity_audit absent (V089 not applied) - '
+                     'nothing to revoke; archive_api gets no read access when '
+                     'it is later created, because this script revokes on '
+                     'every run';
+        RETURN;
+    END IF;
+
+    FOR target IN
+        SELECT c.oid::regclass AS relation
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'authz'
+           AND (c.oid = 'authz.activity_audit'::regclass
+                OR c.oid IN (SELECT inhrelid
+                               FROM pg_inherits
+                              WHERE inhparent = 'authz.activity_audit'::regclass))
+    LOOP
+        EXECUTE format('REVOKE SELECT ON %s FROM archive_api', target.relation);
+    END LOOP;
+END
+$$;
+
 
 -- The sequence behind activity_id. An INSERT into a BIGSERIAL column needs
 -- USAGE on its sequence; without this the failure appears only at the first

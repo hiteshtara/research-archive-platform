@@ -148,6 +148,19 @@ throw, because it never chooses the path.
 | `EXPORT_GENERATED` | `AwardV1Controller.report` and `reportWithAttachments`, via `recordExport` | **wired** |
 | `SEARCH_PERFORMED` | `GlobalSearchService`, `DocumentSearchService`, `AttachmentSearchService`, `AwardEvidenceSearchService` | **wired** |
 
+### A known limitation: decision, not delivery
+
+Release rows record that the system **authorised a file for release** and
+committed the audit before any byte left — **not** that the caller received it.
+A client that disconnects mid-stream still leaves the row behind.
+
+This is deliberate. FAIL_CLOSED means "do not release unless the audit is
+written", which forces the write to happen *before* the stream starts. An event
+recorded after the stream completed could refuse nothing, so it would be a
+weaker guarantee wearing a stronger name. Every release row carries
+`detail.phase = "release_authorized"` so the limitation is visible in the data
+rather than only here.
+
 ### Ordering: the audit comes before the file
 
 For downloads and exports the recorder is called **before** the attachment is

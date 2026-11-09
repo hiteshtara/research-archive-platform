@@ -138,6 +138,30 @@ class ArchiveActivityRecorderTest {
     }
 
     @Test
+    @DisplayName("release events say they record the decision, not the delivery")
+    void releaseEventsCarryTheirPhase() {
+        /*
+         * The known limitation, asserted so it stays visible in the data:
+         * these rows mean "authorised for release and audited before any byte
+         * left", not "the caller received the file". Recording after the
+         * stream would be a weaker guarantee wearing a stronger name, because
+         * by then nothing can be refused.
+         */
+        var port = new RecordingPort();
+        var recorder = recorder(port, FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_OPEN);
+        recorder.attachmentDownloaded("AWARD", "SYN-AWD-A", null);
+        recorder.exportGenerated("AWARD", "SYN-AWD-A", null);
+
+        assertThat(port.written).hasSize(2);
+        assertThat(port.written).allSatisfy(event ->
+                assertThat(event.detail()).containsEntry("phase", "release_authorized"));
+
+        // A routine view is not a release and carries no phase.
+        recorder.recordViewed("AWARD", "SYN-AWD-A", null);
+        assertThat(port.written.get(2).detail()).doesNotContainKey("phase");
+    }
+
+    @Test
     @DisplayName("a negative result count is clamped rather than stored")
     void aNegativeCountIsClamped() {
         var port = new RecordingPort();

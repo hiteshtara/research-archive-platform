@@ -109,6 +109,92 @@ class ActivityAuditGrantIntegrationTest {
     }
 
     @Test
+    @DisplayName("no partition of the audit is readable either")
+    void noPartitionIsReadable() throws Exception {
+        /*
+         * Partitions are separate relations with their own ACLs, and
+         * GRANT SELECT ON ALL TABLES IN SCHEMA authz includes every one of
+         * them. Revoking on the parent alone would leave each monthly
+         * partition readable - and the next monthly partition, created after
+         * the revoke, inherits from the parent rather than from the blanket
+         * grant, so the hole would be historical rows only. That is exactly
+         * the kind of partial exposure nobody notices.
+         */
+        List<String> readable = new ArrayList<>();
+        try (Statement s = owner.createStatement();
+             ResultSet rs = s.executeQuery("""
+                     SELECT c.relname
+                       FROM pg_class c
+                       JOIN pg_namespace n ON n.oid = c.relnamespace
+                      WHERE n.nspname = 'authz'
+                        AND c.relname LIKE 'activity_audit%'
+                        AND has_table_privilege('archive_api', c.oid, 'SELECT')
+                      ORDER BY 1
+                     """)) {
+            while (rs.next()) {
+                readable.add(rs.getString(1));
+            }
+        }
+        assertThat(readable)
+                .as("neither the parent nor any partition may be readable by the API role")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("a partition created next month is writable but still not readable")
+    void aFuturePartitionInheritsTheCorrectedAcl() throws Exception {
+        /*
+         * The partition-maintenance runbook creates a new monthly partition
+         * by hand and says no grant is needed because partitions inherit the
+         * parent's privileges. That is the claim this asserts - and the
+         * inverse matters just as much: the new partition must NOT be
+         * readable, or every month would quietly reopen the hole the revoke
+         * just closed.
+         */
+        asOwner("""
+                CREATE TABLE authz.activity_audit_2027_09
+                    PARTITION OF authz.activity_audit
+                    FOR VALUES FROM ('2027-09-01 00:00:00+00') TO ('2027-10-01 00:00:00+00')
+                """);
+        try {
+            assertThatCode(() -> asApi("""
+                    INSERT INTO authz.activity_audit
+                        (occurred_at, actor, action, outcome)
+                    VALUES ('2027-09-15 10:00:00+00', 'ARP-SYN-0001', 'RECORD_VIEWED', 'PERMITTED')
+                    """))
+                    .as("a new partition must accept inserts with no extra grant")
+                    .doesNotThrowAnyException();
+
+            assertThatThrownBy(() -> asApi(
+                    "SELECT count(*) FROM authz.activity_audit_2027_09"))
+                    .as("and must not be readable")
+                    .hasMessageContaining("permission denied");
+        } finally {
+            asOwner("DROP TABLE authz.activity_audit_2027_09");
+        }
+    }
+
+    @Test
+    @DisplayName("running the role script again does not reopen read access")
+    void theRoleScriptIsIdempotentForTheAudit() throws Exception {
+        /*
+         * The operational trap: re-running archive_api_role.sql for any
+         * unrelated reason used to re-grant SELECT on the audit through its
+         * blanket authz grant. The role script now revokes it itself, so the
+         * order of the two scripts no longer matters.
+         */
+        try (Statement s = owner.createStatement()) {
+            s.execute(ArchiveApiRoleHarness.roleScriptFor(postgres));
+        }
+        assertThat(privilege("SELECT"))
+                .as("re-running the role script must not reopen read access")
+                .isFalse();
+        assertThat(privilege("INSERT"))
+                .as("and must not revoke the insert the audit grant made")
+                .isTrue();
+    }
+
+    @Test
     @DisplayName("catalog privileges are exactly INSERT")
     void catalogPrivilegesAreExactlyInsert() throws Exception {
         assertThat(privilege("INSERT")).isTrue();
