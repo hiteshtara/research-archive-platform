@@ -182,6 +182,75 @@ def query_quality(measurement: QueryMeasurement, known_words: frozenset[str]) ->
     return Outcome(measurement.query, False, "no token is word-like or known")
 
 
+def corpus_vocabulary(
+    measurement: QueryMeasurement,
+    vocabulary_counts: dict[str, int],
+    *,
+    require_all_tokens: bool = False,
+) -> Outcome:
+    """Reject before embedding when no word of the query is in the corpus.
+
+    ``vocabulary_counts`` maps each of the query's tokens to how many embedded
+    rows contain it as a word. It is measured, not guessed - see
+    ``measure_semantic_relevance.py``.
+
+    <h2>The two forms, and why both exist</h2>
+
+    ``any`` (the default) passes a query if ANY token is present. That is what
+    scored 15/15 on the original set - and the score flattered it. For a
+    multi-word query the decision is made by the most common token: "quantum
+    error correction" passes on "quantum" alone, regardless of whether the
+    archive knows anything about error correction. So on phrases the ``any``
+    form barely tests relevance at all; it tests whether the phrase contains a
+    word the archive happens to use.
+
+    ``require_all_tokens`` is the strict form. It is almost certainly too
+    strict - it would reject "mRNA vaccine hesitancy" if any one of those three
+    words is missing - but measuring both is how the middle ground gets found,
+    and asserting one without the other would be choosing by taste.
+
+    <h2>The case that decides whether this can ship at all</h2>
+
+    A SPELLING VARIANT or a SYNONYM-ONLY query has, by construction, no token
+    in the corpus. "paediatric" is a real search for records the archive holds
+    under "pediatric"; "myocardial infarction" is a real search for records
+    filed as "heart". Both are exactly what semantic search is for, and both
+    are rejected by any form of this gate.
+
+    If semantic search returns something useful for those, the gate destroys
+    useful discovery and must not become the permanent rule - it would be
+    PR #27's mistake in a new place. That cannot be settled from the counts
+    alone: it needs the results LOOKED AT. Until then this is a candidate, not
+    a recommendation.
+    """
+    if not vocabulary_counts:
+        return Outcome(measurement.query, False, "no usable token")
+
+    present = {t: n for t, n in vocabulary_counts.items() if n > 0}
+    absent = [t for t, n in vocabulary_counts.items() if n == 0]
+
+    if require_all_tokens:
+        kept = not absent
+        return Outcome(
+            measurement.query,
+            kept,
+            "every token is in the corpus" if kept
+            else f"absent from the corpus: {', '.join(absent)}",
+        )
+
+    kept = bool(present)
+    if not kept:
+        return Outcome(
+            measurement.query, False,
+            f"no token is in the corpus: {', '.join(vocabulary_counts)}",
+        )
+    best = max(present, key=present.get)
+    return Outcome(
+        measurement.query, True,
+        f"'{best}' appears in {present[best]} embedded rows",
+    )
+
+
 # --- comparison --------------------------------------------------------
 
 

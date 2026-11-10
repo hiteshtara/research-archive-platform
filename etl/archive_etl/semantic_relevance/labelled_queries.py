@@ -38,6 +38,14 @@ class Kind(str, Enum):
     SCIENTIFIC_TERM = "scientific_term"
     SYNONYM = "synonym"
     IDENTIFIER_SHAPED = "identifier_shaped"
+    # Added 2026-11-10 to test the corpus-vocabulary gate properly. The first
+    # 15 queries could not: every "should return" query among them happened to
+    # contain at least one word the corpus already uses, so the gate passed
+    # them for reasons that say nothing about whether it preserves
+    # semantic-only discovery.
+    SPELLING_VARIANT = "spelling_variant"
+    SYNONYM_ONLY = "synonym_only"
+    ABSENT_BUT_MEANINGFUL = "absent_but_meaningful"
 
 
 @dataclass(frozen=True)
@@ -249,9 +257,170 @@ LABELLED_QUERIES: tuple[LabelledQuery, ...] = (
 )
 
 
+# --- the expanded tier, added 2026-11-10 -----------------------------
+#
+# WHY. The corpus-vocabulary gate scored 15/15 on the original set, and that
+# result was not trustworthy: every "should return" query there contained at
+# least one word the corpus already uses, so the gate never had to decide a
+# case where the searcher's words and the archive's words differ. That is
+# precisely the case semantic search exists for, and precisely the case PR #27
+# was reverted for breaking.
+#
+# These queries are chosen to make the gate fail if it is going to. A gate
+# that rejects them is not a relevance fix, it is PR #27 wearing a different
+# hat.
+
+EXPANDED_QUERIES: tuple[LabelledQuery, ...] = (
+    # --- spelling variants: meaningful, and not how a US archive spells it ---
+    LabelledQuery(
+        query="paediatric",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.SPELLING_VARIANT,
+        reason=(
+            "British spelling of a term the archive certainly holds (pediatric "
+            "appears in 57 embedded rows). A searcher typing it is not making a "
+            "mistake, and semantic search is exactly what should bridge it. The "
+            "vocabulary gate will reject it unless the corpus happens to contain "
+            "the British form."
+        ),
+    ),
+    LabelledQuery(
+        query="tumour",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.SPELLING_VARIANT,
+        reason="British spelling of tumor. Same case, different field.",
+    ),
+    LabelledQuery(
+        query="haematology",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.SPELLING_VARIANT,
+        reason="British spelling of hematology; a third instance so one is not an anecdote.",
+    ),
+    # --- synonym only: the archive uses a different word entirely ---------
+    LabelledQuery(
+        query="myocardial infarction",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.SYNONYM_ONLY,
+        reason=(
+            "The clinical term for a heart attack. If the archive's titles say "
+            "'heart' and not 'myocardial', this is the synonym case with NO token "
+            "overlap at all - the one the gate cannot pass by luck."
+        ),
+    ),
+    LabelledQuery(
+        query="neoplasm",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.SYNONYM_ONLY,
+        reason="The clinical term for a tumour or cancer; cancer appears in 650 rows.",
+    ),
+    LabelledQuery(
+        query="cerebrovascular accident",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.SYNONYM_ONLY,
+        reason="The clinical term for a stroke. Two words, both likely absent.",
+    ),
+    # --- abbreviations beyond NSF and NIH ---------------------------------
+    LabelledQuery(
+        query="NIAID",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.ABBREVIATION,
+        reason=(
+            "A real NIH institute. Tests whether the gate's acronym handling "
+            "depends on the acronym being in archive.sponsor, where only 772 of "
+            "7,246 sponsors carry one."
+        ),
+    ),
+    LabelledQuery(
+        query="PCORI",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.ABBREVIATION,
+        reason="A real funder whose acronym may or may not be recorded.",
+    ),
+    LabelledQuery(
+        query="DoD",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.ABBREVIATION,
+        reason=(
+            "Department of Defense. Three characters with mixed case, so it also "
+            "tests whether the gate is case sensitive where it should not be."
+        ),
+    ),
+    # --- meaningful, and probably absent from the corpus ------------------
+    LabelledQuery(
+        query="quantum error correction",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.ABSENT_BUT_MEANINGFUL,
+        reason=(
+            "A real research area. 'quantum' is in the corpus (72 rows) so the "
+            "gate passes it on one token - which is the point: it shows the gate "
+            "passing for a reason unrelated to whether the results are good."
+        ),
+    ),
+    LabelledQuery(
+        query="mRNA vaccine hesitancy",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.ABSENT_BUT_MEANINGFUL,
+        reason=(
+            "A real and recent research area. If no token is in the corpus, the "
+            "gate rejects it - and whether that is the RIGHT answer depends on "
+            "whether semantic search would have returned anything useful, which "
+            "has to be observed rather than assumed."
+        ),
+    ),
+    LabelledQuery(
+        query="machine learning fairness",
+        label=Label.SHOULD_RETURN,
+        kind=Kind.ABSENT_BUT_MEANINGFUL,
+        reason="A real area that a 2010s research archive may simply not contain.",
+    ),
+    # --- more nonsense, including shapes the first set did not have -------
+    LabelledQuery(
+        query="plorgle",
+        label=Label.SHOULD_REJECT,
+        kind=Kind.NONSENSE,
+        reason=(
+            "A PRONOUNCEABLE non-word. The original nonsense strings were all "
+            "unpronounceable consonant runs, which a vowel-density test catches "
+            "for free; this one does not look like noise and must still be "
+            "rejected."
+        ),
+    ),
+    LabelledQuery(
+        query="snorfulate biodynamics",
+        label=Label.SHOULD_REJECT,
+        kind=Kind.NONSENSE,
+        reason=(
+            "Two pronounceable non-words arranged to look like a research phrase. "
+            "The hardest nonsense case, because every shape heuristic passes it."
+        ),
+    ),
+    LabelledQuery(
+        query="qqqqqq",
+        label=Label.SHOULD_REJECT,
+        kind=Kind.NONSENSE,
+        reason="A repeated character; a degenerate shape the first set lacked.",
+    ),
+    LabelledQuery(
+        query="asdfghjkl",
+        label=Label.SHOULD_REJECT,
+        kind=Kind.NONSENSE,
+        reason="A keyboard row - the most common accidental input there is.",
+    ),
+)
+
+
+def all_queries() -> tuple[LabelledQuery, ...]:
+    """The original set plus the expanded tier.
+
+    Kept as two tuples so a reader can see which results came from the set
+    that produced the first conclusion and which were added to test it.
+    """
+    return LABELLED_QUERIES + EXPANDED_QUERIES
+
+
 def should_return() -> tuple[LabelledQuery, ...]:
-    return tuple(q for q in LABELLED_QUERIES if q.label is Label.SHOULD_RETURN)
+    return tuple(q for q in all_queries() if q.label is Label.SHOULD_RETURN)
 
 
 def should_reject() -> tuple[LabelledQuery, ...]:
-    return tuple(q for q in LABELLED_QUERIES if q.label is Label.SHOULD_REJECT)
+    return tuple(q for q in all_queries() if q.label is Label.SHOULD_REJECT)

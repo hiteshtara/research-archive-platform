@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -48,7 +49,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from archive_etl.semantic_relevance.labelled_queries import LABELLED_QUERIES, Kind
+from archive_etl.semantic_relevance.labelled_queries import Kind, all_queries
 from archive_etl.semantic_relevance.evaluate import QueryMeasurement
 
 # The same model and window the API uses. If either drifts from
@@ -156,9 +157,48 @@ def candidate_distances(engine: Engine, embedding: list[float]) -> tuple[float, 
     return tuple(float(row[0]) for row in rows)
 
 
-def measure(engine: Engine, bedrock_client: Any) -> list[QueryMeasurement]:
+def vocabulary_counts(engine: Engine, query: str) -> dict[str, int]:
+    """How many embedded rows contain each of the query's tokens as a word.
+
+    What the corpus-vocabulary gate needs in order to be evaluated rather than
+    asserted. Counts only: the SELECT is a ``count(*)``, so no title, no
+    identifier and no source text is returned - the token being tested is an
+    input, not an output.
+    """
+    tokens = [t.lower() for t in re.split(r"[^A-Za-z0-9]+", query) if t]
+    counts: dict[str, int] = {}
+    with engine.connect() as connection:
+        for token in tokens:
+            counts[token] = int(connection.execute(
+                text(
+                    # Raw string: \m and \M are Postgres word boundaries and
+                    # not Python escapes. Without the r-prefix this is a
+                    # SyntaxWarning today and an error in a future Python.
+                    r"""
+                    SELECT count(*)
+                      FROM archive.search_embedding
+                     WHERE source_text ~* ('\m' || :token || '\M')
+                    """
+                ),
+                {"token": token},
+            ).scalar() or 0)
+    return counts
+
+
+def measure(
+    engine: Engine,
+    bedrock_client: Any,
+    vocabulary: dict[str, dict[str, int]] | None = None,
+) -> list[QueryMeasurement]:
+    """Embed every labelled query and record its distances and vocabulary.
+
+    ``vocabulary`` is filled in place when supplied, so a caller gets the
+    corpus-token counts beside the distances without a second pass.
+    """
+    if vocabulary is None:
+        vocabulary = {}
     measurements: list[QueryMeasurement] = []
-    for item in LABELLED_QUERIES:
+    for item in all_queries():
         if item.kind is Kind.IDENTIFIER_SHAPED:
             # The API skips the semantic leg entirely for these, so embedding
             # one here would measure a code path nobody runs.
@@ -168,6 +208,7 @@ def measure(engine: Engine, bedrock_client: Any) -> list[QueryMeasurement]:
         if not distances:
             print(f"  NO CANDIDATES for {item.query!r} - is search_embedding populated?")
             continue
+        counts = vocabulary_counts(engine, item.query)
         measurements.append(
             QueryMeasurement(
                 query=item.query,
@@ -175,10 +216,13 @@ def measure(engine: Engine, bedrock_client: Any) -> list[QueryMeasurement]:
                 lexical_hits=item.measured_lexical_hits or 0,
             )
         )
+        vocabulary[item.query] = counts
+        gate = "PASS" if any(n > 0 for n in counts.values()) else "REJECT"
         print(
-            f"  {item.query!r}: nearest={distances[0]:.4f} "
-            f"median={distances[len(distances) // 2]:.4f} "
-            f"ratio={distances[0] / distances[len(distances) // 2]:.4f}"
+            f"  {item.label.value:14} {item.kind.value:22} {item.query[:34]:36} "
+            f"nearest={distances[0]:.4f} "
+            f"ratio={distances[0] / distances[len(distances) // 2]:.4f} "
+            f"gate={gate:6} vocab={counts}"
         )
     return measurements
 
@@ -223,8 +267,9 @@ def main(argv: list[str] | None = None) -> int:
 
     bedrock_client = boto3.client("bedrock-runtime", region_name=args.region)
 
-    print(f"Measuring {len(LABELLED_QUERIES)} labelled queries...")
-    measurements = measure(engine, bedrock_client)
+    print(f"Measuring {len(all_queries())} labelled queries...")
+    vocabulary: dict[str, dict[str, int]] = {}
+    measurements = measure(engine, bedrock_client, vocabulary)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +284,9 @@ def main(argv: list[str] | None = None) -> int:
                     "identifying column at all."
                 ),
                 "measurements": [asdict(m) for m in measurements],
+                # Token counts, so the corpus-vocabulary gate can be scored
+                # without re-reading the database.
+                "vocabulary": vocabulary,
             },
             indent=2,
         )
