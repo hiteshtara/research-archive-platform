@@ -35,7 +35,7 @@ export const sidebarNavigationItems = [
   // with them. It is QA scaffolding for the current testing round and
   // is expected to be removed afterwards - see docs/QA_STATUS_PAGE.md
   // for everything to delete.
-  { key: "qaStatus", label: "QA status", path: "/qa-status" },
+  { key: "qaStatus", label: "QA Testing", path: "/qa-status" },
 ];
 
 // Mirrors react-router NavLink's own default (non-"end") active-match
