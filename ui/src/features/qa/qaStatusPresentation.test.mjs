@@ -703,9 +703,17 @@ test("approved decisions are listed, and separated from implementation status", 
   assert.match(security.recommendationStatus, /not working software/i);
 });
 
-test("the page renders the stages, the module table and the decision list", () => {
+test("the page renders the current status table, the stages and the decision list", () => {
   const source = readSource("../../pages/SecurityReadinessPage.tsx");
-  assert.match(source, /Security implementation progress/);
+  /*
+   * "Security implementation progress" became "Where each requirement stands
+   * today" when the table stopped reading the frozen 2026-10-20 acceptance
+   * plan and started deriving from the deployment snapshot. The heading moved
+   * with the meaning: the old one described progress toward a release that
+   * has since happened.
+   */
+  assert.match(source, /Where each requirement stands today/);
+  assert.match(source, /currentStatusMatrix/);
   assert.match(source, /Approved business decisions/);
   assert.match(source, /securityStages\(requirement\)/);
   assert.match(source, /Remaining blockers/);
