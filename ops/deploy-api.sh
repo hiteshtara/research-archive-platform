@@ -318,3 +318,57 @@ aws ecs describe-services \
   --services "$ECS_SERVICE" \
   --query 'services[0].deployments[*].[status,runningCount,desiredCount]' \
   --output table
+
+# --- The two things that are now stale, and must not be forgotten --------
+#
+# A deploy moves the running image. Two committed artefacts describe that
+# image and do not move with it:
+#
+#   ops/grant-admin/*.taskdef.json   the operator utilities' pinned digest
+#   ui/.../securityReadiness.json    the verified-deployment snapshot
+#
+# Neither is cosmetic. An operator task definition left behind runs OLD CLI
+# CODE against today's database - the grant-admin definition was last bumped
+# for #103 and was still saying so at revision 87 - and the readiness
+# snapshot is what OperatorTaskDefinitionTest compares against, so leaving it
+# behind moves the drift rather than fixing it.
+#
+# This prints rather than edits, deliberately: a deploy should not quietly
+# rewrite committed files, and the digest below has to be reviewed and
+# committed like any other change.
+
+RUNNING_IMAGE="$(aws ecs describe-task-definition \
+  --region "$REGION" \
+  --task-definition "$NEW_TASK_DEFINITION_ARN" \
+  --query 'taskDefinition.containerDefinitions[0].image' \
+  --output text 2>/dev/null || echo "unknown")"
+
+RUNNING_DIGEST="$(aws ecr describe-images \
+  --region "$REGION" \
+  --repository-name "$ECR_REPOSITORY_NAME" \
+  --image-ids imageTag="$IMAGE_TAG" \
+  --query 'imageDetails[0].imageDigest' \
+  --output text 2>/dev/null || echo "unknown")"
+
+echo ""
+echo "========================================"
+echo "Required follow-up, before this release is consistent"
+echo "========================================"
+echo ""
+echo "Image digest:   $RUNNING_DIGEST"
+echo "Image (by tag): $RUNNING_IMAGE"
+echo ""
+echo "1. Point the operator task definitions at this image:"
+echo "     ops/sync-operator-taskdefs.sh"
+echo ""
+echo "2. Refresh the readiness snapshot's deployment block:"
+echo "     apiTaskDefinition, imageCommit ($GIT_SHA), imageDigest, verifiedAt"
+echo "     in ui/src/features/qa/securityReadiness.json"
+echo ""
+echo "3. Confirm it holds:"
+echo "     cd api && mvn test -Dtest=OperatorTaskDefinitionTest"
+echo "     scripts/verify-grant-admin-taskdef.sh ops/grant-admin/dev-grant-admin.taskdef.json"
+echo "     scripts/verify-grant-admin-taskdef.sh ops/grant-admin/dev-link-identity.taskdef.json"
+echo ""
+echo "Until step 1 is done, DO NOT register or run an operator task"
+echo "definition: it would execute different code from the API just deployed."

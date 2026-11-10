@@ -45,6 +45,52 @@ echo "OK    AWS account $account"
 LIVE_FILE="$(mktemp)"
 trap 'rm -f "$LIVE_FILE"' EXIT
 
+# --- The image the SERVICE is actually running ---------------------------
+#
+# WHY THE SERVICE AND NOT THE FAMILY. The latest revision of the API family
+# is not necessarily the one running; a deploy registers a revision and then
+# updates the service, and those can diverge. "What is running" is the
+# service's own taskDefinition, so that is what an operator utility must
+# match.
+#
+# WHY THIS CHECK EXISTS. The committed grant-admin definition pinned its
+# image by digest - correctly - and the digest was then maintained by hand.
+# It was last bumped for #103; five releases later it still said so, while
+# the API ran revision 87. An operator running the only approved grant path
+# would have run months-old CLI code against today's database, and nothing
+# said a word. OperatorTaskDefinitionTest catches this in CI against the
+# recorded snapshot; this catches it against the live service, which the
+# snapshot can itself fall behind.
+
+SERVICE_TASKDEF="$(aws ecs describe-services   --region "$REGION"   --cluster "$API_FAMILY"   --services "$API_FAMILY"   --query 'services[0].taskDefinition'   --output text 2>/dev/null || true)"
+
+if [ -z "$SERVICE_TASKDEF" ] || [ "$SERVICE_TASKDEF" = "None" ]; then
+  echo "FAIL  could not read which task definition the $API_FAMILY service is running" >&2
+  FAILED=1
+else
+  LIVE_IMAGE="$(aws ecs describe-task-definition     --region "$REGION"     --task-definition "$SERVICE_TASKDEF"     --query 'taskDefinition.containerDefinitions[0].image'     --output text 2>/dev/null || true)"
+  OURS_IMAGE="$(TASKDEF="$FILE" python3 -c '
+import json, os
+d = json.load(open(os.environ["TASKDEF"]))
+print(d["containerDefinitions"][0].get("image", ""))
+')"
+
+  if [ -z "$LIVE_IMAGE" ] || [ "$LIVE_IMAGE" = "None" ]; then
+    echo "FAIL  could not read the running image for $SERVICE_TASKDEF" >&2
+    FAILED=1
+  elif [ "$LIVE_IMAGE" != "$OURS_IMAGE" ]; then
+    echo "FAIL  this operator definition does not run the image the API is running." >&2
+    echo "      API service is running: $LIVE_IMAGE" >&2
+    echo "      this definition pins:   $OURS_IMAGE" >&2
+    echo "      Registering or running it would execute DIFFERENT code from the" >&2
+    echo "      deployed API. Run ops/sync-operator-taskdefs.sh, commit the" >&2
+    echo "      change, and re-run this script." >&2
+    FAILED=1
+  else
+    echo "OK    image matches the running API service exactly"
+  fi
+fi
+
 if ! aws ecs describe-task-definition --region "$REGION" \
        --task-definition "$API_FAMILY" \
        --query 'taskDefinition.containerDefinitions[0].environment' \
