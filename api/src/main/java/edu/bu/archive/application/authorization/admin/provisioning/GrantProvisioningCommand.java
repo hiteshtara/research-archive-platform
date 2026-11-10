@@ -40,6 +40,8 @@ public final class GrantProvisioningCommand {
     /** Crockford base32, as minted by ArchivePrincipalId. */
     private static final Pattern ARP = Pattern.compile("^ARP-[0-9A-HJKMNP-TV-Z]{8}-[0-9A-HJKMNP-TV-Z]{8}$");
     private static final Pattern UNIT = Pattern.compile("^[0-9]{4,12}$");
+    /** An Award number as the archive stores it, e.g. 105698-00002. */
+    private static final Pattern AWARD_NUMBER = Pattern.compile("^[0-9]{4,10}-[0-9]{5}$");
 
     private final String expectedAccountId;
     private final String expectedEnvironment;
@@ -230,6 +232,7 @@ public final class GrantProvisioningCommand {
             created = admin.grantAccess(actor, grantee,
                     new GrantSpecification(type, trim(request.unitNumber()),
                             request.includeDescendants(), trim(request.ioValue()),
+                            trim(request.awardNumber()),
                             expiresAt,
                             "operator=" + request.operator().trim()
                                     + "; approval=" + request.approvalReference().trim()
@@ -367,7 +370,7 @@ public final class GrantProvisioningCommand {
             return type;
         } catch (IllegalArgumentException e) {
             problems.add("unknown grant type '" + raw
-                    + "'. Valid: CENTRAL, UNIT, IO, CONTACT_DERIVATION");
+                    + "'. Valid: CENTRAL, UNIT, IO, CONTACT_DERIVATION, PARENT_AWARD");
             return null;
         }
     }
@@ -400,6 +403,7 @@ public final class GrantProvisioningCommand {
         }
         String unit = trim(r.unitNumber());
         String io = trim(r.ioValue());
+        String award = trim(r.awardNumber());
         switch (type) {
             case UNIT -> {
                 if (unit == null) {
@@ -429,14 +433,62 @@ public final class GrantProvisioningCommand {
                     problems.add("--include-descendants is meaningless for an IO grant");
                 }
             }
+            case PARENT_AWARD -> {
+                /*
+                 * SEC-005. Without this case the switch fell through in
+                 * silence: --type=PARENT_AWARD parsed, no scope was checked,
+                 * no --award-number existed to supply, and GrantSpecification
+                 * then threw from its constructor. The operator saw a stack
+                 * trace instead of a validation message, and the grant type
+                 * the database has supported since V088 could not be issued
+                 * through the only approved path.
+                 */
+                if (award == null) {
+                    problems.add("PARENT_AWARD grants need --award-number");
+                } else if (!AWARD_NUMBER.matcher(award).matches()) {
+                    problems.add("award number '" + award + "' is not an Award number "
+                            + "(expected something like 105698-00002)");
+                } else {
+                    checks.add("OK     parent Award " + award
+                            + ", expanded at the configured depth - never across Award families");
+                }
+                if (unit != null || io != null) {
+                    problems.add("--unit-number and --io-value are meaningless for a "
+                            + "PARENT_AWARD grant");
+                }
+                if (r.includeDescendants()) {
+                    problems.add("--include-descendants is meaningless for a PARENT_AWARD grant; "
+                            + "the hierarchy depth is policy (app.authorization.parent-award-depth), "
+                            + "not a per-grant flag");
+                }
+            }
             case CENTRAL, CONTACT_DERIVATION -> {
-                if (unit != null || io != null || r.includeDescendants()) {
+                if (unit != null || io != null || award != null || r.includeDescendants()) {
                     problems.add(type + " grants take no scope; remove --unit-number, "
-                            + "--io-value and --include-descendants");
+                            + "--io-value, --award-number and --include-descendants");
                 } else {
                     checks.add("OK     " + type + " takes no scope argument");
                 }
             }
+            /*
+             * Unreachable today - every GrantType has an arm above. It is here
+             * because the absence of it is what made the PARENT_AWARD defect
+             * silent rather than loud.
+             *
+             * A switch STATEMENT over an enum is not required to be
+             * exhaustive, so when PARENT_AWARD was added to GrantType this
+             * switch kept compiling and simply validated nothing for it. The
+             * request then reached GrantSpecification and failed in a
+             * constructor, with no refusal an operator could read. A sixth
+             * type would do the same again.
+             *
+             * Refusing an unvalidated type is the only safe default: this
+             * method's output is the list of checks that justify a write.
+             */
+            default -> problems.add(type + " grants have no scope validation in this "
+                    + "utility, so it cannot confirm the arguments are correct and will "
+                    + "not provision one. This is a gap in the tool, not a bad request - "
+                    + "add a case for " + type + " to GrantProvisioningCommand.");
         }
     }
 
@@ -494,9 +546,34 @@ public final class GrantProvisioningCommand {
         }
     }
 
+    /**
+     * Whether an existing grant occupies the same scope slot as a request.
+     *
+     * <p>This read-then-write check exists to turn a constraint violation into
+     * a sentence an operator can act on; {@code ux_access_grant_active_scope}
+     * is what actually holds the invariant. So a qualifier the index keys on
+     * but this does not produces a FALSE REFUSAL - a legitimate grant rejected
+     * as a duplicate, with no retry that helps.
+     *
+     * <p>That had happened. {@code award_number} was missing here, so a
+     * grantee's second {@code PARENT_AWARD} grant for a DIFFERENT Award was
+     * refused as identical to the first - the exact collision V088 rebuilt the
+     * index to permit. Adding it is this method's share of that migration.
+     *
+     * <p>{@code includeDescendants} is compared here even though V087
+     * deliberately leaves it OUT of the index key, and that asymmetry is
+     * intentional in both places. The index excludes it so {@code
+     * modifyAccess} can toggle the flag on an existing grant; this method
+     * includes it so the one request shape where the two disagree - same
+     * grantee, same unit, opposite flag - reaches the index and is refused
+     * there, which is the only single-threaded route into the {@code
+     * DuplicateActiveGrantException} path and is covered by a test for that
+     * reason. Dropping it would silently delete that coverage.
+     */
     private static boolean equalScope(AccessGrant grant, GrantRequest r) {
         return Objects.equals(trim(grant.unitNumber()), trim(r.unitNumber()))
                 && Objects.equals(trim(grant.ioValue()), trim(r.ioValue()))
+                && Objects.equals(trim(grant.awardNumber()), trim(r.awardNumber()))
                 && grant.includeDescendants() == r.includeDescendants();
     }
 

@@ -860,6 +860,130 @@ class GrantProvisioningIntegrationTest {
         };
     }
 
+    @Nested
+    @DisplayName("PARENT_AWARD grants (SEC-005)")
+    class ParentAwardGrants {
+
+        /*
+         * The database has supported PARENT_AWARD since V088 and the evaluator
+         * has decided it since SEC-005 shipped, but the provisioning CLI - the
+         * only approved way to create a grant in DEV - had no --award-number
+         * flag and no PARENT_AWARD case in its scope validation. The switch
+         * fell through in silence, so the type parsed, nothing was checked,
+         * and GrantSpecification then threw from its constructor. An operator
+         * preparing SEC-005 acceptance testing got a stack trace and no grant.
+         */
+
+        @Test
+        @DisplayName("a PARENT_AWARD grant can be created, which it could not before")
+        void aParentAwardGrantCanBeCreated() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").unit(null).awardNumber("105698-00002")
+                            .confirmed(true).build());
+
+            assertThat(outcome.result())
+                    .as("problems: %s", outcome.problems())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+
+            String stored = jdbc.sql("""
+                            SELECT award_number FROM authz.access_grant
+                             WHERE institutional_identifier = :g AND grant_type = 'PARENT_AWARD'
+                            """).param("g", GRANTEE).query(String.class).single();
+            assertThat(stored).isEqualTo("105698-00002");
+        }
+
+        @Test
+        @DisplayName("omitting the Award number is a validation message, not a stack trace")
+        void aMissingAwardNumberIsRefusedClearly() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(outcome.problems())
+                    .anyMatch(problem -> problem.contains("PARENT_AWARD grants need --award-number"));
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("a malformed Award number is refused before anything is written")
+        void aMalformedAwardNumberIsRefused() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").unit(null).awardNumber("not-an-award")
+                            .confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(outcome.problems()).anyMatch(p -> p.contains("is not an Award number"));
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("scope arguments belonging to other grant types are refused")
+        void foreignScopeArgumentsAreRefused() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").awardNumber("105698-00002")
+                            .unit("1250000000").io("IO-1").descendants(true)
+                            .confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" | ", outcome.problems()))
+                    .contains("meaningless for a PARENT_AWARD grant");
+            /*
+             * --include-descendants is the interesting one. It looks like it
+             * ought to control hierarchy depth, and it does not: depth is
+             * policy (app.authorization.parent-award-depth), not a per-grant
+             * flag. Accepting it silently would let an operator believe they
+             * had set something.
+             */
+            assertThat(String.join(" | ", outcome.problems()))
+                    .contains("parent-award-depth");
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("an unknown grant type names PARENT_AWARD among the valid ones")
+        void theErrorMessageListsEveryValidType() {
+            GrantOutcome outcome = command().run(
+                    req().type("NONSENSE").confirmed(true).build());
+
+            assertThat(String.join(" | ", outcome.problems()))
+                    .contains("CENTRAL, UNIT, IO, CONTACT_DERIVATION, PARENT_AWARD");
+        }
+
+        @Test
+        @DisplayName("a second PARENT_AWARD grant for a different Award is allowed")
+        void twoDifferentParentAwardsAreBothStorable() {
+            /*
+             * V088 rebuilt ux_access_grant_active_scope to include
+             * award_number, so these are different scopes rather than a
+             * duplicate. Worth pinning here: the index is what makes SEC-005
+             * usable for more than one Award per person.
+             */
+            assertThat(command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("105698-00002").confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("209653-00002").confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("the same PARENT_AWARD twice is still a duplicate")
+        void theSameParentAwardTwiceIsRefused() {
+            assertThat(command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("105698-00002").confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+
+            GrantOutcome second = command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("105698-00002").confirmed(true).build());
+
+            assertThat(second.result()).isNotEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+        }
+    }
+
     private static Req req() {
         return new Req();
     }
@@ -873,6 +997,7 @@ class GrantProvisioningIntegrationTest {
         private String unit = "1250000000";
         private boolean descendants;
         private String io;
+        private String awardNumber;
         private String operator = "operator@bu.edu";
         private String reason = "first DEV grant";
         private String approval = "APPROVAL-2026-10-29";
@@ -888,6 +1013,7 @@ class GrantProvisioningIntegrationTest {
         Req type(String v) { this.type = v; return this; }
         Req unit(String v) { this.unit = v; return this; }
         Req io(String v) { this.io = v; return this; }
+        Req awardNumber(String v) { this.awardNumber = v; return this; }
         Req descendants(boolean v) { this.descendants = v; return this; }
         Req approval(String v) { this.approval = v; return this; }
         Req dryRun(boolean v) { this.dryRun = v; return this; }
@@ -898,14 +1024,15 @@ class GrantProvisioningIntegrationTest {
         Req revokeOnly(Object id) {
             this.revokeGrantId = String.valueOf(id);
             this.type = null; this.grantee = null; this.unit = null; this.io = null;
+            this.awardNumber = null;
             this.descendants = false; this.expiresAt = null;
             return this;
         }
 
         GrantRequest build() {
             return new GrantRequest(account, environment, grantee, actor, type, unit,
-                    descendants, io, operator, reason, approval, dryRun, confirmed,
-                    expiresAt, revokeGrantId);
+                    descendants, io, awardNumber, operator, reason, approval, dryRun,
+                    confirmed, expiresAt, revokeGrantId);
         }
     }
 
