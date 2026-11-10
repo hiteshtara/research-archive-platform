@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   describeGlobalSearchOutcome,
   describeResultCard,
+  describeResultCounts,
   filterOutIrbResults,
   incompleteSearchMessage,
   isRelatedResult,
@@ -59,24 +60,20 @@ test("filterOutIrbResults removes IRB from failedModules so an IRB outage is nev
 });
 
 test("filterOutIrbResults never throws on a null/undefined/malformed response", () => {
-  assert.deepEqual(filterOutIrbResults(null), {
+  // moduleTotals defaults to an empty list, never undefined: the page maps
+  // over it, and "no totals reported" is a different statement from "this
+  // field is missing".
+  const empty = {
     query: "",
     totalResults: 0,
     results: [],
     failedModules: [],
-  });
-  assert.deepEqual(filterOutIrbResults(undefined), {
-    query: "",
-    totalResults: 0,
-    results: [],
-    failedModules: [],
-  });
-  assert.deepEqual(filterOutIrbResults({}), {
-    query: "",
-    totalResults: 0,
-    results: [],
-    failedModules: [],
-  });
+    moduleTotals: [],
+  };
+  assert.deepEqual(filterOutIrbResults(null), empty);
+  assert.deepEqual(filterOutIrbResults(undefined), empty);
+  assert.deepEqual(filterOutIrbResults({}), empty);
+  assert.deepEqual(filterOutIrbResults({ moduleTotals: "not a list" }), empty);
 });
 
 test("filterOutIrbResults leaves an all-non-IRB response unchanged in content", () => {
@@ -417,4 +414,128 @@ test("the page renders direct and related separately and gates the reveal", () =
   assert.match(page, /setRelatedRevealed\(true\)/);
   assert.match(page, /incompleteSearchMessage\(/);
   assert.match(page, /noDirectMatchesMessage\(/);
+});
+
+/*
+ * QA TC-040: the result count said 104 when one module alone matched 234.
+ *
+ * Measured on DEV (API revision 87, UI Amplify job 186) 2026-11-10:
+ *   /api/global-search?query=NSF  totalResults 104  (25+25+25+29)
+ *   /api/negotiations?query=NSF   totalElements 234
+ */
+
+test("an uncapped search still reads as a plain count", () => {
+  const counts = describeResultCounts(
+    [{ module: "AWARD", returned: 3, totalMatches: 3, capped: false }],
+    3,
+  );
+
+  assert.equal(counts.summary, "3 results found");
+  assert.equal(counts.truncated, false);
+  assert.deepEqual(counts.perModule, []);
+});
+
+test("one result is singular, because '1 results found' is the other kind of sloppy", () => {
+  assert.equal(describeResultCounts([], 1).summary, "1 result found");
+});
+
+test("a capped module makes the count read as a page, not a finding", () => {
+  const counts = describeResultCounts(
+    [
+      { module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true },
+      { module: "AWARD", returned: 25, totalMatches: 1200, capped: true },
+    ],
+    50,
+  );
+
+  assert.equal(counts.truncated, true);
+  assert.equal(counts.summary, "Showing 50 of 1434 matching records");
+  assert.match(counts.truncationNote, /at most 25 results/);
+  assert.ok(
+    !/^\d+ results found$/.test(counts.summary),
+    "the bare count is what made 104 look like a total",
+  );
+});
+
+test("the per-module lines name the real total for each capped type", () => {
+  const counts = describeResultCounts(
+    [{ module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true }],
+    25,
+  );
+
+  assert.deepEqual(counts.perModule, ["NEGOTIATION: showing 25 of 234"]);
+});
+
+test("an uncountable module is reported as a lower bound, never as a total", () => {
+  /*
+   * Proposal and IRB return a bare list, so no count exists without an extra
+   * query. Presenting the rows as a total would be the same defect in a new
+   * field.
+   */
+  const counts = describeResultCounts(
+    [
+      { module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true },
+      { module: "PROPOSAL", returned: 25, totalMatches: null, capped: true },
+    ],
+    50,
+  );
+
+  assert.match(counts.summary, /at least 234 match/);
+  assert.ok(
+    !counts.summary.includes("of 234 matching records"),
+    "an unknown total must not be presented as the whole figure",
+  );
+  assert.ok(counts.perModule.includes("PROPOSAL: showing 25, more exist"));
+});
+
+test("a capped module with an unknown total still says more exist", () => {
+  const counts = describeResultCounts(
+    [{ module: "PROPOSAL", returned: 25, totalMatches: null, capped: true }],
+    25,
+  );
+
+  assert.equal(counts.truncated, true);
+  assert.deepEqual(counts.perModule, ["PROPOSAL: showing 25, more exist"]);
+});
+
+test("IRB's own total is dropped, like its rows", () => {
+  /*
+   * The page must not report a count for records it removed. The backend
+   * still fans out to IRB while enforcement is off, so its entry can arrive.
+   */
+  const filtered = filterOutIrbResults({
+    query: "cancer",
+    totalResults: 2,
+    results: [
+      { module: "IRB", identifier: "P-1" },
+      { module: "AWARD", identifier: "100527-00001" },
+    ],
+    failedModules: [],
+    moduleTotals: [
+      { module: "IRB", returned: 1, totalMatches: 9, capped: false },
+      { module: "AWARD", returned: 1, totalMatches: 40, capped: false },
+    ],
+  });
+
+  assert.deepEqual(
+    filtered.moduleTotals.map((t) => t.module),
+    ["AWARD"],
+  );
+  assert.equal(filtered.totalResults, 1, "and the row count follows");
+});
+
+test("a non-IRB module's total is passed through untouched", () => {
+  const filtered = filterOutIrbResults({
+    query: "nsf",
+    totalResults: 25,
+    results: [],
+    failedModules: [],
+    moduleTotals: [
+      { module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true },
+    ],
+  });
+
+  assert.deepEqual(filtered.moduleTotals, [
+    { module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true },
+  ]);
 });
