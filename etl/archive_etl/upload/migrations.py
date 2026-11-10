@@ -83,6 +83,48 @@ def discover_migrations(
 #     an intentional historical gap, not a missing executable migration.
 INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS = {73}
 
+# Version numbers RESERVED by work that exists but is not merged. Distinct
+# from superseded on purpose: a superseded version will never arrive, and a
+# reserved one is expected to. Collapsing the two would mean that when the
+# reserving branch merges, nothing notices the declaration is now stale.
+#
+# 81: V081__add_award_amount_dates_and_tnm_status.sql is held by
+#     feat/award-amount-dates-v081 (commit 6ae107d, unmerged). It touches
+#     archive.award_* only - zero references to authz, identity_link or
+#     access_grant - so it does not interact with V082-V089, and
+#     discover_migrations sorts by integer version, so the committed chain
+#     still applies in order without it. Investigated 2026-10-28 and recorded
+#     in docs/runbooks/DEV_AUTHORIZATION_ROLLOUT.md, "The V081 gap".
+RESERVED_MIGRATION_VERSIONS = {81}
+
+
+def stale_migration_declarations(
+    migrations_directory: str | Path,
+) -> list[int]:
+    """Declared gaps whose migration has since ARRIVED.
+
+    A declaration is a statement that a version is absent for a known reason.
+    Once the file exists, the statement is false, and a false declaration is
+    worse than none: it would silence a genuine future gap at that number.
+
+    This is aimed squarely at 81. V081 is RESERVED by an unmerged branch, so
+    the day that branch merges the file appears, the reservation becomes
+    stale, and nothing else would notice - the chain check only looks for
+    absences, and an arrived migration is not an absence.
+    """
+    present = {version for version, _, _ in discover_migrations(migrations_directory)}
+    return sorted(declared_migration_gaps() & present)
+
+
+def declared_migration_gaps() -> set[int]:
+    """Every version number whose absence is accounted for.
+
+    Both sets are declarations, and the distinction between them is for the
+    reader rather than the checker: a gap is silent only if someone wrote
+    down why.
+    """
+    return INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS | RESERVED_MIGRATION_VERSIONS
+
 
 def find_missing_migration_versions(
     migrations_directory: str | Path,
@@ -94,10 +136,10 @@ def find_missing_migration_versions(
     review. This checks the files present on disk; it does not look at what
     has been applied to any particular database.
 
-    Versions listed in INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS are
-    excluded - each one is individually documented above. Every other gap
-    is still reported exactly as before, so a genuinely lost or misnumbered
-    migration remains just as visible.
+    Versions declared in INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS or
+    RESERVED_MIGRATION_VERSIONS are excluded - each one is individually
+    documented above. Every other gap is still reported exactly as before, so
+    a genuinely lost or misnumbered migration remains just as visible.
     """
     versions = [version for version, _, _ in discover_migrations(migrations_directory)]
 
@@ -106,7 +148,7 @@ def find_missing_migration_versions(
 
     expected = set(range(versions[0], versions[-1] + 1))
     missing = expected - set(versions)
-    return sorted(missing - INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS)
+    return sorted(missing - declared_migration_gaps())
 
 
 def apply_migrations(

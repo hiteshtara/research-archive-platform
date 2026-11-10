@@ -25,6 +25,7 @@ from __future__ import annotations
 import getpass
 import os
 import re
+import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +37,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from archive_etl.upload.migrations import (
+    RESERVED_MIGRATION_VERSIONS,
+    stale_migration_declarations,
     INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
     apply_migrations,
     find_missing_migration_versions,
@@ -139,6 +142,38 @@ class V071CommittedChainTest(unittest.TestCase):
             "V073 is superseded by V077 and must not be committed",
         )
 
+    def test_an_undeclared_gap_is_still_reported(self):
+        """Declaring 81 must not have silenced gap detection generally.
+
+        The whole value of this check is catching a migration that was
+        renumbered or lost. A fix that quietens one gap by weakening the
+        checker would be worse than the failing test it replaced.
+        """
+        import tempfile
+
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            for version in (1, 2, 4):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+            self.assertEqual(
+                find_missing_migration_versions(directory), [3],
+                "an undeclared gap must still be reported",
+            )
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_a_declared_gap_is_silent_only_for_that_version(self):
+        import tempfile
+
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            # 81 declared, 82 not.
+            for version in (80, 83):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+            self.assertEqual(find_missing_migration_versions(directory), [82])
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
     def test_committed_chain_reports_no_missing_versions(self):
         """V071 is restored, and 73 is registered in
         INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS (V077 owns that
@@ -154,6 +189,18 @@ class V071CommittedChainTest(unittest.TestCase):
             self.assertIn(
                 73, INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
                 "73 must be silent only because it is explicitly declared",
+            )
+            # 81 is RESERVED, not superseded: V081 is held by an unmerged
+            # branch and is expected to arrive, where 73 never will. The
+            # distinction matters because when that branch merges, this
+            # declaration becomes stale and should be removed.
+            self.assertIn(
+                81, RESERVED_MIGRATION_VERSIONS,
+                "81 must be silent only because it is explicitly declared",
+            )
+            self.assertNotIn(
+                81, INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
+                "V081 is not superseded by anything - it is simply unmerged",
             )
         finally:
             shutil.rmtree(clean, ignore_errors=True)
@@ -245,3 +292,62 @@ class V071FreshChainSchemaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaleDeclarationTest(unittest.TestCase):
+    """A declaration must stop being true the moment its migration arrives."""
+
+    def test_no_declaration_is_currently_stale(self) -> None:
+        """Both 73 and 81 are genuinely absent from the committed set today."""
+        clean = _clean_migrations_dir()
+        try:
+            self.assertEqual(stale_migration_declarations(clean), [])
+        finally:
+            shutil.rmtree(clean, ignore_errors=True)
+
+    def test_a_reservation_is_reported_stale_once_the_file_arrives(self) -> None:
+        """The case this exists for: feat/award-amount-dates-v081 merging.
+
+        V081 is reserved by an unmerged branch. When it merges the file
+        appears and the reservation becomes a false statement - which would
+        silence a genuine future gap at 81. The chain check cannot catch it,
+        because an arrived migration is not an absence.
+        """
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            for version in (80, 81, 82):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+
+            self.assertEqual(
+                find_missing_migration_versions(directory), [],
+                "no gap - V081 has arrived",
+            )
+            self.assertEqual(
+                stale_migration_declarations(directory), [81],
+                "but its reservation is now stale and must be removed",
+            )
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_a_superseded_declaration_is_reported_stale_too(self) -> None:
+        """73 is never expected to arrive, but if it did the declaration
+        would be equally false - and restoring V073 is specifically unsafe
+        (its DROP CONSTRAINT has no IF EXISTS)."""
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            for version in (72, 73, 74):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+            self.assertEqual(stale_migration_declarations(directory), [73])
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_an_undeclared_present_migration_is_not_reported(self) -> None:
+        """Only DECLARED versions can be stale. Every other migration being
+        present is the normal case, not a finding."""
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            for version in (10, 11, 12):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+            self.assertEqual(stale_migration_declarations(directory), [])
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
