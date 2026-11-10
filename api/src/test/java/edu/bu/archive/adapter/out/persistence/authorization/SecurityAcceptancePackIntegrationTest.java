@@ -116,6 +116,12 @@ class SecurityAcceptancePackIntegrationTest {
     private static final String ACCOUNT_NUMBER = "9500234095";
     private static final String PI_PERSON_ID = "1000570";
 
+    /** SEC-005, from the live Award search on 2026-11-10. */
+    private static final String PARENT_AWARD = "100380-00001";
+    private static final String PARENT_AWARD_CHILD = "100380-00005";
+    private static final String OTHER_FAMILY_CHILD = "100330-00002";
+    private static final String OTHER_FAMILY_ROOT = "100330-00001";
+
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
             DockerImageName.parse("pgvector/pgvector:pg17")
@@ -326,6 +332,80 @@ class SecurityAcceptancePackIntegrationTest {
         }
     }
 
+    // ── cases 21 to 24: PARENT_AWARD ─────────────────────────────────
+
+    @Nested
+    @DisplayName("Cases 21-24: PARENT_AWARD (SEC-005)")
+    class ParentAwardScope {
+
+        /*
+         * Added 2026-11-10. This matrix was written before V088 introduced
+         * PARENT_AWARD, so SEC-005 had no acceptance case at all - the grant
+         * type existed, its engine was tested, and nothing said what a
+         * correct answer looked like.
+         */
+
+        @Test
+        @DisplayName("21: the granted Award always reaches itself")
+        void case21() {
+            String user = link("ARP-PARENT01-00000001");
+            grant(user, GrantType.PARENT_AWARD, null, false, null, PARENT_AWARD);
+
+            assertThat(canSee(user, PARENT_AWARD))
+                    .as("an Award with no hierarchy row must still reach itself")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("22: a child is reached at depth 1")
+        void case22() {
+            String user = link("ARP-PARENT01-00000001");
+            grant(user, GrantType.PARENT_AWARD, null, false, null, PARENT_AWARD);
+
+            assertThat(canSee(user, PARENT_AWARD_CHILD))
+                    .as("the hierarchy walk follows parent_award_number to award_number")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("23: another Award family is denied, however the hierarchy is shaped")
+        void case23() {
+            /*
+             * The disclosure this guards. A hierarchy row could point at an
+             * Award whose root differs, and following it would hand the
+             * grantee an unrelated family. The walk compares
+             * root_award_number on EVERY hop, not just the first.
+             */
+            String user = link("ARP-PARENT01-00000001");
+            grant(user, GrantType.PARENT_AWARD, null, false, null, PARENT_AWARD);
+
+            assertThat(canSee(user, OTHER_FAMILY_CHILD)).isFalse();
+            assertThat(canSee(user, OTHER_FAMILY_ROOT)).isFalse();
+        }
+
+        @Test
+        @DisplayName("24: at depth 0 the grant is the Award alone")
+        void case24() {
+            /*
+             * Why app.authorization.parent-award-depth is a business decision
+             * and not a tuning knob: it changes what the same grant means.
+             * At 0 this role sees one Award; at 1 it sees nine.
+             */
+            String user = link("ARP-PARENT02-00000002");
+            grant(user, GrantType.PARENT_AWARD, null, false, null, PARENT_AWARD);
+
+            assertThat(decideAtDepth(user, PARENT_AWARD, 0).allowed())
+                    .as("the granted Award itself is always reachable")
+                    .isTrue();
+            assertThat(decideAtDepth(user, PARENT_AWARD_CHILD, 0).allowed())
+                    .as("its child is not, at depth 0")
+                    .isFalse();
+            assertThat(decideAtDepth(user, PARENT_AWARD_CHILD, 1).allowed())
+                    .as("and is, at depth 1 - the same grant, a different policy")
+                    .isTrue();
+        }
+    }
+
     // ── cases 16 to 20: the negative controls ────────────────────────
 
     @Nested
@@ -489,7 +569,8 @@ class SecurityAcceptancePackIntegrationTest {
          * rather than an omission.
          */
         Set<Integer> coveredElsewhere = Set.of(6, 7, 8, 9, 10, 11, 15);
-        Set<Integer> coveredHere = Set.of(1, 2, 3, 4, 5, 12, 13, 14, 16, 17, 18, 19, 20);
+        Set<Integer> coveredHere =
+                Set.of(1, 2, 3, 4, 5, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24);
 
         String matrix = Files.readString(locate("docs/security/AUTHORIZATION_ACCEPTANCE_MATRIX.md"));
         Matcher rows = Pattern.compile("^\\| (\\d+) \\|", Pattern.MULTILINE).matcher(matrix);
@@ -534,6 +615,43 @@ class SecurityAcceptancePackIntegrationTest {
                 .orElseThrow();
 
         return evaluator().decide(outcome, record, family);
+    }
+
+    /**
+     * The same decision, under a specific {@code parent-award-depth}.
+     *
+     * <p>Depth is the one policy value that changes what an already-issued
+     * grant MEANS, so case 24 has to vary it rather than assume it. Everything
+     * else about the policy is held constant.
+     */
+    private static AccessDecision decideAtDepth(
+            String identifier, String awardNumber, int depth) {
+
+        AuthorizationPolicy policy = new AuthorizationPolicy(
+                AuthorizationPolicy.VersionScope.FAMILY_WIDE,
+                AuthorizationPolicy.DepartmentMatch.LEAD_UNIT_WITH_DESCENDANTS,
+                Set.of("PI", "COI", "KP", "MPI"),
+                depth,
+                AuthorizationPolicy.ContactDerivation.EXPLICIT_GRANT);
+
+        AccessOutcome outcome = new AccessScopeResolver(
+                grants, CLOCK, () -> Optional.of(policy),
+                new JdbcContactRelationships(jdbc), new JdbcAwardHierarchy(jdbc))
+                .resolve(identityResolver.resolve(new ValidatedCognitoIdentity(
+                        ISSUER, subjectFor(identifier), "user", CLOCK.instant())));
+
+        List<RecordFacts> family = facts.awardFamily(awardNumber);
+        Optional<String> current = facts.currentAwardVersionKey(awardNumber);
+        if (family.isEmpty() || current.isEmpty()) {
+            throw new IllegalStateException("fixture missing award " + awardNumber);
+        }
+        RecordFacts record = family.stream()
+                .filter(f -> f.versionKey().equals(current.get()))
+                .findFirst()
+                .orElseThrow();
+
+        return new RecordAccessEvaluator(policy, new JdbcUnitHierarchy(jdbc))
+                .decide(outcome, record, family);
     }
 
     private static boolean canSee(String identifier, String awardNumber) {
@@ -616,6 +734,50 @@ class SecurityAcceptancePackIntegrationTest {
                 .param("child", CHILD_UNIT)
                 .param("grandchild", GRANDCHILD_UNIT)
                 .param("account", ACCOUNT_NUMBER)
+                .update();
+
+        // SEC-005 fixtures: a real hierarchy root with a child, plus a
+        // SEPARATE family whose child must stay unreachable.
+        jdbc.sql("""
+                INSERT INTO archive.award_version (
+                    award_id, award_number, sequence_number, title,
+                    status_description, sponsor_code, sponsor_name,
+                    lead_unit_number, lead_unit_name, award_effective_date,
+                    is_primary_current, workflow_document_number
+                ) VALUES
+                (9101, :parentAward, 1, 'Hierarchy root', 'Active',
+                 '0200', 'NIH', :other, 'OTHER UNIT', DATE '2020-01-01', TRUE, 'DOC-H1'),
+                (9102, :childAward, 1, 'Hierarchy child', 'Active',
+                 '0200', 'NIH', :other, 'OTHER UNIT', DATE '2020-01-01', TRUE, 'DOC-H2'),
+                (9103, :otherRoot, 1, 'Another family root', 'Active',
+                 '0200', 'NIH', :other, 'OTHER UNIT', DATE '2020-01-01', TRUE, 'DOC-H3'),
+                (9104, :otherChild, 1, 'Another family child', 'Active',
+                 '0200', 'NIH', :other, 'OTHER UNIT', DATE '2020-01-01', TRUE, 'DOC-H4')
+                """)
+                .param("parentAward", PARENT_AWARD)
+                .param("childAward", PARENT_AWARD_CHILD)
+                .param("otherRoot", OTHER_FAMILY_ROOT)
+                .param("otherChild", OTHER_FAMILY_CHILD)
+                // A unit NOBODY in this suite is granted, so these Awards can
+                // only ever be reached through the PARENT_AWARD path - a unit
+                // grant leaking into case 23 would look like a pass.
+                .param("other", "9999999999")
+                .update();
+
+        jdbc.sql("""
+                INSERT INTO archive.award_hierarchy (
+                    award_hierarchy_id, root_award_number, award_number,
+                    parent_award_number, originating_award_number, active
+                ) VALUES
+                (1, :parentAward, :parentAward, :parentAward, :parentAward, 'Y'),
+                (2, :parentAward, :childAward,  :parentAward, :parentAward, 'Y'),
+                (3, :otherRoot,  :otherRoot,   :otherRoot,   :otherRoot,   'Y'),
+                (4, :otherRoot,  :otherChild,  :otherRoot,   :otherRoot,   'Y')
+                """)
+                .param("parentAward", PARENT_AWARD)
+                .param("childAward", PARENT_AWARD_CHILD)
+                .param("otherRoot", OTHER_FAMILY_ROOT)
+                .param("otherChild", OTHER_FAMILY_CHILD)
                 .update();
 
         // The PI contact row that makes case 12 resolvable.

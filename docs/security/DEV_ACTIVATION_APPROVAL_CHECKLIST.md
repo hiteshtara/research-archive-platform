@@ -143,6 +143,205 @@ Listed so the distinction is visible.
 
 ---
 
+## The six approvals, separately
+
+Each is self-contained so it can be granted, refused or deferred on its own.
+They are ordered by dependency, not by importance.
+
+---
+
+### Approval 1 — Deploy an API image containing the operator utilities
+
+**What is being approved:** building from a clean detached worktree at the
+reviewed commit, pushing to BU non-production ECR, and updating the DEV API
+service's container image reference.
+
+**Changes:** the API container image, and nothing else. Every environment
+variable, secret, CPU, memory, network setting and IAM role is preserved. No
+`APP_AUTHORIZATION_*` variable is added — enforcement is approval 5.
+
+**Why it is first:** the deployed image is `164b242` (revision 87). It has no
+`--award-number` flag, so a `PARENT_AWARD` grant cannot be created, and no
+`link-identity` profile, so that task definition would start a container with
+a profile nothing responds to. Pilot roles 5 and 6 cannot be provisioned at
+all until this is done.
+
+**Writes to shared data:** none.
+
+**Rollback:** `aws ecs update-service --task-definition <previous revision>`.
+One deployment. Task definition revisions are immutable and retained.
+
+**Follow-up that is part of this approval, not after it:** refresh
+`securityReadiness.json` and run `ops/sync-operator-taskdefs.sh`. Leaving
+either behind means the operator utilities run different code from the API.
+
+**Approved by:** ____________________  **Date:** __________
+
+---
+
+### Approval 2 — Register the two operator task definitions
+
+**What is being approved:** `aws ecs register-task-definition` for
+`research-archive-platform-dev-grant-admin` and
+`research-archive-platform-dev-link-identity`.
+
+**Changes:** two new task definition revisions in their own families. The API
+service is not touched — these are separate families, which is the point.
+
+**Preconditions, all enforced rather than trusted:**
+
+- `OperatorTaskDefinitionTest` passes (CI);
+- `scripts/verify-grant-admin-taskdef.sh` passes for **both** files — it
+  compares each against the image the **service is actually running** and
+  exits non-zero on a mismatch;
+- approval 1 complete, including the sync.
+
+**Writes to shared data:** none. Registering a definition runs nothing.
+
+**Rollback:** `aws ecs deregister-task-definition`. Seconds.
+
+**Approved by:** ____________________  **Date:** __________
+
+---
+
+### Approval 3 — Create the eight pilot identity links
+
+**What is being approved:** running the `link-identity` utility eight times
+**with `--confirm`**, writing eight rows to `authz.identity_link`.
+
+**Changes:** eight `ACTIVE` rows with `method = 'ADMIN_VERIFIED'`, plus eight
+`IDENTITY_LINKED` audit rows. One link carries a Kuali `PERSON_ID` (role 4);
+seven do not.
+
+**What a link does NOT do:** confer access to any record. The utility prints
+that on every run. Access requires a grant, which is approval 4.
+
+**Preconditions:** approvals 1 and 2; the eight participants named; each
+institutional identifier from BU IAM; each Cognito `sub` from `AdminGetUser`;
+role 4's `PERSON_ID` paired by the Award-first procedure in
+`PHASE2_PILOT_PLAN.md` section 4b.
+
+**Dry run first.** It is the default, and the proposed runs with their real
+output are in [`../runbooks/DEV_PILOT_DRY_RUNS.md`](../runbooks/DEV_PILOT_DRY_RUNS.md).
+
+**Rollback:** `--unlink-link-id=<id> --confirm` per link. This is a **status
+change, not a delete** — the row survives as history, which is what makes a
+later re-establishment a *re-link*. It does **not** revoke grants.
+
+**The risk that cannot be rolled back:** a wrong `PERSON_ID` pairing on role
+4. It resolves cleanly, the evaluator decides correctly, and the wrong records
+are reached. Name matching is not verification. The pairing procedure is the
+only control.
+
+**Approved by:** ____________________  **Date:** __________
+
+---
+
+### Approval 4 — Issue the six pilot grants
+
+**What is being approved:** running the `grant-admin` utility six times with
+`--confirm`, writing six rows to `authz.access_grant`.
+
+**Changes:** six `ACTIVE` grants — one each of `CENTRAL`, `UNIT`,
+`UNIT --include-descendants`, `CONTACT_DERIVATION`, `IO` and `PARENT_AWARD` —
+plus six `ACCESS_GRANTED` audit rows. **Every grant carries an expiry**
+(proposed `2027-06-30`).
+
+**Six, not eight.** Roles 7 (Grant Administrator) and 8 (No-Grant Control)
+receive none. If a run names either, stop — that is the pilot's control being
+spent.
+
+**Preconditions:** approvals 1–3; the scope values confirmed (unit
+`1250000000`, IO account `9500234095`, Award `100380-00001`, PERSON_ID
+`1000570`); the expiry date agreed.
+
+**Rollback:** `--revoke-grant-id=<id> --confirm` per grant. A status change;
+nothing is deleted and both audit rows survive.
+
+**Expiry is not rollback, and cannot close the pilot.** V087 constrains
+*unrevoked* grants, so an expired grant **still occupies its scope** — nobody
+can be granted that same scope again until it is revoked. Proven by four tests
+in `GrantProvisioningIntegrationTest.ExpiryIsNotRevocation`. Closing the pilot
+means revoking.
+
+**Approved by:** ____________________  **Date:** __________
+
+---
+
+### Approval 5 — Activate enforcement
+
+**What is being approved:** adding the `APP_AUTHORIZATION_*` settings to the
+DEV API service.
+
+**Changes:** one new task definition revision and one service update. **No
+data is written.**
+
+**Preconditions:** approvals 1–4, and **every policy value decided** (section
+D). An incomplete policy is refused at startup by
+`requireEnforcementSettings()` — deliberately, because a half-configured
+policy would deny every record to every user, and a service that starts and
+denies everything is harder to diagnose than one that refuses to start and
+says why.
+
+`parent-award-depth` in particular: at 0 role 6 reaches one Award, at 1 it
+reaches nine. Without it decided, role 6 has no expected result.
+
+**Rollback:** deploy the previous task definition revision. One deployment,
+no data touched. **This is the only genuinely reversible step in the whole
+sequence**, because it is the only one that writes nothing.
+
+**Stop conditions — roll back before continuing if any occur:** role 7 or 8
+can see any record; a denial returns anything other than 404; Global Search
+returns 404 rather than 200-with-zero-results for role 8; a Dashboard count
+disagrees with the page it summarises.
+
+**Approved by:** ____________________  **Date:** __________
+
+---
+
+### Approval 6 — Apply V089 and enable activity auditing
+
+**What is being approved:** two separable things, and they should be approved
+separately even here.
+
+**6a — apply the migration.** Creates `authz.activity_audit` and its monthly
+partitions. Applying it **enables nothing**; collection stays off until the
+flag is set. Applied only through the ETL loader's `--migrate-only` mode, as
+every migration is. Deploying code that depends on a migration does not apply
+it — that cost a production incident on 2026-08-14 with V076.
+
+**6b — turn collection on.** Sets
+`app.authorization.activity-audit.enabled`.
+
+**Preconditions — four decisions, none of them engineering:**
+
+1. the **retention period** (90 days proposed — *"a number for review, not an
+   approved BU retention policy"*);
+2. the **failure policy for routine reads** — does a failed audit write block
+   the read? `FAIL_CLOSED` is the business direction of 2026-11-09 for
+   planning; there is deliberately **no default**;
+3. the **privacy defaults** — search terms never stored, no content, actor is
+   the institutional identifier;
+4. whether a person is **told** when their activity is inspected. No channel
+   for that exists today.
+
+**Rollback:** 6b is a service deployment. **6a is forward-only** — a
+`DROP TABLE` would be a new migration and a new decision. A rollback script
+exists and is rehearsed by `ReleaseMigrationRehearsalIntegrationTest`, but
+using it is a decision, not an undo.
+
+**Why it is last:** it is the only step that adds a table, and the only one
+whose rollback is not a service deployment. V089 is physically held in
+`database/migrations-pending-approval/` so the loader cannot apply it by
+accident, and `MigrationReleaseScopeTest.v089IsHeldBack()` asserts that
+separation on every CI run.
+
+**Approved by (6a):** ____________________  **Date:** __________
+
+**Approved by (6b):** ____________________  **Date:** __________
+
+---
+
 ## The shortest path to testing something
 
 If the goal is to observe one requirement working on DEV with the least

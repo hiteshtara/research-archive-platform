@@ -942,6 +942,105 @@ class GrantProvisioningIntegrationTest {
         }
     }
 
+    /**
+     * Expiry is not revocation, and cannot be used to close a pilot.
+     *
+     * <p>The pilot's grants are proposed with an expiry so that an unreviewed
+     * pilot does not become permanent by inattention. It would be natural to
+     * assume that is also how the pilot gets cleaned up - let the grants
+     * expire and walk away. It is not, and the difference is not cosmetic.
+     *
+     * <p>V087's {@code ux_access_grant_active_scope} constrains UNREVOKED
+     * rows. An expired grant is still unrevoked, so it still occupies its
+     * scope: nobody can be granted that same scope again until it is revoked.
+     * A pilot "closed" by expiry leaves every scope it used blocked.
+     */
+    @Nested
+    @DisplayName("An expired grant is not a revoked one")
+    class ExpiryIsNotRevocation {
+
+        /** Ages a grant past its expiry, which the utility refuses to create. */
+        private void expire(long grantId) {
+            int updated = jdbc.sql("""
+                            UPDATE authz.access_grant
+                               SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 day'
+                             WHERE grant_id = :id
+                            """).param("id", grantId).update();
+            assertThat(updated).isEqualTo(1);
+        }
+
+        private long issue() {
+            GrantOutcome outcome = command().run(
+                    req().expiresAt("2027-06-30T00:00:00Z").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            return outcome.grantId();
+        }
+
+        @Test
+        void anExpiredGrantStillBlocksTheSameScope() {
+            long grantId = issue();
+            expire(grantId);
+
+            GrantOutcome second = command().run(req().confirmed(true).build());
+
+            assertThat(second.result())
+                    .as("V087 constrains UNREVOKED rows, and an expired grant is "
+                            + "still unrevoked")
+                    .isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", second.problems()))
+                    .contains("identical active grant already exists");
+        }
+
+        @Test
+        void revokingItFreesTheScope() {
+            long grantId = issue();
+            expire(grantId);
+            assertThat(command().run(req().confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.REFUSED);
+
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId,
+                    "closing the pilot properly");
+
+            assertThat(command().run(req().confirmed(true).build()).result())
+                    .as("revocation is what actually releases the scope")
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+        }
+
+        @Test
+        void theRowSurvivesBothWays() {
+            /*
+             * Neither expiry nor revocation deletes anything. The audit trail
+             * depends on that, and so does being able to say afterwards what
+             * the pilot actually held.
+             */
+            long grantId = issue();
+            expire(grantId);
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId, "closing");
+
+            assertThat(jdbc.sql("""
+                            SELECT count(*) FROM authz.access_grant WHERE grant_id = :id
+                            """).param("id", grantId).query(Integer.class).single())
+                    .as("the grant row is still there, expired AND revoked")
+                    .isEqualTo(1);
+            assertThat(auditActions())
+                    .containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED");
+        }
+
+        @Test
+        void expiringChangesNothingAboutWhetherItIsRevoked() {
+            long grantId = issue();
+            expire(grantId);
+
+            assertThat(jdbc.sql("""
+                            SELECT revoked_at IS NULL FROM authz.access_grant
+                             WHERE grant_id = :id
+                            """).param("id", grantId).query(Boolean.class).single())
+                    .as("expiry writes expires_at and nothing else - the field the "
+                            + "index and isActiveAt both key on is untouched")
+                    .isTrue();
+        }
+    }
+
     // ---------------- helpers ----------------
 
     private static GrantProvisioningCommand command() {

@@ -17,6 +17,14 @@ every "expected" below was a prediction. Most are now **executed**.
 in the table below is either executed there or recorded as covered elsewhere,
 so a case added here cannot quietly return to being a prediction.
 
+**Cases 21–24 were added on 2026-11-10.** This matrix was written on
+2026-10-29, before V088 added `PARENT_AWARD`, so SEC-005 had no acceptance
+case at all — the grant type existed, its engine was tested, and nothing here
+said what a correct answer looked like. The records are real: Award
+`100380-00001` has eight children (`-00002`…`-00009`) and `100330-00002`
+belongs to a different family, both read from the live Award search on
+2026-11-10.
+
 **Still a prediction, and deliberately so:** every row's behaviour *on DEV*.
 These tests run against throwaway containers. Nothing below has been observed
 on the deployed service, because enforcement is off there and no grant exists
@@ -66,6 +74,10 @@ created and no group is modified.**
 | 18 | identity suspended | any | deny | `AccessOutcome.Denied / SUSPENDED_IDENTITY` | 404 |
 | 19 | no identity link | any | deny | `NotProvisioned / NO_IDENTITY_LINK` | 404 |
 | 20 | **`ARP-FK7QY195-QW5HV7G0`** (the real ADMIN), no data grants | any | deny | ADMIN confers no scope; 0 `access_grant` rows | 404 |
+| 21 | `ARP-TEST-PARENT`, PARENT_AWARD **`100380-00001`** | `100380-00001` | allow | the granted Award always reaches itself, even with no hierarchy row | 200 |
+| 22 | same, with `parent-award-depth` ≥ 1 | `100380-00005` (a child) | allow | `award_hierarchy` walk, `parent_award_number` → `award_number` | 200 |
+| 23 | same | `100330-00002` (**another family**) | **deny** | the walk compares `root_award_number` on every hop | **404** |
+| 24 | same, with `parent-award-depth` = 0 | `100380-00005` | **deny** | depth 0 is the granted Award alone | **404** |
 
 ### Denied versus missing
 
