@@ -28,6 +28,16 @@ public record AuthorizationPolicy(
     /** Default parent-award depth: one level. */
     public static final int DEFAULT_PARENT_AWARD_DEPTH = 1;
 
+    /**
+     * The deepest parent-award traversal the recursive query will run. The
+     * traversal clamps to this, so configuring more is not an error that
+     * surfaces - it is a number that silently does not mean what it says.
+     * Declared here, with the policy, and used by both the traversal and the
+     * startup validator so there is one value rather than two that agree by
+     * coincidence.
+     */
+    public static final int MAX_PARENT_AWARD_DEPTH = 10;
+
     public AuthorizationPolicy(VersionScope versionScope, DepartmentMatch departmentMatch, Set<String> researchStaffRoles) {
         this(versionScope, departmentMatch, researchStaffRoles,
              DEFAULT_PARENT_AWARD_DEPTH, ContactDerivation.EXPLICIT_GRANT);

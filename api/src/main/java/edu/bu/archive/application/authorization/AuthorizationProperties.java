@@ -39,6 +39,72 @@ public class AuthorizationProperties {
     private Duration maxSignInAge;
     private final Enrollment enrollment = new Enrollment();
 
+    /**
+     * Everything that is wrong with the enforcement configuration, as
+     * property names an operator can act on.
+     *
+     * <p>Returns ALL of them, not the first. Someone turning enforcement on
+     * is setting five values at once; failing on one at a time means five
+     * restarts to discover five problems, which is how people start guessing.
+     *
+     * <p>Empty when enforcement is off: nothing here is required until it is.
+     */
+    public List<String> enforcementConfigurationProblems() {
+        List<String> problems = new ArrayList<>();
+        if (!enforcementEnabled) {
+            return problems;
+        }
+        if (versionScope == null) {
+            problems.add("app.authorization.version-scope is not set (one of: "
+                    + names(AuthorizationPolicy.VersionScope.values()) + ")");
+        }
+        if (departmentMatch == null) {
+            problems.add("app.authorization.department-match is not set (one of: "
+                    + names(AuthorizationPolicy.DepartmentMatch.values()) + ")");
+        }
+        if (contactDerivation == null) {
+            problems.add("app.authorization.contact-derivation is not set (one of: "
+                    + names(AuthorizationPolicy.ContactDerivation.values()) + ")");
+        }
+        if (researchStaffRoles.isEmpty()) {
+            problems.add("app.authorization.research-staff-roles is empty (the Kuali contact role "
+                    + "codes that count as Research Staff, e.g. PI)");
+        } else if (researchStaffRoles.stream().anyMatch(role -> role == null || role.isBlank())) {
+            problems.add("app.authorization.research-staff-roles contains a blank role code");
+        }
+        /*
+         * Not part of policy(), but required by RecordAuthorizationService on
+         * every enforced request. Left unset it denies at request time rather
+         * than at startup - the same late failure this validator exists to
+         * move forward.
+         */
+        if (maxSignInAge == null) {
+            problems.add("app.authorization.max-sign-in-age is not set (e.g. 12h; a Cognito refresh "
+                    + "keeps the original auth_time, so without it a refresh token keeps a session "
+                    + "alive with no new BU login)");
+        } else if (maxSignInAge.isZero() || maxSignInAge.isNegative()) {
+            problems.add("app.authorization.max-sign-in-age must be positive, but is " + maxSignInAge);
+        }
+        if (parentAwardDepth < 0) {
+            problems.add("app.authorization.parent-award-depth must not be negative, but is " + parentAwardDepth);
+        } else if (parentAwardDepth > AuthorizationPolicy.MAX_PARENT_AWARD_DEPTH) {
+            problems.add("app.authorization.parent-award-depth is " + parentAwardDepth
+                    + ", above the maximum supported depth of "
+                    + AuthorizationPolicy.MAX_PARENT_AWARD_DEPTH
+                    + " - the traversal would clamp to the maximum, so the configured value "
+                    + "would not mean what it says");
+        }
+        return problems;
+    }
+
+    private static String names(Enum<?>[] values) {
+        List<String> all = new ArrayList<>();
+        for (Enum<?> value : values) {
+            all.add(value.name());
+        }
+        return String.join(", ", all);
+    }
+
     /** The configured policy, or empty when any strategy is missing. */
     public Optional<AuthorizationPolicy> policy() {
         if (versionScope == null || departmentMatch == null || researchStaffRoles.isEmpty()

@@ -54,7 +54,8 @@ public class JdbcAwardHierarchy implements AwardHierarchy {
      * policy knob; this is a guard against one being set to something absurd.
      * BU's deepest observed Award hierarchy is far below this.
      */
-    static final int MAX_SUPPORTED_DEPTH = 10;
+    static final int MAX_SUPPORTED_DEPTH =
+            edu.bu.archive.application.authorization.AuthorizationPolicy.MAX_PARENT_AWARD_DEPTH;
 
     private static final String EXPAND = """
             WITH RECURSIVE walk AS (
