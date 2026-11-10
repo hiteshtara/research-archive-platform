@@ -20,6 +20,7 @@ import {
 } from "../features/common/searchPresentation.mjs";
 import {
   describeGlobalSearchOutcome,
+  describeResultCounts,
   describeResultCard,
   filterOutIrbResults,
   incompleteSearchMessage,
@@ -147,6 +148,13 @@ export function GlobalSearchPage() {
             failedModules: results.failedModules,
             relatedRevealed,
           });
+          // QA TC-040. Every module is capped at 25, so a bare count of the
+          // rows read as a total of the archive's matches. Where a module
+          // reported its real total, say both.
+          const counts = describeResultCounts(
+            results.moduleTotals,
+            outcome.directCount,
+          );
 
           const renderCard = (result: GlobalSearchItem) => {
             const card = describeResultCard(result);
@@ -198,7 +206,36 @@ export function GlobalSearchPage() {
 
           return (
             <>
-              <ResultCount total={outcome.directCount} singular="result" />
+              {counts.truncated ? (
+                <Box sx={{ mb: 1.5 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: "block", letterSpacing: "0.08em" }}
+                  >
+                    {counts.summary}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block" }}
+                  >
+                    {counts.truncationNote}
+                  </Typography>
+                  {counts.perModule.map((line) => (
+                    <Typography
+                      key={line}
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block" }}
+                    >
+                      {line}
+                    </Typography>
+                  ))}
+                </Box>
+              ) : (
+                <ResultCount total={outcome.directCount} singular="result" />
+              )}
 
               {/* A module that failed is not a module that found
                   nothing, so this is never collapsed into "no

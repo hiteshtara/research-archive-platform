@@ -122,11 +122,29 @@ export interface GlobalSearchItem {
 // failedModules names every domain whose search errored during this
 // request (e.g. "IRB", "AWARD") - partial results are always returned
 // rather than failing the whole search for one domain's outage.
+// How many records a module matched, beside how many it returned. Global
+// Search caps every module at 25, so totalResults - which counts ROWS, not
+// matching records - is far smaller than the archive's answer for any broad
+// query. QA TC-040 reported that as misleading; this is what the page needs
+// in order to say "showing 25 of 234" instead of "25 results found".
+//
+// totalMatches is null where the module's own search does not count its
+// matches (Proposal and IRB return a bare list). Null means unknown and is
+// rendered as a lower bound, never as a total.
+export interface GlobalSearchModuleTotal {
+  module: string;
+  returned: number;
+  totalMatches: number | null;
+  capped: boolean;
+}
+
 export interface GlobalSearchResponse {
   query: string;
+  // The number of rows in `results`, NOT the number of matching records.
   totalResults: number;
   results: GlobalSearchItem[];
   failedModules: string[];
+  moduleTotals?: GlobalSearchModuleTotal[];
 }
 
 export interface AiCitation {

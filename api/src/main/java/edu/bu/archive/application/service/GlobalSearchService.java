@@ -1,6 +1,7 @@
 package edu.bu.archive.application.service;
 
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchItemResponse;
+import edu.bu.archive.adapter.in.web.dto.GlobalSearchModuleTotal;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
@@ -247,20 +248,36 @@ public class GlobalSearchService {
         String cid = timingLog.correlationId();
         long requestStartNanos = System.nanoTime();
 
+        /*
+         * QA TC-040. Where a module's own search already counts its matches,
+         * that count is recorded here as the leg runs and reported beside the
+         * rows. A ConcurrentHashMap rather than a return value because the
+         * legs are fault-tolerant futures whose shared shape
+         * (List<GlobalSearchItemResponse>) is relied on by supplyLeg,
+         * startIfSelected, timedLeg and joinOrRecordFailure alike; widening
+         * all four to carry a count would have been a larger change to the
+         * fan-out than the question warrants.
+         *
+         * A module that fails leaves no entry, which is correct: a failed
+         * module has no total, and reporting zero would read as "matched
+         * nothing".
+         */
+        Map<String, Long> knownTotals = new java.util.concurrent.ConcurrentHashMap<>();
+
         // Not merely filtered afterwards: the leg never runs, so no IRB
         // row, identifier or count is computed for an enforced session.
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
                 selected.isEmpty() && !irbExcludedFromSharedSearch()
-                        ? supplyLeg(cid, "IRB", () -> searchIrb(normalizedQuery))
+                        ? supplyLeg(cid, "IRB", () -> searchIrb(normalizedQuery, knownTotals))
                         : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
-                startIfSelected(selected, cid, "AWARD", () -> searchAward(normalizedQuery));
+                startIfSelected(selected, cid, "AWARD", () -> searchAward(normalizedQuery, knownTotals));
         CompletableFuture<List<GlobalSearchItemResponse>> negotiationFuture =
-                startIfSelected(selected, cid, "NEGOTIATION", () -> searchNegotiation(normalizedQuery));
+                startIfSelected(selected, cid, "NEGOTIATION", () -> searchNegotiation(normalizedQuery, knownTotals));
         CompletableFuture<List<GlobalSearchItemResponse>> subawardFuture =
-                startIfSelected(selected, cid, "SUBAWARD", () -> searchSubaward(normalizedQuery));
+                startIfSelected(selected, cid, "SUBAWARD", () -> searchSubaward(normalizedQuery, knownTotals));
         CompletableFuture<List<GlobalSearchItemResponse>> proposalFuture =
-                startIfSelected(selected, cid, "PROPOSAL", () -> searchProposal(normalizedQuery));
+                startIfSelected(selected, cid, "PROPOSAL", () -> searchProposal(normalizedQuery, knownTotals));
 
         // Semantic search is a strictly optional 6th input - see the
         // class comment. It is never started at all (no Bedrock call,
@@ -378,8 +395,52 @@ public class GlobalSearchService {
                 normalizedQuery,
                 deduplicated.size(),
                 deduplicated,
-                failedModules
+                failedModules,
+                moduleTotals(deduplicated, knownTotals)
         );
+    }
+
+    /**
+     * Per-module counts: returned, matched where known, and whether capped.
+     *
+     * <p>QA TC-040 observed that Global Search "appears limited to 25 direct
+     * matches per entity type" and asked whether {@code totalResults} counts
+     * matching records. It does not - it counts rows - and the cap is real
+     * and fixed at {@link #PER_DOMAIN_LIMIT}. Rather than redefine
+     * {@code totalResults} underneath existing callers, the honest numbers
+     * are reported alongside it.
+     *
+     * <p>Counted from the DEDUPLICATED list, so the figures describe what the
+     * caller actually received. Semantic results are excluded from
+     * {@code returned}: they are a different kind of answer and are not part
+     * of the module's capped page, so counting them there would make a
+     * module look as though its direct search returned more than it did.
+     */
+    private static List<GlobalSearchModuleTotal> moduleTotals(
+            List<GlobalSearchItemResponse> results,
+            Map<String, Long> knownTotals
+    ) {
+        Map<String, Integer> returned = new LinkedHashMap<>();
+        for (GlobalSearchItemResponse item : results) {
+            if (MATCH_TYPE_RELATED.equals(item.matchType())) {
+                continue;
+            }
+            returned.merge(item.module(), 1, Integer::sum);
+        }
+
+        Set<String> modules = new java.util.LinkedHashSet<>(returned.keySet());
+        modules.addAll(knownTotals.keySet());
+
+        List<GlobalSearchModuleTotal> totals = new ArrayList<>(modules.size());
+        for (String module : modules) {
+            int rows = returned.getOrDefault(module, 0);
+            totals.add(new GlobalSearchModuleTotal(
+                    module,
+                    rows,
+                    knownTotals.get(module),
+                    rows >= PER_DOMAIN_LIMIT));
+        }
+        return List.copyOf(totals);
     }
 
     private static Set<String> normalizeModules(Set<String> modules) {
@@ -517,7 +578,8 @@ public class GlobalSearchService {
 
     // --- IRB -----------------------------------------------------------
 
-    private List<GlobalSearchItemResponse> searchIrb(String query) {
+    private List<GlobalSearchItemResponse> searchIrb(
+            String query, Map<String, Long> knownTotals) {
         List<IrbGlobalSearchRow> rows =
                 irbSearchRepository.search(query, PER_DOMAIN_LIMIT);
 
@@ -557,7 +619,8 @@ public class GlobalSearchService {
 
     // --- Award -----------------------------------------------------------
 
-    private List<GlobalSearchItemResponse> searchAward(String query) {
+    private List<GlobalSearchItemResponse> searchAward(
+            String query, Map<String, Long> knownTotals) {
         List<GlobalSearchItemResponse> mapped = new ArrayList<>();
 
         if (query.matches("\\d+")) {
@@ -566,6 +629,7 @@ public class GlobalSearchService {
 
         AwardSearchResponse response =
                 awardArchiveService.search(query, 0, PER_DOMAIN_LIMIT);
+        knownTotals.put("AWARD", response.results().totalElements());
 
         if (response.exactDocumentMatch() != null) {
             mapped.add(toGlobalSearchItem(response.exactDocumentMatch()));
@@ -701,9 +765,11 @@ public class GlobalSearchService {
 
     // --- Negotiation -------------------------------------------------------
 
-    private List<GlobalSearchItemResponse> searchNegotiation(String query) {
+    private List<GlobalSearchItemResponse> searchNegotiation(
+            String query, Map<String, Long> knownTotals) {
         PageResponse<NegotiationSummaryResponse> page =
                 negotiationArchiveService.findPage(query, 0, PER_DOMAIN_LIMIT);
+        knownTotals.put("NEGOTIATION", page.totalElements());
 
         List<GlobalSearchItemResponse> mapped =
                 new ArrayList<>(page.content().size());
@@ -784,8 +850,10 @@ public class GlobalSearchService {
 
     // --- Subaward ----------------------------------------------------------
 
-    private List<GlobalSearchItemResponse> searchSubaward(String query) {
+    private List<GlobalSearchItemResponse> searchSubaward(
+            String query, Map<String, Long> knownTotals) {
         var page = subawardArchiveService.findPage(query, 0, PER_DOMAIN_LIMIT);
+        knownTotals.put("SUBAWARD", page.totalElements());
 
         List<GlobalSearchItemResponse> mapped =
                 new ArrayList<>(page.content().size());
@@ -861,7 +929,8 @@ public class GlobalSearchService {
 
     // --- Proposal ------------------------------------------------------
 
-    private List<GlobalSearchItemResponse> searchProposal(String query) {
+    private List<GlobalSearchItemResponse> searchProposal(
+            String query, Map<String, Long> knownTotals) {
         List<ProposalFamilySummaryResponse> results =
                 proposalArchiveRepository.findFamilies(
                         query, proposalAccess.proposalScopeSql("ranked"), PER_DOMAIN_LIMIT);
@@ -1003,6 +1072,7 @@ public class GlobalSearchService {
                 List::size);
 
         List<SemanticSearchRow> deduped = dedupeByBusinessRecord(candidates);
+        recordRelevanceShape(cid, candidates, deduped);
 
         int topK = Math.min(semanticSearchProperties.getTopK(), SEMANTIC_MAX_RESULTS);
         if (deduped.size() > topK) {
@@ -1015,6 +1085,64 @@ public class GlobalSearchService {
                 "SEMANTIC_ENRICH_TOTAL",
                 () -> enrichSemanticResults(toEnrich, cid),
                 List::size);
+    }
+
+    /**
+     * The shape of this query's nearest-neighbour distances, for measurement.
+     *
+     * <h2>Why this exists</h2>
+     *
+     * <p>QA TC-041 asks whether Global Search returns its top five nearest
+     * vectors regardless of relevance. It does: there is no similarity
+     * threshold anywhere in the pipeline, by an earlier deliberate decision
+     * that no single global cutoff separated useful from useless results.
+     *
+     * <p>That decision cannot be revisited on evidence, because the evidence
+     * is not observable. Cosine distance is computed in
+     * {@code SemanticSearchRepository}, used to order the rows, and then
+     * discarded - {@code GlobalSearchItemResponse} documents, deliberately,
+     * that no distance or score ever leaves the backend, and that is a
+     * reasonable rule for a client-facing DTO. So the distances are recorded
+     * HERE instead, where a labelled set of relevant and irrelevant queries
+     * can be run against DEV and the separation actually measured.
+     *
+     * <p>What is logged is only the shape of the distance distribution: the
+     * nearest, the furthest kept, and the candidate-window median. No
+     * identifier, no business number, no query text - the activity audit
+     * deliberately does not record what someone searched for, and this must
+     * not become the place that does. The median is the useful one: a
+     * meaningful query is expected to have a nearest much closer than its
+     * median, and a nonsense query to have them nearly equal, which is the
+     * basis of a relative rejection rule that needs no global constant.
+     */
+    private void recordRelevanceShape(
+            String cid,
+            List<SemanticSearchRow> candidates,
+            List<SemanticSearchRow> deduped
+    ) {
+        if (candidates.isEmpty()) {
+            return;
+        }
+        double[] sorted = candidates.stream()
+                .mapToDouble(SemanticSearchRow::distance)
+                .sorted()
+                .toArray();
+        double nearest = sorted[0];
+        double median = sorted[sorted.length / 2];
+        double furthestKept = deduped.isEmpty()
+                ? nearest
+                : deduped.get(deduped.size() - 1).distance();
+
+        log.info(
+                "SEMANTIC_RELEVANCE cid={} candidates={} nearest={} furthestKept={} "
+                        + "candidateMedian={} nearestToMedianRatio={}",
+                cid,
+                candidates.size(),
+                String.format("%.4f", nearest),
+                String.format("%.4f", furthestKept),
+                String.format("%.4f", median),
+                median == 0 ? "n/a" : String.format("%.4f", nearest / median)
+        );
     }
 
     // Keeps the single best-scoring (lowest-distance) row per business

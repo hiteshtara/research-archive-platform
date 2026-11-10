@@ -2,6 +2,7 @@ package edu.bu.archive.application.service;
 
 import edu.bu.archive.application.authorization.SqlFragment;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchItemResponse;
+import edu.bu.archive.adapter.in.web.dto.GlobalSearchModuleTotal;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardDocumentNumberMatchResponse;
@@ -144,6 +145,167 @@ class GlobalSearchServiceTest {
                 title, "Active", "Jane PI", "Human Subjects",
                 searchRank, matchedField, identifier
         );
+    }
+
+    // --- QA TC-040: totalResults counts rows, not matches -----------------
+
+    /*
+     * Measured on DEV (API revision 87, UI Amplify job 186) on 2026-11-10:
+     *
+     *   /api/global-search?query=NSF      totalResults 104
+     *     = 25 AWARD + 25 NEGOTIATION + 25 SUBAWARD + 29 PROPOSAL
+     *   /api/negotiations?query=NSF       totalElements 234
+     *
+     * So 104 was the page size, four times over, while one module alone
+     * matched 234. These tests hold the distinction the response now makes.
+     */
+
+    private static ProposalFamilySummaryResponse proposalFamily(String number, String title) {
+        return new ProposalFamilySummaryResponse(
+                number, title, "ACTIVE", "NIH", "CHEMISTRY", "Jane PI", 1, 99L);
+    }
+
+    private static NegotiationSummaryResponse negotiationRow(long id, String document) {
+        return new NegotiationSummaryResponse(
+                id, document, null, null, "Executed",
+                null, null, "Material Transfer Agreement",
+                null, null, null, "202505-00002",
+                null, "Jane Negotiator", null, null, null,
+                null, null, null, null, null, null, null
+        );
+    }
+
+    @Test
+    void reportsTheModuleMatchTotalBesideTheRowsItReturned() {
+        List<NegotiationSummaryResponse> capped = new java.util.ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            capped.add(negotiationRow(12000L + i, "doc-" + i));
+        }
+        when(negotiationArchiveService.findPage("wilson wong", 0, 25)).thenReturn(
+                new PageResponse<>(capped, 0, 25, 234, 10, true, false));
+
+        GlobalSearchResponse response = service.search("wilson wong");
+
+        GlobalSearchModuleTotal negotiation = response.moduleTotals().stream()
+                .filter(t -> t.module().equals("NEGOTIATION"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(negotiation.returned()).isEqualTo(25);
+        assertThat(negotiation.totalMatches())
+                .as("the module's own search already counted them; do not discard it")
+                .isEqualTo(234L);
+        assertThat(negotiation.capped()).isTrue();
+    }
+
+    @Test
+    void totalResultsStillCountsRowsAndIsNoLongerTheOnlyNumberAvailable() {
+        /*
+         * totalResults keeps its meaning so existing callers are unaffected.
+         * The point of the fix is that a reader is no longer left with only
+         * that number: 25 returned against 234 matched is now visible.
+         */
+        List<NegotiationSummaryResponse> capped = new java.util.ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            capped.add(negotiationRow(12000L + i, "doc-" + i));
+        }
+        when(negotiationArchiveService.findPage("wilson wong", 0, 25)).thenReturn(
+                new PageResponse<>(capped, 0, 25, 234, 10, true, false));
+
+        GlobalSearchResponse response = service.search("wilson wong");
+
+        assertThat(response.totalResults())
+                .as("rows returned, which is what it has always been")
+                .isEqualTo(response.results().size());
+        assertThat(response.totalResults()).isLessThan(234L);
+    }
+
+    @Test
+    void aModuleUnderTheCapIsNotReportedAsCapped() {
+        when(negotiationArchiveService.findPage("rare", 0, 25)).thenReturn(
+                new PageResponse<>(List.of(negotiationRow(1L, "doc-1")), 0, 25, 1, 1, true, true));
+
+        GlobalSearchModuleTotal negotiation = service.search("rare").moduleTotals().stream()
+                .filter(t -> t.module().equals("NEGOTIATION"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(negotiation.returned()).isEqualTo(1);
+        assertThat(negotiation.totalMatches()).isEqualTo(1L);
+        assertThat(negotiation.capped())
+                .as("one row out of one match is the whole answer")
+                .isFalse();
+    }
+
+    @Test
+    void aModuleWhoseSearchCountsNothingReportsAnUnknownTotalRatherThanAGuess() {
+        /*
+         * Proposal and IRB return a bare list, so no count is available
+         * without an extra query. Reporting 0, or echoing the row count as
+         * though it were a total, would be the same lie in a new field.
+         */
+        when(proposalArchiveRepository.findFamilies(eq("campbell"), any(), eq(25)))
+                .thenReturn(List.of(proposalFamily("01234567", "A proposal")));
+
+        GlobalSearchResponse response = service.search("campbell");
+
+        GlobalSearchModuleTotal proposal = response.moduleTotals().stream()
+                .filter(t -> t.module().equals("PROPOSAL"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(proposal.returned()).isEqualTo(1);
+        assertThat(proposal.totalMatches())
+                .as("unknown must be null, never zero and never the row count")
+                .isNull();
+        assertThat(proposal.capped()).isFalse();
+    }
+
+    @Test
+    void aFailedModuleContributesNoTotalAtAll() {
+        /*
+         * A module that failed is not a module that matched nothing - the
+         * response already distinguishes them through failedModules, and the
+         * totals must not undo that by reporting a confident 0.
+         */
+        when(negotiationArchiveService.findPage(anyString(), eq(0), anyInt()))
+                .thenThrow(new RuntimeException("negotiation search is down"));
+
+        GlobalSearchResponse response = service.search("anything");
+
+        assertThat(response.failedModules()).contains("NEGOTIATION");
+        assertThat(response.moduleTotals())
+                .as("no total for a module that never answered")
+                .noneMatch(t -> t.module().equals("NEGOTIATION"));
+    }
+
+    @Test
+    void semanticResultsAreNotCountedAsAModulesDirectRows() {
+        /*
+         * A related result is not part of the module's capped page. Counting
+         * it there would make a module appear to have returned more direct
+         * matches than it did - which is the original complaint in a
+         * different place.
+         */
+        List<NegotiationSummaryResponse> capped = new java.util.ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            capped.add(negotiationRow(12000L + i, "doc-" + i));
+        }
+        when(negotiationArchiveService.findPage("wilson wong", 0, 25)).thenReturn(
+                new PageResponse<>(capped, 0, 25, 234, 10, true, false));
+
+        GlobalSearchResponse response = service.search("wilson wong");
+
+        long relatedRows = response.results().stream()
+                .filter(r -> "RELATED".equals(r.matchType()))
+                .count();
+        int countedRows = response.moduleTotals().stream()
+                .mapToInt(GlobalSearchModuleTotal::returned)
+                .sum();
+
+        assertThat(countedRows + relatedRows)
+                .as("every row is either a counted direct row or a related one")
+                .isEqualTo(response.results().size());
     }
 
     // --- Normalization / fan-out -----------------------------------------

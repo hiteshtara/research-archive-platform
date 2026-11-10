@@ -22,11 +22,20 @@ export function filterOutIrbResults(response) {
     (module) => module !== "IRB",
   );
 
+  // Carried through, with IRB's own entry dropped for the same reason its
+  // rows are: the page must not report a count for records it removed. The
+  // remaining entries are the backend's own, unmodified - they describe what
+  // each module matched, which filtering IRB out of the list does not change.
+  const moduleTotals = Array.isArray(response?.moduleTotals)
+    ? response.moduleTotals.filter((total) => total?.module !== "IRB")
+    : [];
+
   return {
     query: response?.query ?? "",
     totalResults: filteredResults.length,
     results: filteredResults,
     failedModules: filteredFailedModules,
+    moduleTotals,
   };
 }
 
@@ -152,4 +161,67 @@ export function noDirectMatchesMessage(query) {
   return trimmed
     ? `No direct matches for \u201c${trimmed}\u201d.`
     : "No direct matches.";
+}
+
+/*
+ * What the result count actually means (QA TC-040).
+ *
+ * The page used to print one number - "104 results found" - taken from the
+ * length of the result list. A searcher reasonably read that as "the archive
+ * contains 104 NSF records". It did not: every module is capped at 25, and
+ * the Negotiation module alone matched 234. The number was a page size
+ * wearing the clothes of a finding.
+ *
+ * So the count is now stated as what it is, and where a module reported its
+ * real total that total is named. Where a module could not count (Proposal
+ * and IRB return a bare list), nothing is invented - "at least" is used,
+ * which is the strongest true statement available.
+ */
+export function describeResultCounts(moduleTotals = [], directCount = 0) {
+  const totals = Array.isArray(moduleTotals) ? moduleTotals : [];
+  const capped = totals.filter((t) => t?.capped);
+
+  if (capped.length === 0) {
+    return {
+      showing: directCount,
+      summary:
+        directCount === 1 ? "1 result found" : `${directCount} results found`,
+      truncated: false,
+      perModule: [],
+    };
+  }
+
+  // Known totals can be added up; an unknown one makes the whole figure a
+  // lower bound rather than a total, and it has to read as one.
+  const anyUnknown = capped.some(
+    (t) => t.totalMatches === null || t.totalMatches === undefined,
+  );
+  const knownTotal = totals.reduce(
+    (sum, t) =>
+      t?.totalMatches === null || t?.totalMatches === undefined
+        ? sum
+        : sum + Number(t.totalMatches),
+    0,
+  );
+
+  const perModule = totals
+    .filter((t) => t?.capped)
+    .map((t) =>
+      t.totalMatches === null || t.totalMatches === undefined
+        ? `${t.module}: showing ${t.returned}, more exist`
+        : `${t.module}: showing ${t.returned} of ${t.totalMatches}`,
+    );
+
+  return {
+    showing: directCount,
+    summary: anyUnknown
+      ? `Showing ${directCount} results — at least ${knownTotal} match`
+      : `Showing ${directCount} of ${knownTotal} matching records`,
+    truncated: true,
+    perModule,
+    truncationNote:
+      "Each record type returns at most 25 results, so this is the first " +
+      "page rather than everything that matched. Open a record type to " +
+      "page through all of its matches.",
+  };
 }

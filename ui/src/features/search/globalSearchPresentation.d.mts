@@ -1,4 +1,8 @@
-import type { GlobalSearchItem, GlobalSearchResponse } from "../../types/api";
+import type {
+  GlobalSearchItem,
+  GlobalSearchModuleTotal,
+  GlobalSearchResponse,
+} from "../../types/api";
 
 export function filterOutIrbResults(
   response: GlobalSearchResponse | null | undefined,
@@ -7,6 +11,7 @@ export function filterOutIrbResults(
   totalResults: number;
   results: GlobalSearchItem[];
   failedModules: string[];
+  moduleTotals: GlobalSearchModuleTotal[];
 };
 
 export function describeResultCard(
@@ -49,3 +54,16 @@ export function describeGlobalSearchOutcome<T>(options?: {
 }): GlobalSearchOutcome<T>;
 export function incompleteSearchMessage(failedModules?: string[]): string | null;
 export function noDirectMatchesMessage(query?: unknown): string;
+
+export interface ResultCountDescription {
+  showing: number;
+  summary: string;
+  truncated: boolean;
+  perModule: string[];
+  truncationNote?: string;
+}
+
+export function describeResultCounts(
+  moduleTotals?: GlobalSearchModuleTotal[],
+  directCount?: number,
+): ResultCountDescription;
