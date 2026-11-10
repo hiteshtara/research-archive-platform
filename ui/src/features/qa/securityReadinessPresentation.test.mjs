@@ -87,11 +87,16 @@ test("enforcement is recorded as off, matching the measured task definition", ()
 
 test("the deployed commit and revision are recorded, not inferred", () => {
   const deployment = deploymentSummary(readiness.deployment);
-  assert.equal(deployment.revision, "research-archive-platform-dev-api:84");
-  assert.equal(deployment.commit, "66f3cfe");
-  assert.equal(deployment.behind, 30);
-  assert.equal(deployment.isCurrent, false);
+  assert.equal(deployment.revision, "research-archive-platform-dev-api:85");
+  assert.equal(deployment.commit, "c1d25e6");
+  assert.equal(deployment.behind, 0);
+  assert.equal(deployment.isCurrent, true);
   assert.ok(deployment.verifiedAt);
+  /*
+   * Pinned deliberately. These three values drifted out of date together on
+   * 2026-11-09 and nothing failed; the consistency suite now checks them
+   * against every other claim in the file.
+   */
 });
 
 // ── the helpers ──────────────────────────────────────────────────────

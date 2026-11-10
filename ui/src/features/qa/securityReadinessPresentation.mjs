@@ -150,12 +150,67 @@ export function deploymentSummary(deployment) {
     environment: deployment.environment,
     revision: deployment.apiTaskDefinition,
     commit: deployment.imageCommit,
+    commitFull: deployment.imageCommitFull ?? null,
     commitDate: deployment.imageCommitDate,
     digest: deployment.imageDigest,
     shortDigest: shortenDigest(deployment.imageDigest),
     behind: deployment.commitsBehindMain ?? 0,
     isCurrent: (deployment.commitsBehindMain ?? 0) === 0,
+    runningTasks: deployment.runningTasks ?? null,
     verifiedAt: deployment.verifiedAt,
+  };
+}
+
+/**
+ * How the deployment facts were obtained - and, when they are a snapshot,
+ * that they are one.
+ *
+ * Nothing on this page is read from the running system at page load. The one
+ * endpoint that could report a build identity, /actuator/info, is exposed but
+ * empty, and the rest of these facts come from AWS APIs the browser holds no
+ * credentials for. So the honest presentation is a dated measurement with its
+ * method attached - never an unqualified assertion about "the running
+ * version", which is what went wrong when this panel kept naming revision 84
+ * after 85 was deployed.
+ */
+export function provenanceNotice(readiness) {
+  const runtime = readiness?.runtimeSource ?? null;
+  const verifiedAt = readiness?.deployment?.verifiedAt ?? readiness?.verifiedAt ?? null;
+  if (runtime?.available === true) {
+    return { sourced: "runtime", label: "Read from the running application", detail: runtime.reason ?? "" };
+  }
+  return {
+    sourced: "snapshot",
+    label: verifiedAt ? `Recorded measurement, verified ${verifiedAt}` : "Recorded measurement, date unknown",
+    detail: runtime?.reason ?? "Not read from the running application at page load.",
+    followUp: runtime?.followUp ?? null,
+  };
+}
+
+/** The resolved-mismatch history, so a corrected claim is not silently erased. */
+export function resolvedMismatches(readiness) {
+  return (readiness?.resolvedMismatches ?? []).filter((entry) => Boolean(entry?.title));
+}
+
+/** The post-deployment smoke test, when one has been recorded. */
+export function smokeTestSummary(smokeTest) {
+  if (!smokeTest) {
+    return null;
+  }
+  const checks = smokeTest.checks ?? 0;
+  const passed = smokeTest.passed ?? 0;
+  return {
+    performedAt: smokeTest.performedAt ?? null,
+    revision: smokeTest.revision ?? null,
+    checks,
+    passed,
+    failed: smokeTest.failed ?? 0,
+    blocked: smokeTest.blocked ?? 0,
+    allPassed: checks > 0 && passed === checks && (smokeTest.failed ?? 0) === 0,
+    tone: checks > 0 && passed === checks && (smokeTest.failed ?? 0) === 0 ? "complete" : "partial",
+    text: `${passed} of ${checks} checks passed`,
+    how: smokeTest.how ?? null,
+    note: smokeTest.note ?? null,
   };
 }
 

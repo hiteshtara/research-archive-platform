@@ -1,35 +1,37 @@
 {
-  "_comment": "Security Readiness dashboard data. Every 'verified' field below records WHEN something was measured and HOW, never an assumption. Nothing here is refreshed at page load - the page says 'Last verified' for exactly that reason.",
+  "_comment": "Security Readiness dashboard data. Every 'verified' field below records WHEN something was measured and HOW, never an assumption. Nothing here is refreshed at page load - the page says 'Last verified' for exactly that reason, and runtimeSource below records why a live source is not used. securityReadinessConsistency.test.mjs fails the build if these facts contradict each other or go stale against the recorded deployment.",
   "verifiedAt": "2026-11-09",
-  "verifiedBy": "read-only AWS and PostgreSQL inspection",
+  "verifiedBy": "read-only AWS inspection, the 2026-11-09 DEV deployment itself, and a 13-check authenticated browser smoke test",
   "deployment": {
     "environment": "Development",
-    "apiTaskDefinition": "research-archive-platform-dev-api:84",
+    "apiTaskDefinition": "research-archive-platform-dev-api:85",
     "taskDefinitionIsNewest": true,
-    "imageCommit": "66f3cfe",
-    "imageCommitDate": "2026-10-29",
-    "imageDigest": "sha256:c9f3bc99be9a99fb480c577c0d78d82ea7ebdad3b7d6f3eb3aeb72114ddd4821",
-    "imagePushed": "2026-10-29",
-    "mainCommit": "7442a8e",
-    "mainCommitDate": "2026-11-03",
-    "commitsBehindMain": 30,
+    "imageCommit": "c1d25e6",
+    "imageCommitDate": "2026-11-09",
+    "imageDigest": "sha256:9e8265689014920826cc78892b657e4b6cc777e369e4de9f3678f73bf57e2769",
+    "imagePushed": "2026-11-09",
+    "mainCommit": "c1d25e6",
+    "mainCommitDate": "2026-11-09",
+    "commitsBehindMain": 0,
     "runningTasks": "1 of 1",
     "verifiedAt": "2026-11-09",
-    "verifiedHow": "aws ecs describe-services, describe-task-definition and ecr describe-images",
-    "note": "The 30 commits the running image is missing are entirely the authorization and operator-tooling work (#93-#106). The Proposal-history and search-filter fixes ARE in the running image."
+    "verifiedHow": "aws ecs describe-services and describe-tasks on 2026-11-09: the service and the running task are both on revision 85, rollout COMPLETED, container digest sha256:9e8265689014920826cc78892b657e4b6cc777e369e4de9f3678f73bf57e2769; GET /actuator/health returned 200 UP and the startup log carries no ERROR or Exception",
+    "note": "The running image is the current tip of main, so nothing merged is missing from DEV. The authorization and operator-tooling work that was absent on 2026-11-03 (#93-#106, plus SEC-002 bulk assignment, SEC-003, SEC-005, SEC-008 and SEC-009) is all in this image. It is deployed and switched off, which is not the same as working.",
+    "imageCommitFull": "c1d25e6010cb8b0c773c5748e2983dc52033deb5",
+    "imageIsMainTip": true
   },
   "enforcement": {
     "state": "off",
     "verifiedAt": "2026-11-09",
-    "verifiedHow": "task definition 84 carries 8 environment variables and no APP_AUTHORIZATION_* of any kind",
+    "verifiedHow": "task definition 85 carries the same 8 environment variables as 84 and no APP_AUTHORIZATION_* of any kind, and no activity-audit key - read from aws ecs describe-task-definition on 2026-11-09",
     "businessMeaning": "Every signed-in user can see every archived record. Record-level restrictions are built and tested but are not switched on.",
     "whyNotOn": "Turning it on today would show nobody anything: with no access grants issued, a denial is indistinguishable from a record that does not exist, so dashboards would read zero. Grants have to be issued and checked first."
   },
   "database": {
-    "migrationsApplied": "V082-V087",
-    "migrationsPending": "V088 (Parent Award), V089 (activity audit)",
+    "migrationsApplied": "V082-V088",
+    "migrationsPending": "V089 (activity audit)",
     "verifiedAt": "2026-11-09",
-    "verifiedHow": "read-only SQL over pg_indexes and pg_tables through the SSM tunnel as archive_analyst; the migration ledger itself is deliberately unreadable by that role, so the catalog is the evidence",
+    "verifiedHow": "V082-V087 catalog-verified read-only on 2026-11-09 over pg_indexes and pg_tables through the SSM tunnel as archive_analyst; the migration ledger is deliberately unreadable by that role, so the catalog is the evidence. V088 was applied on 2026-11-09 by the ECS loader task running its own packaged migration runner, which logged a single 'Applying migration V088' line and exited 0",
     "v087Confirmed": true,
     "grantCountsVerified": false,
     "grantCountsNote": "Access grants, identity links and administrators could NOT be re-measured on 2026-11-09: the read-only analyst role has no access to the authorization schema. The last known figures are from 2026-11-03 and are shown as such.",
@@ -38,15 +40,12 @@
       "identityLinks": 1,
       "activeGrants": 0,
       "asOf": "2026-11-03"
-    }
+    },
+    "v088AppliedAt": "2026-11-09",
+    "v089Held": "V089 is kept in database/migrations-pending-approval/, outside the directory every ETL loader globs, so no loader run - including the nightly Subaward sync - can apply it. MigrationReleaseScopeTest fails the build if it reappears.",
+    "v088Confirmed": true
   },
-  "knownMismatch": {
-    "title": "The deployed API is older than the deployed database",
-    "businessMeaning": "Nothing is broken today, because no access grants exist. But the database already enforces a rule the running application does not know about, so the first grant issued against the current image could fail with an unhelpful error instead of a clear one.",
-    "technical": "The database carries V087 (at most one unrevoked grant per grantee and scope). The fix that answers 409 rather than 500 for that constraint (#100, 8bc1e52) is not an ancestor of the running image 66f3cfe.",
-    "resolution": "Carried on the integration branch. Needs a rebuilt image to reach DEV.",
-    "verifiedAt": "2026-11-09"
-  },
+  "knownMismatch": null,
   "stateLabels": {
     "implemented": "Built in source",
     "merged": "Merged to main",
@@ -72,9 +71,9 @@
       },
       "evidence": {
         "implemented": "GrantType.CENTRAL; AccessScope.central short-circuits every module rule.",
-        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit 66f3cfe (verified by file presence at that commit).",
+        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit c1d25e6 (verified by file presence at that commit).",
         "migrationApplied": "V082 authz.access_grant exists in DEV (catalog-verified 2026-11-09).",
-        "configured": "No APP_AUTHORIZATION_* on task definition 84.",
+        "configured": "No APP_AUTHORIZATION_* on task definition 85.",
         "tested": "Covered by the four record-authorization integration suites against real PostgreSQL.",
         "enforcing": "Enforcement flag is off, so no grant of any type restricts anything."
       },
@@ -86,17 +85,17 @@
       "businessSummary": "Someone can be given access to the records of one department, optionally including its sub-units. Bulk assignment lets an administrator give the same department access to many people in one reviewed action.",
       "states": {
         "implemented": "yes",
-        "merged": "partial",
-        "deployed": "partial",
+        "merged": "yes",
+        "deployed": "yes",
         "migrationApplied": "yes",
         "configured": "no",
         "tested": "yes",
         "enforcing": "no"
       },
       "evidence": {
-        "implemented": "Single-grant department access is in main. Bulk assignment (grantAccessInBulk) is new on the integration branch.",
-        "merged": "Single-grant: yes. Bulk assignment: not yet merged.",
-        "deployed": "Single-grant: yes, in image 66f3cfe. Bulk assignment: no.",
+        "implemented": "Single-grant department access and bulk assignment (grantAccessInBulk) are both in main.",
+        "merged": "Merged into main by PR #114 on 2026-11-09. Bulk assignment is no longer outstanding.",
+        "deployed": "Both are in image c1d25e6.",
         "tested": "8 tests for bulk assignment; department access covered by the Award, Proposal and Negotiation authorization suites.",
         "enforcing": "Enforcement flag is off."
       },
@@ -108,19 +107,20 @@
       "businessSummary": "Research staff listed on an award see the versions they are actually listed on - not the whole award history. Someone added to an award partway through does not retrospectively gain access to earlier versions.",
       "states": {
         "implemented": "yes",
-        "merged": "no",
-        "deployed": "no",
+        "merged": "yes",
+        "deployed": "yes",
         "migrationApplied": "n/a",
         "configured": "no",
         "tested": "yes",
         "enforcing": "no"
       },
       "evidence": {
-        "implemented": "PR #109, integrated on this branch. Contact-derived access is decided against the version being read, regardless of the version-scope policy.",
-        "merged": "PR #109 is still a draft.",
+        "implemented": "PR #109. Contact-derived access is decided against the version being read, regardless of the version-scope policy.",
+        "merged": "PR #109 merged into main by PR #114 on 2026-11-09.",
         "migrationApplied": "No migration needed - award_person.award_id is already a version key.",
         "tested": "RecordAccessEvaluator and RecordScopeSqlBuilder tests, plus Sec003AiPartialFamilyAccessTest which proves a partially-visible award family is refused for the AI and history endpoints.",
-        "enforcing": "Enforcement flag is off."
+        "enforcing": "Enforcement flag is off.",
+        "deployed": "In image c1d25e6."
       },
       "pendingApproval": "Whether research staff should keep access to Subawards linked to award versions from before they joined. The current behaviour is the stricter reading."
     },
@@ -139,7 +139,7 @@
       },
       "evidence": {
         "implemented": "AwardAccountNumberIoResolver and AwardAccountNumberIoSql are wired in AuthorizationConfiguration - verified in both main and the running image commit, not inferred from comments.",
-        "deployed": "Present at image commit 66f3cfe.",
+        "deployed": "Present at image commit c1d25e6.",
         "enforcing": "Enforcement flag is off."
       },
       "pendingApproval": null
@@ -150,18 +150,21 @@
       "businessSummary": "Someone can be given access to an award and the awards directly beneath it in the award hierarchy. It never crosses into an unrelated award family, and it stops at the configured depth - one level by default.",
       "states": {
         "implemented": "yes",
-        "merged": "no",
-        "deployed": "no",
-        "migrationApplied": "no",
+        "merged": "yes",
+        "deployed": "yes",
+        "migrationApplied": "yes",
         "configured": "no",
         "tested": "yes",
         "enforcing": "no"
       },
       "evidence": {
-        "implemented": "New on this branch: GrantType.PARENT_AWARD, bounded cycle-safe traversal of archive.award_hierarchy.",
-        "migrationApplied": "V088 is written but NOT applied to any shared database.",
+        "implemented": "GrantType.PARENT_AWARD, with bounded cycle-safe traversal of archive.award_hierarchy.",
+        "migrationApplied": "V088 applied to the shared DEV database on 2026-11-09 (ECS loader task, exit 0). Production is untouched.",
         "tested": "10 Testcontainers tests for the traversal (depth limit, a real two-row cycle, a cross-family row that must not be followed) and 22 for resolution, decisions, list SQL and grant shape.",
-        "enforcing": "Enforcement flag is off."
+        "enforcing": "Enforcement flag is off.",
+        "merged": "Merged into main by PR #114 on 2026-11-09.",
+        "deployed": "In image c1d25e6.",
+        "configured": "Off. The award_number column V088 adds is read only when record-level enforcement is on, so that query has not yet run against DEV - it was rehearsed against throwaway PostgreSQL carrying V088. Expect it to be the first thing to check when enforcement is switched on."
       },
       "pendingApproval": "Depth default of 1 (maximum 10) is the working value, pending business confirmation. Broader inheritance to subawards and negotiations is deliberately NOT enabled."
     },
@@ -190,14 +193,14 @@
       "states": {
         "implemented": "yes",
         "merged": "yes",
-        "deployed": "partial",
+        "deployed": "yes",
         "migrationApplied": "yes",
         "configured": "no",
         "tested": "yes",
         "enforcing": "no"
       },
       "evidence": {
-        "deployed": "The revocation endpoint is in the running image. The operator command-line tool's revocation support (#103) is in main but NOT in the running image.",
+        "deployed": "The revocation endpoint and the operator command-line tool's revocation support (#103) are both in image c1d25e6.",
         "tested": "Revocation and optional expiry are covered by the grant provisioning integration suite against real PostgreSQL.",
         "enforcing": "Enforcement flag is off, so revoking changes nothing visible today."
       },
@@ -217,9 +220,9 @@
         "enforcing": "no"
       },
       "evidence": {
-        "deployed": "Present in image 66f3cfe - but see 'The deployed API is older than the deployed database' above.",
-        "migrationApplied": "V082-V087 confirmed in DEV from the PostgreSQL catalog on 2026-11-09.",
-        "configured": "Off, confirmed from the task definition on 2026-11-09.",
+        "deployed": "Present in image c1d25e6, which is the current tip of main. The database-ahead-of-application mismatch reported on 2026-11-03 is resolved.",
+        "migrationApplied": "V082-V088 confirmed in DEV on 2026-11-09.",
+        "configured": "Off, confirmed from task definition 85 on 2026-11-09.",
         "enforcing": "No. This is the deliberate state."
       },
       "pendingApproval": "Approval to issue the first access grants, and then to switch enforcement on."
@@ -230,8 +233,8 @@
       "businessSummary": "A record of who looked at what, who was refused, what was downloaded or exported, and that a search happened. Search words themselves are never stored, and neither is document content. All five recording points are built; collection is switched off and the database permission has not been granted.",
       "states": {
         "implemented": "yes",
-        "merged": "no",
-        "deployed": "no",
+        "merged": "yes",
+        "deployed": "yes",
         "migrationApplied": "no",
         "configured": "no",
         "tested": "yes",
@@ -239,9 +242,11 @@
       },
       "evidence": {
         "implemented": "All five recording points are wired: record views and refusals at the single authorization decision point, attachment downloads and report exports before any file is released, and searches in the global, document, file-finder and evidence search services.",
-        "migrationApplied": "V089 is written but NOT applied anywhere. The database permission to write audit rows is a separate reviewed script, also not applied - and it explicitly removes the read access a blanket grant would otherwise have given.",
+        "migrationApplied": "V089 is written but NOT applied anywhere, and is held outside the directory the ETL loaders glob so no scheduled run can apply it. The database permission to write audit rows is a separate reviewed script, also not applied - and it explicitly removes the read access a blanket grant would otherwise have given.",
         "tested": "50 tests. An audit failure can never grant access - proved under both failure settings. Downloads and exports stop if their audit record cannot be written; routine views and searches continue and the gap is counted and logged.",
-        "configured": "Collection is off. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one."
+        "configured": "Collection is off, confirmed from task definition 85 on 2026-11-09. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one.",
+        "merged": "Merged into main by PR #114 on 2026-11-09. The migration and the database permission were deliberately kept out of the applied migration directory.",
+        "deployed": "All five recording points are in image c1d25e6. Collection is off, so each one is a no-op that cannot throw - which is why wiring them before approval is safe."
       },
       "pendingApproval": "How long audit records should be kept (90 days is proposed, not approved; automatic deletion is not implemented). Whether the proposed failure settings - continue on a failed view audit, stop on a failed download audit - are accepted as BU policy. And approval to apply the migration and grant the database permission."
     },
@@ -251,7 +256,7 @@
       "businessSummary": "The application can read archived research data and cannot write to it. This is enforced by the database itself, not by application code, and it has now been checked against the real development database.",
       "states": {
         "implemented": "yes",
-        "merged": "no",
+        "merged": "yes",
         "deployed": "yes",
         "migrationApplied": "n/a",
         "configured": "n/a",
@@ -259,12 +264,39 @@
         "enforcing": "yes"
       },
       "evidence": {
-        "implemented": "The database role grants SELECT and nothing else on the archive schema. The regression tests that keep it that way are PR #112, not yet merged.",
-        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script.",
+        "implemented": "The database role grants SELECT and nothing else on the archive schema. The regression tests that keep it that way are PR #112.",
+        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script. The regression suite is in image c1d25e6.",
         "tested": "17 tests, including a catalog-wide sweep that fails if any future grant widens it.",
-        "enforcing": "Yes - this one is in force today, independently of the enforcement flag."
+        "enforcing": "Yes - this one is in force today, independently of the enforcement flag.",
+        "merged": "PR #112 merged into main by PR #114 on 2026-11-09."
       },
       "pendingApproval": null
     }
-  ]
+  ],
+  "resolvedMismatches": [
+    {
+      "title": "The deployed API is older than the deployed database",
+      "reportedWhile": "image 66f3cfe / revision 84 was running",
+      "resolvedOn": "2026-11-09",
+      "how": "Revision 85 deployed from main tip c1d25e6. The fix that answers 409 rather than 500 when V087 rejects a duplicate grant (#100, 8bc1e52) is an ancestor of c1d25e6, verified with git merge-base --is-ancestor."
+    }
+  ],
+  "runtimeSource": {
+    "available": false,
+    "reason": "Nothing the browser can reach reports which build is running. /actuator/info is exposed but returns an empty object - no build-info or git-info is generated into the jar - and /actuator/env and the actuator index answer 401. Every other field here comes from AWS APIs the browser has no credentials for.",
+    "consequence": "So this block is a recorded snapshot, labelled with the date it was measured, and the page says 'Last verified' rather than implying a live reading.",
+    "followUp": "Generating Spring Boot build-info (git commit and build time) and exposing it on /actuator/info would let this panel read the running revision at page load and make staleness structurally impossible. That is an API change and is not done here."
+  },
+  "smokeTest": {
+    "performedAt": "2026-11-09",
+    "revision": "research-archive-platform-dev-api:85",
+    "checks": 13,
+    "passed": 13,
+    "failed": 0,
+    "blocked": 0,
+    "how": "Authenticated browser session against https://nonprod.kuali-archive.bu.edu as a real BU user through Shibboleth and Duo, following the release checklist's 13 read-only checks.",
+    "covered": "health, ECS service state, running image digest, dashboard counts, global search, Award workspace and historical versions, Proposal workspace and history, Subaward workspace and version navigation, Negotiation workspace, Document Explorer, the attachment authorization gate, this page, and that records are still visible",
+    "recordsStillVisible": true,
+    "note": "All seven dashboard counts were unchanged from the pre-deployment baseline and no console error was raised. Nothing was modified: no permission, grant, database row, AWS resource or ECS configuration."
+  }
 }

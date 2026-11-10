@@ -139,6 +139,42 @@ enforcement has been enabled by accident. Roll back immediately (§6).
 
 ---
 
+## 5b. Refresh the readiness page — part of the deployment, not a follow-up
+
+**This step was missing, and the page lied because of it.** On 2026-11-09
+revision 85 was deployed and smoke-tested while `/qa-status` went on reporting
+revision 84, commit `66f3cfe` and "30 commits behind main" — because the
+deployed-version panel is a committed snapshot, not a live reading, and nothing
+tied updating it to deploying.
+
+After check 13 passes, update `ui/src/features/qa/securityReadiness.json` in the
+same change as the release:
+
+| Field | Set it to |
+|---|---|
+| `deployment.apiTaskDefinition` | the revision now serving traffic |
+| `deployment.imageCommit` / `imageCommitFull` | the released commit, short and full |
+| `deployment.imageDigest` | the digest on the **running task**, not the one you pushed |
+| `deployment.commitsBehindMain` / `imageIsMainTip` | `git rev-list --count <commit>..origin/main` |
+| `deployment.verifiedAt` / `verifiedHow` | the date, and the commands you ran |
+| `smokeTest` | the checks, how many passed, and the revision tested |
+| each capability's `states` and `evidence` | what the release actually changed |
+
+Then `cd ui && npm run test`. `securityReadinessConsistency.test.mjs` fails if
+the deployment block and the evidence strings disagree — a half-finished
+refresh is a build failure rather than a page that contradicts itself.
+
+Leave `enforcement.state` at `off` and SEC-008's `configured` at `no` unless
+the flags genuinely changed; the suite enforces that too.
+
+The panel cannot read any of this at page load. `/actuator/info` is exposed but
+empty — no build-info is generated into the jar — and everything else comes
+from AWS APIs the browser has no credentials for. Until build-info is published
+(see `docs/FOLLOW_UPS.md`), this manual step is the only thing keeping the page
+honest, which is why it belongs here and not in a backlog.
+
+---
+
 ## 6. Rollback
 
 **Application only (no migration applied yet):** update the ECS service to task

@@ -22,14 +22,18 @@ import {
   awaitingBusinessApproval,
   deploymentSummary,
   grantFigures,
+  provenanceNotice,
   readinessSummary,
   readinessTotals,
+  resolvedMismatches,
+  smokeTestSummary,
   stateLabel,
   stateTone,
   verificationNotice,
 } from "./securityReadinessPresentation.mjs";
 
 import type {
+  KnownMismatch,
   ReadinessStage,
   ReadinessTone,
   SecurityCapability,
@@ -65,6 +69,16 @@ export function SecurityReadinessSection({ today }: { today: string }) {
   const deployment = deploymentSummary(readiness.deployment as never);
   const grants = grantFigures(readiness.database as never);
   const pending = awaitingBusinessApproval(capabilities);
+  const provenance = provenanceNotice(readiness as never);
+  const resolved = resolvedMismatches(readiness as never);
+  const smoke = smokeTestSummary(readiness.smokeTest as never);
+  /*
+   * Null today, because the mismatch this panel used to report is resolved.
+   * Typed rather than deleted: the next one gets rendered without anyone
+   * having to rebuild the markup, and TypeScript stops narrowing the literal
+   * null to `never`.
+   */
+  const mismatch = readiness.knownMismatch as KnownMismatch | null;
 
   return (
     <Stack spacing={2.5}>
@@ -115,23 +129,78 @@ export function SecurityReadinessSection({ today }: { today: string }) {
                   : `${deployment.behind} commits behind main`
               }
             />
+            {deployment.runningTasks ? (
+              <Chip size="small" variant="outlined" label={`Tasks ${deployment.runningTasks}`} />
+            ) : null}
             <Chip size="small" variant="outlined" label={`Verified ${deployment.verifiedAt}`} />
           </Stack>
+          {deployment.commitFull ? (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ mt: 1, display: "block", wordBreak: "break-all" }}
+            >
+              Commit {deployment.commitFull}
+            </Typography>
+          ) : null}
           {readiness.deployment.note ? (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
               {readiness.deployment.note}
             </Typography>
           ) : null}
+          {/*
+            * Say where these facts came from. The panel named revision 84 for
+            * hours after 85 was deployed, because nothing on the page
+            * distinguished "measured on a date" from "currently true".
+            */}
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block" }}>
+            <strong>{provenance.label}.</strong> {provenance.detail}
+          </Typography>
+          {smoke ? (
+            <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1, mt: 1.5, alignItems: "center" }}>
+              <Chip
+                size="small"
+                color={smoke.allPassed ? "success" : "warning"}
+                label={`Smoke test ${smoke.text}`}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {smoke.performedAt} against {smoke.revision}
+                {smoke.failed || smoke.blocked
+                  ? ` - ${smoke.failed} failed, ${smoke.blocked} blocked`
+                  : ""}
+              </Typography>
+            </Stack>
+          ) : null}
         </Paper>
       ) : null}
 
-      <Alert severity="info">
-        <AlertTitle>{readiness.knownMismatch.title}</AlertTitle>
-        <Typography variant="body2">{readiness.knownMismatch.businessMeaning}</Typography>
-        <Typography variant="body2" sx={{ mt: 1 }}>
-          <strong>Resolution:</strong> {readiness.knownMismatch.resolution}
-        </Typography>
-      </Alert>
+      {mismatch ? (
+        <Alert severity="info">
+          <AlertTitle>{mismatch.title}</AlertTitle>
+          <Typography variant="body2">{mismatch.businessMeaning}</Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            <strong>Resolution:</strong> {mismatch.resolution}
+          </Typography>
+        </Alert>
+      ) : null}
+
+      {/*
+        * A mismatch this page used to report, and no longer does. Kept rather
+        * than deleted: a reader who saw the warning needs to be able to find
+        * out it was resolved, not just notice it vanished.
+        */}
+      {resolved.length > 0 ? (
+        <Alert severity="success">
+          <AlertTitle>Resolved since the last update</AlertTitle>
+          <Stack spacing={1}>
+            {resolved.map((entry) => (
+              <Typography key={entry.title} variant="body2">
+                <strong>{entry.title}</strong> - resolved {entry.resolvedOn}. {entry.how}
+              </Typography>
+            ))}
+          </Stack>
+        </Alert>
+      ) : null}
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography component="h3" variant="subtitle2">
