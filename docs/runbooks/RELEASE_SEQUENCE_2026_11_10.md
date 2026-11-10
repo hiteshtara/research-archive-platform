@@ -30,10 +30,14 @@ The fully integrated tree was then tested:
 
 | Suite | Result |
 |---|---|
-| API (`mvn test`, includes the Testcontainers database suites) | **1990 pass**, 0 failures |
-| UI (`npm run test`) | **826 pass**, 0 failures |
+| API (`mvn test`, includes the Testcontainers database suites) | **2001 pass**, 0 failures |
+| UI (`npm run test`) | **841 pass**, 0 failures |
 | UI lint (`oxlint`) | clean, no warnings |
-| ETL (`uv run pytest`) | **1334 pass**, 0 failures |
+| ETL (`uv run pytest`) | **1345 pass**, 0 failures |
+
+Re-run on 2026-11-10 after the measurement, the current-assessment layer and
+the PR #125 reconciliation changed branch content. The earlier figures (API
+1990 / UI 826 / ETL 1334) described the tree before those.
 
 ### Why this order
 
@@ -80,27 +84,30 @@ to expect:
 3. `archive.sponsor` must be populated for the acronym path to find anything.
    **This is unverified on DEV** and is the one open item below.
 
-## Open item before #125 is released
+## The #125 open item: answered
 
-**Is `archive.sponsor` populated on DEV?** It cannot be answered from outside
-the database: the Explorer exposes no sponsor endpoint, and the Award API
-returns the numeric `sponsor_code` (`301573`) and never the acronym.
+**`archive.sponsor` is populated, and the acronym is exactly what the fix
+needs.** Measured read-only against DEV on 2026-11-10 as `archive_api`:
 
-One read-only query settles it:
+| Check | Result |
+|---|---|
+| `archive.sponsor` rows | **7,246** (772 carry an acronym) |
+| `sponsor_code 301573` | `('301573', 'National Science Foundation', 'NSF', active)` |
+| Sponsors whose acronym is exactly `NSF` | **exactly one** — no ambiguity |
+| Award `100527-00001` reachable by the acronym path | **yes** |
 
-```sql
-SELECT count(*) AS sponsors,
-       count(acronym) AS with_acronym
-  FROM archive.sponsor;
-SELECT acronym FROM archive.sponsor WHERE sponsor_code = '301573';
-```
+So #125 delivers the true positive on real data, not only in fixtures.
 
-If it is empty the fix still removes the false positives and simply does not
-deliver the true positive — and the search keeps working, which is asserted by
-`WithoutSponsorReferenceData` in
-`GlobalSearchLexicalRelevanceIntegrationTest`. So an empty table is a
-disappointment, not a breakage, and does not block the merge. It does change
-what we tell Lalitha.
+And the false positives it removes, measured on the real corpus:
+
+| Field | Substring match for "NSF" | Word-start match |
+|---|---|---|
+| current Award titles | **298** | **107** |
+| Negotiation agreement types | **4,953** | **0** |
+
+191 of 298 Award titles (64%) were matching on "TRANSFER" or "TRANSFORMING",
+and **every one** of the 4,953 Negotiation matches was "Material Transfer
+Agreement". That is the inversion TC-040 reported, quantified.
 
 ## Rollback
 
@@ -132,22 +139,46 @@ are separate decisions:
 
 | # | Decision | Blocks |
 |---|---|---|
-| 1 | Is `archive.sponsor` populated on DEV? (one read-only query) | what we claim about #125's NSF behaviour — not the merge |
-| 2 | Read access to `archive.search_embedding` + Bedrock calls, to run the TC-041 measurement | closing TC-041. **No new permission is needed** — see `TC-041_MEASUREMENT_PROCEDURE.md` |
-| 3 | TC-041's recorded `passed` status, which now contradicts the investigation | the QA page showing an accurate status. Two options with costs are recorded in the investigation |
-| 4 | The six DEV activation approvals | any live authorization testing |
+| 1 | ~~Is `archive.sponsor` populated?~~ | **answered** — 7,246 rows, acronym `NSF` present, award reachable |
+| 2 | ~~Run the TC-041 measurement~~ | **done** — 15 embedding calls, read-only; results in `TC-041_MEASURED_RESULTS.md` |
+| 3 | ~~TC-041's status contradicting the investigation~~ | **resolved** — current assessment is now derived; the snapshot is untouched |
+| 4 | Build the corpus-vocabulary relevance gate the measurement supports | closing TC-041. Changes what the API returns, so it is its own change |
+| 5 | The six DEV activation approvals | any live authorization testing |
 
-None of the four blocks merging this release.
+Neither remaining item blocks merging this release.
 
 ## Reviewed commits
 
 Recorded so the review attaches to something specific rather than to a branch
 name that keeps moving.
 
-| PR | Head commit at review |
-|---|---|
-| #127 | `14fae95` |
-| #124 | `b14adfb` |
-| #125 | `ace32d4` |
-| #126 | `69e8071` |
-| #123 | see the PR; head moves with the approval checklist |
+| PR | Branch head (remote) | GitHub PR head |
+|---|---|---|
+| #127 | `14fae95` | `14fae95` ✓ |
+| #124 | `863ad72` | `863ad72` ✓ |
+| #125 | `7d1b214` | `7d1b214` ✓ |
+| #126 | `8b3c904` | `8b3c904` ✓ |
+| #123 | `a05bdbc` | `a05bdbc` ✓ |
+
+All five reconciled on 2026-11-10: the remote branch head and the head
+GitHub reports for the PR are the same commit in every case.
+
+### The #125 discrepancy, resolved
+
+An earlier report listed #125's reviewed head as `ace32d4` while GitHub
+showed `d9d5897`. Diagnosed: **unpushed commits**, not a branch mismatch.
+`d9d5897` was the FIRST merge of #124 into #125 and is an *ancestor* of
+`ace32d4`; three commits existed only locally — the sponsor-degradation tests
+(76 lines), the TC-041 contradiction record arriving via a second merge of
+#124, and the route-verification note.
+
+Two consequences, both corrected:
+
+- The only CI run for #125 had been against `d9d5897`, not the content I
+  reported as reviewed.
+- The first integrated verification merged `origin/` refs, so it also
+  described `d9d5897` — which is why the API count has moved.
+
+`ace32d4` was pushed, #124 was merged in again (`7d1b214`), CI re-run, and the
+integrated figures refreshed above. **Nothing was reviewed that is not now on
+GitHub.**
