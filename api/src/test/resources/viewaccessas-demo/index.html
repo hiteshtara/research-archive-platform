@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>View Access As — QA demonstration</title>
+<style>
+  :root {
+    --bg: #11151c;
+    --panel: #171d26;
+    --panel-2: #1d2531;
+    --line: #2a3442;
+    --text: #e6edf6;
+    --muted: #93a3b8;
+    --permit: #3fb950;
+    --deny: #f0883e;
+    --indeterminate: #d29922;
+    --accent: #58a6ff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 20px 64px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1220px; margin: 0 auto; }
+  header { padding: 28px 0 18px; }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); }
+  .banner {
+    margin: 14px 0 0; padding: 10px 14px; border-radius: 6px;
+    background: #2a2113; border: 1px solid #5c4415; color: #e8c37a;
+    font-size: 13px;
+  }
+  .provenance {
+    margin-top: 10px; padding: 10px 14px; border-radius: 6px;
+    background: var(--panel); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    overflow-x: auto; white-space: pre;
+  }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    margin: 20px 0; padding: 16px; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 190px; flex: 1 1 190px; }
+  label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 8px 10px; font-size: 13px; font-family: inherit;
+  }
+  .families { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .family-btn {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .family-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .family-btn .key { font-family: var(--mono); font-size: 12px; }
+  .columns { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 900px) { .columns.two { grid-template-columns: 1fr 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .card h3 { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase;
+             letter-spacing: 0.06em; color: var(--muted); }
+  .desc { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; padding: 3px 8px;
+    border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted); font-weight: 600;
+    padding: 6px 8px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 7px 8px; border-bottom: 1px solid #222b37; vertical-align: top; }
+  tr.selected td { background: #1b2430; }
+  tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  td.key, td.rule { font-family: var(--mono); font-size: 12px; }
+  td.rule { color: var(--muted); }
+  .verdict { font-weight: 700; font-size: 12px; letter-spacing: 0.04em; }
+  .PERMIT { color: var(--permit); }
+  .DENY { color: var(--deny); }
+  .INDETERMINATE { color: var(--indeterminate); }
+  .REFUSED { color: var(--deny); }
+  .ALLOWED { color: var(--permit); }
+  .flag {
+    display: inline-block; margin-top: 10px; padding: 8px 12px; border-radius: 6px;
+    font-size: 13px; border: 1px solid var(--line); background: var(--panel-2);
+  }
+  .flag.partial { border-color: #5c4415; background: #2a2113; color: #e8c37a; }
+  .flag.steady { border-color: #1f4f2b; background: #122018; color: #8fd79d; }
+  .flag { display: block; }
+  pre {
+    margin: 0; padding: 12px; border-radius: 6px; overflow-x: auto;
+    background: #0d1117; border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12px; color: #c9d5e3;
+  }
+  .sql-module { margin-bottom: 10px; }
+  .sql-module .name {
+    font-family: var(--mono); font-size: 11px; color: var(--accent); margin-bottom: 4px;
+  }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .err { color: var(--deny); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>View Access As — interactive authorization demonstration</h1>
+    <div class="sub">Every verdict below is produced by the production authorization engine. This page holds no rule and no expected answer.</div>
+    <div class="banner">
+      <strong>Test scope only.</strong> Synthetic fixtures — no BU data, no archive row read, no grant issued,
+      no token minted, no AWS call. DEV enforcement is untouched and remains OFF.
+    </div>
+    <div class="provenance" id="provenance">loading…</div>
+  </header>
+
+  <div class="controls">
+    <div class="field">
+      <label for="profileA">Profile A</label>
+      <select id="profileA"></select>
+    </div>
+    <div class="field">
+      <label for="profileB">Profile B (compare)</label>
+      <select id="profileB"></select>
+    </div>
+    <div class="field">
+      <label for="versionScope">Policy — version scope</label>
+      <select id="versionScope"></select>
+    </div>
+    <div class="field">
+      <label for="departmentMatch">Policy — department match</label>
+      <select id="departmentMatch"></select>
+    </div>
+  </div>
+
+  <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px">
+    Award family — switch versions within it
+  </h3>
+  <div class="families" id="families"></div>
+
+  <div id="error" class="err"></div>
+  <div class="columns two" id="profiles"></div>
+
+  <div class="card">
+    <h2>Subaward inheritance</h2>
+    <div class="desc">Resolved through <code>subaward_funding.award_id</code> by the real service. A funding reference that resolves to no archived Award authorises nothing.</div>
+    <div id="subawards"></div>
+  </div>
+
+  <div class="card">
+    <h2>Negotiation inheritance</h2>
+    <div class="desc">Lead unit, or an association only where the association type explicitly names one.</div>
+    <div id="negotiations"></div>
+  </div>
+
+  <div class="card">
+    <h2>Scoping SQL, as the engine renders it</h2>
+    <div class="desc">The predicate <code>RecordScopeSqlBuilder</code> puts in the <code>WHERE</code> clause for each module, for Profile A's resolved scope.</div>
+    <div id="sql"></div>
+    <div class="note">Rendered, not executed — there is no database behind this page. The
+      <code>*RecordAuthorizationIntegrationTest</code> suites execute the same builder against a real PostgreSQL.</div>
+  </div>
+
+</div>
+
+<script>
+const state = { model: null, family: null, version: null };
+
+async function boot() {
+  const res = await fetch('/api/model');
+  state.model = await res.json();
+  const m = state.model;
+
+  fillSelect('profileA', m.profiles.map(p => [p.name, p.name]));
+  fillSelect('profileB', [['', '— none —']].concat(m.profiles.map(p => [p.name, p.name])));
+  fillSelect('versionScope', m.versionScopes.map(v => [v, v]));
+  fillSelect('departmentMatch', m.departmentMatches.map(v => [v, v]));
+
+  document.getElementById('profileA').value = m.profiles[m.profiles.length - 1].name;
+  document.getElementById('profileB').value = m.profiles[1].name;
+
+  const e = m.engine;
+  document.getElementById('provenance').textContent =
+    'evaluator   ' + e.evaluator + '\n' +
+    'service     ' + e.service + '\n' +
+    'sql builder ' + e.sqlBuilder + '\n' +
+    'loaded from ' + e.loadedFrom;
+
+  renderFamilies();
+  ['profileA', 'profileB', 'versionScope', 'departmentMatch'].forEach(id =>
+    document.getElementById(id).addEventListener('change', evaluate));
+
+  state.family = m.families[1].familyKey;
+  state.version = m.families[1].versionKeys[0];
+  await evaluate();
+}
+
+function fillSelect(id, pairs) {
+  const select = document.getElementById(id);
+  select.innerHTML = '';
+  for (const [value, label] of pairs) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+}
+
+function renderFamilies() {
+  const host = document.getElementById('families');
+  host.innerHTML = '';
+  for (const family of state.model.families) {
+    const button = document.createElement('button');
+    button.className = 'family-btn';
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(family.familyKey === state.family));
+    button.innerHTML = '<span class="key">' + family.familyKey + '</span> &middot; ' + family.label;
+    button.addEventListener('click', () => {
+      state.family = family.familyKey;
+      state.version = family.versionKeys[0];
+      renderFamilies();
+      render();
+    });
+    host.appendChild(button);
+  }
+}
+
+async function evaluate() {
+  const params = new URLSearchParams({
+    profileA: document.getElementById('profileA').value,
+    profileB: document.getElementById('profileB').value,
+    versionScope: document.getElementById('versionScope').value,
+    departmentMatch: document.getElementById('departmentMatch').value
+  });
+  const res = await fetch('/api/evaluate?' + params.toString());
+  const body = await res.json();
+  if (!res.ok) {
+    document.getElementById('error').textContent = body.error || 'evaluation failed';
+    return;
+  }
+  document.getElementById('error').textContent = '';
+  state.last = body;
+  render();
+}
+
+function render() {
+  const body = state.last;
+  if (!body) return;
+  const host = document.getElementById('profiles');
+  host.innerHTML = '';
+  host.className = 'columns' + (body.results.length > 1 ? ' two' : '');
+
+  for (const result of body.results) {
+    const family = result.awards.find(a => a.familyKey === state.family) || result.awards[0];
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const chips = result.grants.map(g => '<span class="chip">' + escape(g) + '</span>').join('');
+    const rows = family.versions.map(v => {
+      const selected = v.versionKey === state.version ? ' class="selected"' : '';
+      return '<tr' + selected + ' data-version="' + escape(v.versionKey) + '">' +
+        '<td class="key">' + escape(v.versionKey) + '</td>' +
+        '<td><span class="verdict ' + escape(v.verdict) + '">' + escape(v.verdict) + '</span></td>' +
+        '<td class="rule">' + escape(v.rule) + '</td></tr>';
+    }).join('');
+
+    const partial = family.partialFamily
+      ? '<div class="flag partial"><strong>Partial family access.</strong> ' +
+        family.permitted + ' of ' + (family.permitted + family.denied) +
+        ' versions visible.</div>'
+      : '';
+
+    const scope = '<div class="flag' + (family.changesUnderOtherScope ? '' : ' steady') + '">' +
+      'Under policy <span class="chip">' + escape(family.otherScope) + '</span> this family\'s verdicts ' +
+      '<strong>' + (family.changesUnderOtherScope ? 'change' : 'do not change') + '</strong>' +
+      (family.changesUnderOtherScope ? '' :
+        ' &mdash; contact-derived access is version-specific whatever the policy says (SEC-003)') +
+      '</div>';
+
+    const ai = '<div class="flag">Family-spanning read (Award Summary, Award Questions, history): ' +
+      '<span class="verdict ' + escape(family.aiVerdict) + '">' + escape(family.aiVerdict) + '</span> ' +
+      '<span class="chip">' + escape(family.aiRule) + '</span></div>';
+
+    card.innerHTML =
+      '<h2>' + escape(result.profile) + '</h2>' +
+      '<div class="desc">' + escape(result.description) + '</div>' +
+      '<div class="chips">' + chips + '</div>' +
+      '<h3>Resolved scope</h3>' +
+      '<div class="chip">' + escape(result.outcome) + '</div>' +
+      '<h3>' + escape(family.familyKey) + ' &middot; lead unit ' + escape(family.leadUnit) + '</h3>' +
+      '<table><thead><tr><th>Version</th><th>Decision</th><th>Rule</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>' +
+      partial + scope + ai;
+
+    card.querySelectorAll('tr[data-version]').forEach(tr =>
+      tr.addEventListener('click', () => {
+        state.version = tr.getAttribute('data-version');
+        render();
+      }));
+
+    host.appendChild(card);
+  }
+
+  renderModule('subawards', body.results, r => r.subawards, 'Subaward');
+  renderModule('negotiations', body.results, r => r.negotiations, 'Negotiation');
+  renderSql(body.results[0]);
+}
+
+function renderModule(hostId, results, pick, noun) {
+  const rowsById = new Map();
+  for (const result of results) {
+    for (const row of pick(result)) {
+      if (!rowsById.has(row.id)) rowsById.set(row.id, { label: row.label, rule: row.rule, byProfile: [] });
+      rowsById.get(row.id).byProfile.push({ profile: result.profile, verdict: row.verdict });
+    }
+  }
+  let head = '<tr><th>' + noun + '</th><th>Basis</th>';
+  for (const result of results) head += '<th>' + escape(result.profile) + '</th>';
+  head += '</tr>';
+
+  let bodyHtml = '';
+  for (const [id, row] of rowsById) {
+    bodyHtml += '<tr><td class="key">' + id + '<div class="rule">' + escape(row.label) + '</div></td>' +
+      '<td class="rule">' + escape(row.rule) + '</td>';
+    for (const entry of row.byProfile) {
+      bodyHtml += '<td><span class="verdict ' + escape(entry.verdict) + '">' + escape(entry.verdict) + '</span></td>';
+    }
+    bodyHtml += '</tr>';
+  }
+  document.getElementById(hostId).innerHTML =
+    '<table><thead>' + head + '</thead><tbody>' + bodyHtml + '</tbody></table>';
+}
+
+function renderSql(result) {
+  let html = '';
+  for (const [module, sql] of Object.entries(result.renderedSql)) {
+    html += '<div class="sql-module"><div class="name">' + escape(module) +
+      ' &middot; ' + escape(result.profile) + '</div><pre>' + escape(sql) + '</pre></div>';
+  }
+  document.getElementById('sql').innerHTML = html;
+}
+
+function escape(value) {
+  return String(value)
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+boot().catch(e => {
+  document.getElementById('error').textContent = 'failed to load: ' + e;
+});
+</script>
+</body>
+</html>

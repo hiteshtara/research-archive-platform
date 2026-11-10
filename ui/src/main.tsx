@@ -4,6 +4,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
+import { Suspense, lazy } from "react";
+
 import App from "./App";
 import { AuthGate } from "./AuthGate";
 import { SignedOutPage } from "./SignedOutPage";
@@ -33,6 +35,36 @@ if (canonicalRedirect) {
   // back-button target that bounces straight forward again.
   window.location.replace(canonicalRedirect);
 }
+
+/*
+ * View Access As: a TEMPORARY QA route, present in development builds only.
+ *
+ * The dynamic import sits inside an `import.meta.env.DEV` branch on purpose.
+ * Vite replaces that expression with a literal `false` when building for
+ * production, so the branch is dead code and Rollup never emits the chunk -
+ * the page, its presentation module and the harness URL are all absent from
+ * dist/. That is the requirement: excluded from the production build, not
+ * merely hidden from navigation. A static `import` at the top of this file
+ * would ship the code and only hide the link.
+ *
+ * It is mounted OUTSIDE AuthGate, beside the signed-out page, for the same
+ * reason that route is: the page reads nothing from the production API. Every
+ * decision it shows comes from a test-scope harness on loopback, so a Cognito
+ * session would authorise nothing and its absence hides nothing. Gating it
+ * would only stop a developer opening it. This is not an auth bypass for the
+ * archive: the route renders one simulator page, reaches no archive data, and
+ * does not exist at all in a production build.
+ *
+ * Deliberately NOT in navigationPresentation.mjs either: a nav entry would put
+ * the label and path into the production bundle even though the route is gone.
+ *
+ * Verified by `npm run verify:dev-only-routes` against a production build, and
+ * by viewAccessAsPresentation.test.mjs, which asserts this guard is intact.
+ * Removal checklist: docs/VIEW_ACCESS_AS_PAGE.md.
+ */
+const ViewAccessAsPage = import.meta.env.DEV
+  ? lazy(() => import("./pages/ViewAccessAsPage"))
+  : null;
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,6 +110,16 @@ if (!canonicalRedirect) {
           <BrowserRouter>
             <Routes>
               <Route path={SIGNED_OUT_PATH} element={<SignedOutPage />} />
+              {import.meta.env.DEV && ViewAccessAsPage ? (
+                <Route
+                  path="/view-access-as"
+                  element={
+                    <Suspense fallback={null}>
+                      <ViewAccessAsPage />
+                    </Suspense>
+                  }
+                />
+              ) : null}
               <Route
                 path="*"
                 element={
