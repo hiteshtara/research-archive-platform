@@ -87,8 +87,8 @@ test("enforcement is recorded as off, matching the measured task definition", ()
 
 test("the deployed commit and revision are recorded, not inferred", () => {
   const deployment = deploymentSummary(readiness.deployment);
-  assert.equal(deployment.revision, "research-archive-platform-dev-api:87");
-  assert.equal(deployment.commit, "164b242");
+  assert.equal(deployment.revision, "research-archive-platform-dev-api:89");
+  assert.equal(deployment.commit, "94c22a5");
   assert.equal(deployment.behind, 0);
   assert.equal(deployment.isCurrent, true);
   assert.ok(deployment.verifiedAt);

@@ -346,9 +346,9 @@ test("the recorded smoke test refers to the deployed revision and adds up", () =
 
 test("deploymentSummary reports being up to date without inventing it", () => {
   const summary = deploymentSummary(DEPLOYMENT);
-  assert.equal(summary.revision, "research-archive-platform-dev-api:87");
-  assert.equal(summary.commit, "164b242");
-  assert.equal(summary.commitFull, "164b242164c93713a49ebd114beb4c1747a65314");
+  assert.equal(summary.revision, "research-archive-platform-dev-api:89");
+  assert.equal(summary.commit, "94c22a5");
+  assert.equal(summary.commitFull, "94c22a542ae0e6b7e78697bde7809ff750f0861a");
   assert.equal(summary.behind, 0);
   assert.equal(summary.isCurrent, true);
   assert.equal(summary.runningTasks, "1 of 1");
