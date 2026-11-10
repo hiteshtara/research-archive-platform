@@ -17,6 +17,12 @@ import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import snapshot from "../features/qa/qaSnapshot.json";
+import openFindings from "../features/qa/qaOpenFindings.json";
+import {
+  currentQaCases,
+  reopenedNotice,
+} from "../features/qa/currentQaStatus.mjs";
+import type { QaOpenFinding } from "../features/qa/currentQaStatus.d.mts";
 import {
   applyFilters,
   attentionCases,
@@ -43,9 +49,28 @@ type QaCase = {
   note?: string;
   scope?: string;
   environment?: string;
+  recordedStatus?: string;
+  currentStatus?: string;
+  reopened?: boolean;
+  finding?: QaOpenFinding | null;
 };
 
-const cases = snapshot.cases as unknown as QaCase[];
+/*
+ * The cases as they stand NOW, not only as they were recorded.
+ *
+ * qaSnapshot.json is history - what was observed, and when - and three tests
+ * guard it byte-for-byte. A case that was verified and has since been
+ * reopened would otherwise still read as passed here, which is how TC-041
+ * came to say "passed" on this page while its relevance finding was open.
+ *
+ * So current assessment lives in qaOpenFindings.json and the list is derived.
+ * A finding can only ever make a case MORE open; nothing in that file can
+ * mark something passed.
+ */
+const cases = currentQaCases(
+  snapshot.cases,
+  openFindings.findings,
+) as unknown as QaCase[];
 
 /**
  * QA Testing - the default page, written for a BU tester.
@@ -310,6 +335,35 @@ export function QaTestingPage() {
               </AccordionSummary>
               <AccordionDetails>
                 <Stack spacing={1.5}>
+                  {/* A case that was verified and has since been reopened.
+                      A tester needs to know that part of this was checked
+                      and holds, that part of it is still wrong, and that the
+                      difference is not their misreading. */}
+                  {item.reopened && item.finding ? (
+                    <Alert severity="warning">
+                      <Typography sx={{ fontWeight: 600 }}>
+                        {reopenedNotice(item.finding)?.headline}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        <strong>Checked and still holds:</strong>{" "}
+                        {item.finding.whatWasVerified}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        <strong>Still open:</strong> {item.finding.whatRemainsOpen}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        <strong>How we know:</strong> {item.finding.evidence}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 0.5 }}>
+                        <strong>What would close it:</strong>{" "}
+                        {item.finding.whatWouldCloseIt}
+                      </Typography>
+                      <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
+                        Recorded as passed earlier; reopened {item.finding.openedOn}.
+                        The earlier result is kept below exactly as it was written.
+                      </Typography>
+                    </Alert>
+                  ) : null}
                   <Box>
                     <Typography component="h4" variant="subtitle2">
                       What this status means

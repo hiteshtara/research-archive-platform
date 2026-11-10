@@ -1,0 +1,16 @@
+{
+  "recordedOn": "2026-11-10",
+  "purpose": "Current assessment, kept SEPARATE from qaSnapshot.json so that reopening a case never rewrites what was observed on the day it was verified.",
+  "findings": [
+    {
+      "caseId": "TC-041",
+      "openedOn": "2026-11-10",
+      "headline": "The presentation is fixed. The relevance behaviour is not.",
+      "whatWasVerified": "On 2026-10-06 the presentation was checked on the released builds and still holds: a search matching nothing says so, and loosely-related suggestions sit behind an explicit action rather than being presented as answers. That verification is accurate about what it checked, and is kept in the recorded snapshot unchanged.",
+      "whatRemainsOpen": "The system still returns its five nearest matches however unrelated they are. Nothing in it rejects a result for being too far away.",
+      "evidence": "Measured against the development website on 2026-11-10. Two nonsense searches each returned five suggestions, from different record types. Measuring the similarity scores showed that no single distance cutoff separates useful searches from nonsense ones - the closest useful search and the closest nonsense search are a ten-thousandth apart. A check against the words actually present in the archive does separate them cleanly, and that is the recommended fix.",
+      "blockedBy": "The fix changes which suggestions the archive offers, so it is a change in its own right with its own testing and review.",
+      "whatWouldCloseIt": "The recommended check built, released, and re-verified on the development website against the same searches."
+    }
+  ]
+}
