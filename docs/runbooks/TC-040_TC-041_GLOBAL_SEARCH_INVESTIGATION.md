@@ -352,6 +352,45 @@ related results" button appearing when the five are worthless.
 
 ---
 
+## TC-041 is recorded as passed, and that now contradicts this record
+
+`qaSnapshot.json` carries `TC-041: status "passed"`, closed on 2026-10-06
+with `verificationStatus: "Closed."`. That verification was real and its note
+is accurate about what it checked — the presentation: *"a search that matches
+nothing now says so, and offers loosely-related suggestions only if you ask
+for them."* What it did **not** check, and could not have, is the relevance
+behaviour, which was never changed.
+
+So the QA page currently shows TC-041 as passed while this document shows the
+relevance finding open. That is the same shape of contradiction PR #122
+existed to remove.
+
+**I have not altered the snapshot.** Three tests guard it byte-for-byte —
+`qaTestingPresentation.test.mjs` ("unchanged by the redesign"),
+`securityReadinessConsistency.test.mjs` ("the historical QA snapshot is
+byte-for-byte unchanged") and `securityReadinessPresentation.test.mjs` ("the
+recorded QA snapshot is unchanged by this work"). That
+immutability is a deliberate control: the snapshot records what was observed
+on a date, and reopening a case by editing it would both rewrite history and
+require relaxing a guard somebody put there on purpose. I changed the status
+locally to see what it cost, found those three guards, and reverted it.
+
+Two ways to resolve it, and the choice is yours:
+
+| Option | What it costs | What it buys |
+|---|---|---|
+| **A — reopen TC-041 in the snapshot** | relaxing the three byte-for-byte guards, and rewriting a record of what was observed | one place to look; the QA page stops saying passed |
+| **B — derive current QA status, as #122 did for readiness** | a derivation layer for QA cases, like `currentSecurityStatus.mjs` | history stays frozen AND the page stops contradicting itself; a future case cannot drift the same way |
+
+Engineering recommendation: **B**. It is the fix #122 already established for
+exactly this problem — a frozen record rendered as current status — and A
+would have to be done again the next time a case is reopened. B is more work
+now and the last time it will be needed.
+
+Until one is chosen, **this document is the authority on TC-041**, and the
+snapshot should be read as "the presentation was verified on 2026-10-06",
+which is what its own note says.
+
 ## Changed in this branch
 
 | Change | Status |
