@@ -59,6 +59,19 @@ const SEMANTIC_MATCH_CHIP_LABEL = "Semantic match";
  * offer the page that CAN show all of it (QA TC-040). Taken from the live
  * navigation, not guessed: Global Search itself is /search, and the module
  * pages are the routes the sidebar links to.
+ *
+ * All four were checked on DEV on 2026-11-10, including that each ACCEPTS
+ * ?q= and actually runs the search - a link that lands on an empty page
+ * would be worse than no link:
+ *
+ *   /awards/search?q=   -> /api/v1/awards/search?...&q=
+ *   /proposals?q=       -> /api/proposals/search?...&query=
+ *   /negotiations?q=    -> /api/negotiations?...&query=
+ *   /subawards?q=       -> /api/subawards?...&query=
+ *
+ * Note /negotiations ignores ?query= and reads ?q= only, which is why the
+ * link below uses q for every module rather than matching each API's own
+ * parameter name.
  */
 const MODULE_SEARCH_ROUTES = {
   AWARD: "/awards/search",

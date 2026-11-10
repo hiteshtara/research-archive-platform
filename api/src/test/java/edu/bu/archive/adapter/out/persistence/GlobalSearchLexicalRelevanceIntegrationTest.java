@@ -255,15 +255,69 @@ class GlobalSearchLexicalRelevanceIntegrationTest {
         }
     }
 
+    // ── what happens if archive.sponsor is not populated ─────────────
+
+    @Nested
+    @DisplayName("An unpopulated sponsor table degrades, and does not break")
+    class WithoutSponsorReferenceData {
+
+        /**
+         * The release precondition behind this.
+         *
+         * <p>Whether {@code archive.sponsor} is populated on DEV cannot be
+         * verified from outside the database - the Explorer exposes no
+         * sponsor endpoint, and the Award API returns the numeric
+         * {@code sponsor_code} (301573) and never the acronym. So the honest
+         * position is that the acronym path is UNVERIFIED on DEV until
+         * someone runs one read-only count.
+         *
+         * <p>What can be settled here is the consequence of it being empty:
+         * the search must still work, and simply not find anything by
+         * acronym. If an empty reference table broke the Award search
+         * instead, that would be a far worse failure than the one being
+         * fixed.
+         */
+        @Test
+        void theSearchStillWorksAndTheAcronymPathSimplyFindsNothing() {
+            jdbc.sql("DELETE FROM archive.sponsor").update();
+            try {
+                assertThat(awardNumbersMatchingAnchoredText("NSF"))
+                        .as("with no reference data there is no acronym to match, so the "
+                                + "NSF-funded award is NOT reachable by its acronym - the "
+                                + "false positives are still gone, but the true positive "
+                                + "is not delivered")
+                        .isEmpty();
+
+                assertThat(awardNumbersMatchingAnchoredText("PROBING"))
+                        .as("an ordinary title search must be completely unaffected")
+                        .contains("100533-00001");
+            } finally {
+                seedSponsors();
+            }
+        }
+
+        @Test
+        void aSponsorWithNoAcronymIsNotAnError() {
+            /*
+             * acronym is nullable. Award 100543-00001's sponsor (Old Dominion)
+             * has none, and a NULL must simply not match rather than
+             * propagating NULL through the predicate and swallowing the row.
+             */
+            assertThat(awardNumbersMatchingAnchoredText("PIRE"))
+                    .as("matched on its title, with a null-acronym sponsor attached")
+                    .contains("100543-00001");
+        }
+
+        @Test
+        void theAcronymPathIsRestoredWhenTheDataIs() {
+            assertThat(awardNumbersMatchingAnchoredText("NSF")).contains("100527-00001");
+        }
+    }
+
     // ---------------- fixtures and queries ----------------
 
     private static void seed() {
-        jdbc.sql("""
-                INSERT INTO archive.sponsor (sponsor_code, sponsor_name, acronym, active) VALUES
-                ('301573', 'National Science Foundation', 'NSF', TRUE),
-                ('301045', 'NIH/National Institute on Aging', 'NIA', TRUE),
-                ('000999', 'A sponsor with no acronym', NULL, TRUE)
-                """).update();
+        seedSponsors();
 
         jdbc.sql("""
                 INSERT INTO archive.award_version (
@@ -303,6 +357,16 @@ class GlobalSearchLexicalRelevanceIntegrationTest {
                 .param("t", title)
                 .param("r", LexicalMatch.wordStartRegex(term))
                 .query(Boolean.class).single();
+    }
+
+    private static void seedSponsors() {
+        jdbc.sql("""
+                INSERT INTO archive.sponsor (sponsor_code, sponsor_name, acronym, active) VALUES
+                ('301573', 'National Science Foundation', 'NSF', TRUE),
+                ('301045', 'NIH/National Institute on Aging', 'NIA', TRUE),
+                ('000999', 'A sponsor with no acronym', NULL, TRUE)
+                ON CONFLICT (sponsor_code) DO NOTHING
+                """).update();
     }
 
     /** The substring behaviour, as it was before the fix. */
