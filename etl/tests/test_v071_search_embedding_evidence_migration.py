@@ -25,6 +25,7 @@ from __future__ import annotations
 import getpass
 import os
 import re
+import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +37,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from archive_etl.upload.migrations import (
+    RESERVED_MIGRATION_VERSIONS,
     INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
     apply_migrations,
     find_missing_migration_versions,
@@ -139,6 +141,38 @@ class V071CommittedChainTest(unittest.TestCase):
             "V073 is superseded by V077 and must not be committed",
         )
 
+    def test_an_undeclared_gap_is_still_reported(self):
+        """Declaring 81 must not have silenced gap detection generally.
+
+        The whole value of this check is catching a migration that was
+        renumbered or lost. A fix that quietens one gap by weakening the
+        checker would be worse than the failing test it replaced.
+        """
+        import tempfile
+
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            for version in (1, 2, 4):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+            self.assertEqual(
+                find_missing_migration_versions(directory), [3],
+                "an undeclared gap must still be reported",
+            )
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_a_declared_gap_is_silent_only_for_that_version(self):
+        import tempfile
+
+        directory = pathlib.Path(tempfile.mkdtemp())
+        try:
+            # 81 declared, 82 not.
+            for version in (80, 83):
+                (directory / f"V{version:03d}__thing.sql").write_text("SELECT 1;\n")
+            self.assertEqual(find_missing_migration_versions(directory), [82])
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
     def test_committed_chain_reports_no_missing_versions(self):
         """V071 is restored, and 73 is registered in
         INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS (V077 owns that
@@ -154,6 +188,18 @@ class V071CommittedChainTest(unittest.TestCase):
             self.assertIn(
                 73, INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
                 "73 must be silent only because it is explicitly declared",
+            )
+            # 81 is RESERVED, not superseded: V081 is held by an unmerged
+            # branch and is expected to arrive, where 73 never will. The
+            # distinction matters because when that branch merges, this
+            # declaration becomes stale and should be removed.
+            self.assertIn(
+                81, RESERVED_MIGRATION_VERSIONS,
+                "81 must be silent only because it is explicitly declared",
+            )
+            self.assertNotIn(
+                81, INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS,
+                "V081 is not superseded by anything - it is simply unmerged",
             )
         finally:
             shutil.rmtree(clean, ignore_errors=True)
