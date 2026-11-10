@@ -1,0 +1,68 @@
+{
+  "_comment": "Prototype fixtures. Synthetic identifiers only - no real BU person, no real Cognito subject, no real Award. Nothing here is fetched; the prototype renders these directly so it cannot become a live client by accident.",
+  "enforcement": {
+    "enabled": false,
+    "policySource": "SIMULATED",
+    "policy": {
+      "versionScope": "FAMILY_WIDE",
+      "departmentMatch": "LEAD_UNIT_WITH_DESCENDANTS",
+      "contactDerivation": "EXPLICIT_GRANT",
+      "researchStaffRoles": ["PI"]
+    }
+  },
+  "administrator": {
+    "institutionalIdentifier": "ARP-SYN-ADMIN-0001",
+    "isArchiveAdministrator": true,
+    "holdsCentralGrant": false,
+    "note": "Administering access is not having it. This administrator holds no data grant, so their own column below is mostly DENY - which is correct."
+  },
+  "subject": {
+    "found": true,
+    "institutionalIdentifier": "ARP-SYN-DEPT-0002",
+    "loginName": "syn-dept",
+    "linkStatus": "ACTIVE",
+    "linkedOn": "2026-11-02",
+    "hasKualiPrincipal": false,
+    "scopeDescription": "Every Award, Proposal, Subaward and Negotiation whose lead unit is 7777, or any unit beneath it."
+  },
+  "grants": [
+    {
+      "grantId": 1001, "type": "UNIT", "scope": "Unit 7777, including sub-units",
+      "state": "ACTIVE", "validFrom": "2026-11-02", "expiresAt": null, "revokedAt": null,
+      "inForce": true, "why": "No expiry set, not revoked."
+    },
+    {
+      "grantId": 1002, "type": "IO", "scope": "SAP account IO-55500",
+      "state": "EXPIRED", "validFrom": "2026-09-01", "expiresAt": "2026-10-01", "revokedAt": null,
+      "inForce": false, "why": "Expired on 2026-10-01. Still stored - a grant row is evidence - but it grants nothing."
+    },
+    {
+      "grantId": 1003, "type": "CENTRAL", "scope": "Every record",
+      "state": "REVOKED", "validFrom": "2026-08-01", "expiresAt": null, "revokedAt": "2026-09-15",
+      "inForce": false, "why": "Revoked on 2026-09-15. Kept, never deleted, so who had access and when survives."
+    }
+  ],
+  "decisions": [
+    {
+      "module": "AWARD", "identifier": "SYN-AWD-0001",
+      "subject": { "decision": "PERMIT", "reasonCode": "DEPARTMENT", "versionsEvaluated": 3 },
+      "administrator": { "decision": "DENY", "reasonCode": "NO_MATCHING_GRANT", "versionsEvaluated": 0 }
+    },
+    {
+      "module": "AWARD", "identifier": "SYN-AWD-0002",
+      "subject": { "decision": "DENY", "reasonCode": "NO_MATCHING_GRANT", "versionsEvaluated": 0 },
+      "administrator": { "decision": "DENY", "reasonCode": "NO_MATCHING_GRANT", "versionsEvaluated": 0 }
+    },
+    {
+      "module": "AWARD", "identifier": "SYN-AWD-DOES-NOT-EXIST",
+      "subject": { "decision": "DENY", "reasonCode": "NO_MATCHING_GRANT", "versionsEvaluated": 0 },
+      "administrator": { "decision": "DENY", "reasonCode": "NO_MATCHING_GRANT", "versionsEvaluated": 0 },
+      "note": "Deliberately identical to SYN-AWD-0002 above. A record that does not exist and a record the subject cannot reach must be indistinguishable, or this screen becomes a way to discover which identifiers are real."
+    },
+    {
+      "module": "SUBAWARD", "identifier": "SYN-SUB-0003",
+      "subject": { "decision": "PERMIT", "reasonCode": "DEPARTMENT", "versionsEvaluated": 1 },
+      "administrator": { "decision": "DENY", "reasonCode": "NO_MATCHING_GRANT", "versionsEvaluated": 0 }
+    }
+  ]
+}
