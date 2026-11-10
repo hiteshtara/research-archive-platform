@@ -704,7 +704,7 @@ test("approved decisions are listed, and separated from implementation status", 
 });
 
 test("the page renders the stages, the module table and the decision list", () => {
-  const source = readSource("../../pages/QaStatusPage.tsx");
+  const source = readSource("../../pages/SecurityReadinessPage.tsx");
   assert.match(source, /Security implementation progress/);
   assert.match(source, /Approved business decisions/);
   assert.match(source, /securityStages\(requirement\)/);
@@ -714,9 +714,21 @@ test("the page renders the stages, the module table and the decision list", () =
   // strongly than the evidence in securityRequirements.json supports.
   assert.match(source, /Record-level authorization is OFF</);
   assert.doesNotMatch(source, /OFF in every environment/i);
-  // And the merged-but-not-running distinction must be on the page.
-  assert.match(source, /Merged, but not running/);
-  assert.match(source, /apiDeploymentState/);
+  /*
+   * The merged-but-not-running distinction still has to be on the page, but
+   * it has changed tense. Revision 85 shipped the authorization code, so the
+   * recorded "NOTHING authorization-related is running" is history now - and
+   * it is shown as history, with the revision that superseded it, rather than
+   * deleted or left reading as current.
+   */
+  assert.match(source, /Historical record/);
+  assert.match(source, /Superseded by/);
+  assert.match(source, /statements\.historical/);
+  assert.doesNotMatch(
+    source,
+    /none of that backend code is in the running API/,
+    "that sentence was true of revision 81 and is false now",
+  );
 });
 
 test("the enforcement state is stated so no one reads these as live controls", () => {
@@ -767,21 +779,41 @@ test("the excluded case's subject matter is not described in the shipped asset e
 
 // --- Page wiring (static source inspection - no component-render harness) -
 
-test("QaStatusPage.tsx derives its totals from the presentation module", () => {
-  const source = readSource("../../pages/QaStatusPage.tsx");
+test("the pages derive their totals from the presentation modules", () => {
+  const testing = readSource("../../pages/QaTestingPage.tsx");
+  const readinessPage = readSource("../../pages/SecurityReadinessPage.tsx");
+
   assert.match(
-    source,
-    /from\s*"[^"]*qaStatusPresentation\.mjs"/,
-    "the page must use the shared, tested helpers rather than its own counting",
+    testing,
+    /from\s*"[^"]*qaTestingPresentation\.mjs"/,
+    "the tester page must use the shared, tested helpers rather than its own counting",
   );
-  assert.match(source, /securityRequirements\.json/, "the page must render the security section");
+  assert.match(
+    readinessPage,
+    /from\s*"[^"]*qaStatusPresentation\.mjs"/,
+    "the readiness page keeps using the security helpers it always did",
+  );
+  assert.match(
+    readinessPage,
+    /securityRequirements\.json/,
+    "the readiness page must still render the security requirements",
+  );
 });
 
-test("App.tsx routes /qa-status to the page", () => {
+test("App.tsx routes /qa-status to QA Testing and /qa-status/readiness to the technical page", () => {
   const source = readSource("../../App.tsx");
-  const routeBlock = source.match(/path="qa-status"[\s\S]{0,120}/)?.[0];
-  assert.ok(routeBlock, "expected a qa-status route block");
-  assert.match(routeBlock, /QaStatusPage/);
+
+  const testingRoute = source.match(/path="qa-status"[\s\S]{0,120}/)?.[0];
+  assert.ok(testingRoute, "expected a qa-status route block");
+  assert.match(
+    testingRoute,
+    /QaTestingPage/,
+    "the default page is the tester's, not the engineer's",
+  );
+
+  const readinessRoute = source.match(/path="qa-status\/readiness"[\s\S]{0,120}/)?.[0];
+  assert.ok(readinessRoute, "expected a qa-status/readiness route block");
+  assert.match(readinessRoute, /SecurityReadinessPage/);
 });
 
 test("the QA status link is declared in the shared navigation config, not inline in AppLayout", () => {
@@ -1050,9 +1082,21 @@ test("earlier findings are preserved rather than overwritten", () => {
   }
 });
 
-test("the page renders the progress block and earlier findings", () => {
-  const source = readSource("../../pages/QaStatusPage.tsx");
-  assert.match(source, /item\.progress/);
-  assert.match(source, /Earlier findings/);
-  assert.match(source, /Remaining limitations/);
+test("the verification record is split: findings for testers, builds for engineers", () => {
+  /*
+   * It used to be one block on one page. The tester half - what was observed,
+   * what is still missing, what was found earlier - stays with the cases. The
+   * engineering half - which change, which Amplify job, which ECS revision -
+   * moves to the readiness page. Neither is deleted.
+   */
+  const testing = readSource("../../pages/QaTestingPage.tsx");
+  assert.match(testing, /Earlier findings/);
+  assert.match(testing, /Remaining limitations/);
+  assert.match(testing, /What was observed/);
+  assert.match(testing, /testerProgress\(item\)/);
+
+  const readinessPage = readSource("../../pages/SecurityReadinessPage.tsx");
+  assert.match(readinessPage, /Build evidence for verified QA cases/);
+  assert.match(readinessPage, /progress\?\.deployedBuild/);
+  assert.match(readinessPage, /progress\?\.change/);
 });

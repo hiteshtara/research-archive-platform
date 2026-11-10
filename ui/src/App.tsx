@@ -14,7 +14,8 @@ import { AdministratorsPage } from "./pages/admin/AdministratorsPage";
 
 import { ArchivedFileFinderPage } from "./pages/ArchivedFileFinderPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { QaStatusPage } from "./pages/QaStatusPage";
+import { QaTestingPage } from "./pages/QaTestingPage";
+import { SecurityReadinessPage } from "./pages/SecurityReadinessPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 import { GlobalSearchPage } from "./pages/GlobalSearchPage";
@@ -33,7 +34,12 @@ export default function App() {
       <Route element={<AppLayout />}>
 
         <Route index element={<DashboardPage />} />
-        <Route path="qa-status" element={<QaStatusPage />} />
+        {/*
+          QA Testing is the default: testers outnumber the people reading
+          deployment status, and they were the ones scrolling past it.
+        */}
+        <Route path="qa-status" element={<QaTestingPage />} />
+        <Route path="qa-status/readiness" element={<SecurityReadinessPage />} />
 
         {/* Retired: the legacy Award Families/History pages predated
             the current Award Search/Dashboard experience and bypassed

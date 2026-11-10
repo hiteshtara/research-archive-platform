@@ -549,7 +549,7 @@ test("the only sidebar entry after the archive domains is the QA status page", (
   // scaffolding and this line goes when the page does.
   const source = readSource("../navigation/navigationPresentation.mjs");
   const labels = [...source.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(labels.slice(7), ["QA status"]);
+  assert.deepEqual(labels.slice(7), ["QA Testing"]);
 });
 
 test("no developer-tool entries appear in the sidebar", () => {

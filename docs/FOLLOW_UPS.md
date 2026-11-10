@@ -104,3 +104,29 @@ panel reading the running revision at page load and falling back to the
 snapshot when the call fails. That makes this class of staleness impossible
 rather than merely tested for. It is an API change plus a UI change, so it is
 not folded into a UI-only correction.
+
+---
+
+## FU-004 — Readiness data is served from the JavaScript bundle, not an authorized endpoint
+
+**Observed** 2026-11-10, while splitting `/qa-status` into QA Testing and
+Security & Deployment Readiness.
+
+The readiness page now separates technical status from the tester experience,
+which was the goal. It does **not** restrict it. `securityReadiness.json`,
+`securityRequirements.json` and `qaSnapshot.json` are compiled into the single
+JavaScript bundle every signed-in user already downloads, so a route guard
+would change who is *likely* to read the page, not who *can*.
+
+The page says so in those words rather than claiming to be administrator-only,
+and `qaTestingPresentation.test.mjs` fails if that claim ever appears.
+
+**Why it is only a follow-up.** Nothing on the page is a credential or record
+data — it is deployment facts and test evidence, behind BU authentication. The
+exposure is to signed-in BU users, not the public.
+
+**Done would look like.** The readiness data served from an API endpoint that
+checks administrator status server-side, with the UI fetching it rather than
+importing it, and the JSON removed from the client bundle. That is an API
+change plus a UI change, and it is the only way the word "restricted" could
+honestly be used about this page.

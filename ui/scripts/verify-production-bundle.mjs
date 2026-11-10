@@ -47,6 +47,7 @@ const CONFIG_GUARDS_THAT_MUST_BE_GONE = [
  */
 const ROUTES = [
   "qa-status",
+  "qa-status/readiness",
   "awards/search",
   "awards/versions/search",
   "awards/hierarchy/:awardNumber",
@@ -78,7 +79,8 @@ const MODULE_MARKERS = [
   ["Subaward search", "Find a Subaward"],
   ["Document explorer", "Kuali Documents"],
   ["Archived file finder", "Find an Archived File"],
-  ["QA status / Security readiness", "Security readiness"],
+  ["QA Testing", "QA Testing"],
+  ["Security & Deployment Readiness", "Security readiness"],
 ];
 
 /**
