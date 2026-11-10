@@ -1,0 +1,90 @@
+{
+  "family": "research-archive-platform-dev-link-identity",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::770203350335:role/research-archive-platform-dev-api-execution-role",
+  "taskRoleArn": "arn:aws:iam::770203350335:role/research-archive-platform-dev-api-task-role",
+  "containerDefinitions": [
+    {
+      "name": "link-identity",
+      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api@sha256:abce05a688cdad93361e47e05e685ea9d5bcd6ec4439fa8ab4f052727f46cc42",
+      "essential": true,
+      "environment": [
+        {
+          "name": "APP_EXPLORER_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "APP_CORS_ALLOWED_ORIGINS",
+          "value": "http://localhost:5173,https://main.d288p9gmoteftb.amplifyapp.com,https://nonprod.kuali-archive.bu.edu"
+        },
+        {
+          "name": "SPRING_PROFILES_ACTIVE",
+          "value": "aws,link-identity"
+        },
+        {
+          "name": "APP_SEARCH_SEMANTIC_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "COGNITO_ISSUER_URI",
+          "value": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_VJ4ekQ27c"
+        },
+        {
+          "name": "ARCHIVE_DOCUMENTS_BUCKET",
+          "value": "research-archive-platform-dev-documents-770203350335"
+        },
+        {
+          "name": "COGNITO_CLIENT_ID",
+          "value": "seqgmc8sccr22sq8lcafqjcpb"
+        },
+        {
+          "name": "APP_SEARCH_TIMING_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "SPRING_MAIN_WEB_APPLICATION_TYPE",
+          "value": "none"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "POSTGRES_DB",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:dbname::"
+        },
+        {
+          "name": "POSTGRES_HOST",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:host::"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:password::"
+        },
+        {
+          "name": "POSTGRES_PORT",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:port::"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:username::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/research-archive-platform-dev-api",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "link-identity"
+        }
+      }
+    }
+  ]
+}

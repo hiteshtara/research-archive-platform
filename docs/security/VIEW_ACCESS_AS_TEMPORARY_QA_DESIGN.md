@@ -329,7 +329,7 @@ must assert against the artifact.
 ### The gate
 
 A test in the existing `edu.bu.archive.ops` package — alongside
-`GrantAdminTaskDefinitionTest`, which already guards a one-off task definition
+`OperatorTaskDefinitionTest`, which already guards a one-off task definition
 the same way — asserting on the built jar:
 
 ```

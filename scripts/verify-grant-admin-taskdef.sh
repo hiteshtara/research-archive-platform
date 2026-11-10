@@ -9,7 +9,7 @@
 # without it. The same attempt also set SPRING_PROFILES_ACTIVE=grant-admin,
 # replacing "aws" instead of adding to it.
 #
-# GrantAdminTaskDefinitionTest asserts the shape of the committed file and runs
+# OperatorTaskDefinitionTest asserts the shape of the committed file and runs
 # in CI. It cannot see a variable added to the DEPLOYED API later. This script
 # closes that gap by diffing the committed file against the live API task
 # definition, so a new API requirement shows up here instead of as a failed
@@ -17,6 +17,11 @@
 #
 # Usage:
 #   scripts/verify-grant-admin-taskdef.sh [path-to-taskdef.json]
+#
+# Defaults to the grant-admin definition. Pass a path to check another
+# operator definition, such as ops/grant-admin/dev-link-identity.taskdef.json;
+# the expected Spring profile is derived from the file's own family, so no
+# argument but the path is needed.
 #
 # Exit 0 only if every check passes. Requires AWS_PROFILE=bu-nprd.
 set -uo pipefail
@@ -77,8 +82,22 @@ bad = []
 profiles = env.get("SPRING_PROFILES_ACTIVE", "").split(",")
 if "aws" not in profiles:
     bad.append("SPRING_PROFILES_ACTIVE must still contain 'aws'")
-if "grant-admin" not in profiles:
-    bad.append("SPRING_PROFILES_ACTIVE must contain 'grant-admin'")
+# The utility profile is DERIVED from the family rather than hardcoded, so
+# this script works for every operator task definition. It was written for
+# grant-admin only, and a second utility (link-identity) would have failed
+# here spuriously - which is the kind of false alarm that gets a check
+# switched off.
+family = d.get("family", "")
+prefix = "research-archive-platform-dev-"
+utility = family[len(prefix):] if family.startswith(prefix) else None
+if not utility:
+    bad.append("family must be " + prefix + "<utility>, got " + repr(family))
+elif utility not in profiles:
+    bad.append("SPRING_PROFILES_ACTIVE must contain '" + utility + "'"
+               " to match the family " + family)
+if "bootstrap-admin" in profiles:
+    bad.append("bootstrap-admin is a separate one-time procedure; it must not "
+               "be active here")
 if env.get("SPRING_MAIN_WEB_APPLICATION_TYPE") != "none":
     bad.append("SPRING_MAIN_WEB_APPLICATION_TYPE must be 'none' - no HTTP listener")
 if "portMappings" in c:

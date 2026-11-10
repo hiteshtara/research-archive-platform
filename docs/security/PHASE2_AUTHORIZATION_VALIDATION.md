@@ -276,7 +276,7 @@ reversible.
    answers, not configuration yet.
 3. **Register the grant-admin task definition** from the version-controlled
    JSON in `ops/`, and verify it with `scripts/verify-grant-admin-taskdef.sh`
-   and `GrantAdminTaskDefinitionTest`. This creates the administrative path;
+   and `OperatorTaskDefinitionTest`. This creates the administrative path;
    it does not enforce anything.
 4. **Create identity links** for the four pilot participants — one write each,
    each audited, each individually revocable.
