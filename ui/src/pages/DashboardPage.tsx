@@ -25,6 +25,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { getDashboard } from "../api/client";
+import { AccessNotice } from "../features/access/AccessNotice";
+import { shouldReplaceEmptyState } from "../features/access/accessStatePresentation.mjs";
 import { LoadingState } from "../components/common/LoadingState";
 import {
   canSubmitSearchText,
@@ -80,6 +82,21 @@ export function DashboardPage() {
   }
 
   if (dashboardQuery.isError || !dashboardQuery.data) {
+    /*
+     * The Dashboard is where "no access" is most easily mistaken for "the
+     * archive is down". A user with no grants gets 403 ACCESS_NOT_PROVISIONED
+     * here, and the old branch rendered "the dashboard data could not be
+     * loaded" - which reads as an outage and produces a bug report instead of
+     * an access request. A 404 or a genuine failure still gets the generic
+     * message, because only the access states are safe to explain.
+     */
+    const error = dashboardQuery.error as
+      | { status?: number; code?: string; correlationId?: string }
+      | null;
+
+    if (shouldReplaceEmptyState(error)) {
+      return <AccessNotice error={error} />;
+    }
     return (
       <Alert severity="error">
         The dashboard data could not be loaded.
