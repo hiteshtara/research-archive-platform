@@ -200,18 +200,29 @@ test("awaitingBusinessApproval lists only genuine decisions", () => {
 
 // ── the page keeps history, and says what it is ──────────────────────
 
-test("the page renders readiness before the historical QA cases", () => {
-  const page = read("../../pages/QaStatusPage.tsx");
-  const readinessAt = page.indexOf("<SecurityReadinessSection");
-  const historyAt = page.indexOf("Historical QA results");
-  assert.ok(readinessAt > 0, "the readiness section must be on the page");
-  assert.ok(historyAt > readinessAt, "security readiness comes first");
+test("the readiness section lives on the readiness page, not the tester page", () => {
+  /*
+   * The pages were split so a tester is not scrolling past deployment status
+   * to reach their cases. If <SecurityReadinessSection> reappears on the
+   * testing page, the split has quietly been undone.
+   */
+  const readinessPage = read("../../pages/SecurityReadinessPage.tsx");
+  const testingPage = read("../../pages/QaTestingPage.tsx");
+
+  assert.ok(
+    readinessPage.includes("<SecurityReadinessSection"),
+    "the readiness section must be on the readiness page",
+  );
+  assert.ok(
+    !testingPage.includes("<SecurityReadinessSection"),
+    "and must not be back on the tester page",
+  );
 });
 
 test("historical QA results are still rendered, not replaced", () => {
-  const page = read("../../pages/QaStatusPage.tsx");
+  const page = read("../../pages/QaTestingPage.tsx");
   assert.ok(page.includes("qaSnapshot.json"), "the recorded cases must still be loaded");
-  assert.match(page, /never rewritten|never rewrite|exactly as\s*\n?\s*tested/);
+  assert.match(page, /never rewritten|never rewrite|exactly as\s*\n?\s*recorded/);
 });
 
 test("the recorded QA snapshot is unchanged by this work", () => {
