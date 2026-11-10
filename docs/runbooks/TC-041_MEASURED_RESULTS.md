@@ -133,3 +133,99 @@ Distances are preserved at
 repository**, 15 queries × 50 candidate distances. It contains no module, no
 record id, no business number and no title: the measurement query selects the
 distance and nothing else.
+
+
+---
+
+# Expanded measurement — 33 queries
+
+Measured against DEV on **2026-11-10**, same read-only route, 31 embedding
+calls (the two identifier-shaped queries are skipped because the API skips
+the semantic leg for them). 23 should-return, 8 should-reject.
+
+## Every strategy fails, and now by a wide margin
+
+| Strategy | Correct | Useful withheld | Noise kept | Overlap |
+|---|---|---|---|---|
+| Corpus vocabulary (any token) | 24/31 | **6** | 1 | n/a |
+| Absolute cutoff, best possible `<= 0.8210` | 26/31 | 0 | **5 of 8** | **−0.0324** |
+| Relative margin | — | — | — | **−0.0586** |
+
+The original 15-query set put the absolute cutoff's overlap at −0.0001. On a
+set that actually tests the hard cases it is **−0.0324**, 300× wider, and the
+best cutoff keeps **five of the eight** nonsense queries. It is not a filter.
+
+## The corpus-vocabulary gate is refuted — it fails on both axes
+
+**Six useful queries withheld:**
+
+| Withheld | Why |
+|---|---|
+| `paediatric` | British spelling; the archive holds 57 rows saying "pediatric" |
+| `tumour` | British spelling |
+| `haematology` | British spelling |
+| `neoplasm` | the clinical term; the archive says "cancer" (650 rows) |
+| **`NIAID`** | **a real NIH institute** |
+| **`PCORI`** | **a real funder** |
+
+Two of those are funders a BU researcher would plainly search for. Withholding
+them is PR #27's failure in a new place, which is what this set was built to
+detect.
+
+**And it admits nonsense.** `snorfulate biodynamics` **passes** the gate —
+because `biodynamics` is a real word appearing in 5 embedded rows. The hardest
+nonsense case defeats it.
+
+So the gate is worse than the absolute cutoff on relevance *and* worse on
+noise. **It should not be implemented.**
+
+## Why all three fail: distance measures corpus coverage, not query quality
+
+The expanded set exposes the mechanism, and it explains every failure at once.
+
+`tumour` has a nearest distance of **0.8207** — further away than four of the
+eight nonsense queries. `NIAID` has a ratio of **0.9870**, worse than every
+nonsense query. Neither is a bad search. They are *good searches the archive
+has little on*.
+
+A nearest-neighbour distance answers "how close is the nearest embedded
+record?" — which is a statement about **what the archive contains**, not about
+whether the searcher asked a sensible question. A rare-but-real term and a
+meaningless string both land far away, for entirely different reasons, and no
+threshold over that one number can tell them apart.
+
+That is also why the vocabulary gate fails: "is this word in the corpus?" is
+the same question asked a different way.
+
+## Recommendation
+
+**Stop pursuing a filtering rule on this evidence, and keep the presentation
+separation that is already deployed.**
+
+It is doing the real work: a search matching nothing says so, and the
+suggestions sit behind an explicit action rather than being presented as
+answers. No measured strategy improves on that without withholding something
+a researcher legitimately asked for.
+
+Three avenues remain, and all are larger than a threshold:
+
+1. **Make the API's count honest.** `totalResults: 5` for a nonsense query is
+   still wrong even when the page shows 0. PR #124's `moduleTotals` is the
+   shape of the fix; a related-only result set should report zero *direct*
+   matches in the API too, not just in the UI.
+2. **Enrich what is embedded.** A Negotiation's whole embedded text is a
+   document number, an agreement type, a negotiator and a status. Thousands
+   are near-identical, which is why nonsense queries landed on Negotiations
+   in the first place. Better source text would move every distance in the
+   corpus — and would invalidate these measurements, which is a reason to do
+   it before choosing any rule, not after.
+3. **Show the searcher the coverage signal instead of acting on it.** "The
+   archive has little on this term" is useful and true; "this is irrelevant"
+   is neither.
+
+## TC-041 stays open
+
+Nothing here closes it. What has changed is that three candidate rules are now
+ruled **out** on measured evidence rather than left as options — which is
+progress, and is why the case should stay open rather than be closed on a rule
+that would have withheld NIAID and PCORI.
