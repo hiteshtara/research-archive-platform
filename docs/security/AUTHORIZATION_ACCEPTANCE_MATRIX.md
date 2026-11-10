@@ -1,9 +1,26 @@
 # Authorization acceptance matrix — DEV
 
 Built from the deployed code (API revision 84, image `@sha256:c9f3bc99…`)
-and from **real DEV data**, read-only, 2026-10-29. No grants exist and
-enforcement is OFF, so every "expected" below is a prediction to be
-verified, not an observation.
+and from **real DEV data**, read-only, 2026-10-29.
+
+## Status of these expectations
+
+When this matrix was written, no grants existed and enforcement was OFF, so
+every "expected" below was a prediction. Most are now **executed**.
+
+| Cases | Where they run | What that proves |
+|---|---|---|
+| 1–5, 12–14, 16–20 | `SecurityAcceptancePackIntegrationTest` | the whole chain, from a Cognito issuer and subject through `authz.identity_link` and `authz.access_grant` to an `AccessDecision`, against a real schema with every migration applied. Grants are written through `ArchiveAdminService`, the same method the administrative API and both operator utilities use |
+| 6–11, 15 | the Proposal, Subaward and Negotiation authorization integration tests | the module-specific predicates |
+
+`SecurityAcceptancePackIntegrationTest` also asserts that every numbered row
+in the table below is either executed there or recorded as covered elsewhere,
+so a case added here cannot quietly return to being a prediction.
+
+**Still a prediction, and deliberately so:** every row's behaviour *on DEV*.
+These tests run against throwaway containers. Nothing below has been observed
+on the deployed service, because enforcement is off there and no grant exists
+— which is the state the activation plan exists to change, under approval.
 
 **Structural reachability is not permission.** A subaward family is
 reachable through *any* funding Award; it is authorized only if one of
