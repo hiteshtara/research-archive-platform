@@ -116,7 +116,8 @@ class AdminVerifiedPilotPathIntegrationTest {
                         lead_unit_number, lead_unit_name, is_primary_current, workflow_document_number
                     ) VALUES
                     (8101, 'PILOT-00001', 1, 'Pilot award v1', 'Active', '7777', 'CHEMISTRY', FALSE, 'DOC-P-1'),
-                    (8102, 'PILOT-00001', 2, 'Pilot award v2', 'Active', '7777', 'CHEMISTRY', TRUE,  'DOC-P-2')
+                    (8102, 'PILOT-00001', 2, 'Pilot award v2', 'Active', '7777', 'CHEMISTRY', TRUE,  'DOC-P-2'),
+                    (8201, 'OTHER-00002', 1, 'Namesake award', 'Active', '7777', 'CHEMISTRY', TRUE,  'DOC-N-1')
                     """);
             /*
              * The researcher is listed as PI on version 2 only. SEC-003 says
@@ -128,7 +129,10 @@ class AdminVerifiedPilotPathIntegrationTest {
                         award_person_id, award_id, award_number, sequence_number,
                         full_name, contact_role_code, person_id
                     ) VALUES
-                    (201, 8102, 'PILOT-00001', 2, 'SYN RESEARCHER', 'PI', 'P-SYN-RESEARCHER')
+                    (201, 8102, 'PILOT-00001', 2, 'SYN RESEARCHER', 'PI', 'P-SYN-RESEARCHER'),
+                    -- Same display name, different principal, different Award.
+                    -- This is the collision an authoritative lookup prevents.
+                    (202, 8201, 'OTHER-00002', 1, 'SYN RESEARCHER', 'PI', 'P-SYN-NAMESAKE')
                     """);
 
             /*
@@ -143,16 +147,18 @@ class AdminVerifiedPilotPathIntegrationTest {
             statement.execute("""
                     INSERT INTO authz.identity_link (cognito_issuer, cognito_subject,
                         institutional_identifier, kuali_person_id, login_name,
-                        method, status, verified_by, verified_at)
+                        method, status, verified_by, verified_at, revoked_by, revoked_at)
                     VALUES
                       ('%1$s', 'sub-central',  'SYN-INST-CENTRAL', NULL, 'syn-central',
-                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now()),
+                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now(), NULL, NULL),
                       ('%1$s', 'sub-dept',     'SYN-INST-DEPT',    NULL, 'syn-dept',
-                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now()),
+                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now(), NULL, NULL),
                       ('%1$s', 'sub-research', 'SYN-INST-RESEARCH', 'P-SYN-RESEARCHER', 'syn-research',
-                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now()),
+                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now(), NULL, NULL),
                       ('%1$s', 'sub-control',  'SYN-INST-CONTROL', NULL, 'syn-control',
-                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now())
+                       'ADMIN_VERIFIED', 'ACTIVE', 'syn-admin', now(), NULL, NULL),
+                      ('%1$s', 'sub-revoked',  'SYN-INST-REVOKED', 'P-SYN-RESEARCHER', 'syn-revoked',
+                       'ADMIN_VERIFIED', 'REVOKED', 'syn-admin', now(), 'syn-admin', now())
                     """.formatted(ISSUER));
         }
 
@@ -268,6 +274,84 @@ class AdminVerifiedPilotPathIntegrationTest {
                 .isInstanceOf(IdentityResolution.NotProvisioned.class);
     }
 
+    // ── identity-mapping failure modes ───────────────────────────────
+
+    @Test
+    @DisplayName("two people share a display name, and only the principal tells them apart")
+    void aSharedDisplayNameIsNotAnIdentity() {
+        /*
+         * Both rows read 'SYN RESEARCHER'. An administrator searching the
+         * archive by name finds two, on different Awards, with different
+         * principals. Pairing the wrong one is undetectable afterwards -
+         * which is why the verification procedure pairs against a KNOWN
+         * Award rather than against a name.
+         */
+        List<String> principals = jdbc.sql("""
+                        SELECT DISTINCT person_id FROM archive.award_person
+                         WHERE full_name = 'SYN RESEARCHER' ORDER BY person_id
+                        """).query(String.class).list();
+
+        assertThat(principals)
+                .as("a name resolves to more than one principal, so a name is not an identity")
+                .containsExactly("P-SYN-NAMESAKE", PILOT_PRINCIPAL);
+
+        AccessScope asNamesake = new AccessScope(
+                false, Set.of(), Optional.of(new KualiPersonId("P-SYN-NAMESAKE")), Set.of());
+
+        assertThat(permits(asNamesake, "OTHER-00002", 8201))
+                .as("the namesake reaches their own Award")
+                .isTrue();
+        assertThat(permits(asNamesake, "PILOT-00001", 8102))
+                .as("and not the pilot participant's - the two are only separable by principal")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("a revoked link resolves as revoked, not as unprovisioned and not as access")
+    void aRevokedLinkIsRevoked() {
+        /*
+         * Three outcomes have to stay distinguishable: never enrolled,
+         * enrolled and withdrawn, and enrolled with no grants. Collapsing
+         * revoked into not-provisioned would lose the fact that access was
+         * deliberately withdrawn.
+         */
+        assertThat(resolverResolve("sub-revoked"))
+                .isInstanceOf(IdentityResolution.Revoked.class);
+    }
+
+    @Test
+    @DisplayName("a revoked link's principal does not leak access, even though the row still names it")
+    void aRevokedLinkGrantsNothingDespiteItsPrincipal() {
+        // The revoked row carries the SAME principal as the active research
+        // link. Revocation has to stop at the link, not depend on the
+        // principal being unique to it.
+        IdentityResolution revoked = resolverResolve("sub-revoked");
+
+        assertThat(revoked).isNotInstanceOf(IdentityResolution.Mapped.class);
+        assertThat(revoked)
+                .as("no institutional identity is handed back, so no scope can be resolved")
+                .isInstanceOf(IdentityResolution.Revoked.class);
+    }
+
+    @Test
+    @DisplayName("a link with no principal cannot reach anything by contact derivation")
+    void aMissingPrincipalMeansNoContactAccess() {
+        /*
+         * The Department Administrator's link carries no kuali_person_id.
+         * That is correct - they do not need one - but it means contact
+         * derivation can grant them nothing, and the failure must be "no
+         * access" rather than "match everything".
+         */
+        var mapped = (IdentityResolution.Mapped) resolverResolve("sub-dept");
+        assertThat(mapped.kualiPersonId()).isEmpty();
+
+        AccessScope contactOnly = new AccessScope(
+                false, Set.of(), mapped.kualiPersonId(), Set.of());
+
+        assertThat(contactOnly.isEmpty()).isTrue();
+        assertThat(permits(contactOnly, "PILOT-00001", 8102)).isFalse();
+    }
+
     // ── what the import would have protected ─────────────────────────
 
     @Test
@@ -302,6 +386,10 @@ class AdminVerifiedPilotPathIntegrationTest {
     }
 
     // ── helpers ──────────────────────────────────────────────────────
+
+    private static IdentityResolution resolverResolve(String subject) {
+        return resolver.resolve(cognito(subject));
+    }
 
     private static boolean permits(AccessScope scope, String awardNumber, long awardId) {
         List<RecordFacts> family = facts.awardFamily(awardNumber);

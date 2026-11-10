@@ -165,6 +165,97 @@ keeps serving".
 
 ---
 
+## 4b. Verifying a participant's identity — the procedure
+
+Name matching is not a verification step. `archive.award_person.full_name` is
+not unique: `AdminVerifiedPilotPathIntegrationTest.aSharedDisplayNameIsNotAnIdentity`
+uses two rows reading `SYN RESEARCHER` with different principals on different
+Awards, and shows that each reaches only their own — so a name tells the
+administrator nothing about which principal is correct, and a wrong pairing is
+undetectable afterwards.
+
+For each participant, record all four values before creating anything:
+
+| # | Value | Authoritative source | How to confirm it |
+|---|---|---|---|
+| 1 | Cognito `sub` | the Cognito user pool, via `AdminGetUser` on the user's BU login name | the pool is `us-east-1_VJ4ekQ27c`; `ListUsers` is not available in this account, so the login name must come from the participant or from BU IAM |
+| 2 | Institutional identifier | **BU IAM / the person themselves** — never derived from archive data | this is the stable key every grant hangs off; it must be the same value BU would use elsewhere for that person |
+| 3 | Kuali person id | `archive.award_person.person_id`, **only** for Research Staff | see the pairing check below — this is the one that cannot be confirmed from a name |
+| 4 | Login name | the Cognito user record | recorded for display only; login names change, so nothing authorizes on it |
+
+### The pairing check for a Kuali person id
+
+Do not search by name and take the first hit.
+
+1. Ask the participant to name **one specific Award they expect to see** — its
+   Award number and roughly when they were on it.
+2. Look up the contacts of that Award by Award number, not by person name.
+3. Confirm exactly one contact row on that Award matches the participant, in an
+   approved role, on the version they expect.
+4. Take `person_id` from **that row**.
+5. After the link exists, have the participant confirm they can see that Award
+   and that nothing unexpected appears.
+
+Step 5 is the real control. A wrong pairing shows up immediately as "I cannot
+see my own Award" or "I can see someone else's", and both are visible to the
+participant before any wider rollout.
+
+**This procedure does not scale.** At four participants it is a few minutes
+each. The moment the pilot grows beyond a handful, load `kim_principal` and
+`principal_crosswalk` so the lookup is authoritative rather than manual.
+
+### Failure modes, and what each looks like
+
+Each is pinned by a test in `AdminVerifiedPilotPathIntegrationTest`.
+
+| Failure | What the system does | Detectable? |
+|---|---|---|
+| Two people share a display name | nothing — each principal reaches only its own records | **no**, only the administrator can tell them apart at pairing time |
+| Wrong Kuali person id paired | the link resolves, the evaluator decides correctly, the wrong records are reached | **no** — the pairing check above is the only control |
+| Participant never linked | `IdentityResolution.NotProvisioned` → **403 `ACCESS_NOT_PROVISIONED`** | yes |
+| Link revoked | `IdentityResolution.Revoked` → 403, and the principal on the revoked row grants nothing | yes |
+| Two active links for one Cognito identity | refused by a database constraint before it can exist; resolution would report `Ambiguous` | yes |
+| One institutional identity linked to two people | `IdentityResolution.Ambiguous` → 403 | yes |
+| No Kuali person id on the link | contact derivation yields an empty scope, which denies; it never matches everything | yes |
+
+---
+
+## 4c. How a user tells "no access" apart from "empty archive"
+
+A pilot participant with no grants must not see something that looks like a
+broken site. The API already separates the three cases:
+
+| Situation | Response | Code |
+|---|---|---|
+| Not linked at all | **403** | `ACCESS_NOT_PROVISIONED` — "No archive access has been provisioned for this account." |
+| Linked, ambiguous, revoked or suspended | **403** | identity access denied |
+| Linked and granted, but this record is out of scope | **404** | deliberately indistinguishable from a record that does not exist |
+
+The 404 is intentional and should not be changed without a separate security
+review: `RecordNotAccessibleException extends NoSuchElementException` and is
+explicitly *not* handled by `GlobalExceptionHandler`, with a comment saying so,
+so it falls through to the same 404 as a genuinely missing record. That is what
+stops a scoped caller probing for the existence of records they cannot see.
+
+### The gap
+
+**The UI has no handling for `ACCESS_NOT_PROVISIONED` at all** — zero
+references in `ui/src`. A participant in that state would get whatever the
+generic error path renders, not the plain-English explanation the API is
+supplying.
+
+That matters because the No-Grant Control is the pilot's first and most
+important check, and what it is really testing is the *user-visible*
+difference between "you have not been given access" and "the archive is
+empty". Right now the API makes that distinction and the UI discards it.
+
+**Recommended before the pilot:** a small UI change that renders
+`ACCESS_NOT_PROVISIONED` as its own state — who to contact, no record counts,
+no suggestion that anything is broken. It is UI-only, needs no authorization
+change, and is not included in this PR.
+
+---
+
 ## 5. Still outstanding
 
 | # | Decision | Owner | Blocks |
