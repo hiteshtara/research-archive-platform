@@ -1,6 +1,8 @@
 package edu.bu.archive.application.service;
 
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchItemResponse;
+import edu.bu.archive.application.search.LexicalMatch;
+import edu.bu.archive.application.search.MatchExplanation;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchModuleTotal;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchResponse;
 import edu.bu.archive.adapter.in.web.dto.PageResponse;
@@ -635,11 +637,54 @@ public class GlobalSearchService {
             mapped.add(toGlobalSearchItem(response.exactDocumentMatch()));
         }
 
-        for (AwardSearchResultResponse result : response.results().content()) {
-            mapped.add(toGlobalSearchItem(result, query));
+        /*
+         * QA TC-040. An Award whose match cannot be explained from its own
+         * displayed fields - a non-PI team member, the sponsor's acronym, the
+         * sponsor code, the modification number - previously said
+         * "Matched on: Award (<number>)", which explains nothing. The reason
+         * is now asked of the database, ONCE for the whole page rather than
+         * once per row, and only for the rows that need it. A row whose
+         * reason still cannot be established carries no explanation, rather
+         * than a fabricated one.
+         */
+        List<AwardSearchResultResponse> rows = response.results().content();
+        List<Long> unexplained = rows.stream()
+                .filter(r -> awardMatchedField(r, query) == null)
+                .map(AwardSearchResultResponse::awardId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Map<Long, MatchExplanation> explanations = explainAwards(unexplained, query);
+
+        for (AwardSearchResultResponse result : rows) {
+            mapped.add(toGlobalSearchItem(result, query, explanations));
         }
 
         return mapped;
+    }
+
+    /**
+     * The database's own account of why these Awards matched.
+     *
+     * <p>Fault-tolerant on purpose: an explanation is a nicety, and a failure
+     * to produce one must never cost the caller their results. The leg itself
+     * is already fault-tolerant, but losing 25 Awards because a cosmetic
+     * query failed would be a poor trade.
+     */
+    private Map<Long, MatchExplanation> explainAwards(List<Long> awardIds, String query) {
+        if (awardIds.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            Map<Long, MatchExplanation> byId = new LinkedHashMap<>();
+            for (MatchExplanation explanation : awardArchiveService.explainMatches(awardIds, query)) {
+                byId.putIfAbsent(explanation.recordId(), explanation);
+            }
+            return byId;
+        } catch (RuntimeException exception) {
+            log.warn("Global Search: could not explain {} Award match(es)",
+                    awardIds.size(), exception);
+            return Map.of();
+        }
     }
 
     private java.util.Optional<GlobalSearchItemResponse> findAwardById(
@@ -695,9 +740,18 @@ public class GlobalSearchService {
 
     private GlobalSearchItemResponse toGlobalSearchItem(
             AwardSearchResultResponse result,
-            String query
+            String query,
+            Map<Long, MatchExplanation> explanations
     ) {
         String matchedField = awardMatchedField(result, query);
+        String matchedValue = awardMatchedValue(result, matchedField);
+        if (matchedField == null) {
+            MatchExplanation explained = explanations.get(result.awardId());
+            if (explained != null) {
+                matchedField = explained.field();
+                matchedValue = explained.value();
+            }
+        }
 
         return new GlobalSearchItemResponse(
                 "AWARD",
@@ -708,7 +762,7 @@ public class GlobalSearchService {
                 result.status(),
                 null,
                 matchedField,
-                awardMatchedValue(result, matchedField),
+                matchedValue,
                 "/awards/" + result.awardId(),
                 null,
                 result.awardId(),
@@ -723,43 +777,61 @@ public class GlobalSearchService {
     // heuristic re-derives a human-readable label from the same fields
     // the query WHERE clause searches - see
     // AwardArchiveRepository.searchAwards.
+    /**
+     * Which of the Award's OWN displayed fields the term matched, or null.
+     *
+     * <p>Null means "this result cannot explain itself from what it carries",
+     * not "it did not match". The Award search also matches any team member's
+     * name, the sponsor's acronym, the sponsor code and the modification
+     * number, none of which are in this DTO; those are explained by
+     * {@code explainAwardMatches} instead of guessed at here.
+     *
+     * <p>QA TC-040: this previously fell through to the literal "Award",
+     * rendered as "Matched on: Award (100527-00001)", and used a plain
+     * substring test - so a search for "NSF" reported "Matched on: Title"
+     * against "ENERGY TRANSFER IN PROTEINS". Both are gone: the test is now
+     * {@link LexicalMatch#matches}, the same rule the SQL applies, and an
+     * unexplainable match says nothing at all.
+     */
     private String awardMatchedField(AwardSearchResultResponse result, String query) {
-        String normalizedQuery = query.toLowerCase();
-
-        if (result.awardNumber() != null
-                && result.awardNumber().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.awardNumber())) {
             return "Award Number";
         }
-        if (result.title() != null
-                && result.title().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.title())) {
             return "Title";
         }
-        if (result.sponsor() != null
-                && result.sponsor().toLowerCase().contains(normalizedQuery)) {
-            return "Sponsor";
-        }
-        if (result.leadUnit() != null
-                && result.leadUnit().toLowerCase().contains(normalizedQuery)) {
-            return "Lead Unit";
-        }
-        if (result.principalInvestigator() != null
-                && result.principalInvestigator().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.principalInvestigator())) {
             return "Principal Investigator";
         }
-        return "Award";
+        if (LexicalMatch.matches(query, result.sponsor())) {
+            return "Sponsor";
+        }
+        if (LexicalMatch.matches(query, result.leadUnit())) {
+            return "Lead Unit";
+        }
+        if (LexicalMatch.matches(query, result.grantNumber())) {
+            return "Grant Number";
+        }
+        return null;
     }
 
     private String awardMatchedValue(
             AwardSearchResultResponse result,
             String matchedField
     ) {
+        if (matchedField == null) {
+            // No field to quote. The caller shows no caption rather than
+            // echoing the award number as though it were the match.
+            return null;
+        }
         return switch (matchedField) {
             case "Award Number" -> result.awardNumber();
             case "Title" -> result.title();
             case "Sponsor" -> result.sponsor();
             case "Lead Unit" -> result.leadUnit();
             case "Principal Investigator" -> result.principalInvestigator();
-            default -> result.awardNumber();
+            case "Grant Number" -> result.grantNumber();
+            default -> null;
         };
     }
 
@@ -808,43 +880,73 @@ public class GlobalSearchService {
     // findNegotiations' own SQL doesn't expose which column matched,
     // same heuristic approach as awardMatchedField - see
     // NegotiationArchiveRepository.findNegotiations.
+    /**
+     * Which of the Negotiation's displayed fields matched, or null.
+     *
+     * <p>QA TC-040: all 25 rows for "WILSON WONG" were explained as
+     * "Negotiation", because the match was the associated Award's principal
+     * investigator - a field this DTO has carried all along and that this
+     * method never tested. The title, sponsor and lead unit were missing for
+     * the same reason. No extra query is needed to explain a Negotiation;
+     * the fields were simply not being read.
+     */
     private String negotiationMatchedField(
             NegotiationSummaryResponse result,
             String query
     ) {
-        String normalizedQuery = query.toLowerCase();
-
-        if (result.documentNumber() != null
-                && result.documentNumber().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.documentNumber())) {
             return "Document Number";
         }
-        if (result.negotiationStatusDescription() != null
-                && result.negotiationStatusDescription().toLowerCase()
-                        .contains(normalizedQuery)) {
-            return "Status";
+        if (result.negotiationId() != null
+                && LexicalMatch.matches(query, String.valueOf(result.negotiationId()))) {
+            return "Negotiation ID";
         }
-        if (result.negotiationAgreementTypeDescription() != null
-                && result.negotiationAgreementTypeDescription().toLowerCase()
-                        .contains(normalizedQuery)) {
-            return "Agreement Type";
+        if (LexicalMatch.matches(query, result.principalInvestigatorName())) {
+            return "Principal Investigator";
         }
-        if (result.negotiatorFullName() != null
-                && result.negotiatorFullName().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.negotiatorFullName())) {
             return "Negotiator";
         }
-        return "Negotiation";
+        if (LexicalMatch.matches(query, result.title())) {
+            return "Associated Award Title";
+        }
+        if (LexicalMatch.matches(query, result.sponsorName())) {
+            return "Sponsor";
+        }
+        if (LexicalMatch.matches(query, result.leadUnitName())) {
+            return "Lead Unit";
+        }
+        if (LexicalMatch.matches(query, result.negotiationAgreementTypeDescription())) {
+            return "Agreement Type";
+        }
+        if (LexicalMatch.matches(query, result.negotiationStatusDescription())) {
+            return "Status";
+        }
+        if (LexicalMatch.matches(query, result.associatedDocumentId())) {
+            return "Associated Document";
+        }
+        return null;
     }
 
     private String negotiationMatchedValue(
             NegotiationSummaryResponse result,
             String matchedField
     ) {
+        if (matchedField == null) {
+            return null;
+        }
         return switch (matchedField) {
             case "Document Number" -> result.documentNumber();
-            case "Status" -> result.negotiationStatusDescription();
-            case "Agreement Type" -> result.negotiationAgreementTypeDescription();
+            case "Negotiation ID" -> String.valueOf(result.negotiationId());
+            case "Principal Investigator" -> result.principalInvestigatorName();
             case "Negotiator" -> result.negotiatorFullName();
-            default -> result.documentNumber();
+            case "Associated Award Title" -> result.title();
+            case "Sponsor" -> result.sponsorName();
+            case "Lead Unit" -> result.leadUnitName();
+            case "Agreement Type" -> result.negotiationAgreementTypeDescription();
+            case "Status" -> result.negotiationStatusDescription();
+            case "Associated Document" -> result.associatedDocumentId();
+            default -> null;
         };
     }
 

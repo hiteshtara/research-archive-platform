@@ -1,6 +1,8 @@
 package edu.bu.archive.adapter.out.persistence;
 
 import edu.bu.archive.application.authorization.SqlFragment;
+import edu.bu.archive.application.search.LexicalMatch;
+import edu.bu.archive.application.search.MatchExplanation;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAssociatedNegotiationResponse;
@@ -742,6 +744,69 @@ public class AwardArchiveRepository {
         return bound;
     }
 
+    /**
+     * Why these Awards matched, for the ones the result DTO cannot explain.
+     *
+     * <p>Called once per search with the Awards whose explanation is unknown,
+     * never once per row. Each Award gets at most one reason, chosen by a
+     * fixed priority so the answer is stable: a person first, because that is
+     * the question people actually ask, then the sponsor acronym, then the
+     * identifier-ish fields.
+     *
+     * <p>The same anchoring rule as the search itself is applied, so an
+     * explanation can never claim a field the search would not have matched.
+     */
+    public List<MatchExplanation> explainAwardMatches(
+            Collection<Long> awardIds,
+            String pattern,
+            boolean anchorWords,
+            String wordRegex
+    ) {
+        if (awardIds == null || awardIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                        SELECT av.award_id AS record_id,
+                               x.field      AS field,
+                               x.value      AS value
+                          FROM archive.award_version av
+                          CROSS JOIN LATERAL (
+                              SELECT 'Team member' AS field,
+                                     ap.full_name
+                                       || COALESCE(' - ' || NULLIF(TRIM(ap.contact_role_code), ''), '')
+                                       AS value,
+                                     1 AS priority
+                                FROM archive.award_person ap
+                               WHERE ap.award_id = av.award_id
+                                 AND ap.full_name IS NOT NULL
+                                 AND ((:anchorWords AND ap.full_name ~* :wordRegex)
+                                      OR (NOT :anchorWords AND ap.full_name ILIKE :pattern))
+                              UNION ALL
+                              SELECT 'Sponsor', sp.acronym, 2
+                                FROM archive.sponsor sp
+                               WHERE sp.sponsor_code = av.sponsor_code
+                                 AND sp.acronym IS NOT NULL
+                                 AND ((:anchorWords AND sp.acronym ~* :wordRegex)
+                                      OR (NOT :anchorWords AND sp.acronym ILIKE :pattern))
+                              UNION ALL
+                              SELECT 'Sponsor code', av.sponsor_code, 3
+                               WHERE av.sponsor_code ILIKE :pattern
+                              UNION ALL
+                              SELECT 'Modification number', av.modification_number, 4
+                               WHERE av.modification_number ILIKE :pattern
+                              ORDER BY priority
+                              LIMIT 1
+                          ) x
+                         WHERE av.award_id IN (:awardIds)
+                        """)
+                .param("awardIds", List.copyOf(awardIds))
+                .param("pattern", pattern)
+                .param("anchorWords", anchorWords)
+                .param("wordRegex", wordRegex)
+                .query(MatchExplanation.class)
+                .list();
+    }
+
     /*
      * Current-Award (family) free-text WHERE, shared verbatim by
      * searchAwards and countSearchAwards.
@@ -751,18 +816,63 @@ public class AwardArchiveRepository {
                   AND (
                         :rawQuery = ''
                         OR UPPER(av.award_number) = UPPER(:rawQuery)
+                        /*
+                         * IDENTIFIER fields: substring, always. QA TC-040's
+                         * fix anchors TEXT to word starts, and must not
+                         * touch these - pasting "105698" to find
+                         * "105698-00001", or a fragment of an account,
+                         * grant or modification number, is matching
+                         * mid-string on purpose.
+                         */
                         OR av.award_number ILIKE :pattern
-                        OR av.title ILIKE :pattern
                         OR av.sponsor_code ILIKE :pattern
-                        OR av.sponsor_name ILIKE :pattern
                         OR av.lead_unit_number ILIKE :pattern
-                        OR av.lead_unit_name ILIKE :pattern
                         OR av.modification_number ILIKE :pattern
-                        OR EXISTS (
-                            SELECT 1 FROM archive.award_person ap2
-                            WHERE ap2.award_id = av.award_id
-                              AND ap2.full_name ILIKE :pattern
-                        )
+                        /*
+                         * TEXT fields, substring branch: used whenever the
+                         * term does not qualify for anchoring - it carries a
+                         * digit, punctuation, or the user's own wildcard.
+                         * :anchorWords is a bound constant, so the planner
+                         * discards whichever branch is false.
+                         */
+                        OR (:anchorWords = FALSE AND (
+                                av.title ILIKE :pattern
+                             OR av.sponsor_name ILIKE :pattern
+                             OR av.lead_unit_name ILIKE :pattern
+                             OR EXISTS (
+                                    SELECT 1 FROM archive.award_person ap2
+                                    WHERE ap2.award_id = av.award_id
+                                      AND ap2.full_name ILIKE :pattern
+                                )
+                             OR EXISTS (
+                                    SELECT 1 FROM archive.sponsor sp2
+                                    WHERE sp2.sponsor_code = av.sponsor_code
+                                      AND sp2.acronym ILIKE :pattern
+                                )
+                        ))
+                        /*
+                         * TEXT fields, anchored branch. The regex binds a
+                         * start-of-word boundary, so "nsf" no longer matches
+                         * inside "TRANSFER" or "TRANSFORMING" - the defect
+                         * TC-040 reported - while "cardio" still finds
+                         * "cardiology", because only the START of the word is
+                         * anchored and not the whole word. See LexicalMatch.
+                         */
+                        OR (:anchorWords = TRUE AND (
+                                av.title ~* :wordRegex
+                             OR av.sponsor_name ~* :wordRegex
+                             OR av.lead_unit_name ~* :wordRegex
+                             OR EXISTS (
+                                    SELECT 1 FROM archive.award_person ap2
+                                    WHERE ap2.award_id = av.award_id
+                                      AND ap2.full_name ~* :wordRegex
+                                )
+                             OR EXISTS (
+                                    SELECT 1 FROM archive.sponsor sp2
+                                    WHERE sp2.sponsor_code = av.sponsor_code
+                                      AND sp2.acronym ~* :wordRegex
+                                )
+                        ))
                         /*
                          * Grant Number (AWARD_EXTENSION.GRANT_NUMBER) is
                          * VERSION-scoped - award_extension is keyed by
@@ -890,6 +1000,12 @@ public class AwardArchiveRepository {
                 """), filters), safeScope)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
+                // QA TC-040: both branches of the text WHERE are bound on every
+                // call, because JdbcClient rejects a statement whose named
+                // parameter was never supplied - and the unused branch still
+                // references its parameter.
+                .param("anchorWords", LexicalMatch.anchorsToWordStart(rawQuery))
+                .param("wordRegex", LexicalMatch.wordStartRegex(rawQuery))
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(AwardSearchResultResponse.class)
@@ -927,6 +1043,12 @@ public class AwardArchiveRepository {
                 """ + AWARD_FAMILY_SEARCH_WHERE + safeScope.sql()), filters), safeScope)
                 .param("rawQuery", rawQuery)
                 .param("pattern", pattern)
+                // QA TC-040: both branches of the text WHERE are bound on every
+                // call, because JdbcClient rejects a statement whose named
+                // parameter was never supplied - and the unused branch still
+                // references its parameter.
+                .param("anchorWords", LexicalMatch.anchorsToWordStart(rawQuery))
+                .param("wordRegex", LexicalMatch.wordStartRegex(rawQuery))
                 .query(Long.class)
                 .single();
 

@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import edu.bu.archive.application.search.LexicalMatch;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationActivityResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationAttachmentResponse;
 import edu.bu.archive.adapter.in.web.dto.negotiation.NegotiationCustomDataResponse;
@@ -63,24 +64,56 @@ public class NegotiationArchiveRepository {
      */
     private static final String SEARCH_WHERE = """
             WHERE (CAST(:query AS TEXT) IS NULL OR (
+                       /*
+                        * IDENTIFIER fields: substring, always. QA TC-040's
+                        * fix anchors TEXT to word starts and must not touch
+                        * these - someone pasting part of a document number
+                        * or an associated document id is matching mid-string
+                        * deliberately.
+                        */
                        CAST(n.negotiation_id AS TEXT)
                            ILIKE '%' || :query || '%'
                     OR n.document_number ILIKE '%' || :query || '%'
-                    OR n.negotiation_status_description
-                           ILIKE '%' || :query || '%'
-                    OR n.negotiation_agreement_type_description
-                           ILIKE '%' || :query || '%'
-                    OR n.negotiation_association_type_description
-                           ILIKE '%' || :query || '%'
                     OR n.associated_document_id ILIKE '%' || :query || '%'
-                    OR n.negotiator_full_name ILIKE '%' || :query || '%'
-                    OR a.title ILIKE '%' || :query || '%'
-                    OR a.principal_investigator_name
-                           ILIKE '%' || :query || '%'
-                    OR a.sponsor_name ILIKE '%' || :query || '%'
                     OR a.sponsor_code ILIKE '%' || :query || '%'
-                    OR a.lead_unit_name ILIKE '%' || :query || '%'
                     OR a.lead_unit_number ILIKE '%' || :query || '%'
+                    /*
+                     * TEXT fields, substring branch - used when the term
+                     * carries a digit, punctuation or the user's own
+                     * wildcard. :anchorWords is a bound constant, so the
+                     * planner discards whichever branch is false.
+                     */
+                    OR (:anchorWords = FALSE AND (
+                            n.negotiation_status_description
+                                ILIKE '%' || :query || '%'
+                         OR n.negotiation_agreement_type_description
+                                ILIKE '%' || :query || '%'
+                         OR n.negotiation_association_type_description
+                                ILIKE '%' || :query || '%'
+                         OR n.negotiator_full_name ILIKE '%' || :query || '%'
+                         OR a.title ILIKE '%' || :query || '%'
+                         OR a.principal_investigator_name
+                                ILIKE '%' || :query || '%'
+                         OR a.sponsor_name ILIKE '%' || :query || '%'
+                         OR a.lead_unit_name ILIKE '%' || :query || '%'
+                    ))
+                    /*
+                     * TEXT fields, anchored branch. This is what stops
+                     * "NSF" matching all 25 "Material TRAnsfer Agreement"
+                     * rows that filled the page in TC-040.
+                     */
+                    OR (:anchorWords = TRUE AND (
+                            n.negotiation_status_description ~* :wordRegex
+                         OR n.negotiation_agreement_type_description
+                                ~* :wordRegex
+                         OR n.negotiation_association_type_description
+                                ~* :wordRegex
+                         OR n.negotiator_full_name ~* :wordRegex
+                         OR a.title ~* :wordRegex
+                         OR a.principal_investigator_name ~* :wordRegex
+                         OR a.sponsor_name ~* :wordRegex
+                         OR a.lead_unit_name ~* :wordRegex
+                    ))
               ))
               AND (CAST(:status AS TEXT) IS NULL
                    OR n.negotiation_status_description = :status)
@@ -233,6 +266,16 @@ public class NegotiationArchiveRepository {
     ) {
         return statement
                 .param("query", filters.query())
+                /*
+                 * QA TC-040. Bound on EVERY call, including the browse-all
+                 * path where query is null: JdbcClient rejects a statement
+                 * whose named parameter was never supplied, and the branch
+                 * that is false still references its parameter. A null query
+                 * does not qualify for anchoring, so this is false and the
+                 * regex is deliberately unmatchable - see LexicalMatch.
+                 */
+                .param("anchorWords", LexicalMatch.anchorsToWordStart(filters.query()))
+                .param("wordRegex", LexicalMatch.wordStartRegex(filters.query()))
                 .param("status", filters.status())
                 .param("agreementType", filters.agreementType())
                 .param("associationType", filters.associationType())

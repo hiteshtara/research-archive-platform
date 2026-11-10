@@ -463,7 +463,11 @@ test("the per-module lines name the real total for each capped type", () => {
     25,
   );
 
-  assert.deepEqual(counts.perModule, ["NEGOTIATION: showing 25 of 234"]);
+  assert.deepEqual(
+    counts.perModule.map((m) => m.text),
+    ["Negotiations: showing 25 of 234"],
+  );
+  assert.equal(counts.perModule[0].href, "/negotiations");
 });
 
 test("an uncountable module is reported as a lower bound, never as a total", () => {
@@ -485,7 +489,9 @@ test("an uncountable module is reported as a lower bound, never as a total", () 
     !counts.summary.includes("of 234 matching records"),
     "an unknown total must not be presented as the whole figure",
   );
-  assert.ok(counts.perModule.includes("PROPOSAL: showing 25, more exist"));
+  assert.ok(
+    counts.perModule.some((m) => m.text === "Proposals: showing 25, more exist"),
+  );
 });
 
 test("a capped module with an unknown total still says more exist", () => {
@@ -495,7 +501,11 @@ test("a capped module with an unknown total still says more exist", () => {
   );
 
   assert.equal(counts.truncated, true);
-  assert.deepEqual(counts.perModule, ["PROPOSAL: showing 25, more exist"]);
+  assert.deepEqual(
+    counts.perModule.map((m) => m.text),
+    ["Proposals: showing 25, more exist"],
+  );
+  assert.equal(counts.perModule[0].href, "/proposals");
 });
 
 test("IRB's own total is dropped, like its rows", () => {
@@ -538,4 +548,88 @@ test("a non-IRB module's total is passed through untouched", () => {
   assert.deepEqual(filtered.moduleTotals, [
     { module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true },
   ]);
+});
+
+/*
+ * QA TC-040: a Negotiation card showed only its document number, while the
+ * record it links to is addressed by Negotiation ID.
+ */
+
+test("a Negotiation card labels both its ID and its document number", () => {
+  const card = describeResultCard({
+    module: "NEGOTIATION",
+    recordId: 6447,
+    identifier: "760067",
+    title: "Material Transfer Agreement",
+    subtitle: "WILLIAM P SEGARRA",
+  });
+
+  assert.match(card.identifierLine, /Negotiation 6447/);
+  assert.match(card.identifierLine, /Document 760067/);
+  assert.match(card.identifierLine, /WILLIAM P SEGARRA/);
+});
+
+test("a Negotiation with no document number still names its ID", () => {
+  const card = describeResultCard({
+    module: "NEGOTIATION",
+    recordId: 6447,
+    identifier: null,
+    title: "Material Transfer Agreement",
+  });
+
+  assert.match(card.identifierLine, /Negotiation 6447/);
+  assert.ok(!card.identifierLine.includes("Document"));
+});
+
+test("other modules keep their existing identifier line", () => {
+  const card = describeResultCard({
+    module: "AWARD",
+    recordId: 1928503,
+    identifier: "100527-00001",
+    title: "NATIONAL SCIENCE FOUNDATION GRADUATE RESEARCH FELLOWSHIP PROGRAM",
+    subtitle: "National Science Foundation",
+  });
+
+  assert.equal(
+    card.identifierLine,
+    "100527-00001 • National Science Foundation",
+  );
+  assert.ok(
+    !card.identifierLine.includes("Award 1928503"),
+    "only Negotiation had the ID/document mismatch",
+  );
+});
+
+test("every capped module offers the page that can show all of it", () => {
+  const counts = describeResultCounts(
+    [
+      { module: "AWARD", returned: 25, totalMatches: 100, capped: true },
+      { module: "NEGOTIATION", returned: 25, totalMatches: 234, capped: true },
+      { module: "SUBAWARD", returned: 25, totalMatches: 50, capped: true },
+      { module: "PROPOSAL", returned: 25, totalMatches: null, capped: true },
+    ],
+    100,
+  );
+
+  assert.deepEqual(
+    counts.perModule.map((m) => m.href),
+    ["/awards/search", "/negotiations", "/subawards", "/proposals"],
+  );
+  for (const entry of counts.perModule) {
+    assert.ok(entry.href, `${entry.module} must offer somewhere to go`);
+  }
+});
+
+test("an unknown module is named rather than dropped, and offers no route", () => {
+  /*
+   * IRB is filtered out before this, but a module added later must not
+   * vanish from the counts just because no route is mapped for it yet.
+   */
+  const counts = describeResultCounts(
+    [{ module: "SOMETHING_NEW", returned: 25, totalMatches: 9, capped: true }],
+    25,
+  );
+
+  assert.equal(counts.perModule[0].label, "SOMETHING_NEW");
+  assert.equal(counts.perModule[0].href, null);
 });
