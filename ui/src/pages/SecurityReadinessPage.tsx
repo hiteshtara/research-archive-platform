@@ -29,22 +29,53 @@ import snapshot from "../features/qa/qaSnapshot.json";
 import { SecurityReadinessSection } from "../features/qa/SecurityReadinessSection";
 import readiness from "../features/qa/securityReadiness.json";
 import securityData from "../features/qa/securityRequirements.json";
-import type { SecurityModule } from "../features/qa/qaStatusPresentation.d.mts";
 import type { SecurityRequirement } from "../features/qa/qaStatusPresentation.mjs";
 import {
-  enforcementIsOffEverywhere,
   requirementsWithConflicts,
-  securityProgress,
   securityStages,
   securitySummary,
 } from "../features/qa/qaStatusPresentation.mjs";
 import { acceptanceSummary, classifyStatements } from "../features/qa/readinessHistory.mjs";
+import {
+  STATUS_DIMENSIONS,
+  currentStatusMatrix,
+  currentStatusTotals,
+  supersededDeploymentRecords,
+} from "../features/qa/currentSecurityStatus.mjs";
+import type {
+  CurrentStatus,
+  SupersededRecord,
+} from "../features/qa/currentSecurityStatus.d.mts";
 import type { ReadinessStatement } from "../features/qa/readinessHistory.d.mts";
 
 const requirements = securityData.requirements as unknown as SecurityRequirement[];
-const modules = securityData.moduleProgress as unknown as SecurityModule[];
 const approvedDecisions = (securityData.decisionsApproved ?? []) as string[];
-const enforcementOff = enforcementIsOffEverywhere(requirements);
+const deployedRevisionLabel = readiness.deployment.apiTaskDefinition;
+const requirementNames: Record<string, string> = Object.fromEntries(
+  requirements.map((requirement) => [requirement.id, requirement.requirement]),
+);
+
+const TONE_COLOURS: Record<string, "success" | "warning" | "default" | "info"> = {
+  complete: "success",
+  partial: "warning",
+  outstanding: "default",
+  notApplicable: "default",
+};
+
+/** Yes / No / n/a, rendered the same way in every column. */
+function StageMark({ value }: { value: string }) {
+  if (value === "n/a") {
+    return <Typography variant="caption" color="text.secondary">n/a</Typography>;
+  }
+  return (
+    <Chip
+      size="small"
+      label={value === "yes" ? "Yes" : value === "partial" ? "Partly" : "No"}
+      color={value === "yes" ? "success" : value === "partial" ? "warning" : "default"}
+      variant={value === "yes" ? "filled" : "outlined"}
+    />
+  );
+}
 
 type VerifiedCase = {
   id: string;
@@ -82,13 +113,21 @@ const verifiedCases = (snapshot.cases as unknown as VerifiedCase[]).filter(
  */
 export function SecurityReadinessPage() {
   const security = securitySummary(requirements);
-  const progress = securityProgress(requirements);
   const conflicts = requirementsWithConflicts(requirements);
   const statements = useMemo(
     () => classifyStatements(securityData, readiness.deployment),
     [],
   );
   const acceptance = useMemo(() => acceptanceSummary(requirements), []);
+  const statusMatrix = useMemo(
+    () => currentStatusMatrix(requirements, readiness.capabilities, readiness.deployment),
+    [],
+  ) as CurrentStatus[];
+  const statusTotals = useMemo(() => currentStatusTotals(statusMatrix), [statusMatrix]);
+  const superseded = useMemo(
+    () => supersededDeploymentRecords(securityData, readiness.deployment),
+    [],
+  ) as SupersededRecord[];
 
   return (
     <Stack spacing={3} sx={{ maxWidth: 1100, mx: "auto" }}>
@@ -155,81 +194,84 @@ export function SecurityReadinessPage() {
       */}
 
       {/*
-        Security implementation progress. Separate from the case totals and
-        from the requirement list: this is "which parts of the archive have
-        authorization at all", which is a different question from "is each
-        written requirement satisfied".
+        Current status, DERIVED from the deployment snapshot.
+
+        This table used to read moduleProgress[].state out of
+        securityRequirements.json, which was written on 2026-10-20 when
+        revision 81 was running. It therefore showed ten "merged-not-deployed"
+        chips and evidence saying "NOT in the running API (revision 81)" while
+        the block above correctly reported revision 87 - the same page
+        contradicting itself.
+
+        Fixing the labels by hand would fix today and guarantee a repeat. The
+        deployed, enabled and tested dimensions now come from the readiness
+        snapshot, which is verified every release; only acceptance still comes
+        from the acceptance plan, because only the business can set it. The
+        2026-10-20 record is preserved below under Historical record.
       */}
-      <Box>
-        <Typography component="h3" variant="h6">
-          Security implementation progress
+      <Box component="section" aria-labelledby="current-status">
+        <Typography component="h3" variant="h6" id="current-status">
+          Where each requirement stands today
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: "80ch" }}>
-          {progress.decided} of {progress.total} requirements have a settled
-          business decision. {progress.implemented} are implemented in code
-          across their whole stated scope &mdash; the rest cover Award and
-          Proposal only, of five modules, which is why they read
-          &ldquo;partial&rdquo; rather than done. {progress.merged} are merged
-          into main, and the running API now carries them &mdash; see the
-          deployment block above for which revision. And{" "}
-          <strong>{progress.verified} have been verified against their acceptance
-          criteria</strong>. Those are four different facts and are reported
-          separately on purpose.
+          Five separate facts per requirement, never collapsed into one.{" "}
+          <strong>{statusTotals.deployed} of {statusTotals.total}</strong> are in the
+          running API ({deployedRevisionLabel}, verified {readiness.deployment.verifiedAt});{" "}
+          <strong>{statusTotals.enabled}</strong> are switched on;{" "}
+          <strong>{statusTotals.tested} of {statusTotals.total}</strong> are covered by
+          passing automated tests; and{" "}
+          <strong>{statusTotals.accepted} have been accepted by the business</strong>.
+          Deployed is not enabled, and enabled would not be accepted.
         </Typography>
 
         <TableContainer component={Paper} variant="outlined" sx={{ mt: 2 }}>
-          <Table size="small" aria-label="Security implementation progress by area">
+          <Table size="small" aria-label="Current status of each security requirement">
             <TableHead>
               <TableRow>
-                <TableCell>Area</TableCell>
-                <TableCell>State</TableCell>
-                <TableCell>Evidence</TableCell>
+                <TableCell>Requirement</TableCell>
+                <TableCell>Status today</TableCell>
+                {STATUS_DIMENSIONS.map((dimension) => (
+                  <TableCell key={dimension.key}>{dimension.label}</TableCell>
+                ))}
               </TableRow>
             </TableHead>
             <TableBody>
-              {modules.map((module) => (
-                <TableRow key={module.name}>
+              {statusMatrix.map((status: CurrentStatus) => (
+                <TableRow key={status.id}>
                   <TableCell>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {module.name}
+                      {status.id}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {module.detail}
+                      {requirementNames[status.id]}
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Chip
                       size="small"
-                      label={module.state}
-                      color={
-                        module.state === "working"
-                          ? "success"
-                          : module.state === "implemented"
-                            ? "info"
-                            : module.state === "merged-not-deployed"
-                              ? "warning"
-                              : module.state === "off"
-                                ? "warning"
-                                : "default"
-                      }
-                      variant={module.state === "off" ? "filled" : "outlined"}
+                      label={status.headline.label}
+                      color={TONE_COLOURS[status.headline.tone] ?? "default"}
+                      variant={status.headline.tone === "complete" ? "filled" : "outlined"}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="caption" color="text.secondary">
-                      {module.evidence}
-                    </Typography>
-                  </TableCell>
+                  <TableCell><StageMark value={status.codeComplete} /></TableCell>
+                  <TableCell><StageMark value={status.deployed} /></TableCell>
+                  <TableCell><StageMark value={status.enabled} /></TableCell>
+                  <TableCell><StageMark value={status.tested} /></TableCell>
+                  <TableCell><StageMark value={status.accepted} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
-        {enforcementOff && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-            No requirement on this page reports enforcement as enabled.
-          </Typography>
-        )}
+
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Enabled is <strong>No</strong> everywhere on purpose: record-level
+          enforcement is switched off, which is a configuration decision and not
+          a gap in the deployed code. Accepted is <strong>No</strong> everywhere
+          because acceptance means checking a requirement against its criteria
+          with enforcement on, and that has not happened for any of them.
+        </Typography>
       </Box>
 
       {approvedDecisions.length > 0 && (
@@ -438,6 +480,30 @@ export function SecurityReadinessPage() {
             release. Kept rather than deleted: it is the record of what was true,
             and the acceptance verdicts above were reached against it.
           </Typography>
+          {superseded.length > 0 ? (
+            <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+              <Typography component="h3" variant="subtitle2" gutterBottom>
+                Implementation states as at {securityData.sourceDated}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                {superseded.length} records written while revision 81 was running.
+                They said &ldquo;merged, not deployed&rdquo; and that was true at
+                the time; revision 87 carries all of it now. Kept verbatim -
+                the current table above is derived from the deployment snapshot
+                instead, so these can never be read as today&rsquo;s status again.
+              </Typography>
+              <Stack component="ul" sx={{ pl: 2.5, m: 0 }} spacing={0.75}>
+                {superseded.map((record) => (
+                  <Typography component="li" variant="caption" color="text.secondary" key={`${record.kind}-${record.name}`}>
+                    <strong>{record.name}</strong> — {record.state}
+                    {record.namedRevisions.length > 0
+                      ? ` (named revision ${record.namedRevisions.join(", ")})`
+                      : ""}
+                  </Typography>
+                ))}
+              </Stack>
+            </Paper>
+          ) : null}
           {statements.historical.map((statement: ReadinessStatement) => (
             <Paper variant="outlined" key={statement.key} sx={{ p: 2, mt: 2 }}>
               <Stack direction="row" sx={{ gap: 1, flexWrap: "wrap", alignItems: "center", mb: 1 }}>
