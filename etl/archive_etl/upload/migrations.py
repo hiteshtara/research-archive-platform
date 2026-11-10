@@ -98,6 +98,24 @@ INTENTIONALLY_SUPERSEDED_MIGRATION_VERSIONS = {73}
 RESERVED_MIGRATION_VERSIONS = {81}
 
 
+def stale_migration_declarations(
+    migrations_directory: str | Path,
+) -> list[int]:
+    """Declared gaps whose migration has since ARRIVED.
+
+    A declaration is a statement that a version is absent for a known reason.
+    Once the file exists, the statement is false, and a false declaration is
+    worse than none: it would silence a genuine future gap at that number.
+
+    This is aimed squarely at 81. V081 is RESERVED by an unmerged branch, so
+    the day that branch merges the file appears, the reservation becomes
+    stale, and nothing else would notice - the chain check only looks for
+    absences, and an arrived migration is not an absence.
+    """
+    present = {version for version, _, _ in discover_migrations(migrations_directory)}
+    return sorted(declared_migration_gaps() & present)
+
+
 def declared_migration_gaps() -> set[int]:
     """Every version number whose absence is accounted for.
 
