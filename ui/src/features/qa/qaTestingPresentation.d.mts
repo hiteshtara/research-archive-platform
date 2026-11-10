@@ -1,3 +1,5 @@
+import type { QaOpenFinding } from "./currentQaStatus.d.mts";
+
 export interface TesterCase {
   id: string;
   category: string;
@@ -9,6 +11,16 @@ export interface TesterCase {
   note?: string;
   scope?: string;
   environment?: string;
+  /*
+   * Present once the case has been through currentQaCases. `status` is then
+   * the CURRENT assessment and `recordedStatus` is what the frozen snapshot
+   * says, which is how a reopened case can show both without the snapshot
+   * being edited.
+   */
+  recordedStatus?: string;
+  currentStatus?: string;
+  reopened?: boolean;
+  finding?: QaOpenFinding | null;
 }
 
 export interface TesterStatus {
