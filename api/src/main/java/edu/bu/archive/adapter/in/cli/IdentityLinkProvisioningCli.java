@@ -46,6 +46,21 @@ import edu.bu.archive.application.authorization.admin.provisioning.IdentityLinkR
  * [--confirm]                                 without it, this is a dry run
  * </pre>
  *
+ * <p>To withdraw a link instead, pass its immutable id and nothing
+ * link-shaped:
+ *
+ * <pre>
+ * --unlink-link-id=&lt;identity_link_id&gt;
+ * --actor=&lt;the acting administrator's ARP&gt;
+ * --operator=... --reason=... --approval-reference=...
+ * [--confirm]
+ * </pre>
+ *
+ * <p>Unlinking is a status change, never a delete: the row keeps its history
+ * and an IDENTITY_UNLINKED audit row is written in the same transaction. It
+ * does NOT revoke the person's grants - those hang off the archive identity
+ * and are withdrawn separately, through the grant utility.
+ *
  * <p>This is the supported way to establish an identity while the
  * administrative API is unreachable, which it is whenever enforcement is off -
  * the same relationship grant provisioning has to the grant endpoints.
@@ -91,7 +106,8 @@ public class IdentityLinkProvisioningCli implements ApplicationRunner {
                 options.get("reason"),
                 options.get("approval-reference"),
                 args.containsOption("dry-run"),
-                args.containsOption("confirm"));
+                args.containsOption("confirm"),
+                options.get("unlink-link-id"));
 
         IdentityLinkOutcome outcome = new IdentityLinkCommand(
                 options.getOrDefault("environment", ""),

@@ -79,6 +79,123 @@ public final class IdentityLinkCommand {
     }
 
     public IdentityLinkOutcome run(IdentityLinkRequest request) {
+        return request.isUnlink() ? unlink(request) : create(request);
+    }
+
+    /**
+     * Withdraw a link by its immutable id - the rollback for step 4 of the
+     * test-enablement runbook.
+     *
+     * <p>Delegates to {@link ArchiveAdminService#unlinkIdentity}, the method
+     * the administrative API uses, so there is ONE unlink implementation: it
+     * checks the administrator, flips the link's status and writes the
+     * IDENTITY_UNLINKED audit row in a single transaction. Nothing is
+     * deleted - the link row survives as history, which is what makes a
+     * later re-link a re-link rather than a first link.
+     *
+     * <p>The person's grants are NOT touched. They keep every
+     * {@code access_grant} row they held and simply stop resolving to the
+     * archive identity those grants hang off. That is deliberate: unlinking
+     * answers "this Cognito identity is not this person", and revoking
+     * answers "this person should not have this access". Conflating them
+     * would mean one mistake could not be corrected without destroying the
+     * evidence of the other.
+     */
+    private IdentityLinkOutcome unlink(IdentityLinkRequest request) {
+        List<String> checks = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
+
+        OperatorChecks.environment(
+                runtime,
+                OperatorChecks.trim(request.awsAccountId()),
+                OperatorChecks.lower(request.environment()),
+                expectedEnvironment,
+                request.confirmed() && !request.dryRun(),
+                checks,
+                problems);
+        OperatorChecks.provenance(
+                request.operator(), request.reason(), request.approvalReference(),
+                checks, problems);
+
+        InstitutionalIdentifier actor = OperatorChecks.identifier(
+                request.actorIdentifier(), "acting administrator", checks, problems);
+
+        rejectCreateOnlyInputs(request, problems);
+
+        Long linkId = null;
+        try {
+            linkId = Long.valueOf(request.unlinkLinkId().trim());
+        } catch (NumberFormatException e) {
+            problems.add("--unlink-link-id must be the numeric identity_link_id, not an "
+                    + "archive identifier or a Cognito subject");
+        }
+
+        if (actor != null) {
+            if (adminRoles.findActive(actor).isEmpty()) {
+                problems.add("the acting administrator " + OperatorChecks.mask(actor.value())
+                        + " holds no ACTIVE ARCHIVE_ADMIN membership. "
+                        + "Unlinking must be done by a real administrator.");
+            } else {
+                checks.add("OK     acting administrator holds an ACTIVE membership");
+            }
+        }
+
+        checks.add("NOTE   unlinking does NOT revoke this person's grants. They keep every "
+                + "grant and stop resolving to the identity those grants hang off. Revoke "
+                + "the grants separately if that is what is wanted.");
+
+        if (!problems.isEmpty()) {
+            return new IdentityLinkOutcome(IdentityLinkOutcome.Result.REFUSED, checks, problems,
+                    "Refusing to unlink: " + problems.size()
+                            + " problem(s). Nothing was written.", null);
+        }
+        if (request.dryRun() || !request.confirmed()) {
+            return new IdentityLinkOutcome(IdentityLinkOutcome.Result.DRY_RUN_OK, checks, problems,
+                    request.dryRun()
+                            ? "Dry run: every check passed. Nothing was written."
+                            : "Not confirmed: every check passed, but --confirm was not given. "
+                                    + "Nothing was written.",
+                    linkId);
+        }
+
+        try {
+            admin.unlinkIdentity(actor, linkId, "operator=" + request.operator().trim()
+                    + "; approval=" + request.approvalReference().trim()
+                    + "; " + request.reason().trim());
+        } catch (RuntimeException e) {
+            /*
+             * Reported rather than rethrown, for the same reason the create
+             * path does it: an operator should get a sentence. The common
+             * cause is a link id that does not exist or is already revoked,
+             * and a second unlink must not leave a second IDENTITY_UNLINKED
+             * row suggesting it happened twice.
+             */
+            problems.add("the link could not be withdrawn: " + e.getMessage()
+                    + " Nothing was written. Check the id against "
+                    + "authz.identity_link; an already-revoked link cannot be "
+                    + "withdrawn again.");
+            return new IdentityLinkOutcome(IdentityLinkOutcome.Result.REFUSED, checks, problems,
+                    "Refusing to unlink: the link was not withdrawn. Nothing was written.", null);
+        }
+
+        return new IdentityLinkOutcome(IdentityLinkOutcome.Result.APPLIED, checks, problems,
+                "Unlinked. Link " + linkId + " is REVOKED and the person no longer resolves "
+                        + "to any archive identity. Their grants are unchanged.",
+                linkId);
+    }
+
+    /** An unlink carries no link-shaped input at all. */
+    private static void rejectCreateOnlyInputs(IdentityLinkRequest r, List<String> problems) {
+        if (OperatorChecks.trim(r.cognitoSubject()) != null
+                || OperatorChecks.trim(r.subjectIdentifier()) != null
+                || OperatorChecks.trim(r.kualiPersonId()) != null) {
+            problems.add("--unlink-link-id withdraws an existing link by id. Remove "
+                    + "--cognito-subject, --subject-identifier and --kuali-person-id so it is "
+                    + "unambiguous which link is being withdrawn.");
+        }
+    }
+
+    private IdentityLinkOutcome create(IdentityLinkRequest request) {
         List<String> checks = new ArrayList<>();
         List<String> problems = new ArrayList<>();
 

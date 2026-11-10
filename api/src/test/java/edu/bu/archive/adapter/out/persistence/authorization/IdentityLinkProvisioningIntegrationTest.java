@@ -36,6 +36,8 @@ import edu.bu.archive.application.authorization.KualiPersonId;
 import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
+import edu.bu.archive.application.authorization.admin.GrantSpecification;
+import edu.bu.archive.application.authorization.GrantType;
 import edu.bu.archive.application.authorization.admin.provisioning.IdentityLinkCommand;
 import edu.bu.archive.application.authorization.admin.provisioning.IdentityLinkOutcome;
 import edu.bu.archive.application.authorization.admin.provisioning.IdentityLinkRequest;
@@ -380,6 +382,155 @@ class IdentityLinkProvisioningIntegrationTest {
         }
     }
 
+    // ── withdrawing a link ───────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Unlinking by immutable id")
+    class Unlinking {
+
+        @Test
+        void withdrawsTheLinkAndWritesItsAuditRow() {
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+
+            IdentityLinkOutcome outcome = command().run(
+                    unlinkReq(created.linkId()).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(IdentityLinkOutcome.Result.APPLIED);
+            assertThat(activeLinksFor(SUBJECT)).isZero();
+            assertThat(auditActions()).containsExactly("IDENTITY_LINKED", "IDENTITY_UNLINKED");
+        }
+
+        @Test
+        void isAStatusChangeAndNeverADelete() {
+            /*
+             * The row has to survive: it is what makes a later re-link a
+             * RE-link, which is the deliberate, separately-approved act that
+             * transfers grants to a new Cognito subject.
+             */
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+            command().run(unlinkReq(created.linkId()).confirmed(true).build());
+
+            assertThat(jdbc.sql("""
+                            SELECT status FROM authz.identity_link
+                            WHERE identity_link_id = :id
+                            """).param("id", created.linkId()).query(String.class).single())
+                    .isEqualTo("REVOKED");
+        }
+
+        @Test
+        void leavesTheGrantsAlone() {
+            /*
+             * Unlinking answers "this Cognito identity is not this person".
+             * Revoking answers "this person should not have this access".
+             * Conflating them would mean correcting the first mistake
+             * destroys the evidence of the second.
+             */
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+            service.grantAccess(new InstitutionalIdentifier(ADMIN),
+                    new InstitutionalIdentifier(SUBJECT),
+                    new GrantSpecification(GrantType.CENTRAL, null, false, null, null, null,
+                            "fixture"));
+
+            command().run(unlinkReq(created.linkId()).confirmed(true).build());
+
+            assertThat(jdbc.sql("""
+                            SELECT count(*) FROM authz.access_grant
+                            WHERE institutional_identifier = :s AND revoked_at IS NULL
+                            """).param("s", SUBJECT).query(Integer.class).single())
+                    .as("the grant must survive an unlink")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void saysSoRatherThanLeavingItToBeDiscovered() {
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+
+            IdentityLinkOutcome outcome = command().run(
+                    unlinkReq(created.linkId()).confirmed(true).build());
+
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("unlinking does NOT revoke this person's grants");
+        }
+
+        @Test
+        void theDefaultIsStillADryRun() {
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+
+            IdentityLinkOutcome outcome = command().run(unlinkReq(created.linkId()).build());
+
+            assertThat(outcome.result()).isEqualTo(IdentityLinkOutcome.Result.DRY_RUN_OK);
+            assertThat(activeLinksFor(SUBJECT))
+                    .as("a dry run must not withdraw it")
+                    .isEqualTo(1);
+            assertThat(auditActions()).containsExactly("IDENTITY_LINKED");
+        }
+
+        @Test
+        void linkShapedInputIsRefusedSoTheTargetIsUnambiguous() {
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+
+            IdentityLinkOutcome outcome = command().run(
+                    unlinkReq(created.linkId())
+                            .subjectIdentifier(SUBJECT)
+                            .confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(IdentityLinkOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("withdraws an existing link by id");
+            assertThat(activeLinksFor(SUBJECT)).isEqualTo(1);
+        }
+
+        @Test
+        void anIdentifierInsteadOfAnIdIsRefused() {
+            IdentityLinkOutcome outcome = command().run(
+                    unlinkReq(null).unlinkLinkId(SUBJECT).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(IdentityLinkOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("must be the numeric identity_link_id");
+        }
+
+        @Test
+        void aNonAdministratorCannotWithdrawALink() {
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+
+            IdentityLinkOutcome outcome = command().run(
+                    unlinkReq(created.linkId())
+                            .actor("ARP-NTADMN09-00000009")
+                            .confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(IdentityLinkOutcome.Result.REFUSED);
+            assertThat(activeLinksFor(SUBJECT)).isEqualTo(1);
+            assertThat(auditActions()).containsExactly("IDENTITY_LINKED");
+        }
+
+        @Test
+        void anUnknownLinkIdIsARefusalNotAStackTrace() {
+            IdentityLinkOutcome outcome = command().run(
+                    unlinkReq(999_999L).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(IdentityLinkOutcome.Result.REFUSED);
+            assertThat(outcome.message()).doesNotContain("Exception");
+            assertThat(auditActions()).isEmpty();
+        }
+
+        @Test
+        void aSecondWithdrawalIsRefusedRatherThanAudited() {
+            /*
+             * A repeated unlink must not leave a second IDENTITY_UNLINKED row
+             * implying it happened twice.
+             */
+            IdentityLinkOutcome created = command().run(req().confirmed(true).build());
+            command().run(unlinkReq(created.linkId()).confirmed(true).build());
+
+            IdentityLinkOutcome again = command().run(
+                    unlinkReq(created.linkId()).confirmed(true).build());
+
+            assertThat(again.result()).isEqualTo(IdentityLinkOutcome.Result.REFUSED);
+            assertThat(auditActions()).containsExactly("IDENTITY_LINKED", "IDENTITY_UNLINKED");
+        }
+    }
+
     // ── the runtime is checked, not taken on trust ───────────────────
 
     @Nested
@@ -472,6 +623,16 @@ class IdentityLinkProvisioningIntegrationTest {
         return new Req();
     }
 
+    /** An unlink request carries the id and no link-shaped input. */
+    private static Req unlinkReq(Long linkId) {
+        Req r = new Req();
+        r.unlinkLinkId = linkId == null ? null : String.valueOf(linkId);
+        r.cognitoSubject = null;
+        r.subjectIdentifier = null;
+        r.kualiPersonId = null;
+        return r;
+    }
+
     private static final class Req {
         private String account = ACCOUNT;
         private String environment = ENVIRONMENT;
@@ -488,8 +649,10 @@ class IdentityLinkProvisioningIntegrationTest {
         private String approval = "APPROVAL-2026-11-10";
         private boolean dryRun;
         private boolean confirmed;
+        private String unlinkLinkId;
 
         Req environment(String v) { this.environment = v; return this; }
+        Req unlinkLinkId(String v) { this.unlinkLinkId = v; return this; }
         Req issuer(String v) { this.issuer = v; return this; }
         Req cognitoSubject(String v) { this.cognitoSubject = v; return this; }
         Req subjectIdentifier(String v) { this.subjectIdentifier = v; return this; }
@@ -502,7 +665,7 @@ class IdentityLinkProvisioningIntegrationTest {
         IdentityLinkRequest build() {
             return new IdentityLinkRequest(account, environment, pool, region, issuer,
                     cognitoSubject, subjectIdentifier, actor, kualiPersonId, loginName,
-                    operator, reason, approval, dryRun, confirmed);
+                    operator, reason, approval, dryRun, confirmed, unlinkLinkId);
         }
     }
 }

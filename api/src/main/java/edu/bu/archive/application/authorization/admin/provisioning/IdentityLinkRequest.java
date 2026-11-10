@@ -27,5 +27,24 @@ public record IdentityLinkRequest(
         String reason,
         String approvalReference,
         boolean dryRun,
-        boolean confirmed) {
+        boolean confirmed,
+        String unlinkLinkId) {
+
+    /** A request that withdraws a link rather than creating one. */
+    public boolean isUnlink() {
+        return unlinkLinkId != null && !unlinkLinkId.isBlank();
+    }
+
+    /** Back-compatible creation form, before unlink existed. */
+    public IdentityLinkRequest(
+            String awsAccountId, String environment, String cognitoUserPoolId,
+            String cognitoRegion, String cognitoIssuer, String cognitoSubject,
+            String subjectIdentifier, String actorIdentifier, String kualiPersonId,
+            String loginName, String operator, String reason, String approvalReference,
+            boolean dryRun, boolean confirmed) {
+
+        this(awsAccountId, environment, cognitoUserPoolId, cognitoRegion, cognitoIssuer,
+                cognitoSubject, subjectIdentifier, actorIdentifier, kualiPersonId, loginName,
+                operator, reason, approvalReference, dryRun, confirmed, null);
+    }
 }
