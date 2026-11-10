@@ -217,6 +217,55 @@ public class AuthorizationConfiguration {
                 Clock.systemUTC());
     }
 
+    /**
+     * Refuse to start when enforcement is on and its configuration is not.
+     *
+     * <h2>Why startup and not request time</h2>
+     *
+     * <p>Without this, {@code app.authorization.enforcement-enabled=true} on
+     * its own starts cleanly and then denies EVERY record to EVERY user -
+     * including a central administrator - because
+     * {@link RecordAuthorizationGate} checks the policy before it consults any
+     * grant, and none of the policy strategies has a default. The gate even
+     * computes {@code Status.ENFORCED_POLICY_NOT_CONFIGURED} for exactly this
+     * case, but nothing consumes it: no endpoint, no health indicator, no log
+     * line. An operator who flipped the flag would see a dark archive and no
+     * explanation, and the natural reading of a dark archive is "the deploy
+     * broke the database".
+     *
+     * <p>Failing at startup turns that into a message naming the properties,
+     * before the service ever reports healthy. The deployment stops; the
+     * previous task definition keeps serving.
+     *
+     * <p>Enforcement off is untouched - the method returns immediately, so
+     * every environment that exists today starts exactly as before.
+     */
+    @Bean
+    AuthorizationEnforcementSettings authorizationEnforcementSettings(AuthorizationProperties properties) {
+        requireEnforcementSettings(properties);
+        return new AuthorizationEnforcementSettings(properties.isEnforcementEnabled());
+    }
+
+    /** Marker that the enforcement configuration was validated at startup. */
+    public record AuthorizationEnforcementSettings(boolean enforcementEnabled) {
+    }
+
+    public static void requireEnforcementSettings(AuthorizationProperties properties) {
+        List<String> problems = properties.enforcementConfigurationProblems();
+        if (problems.isEmpty()) {
+            return;
+        }
+        throw new IllegalStateException(
+                "Record-level authorization is enabled (app.authorization.enforcement-enabled=true) "
+                        + "but its configuration is incomplete, and starting this way would deny every "
+                        + "record to every user, administrators included. "
+                        + problems.size() + " problem" + (problems.size() == 1 ? "" : "s") + ":"
+                        + problems.stream().map(problem -> System.lineSeparator() + "  - " + problem)
+                                .collect(java.util.stream.Collectors.joining())
+                        + System.lineSeparator()
+                        + "Set them, or set app.authorization.enforcement-enabled=false.");
+    }
+
     public static void requireEnrollmentSettings(AuthorizationProperties.Enrollment settings) {
         List<String> missing = settings.missingSettings();
         if (!missing.isEmpty()) {
