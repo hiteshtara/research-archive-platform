@@ -33,11 +33,13 @@ The fully integrated tree was then tested:
 | API (`mvn test`, includes the Testcontainers database suites) | **2001 pass**, 0 failures |
 | UI (`npm run test`) | **841 pass**, 0 failures |
 | UI lint (`oxlint`) | clean, no warnings |
-| ETL (`uv run pytest`) | **1345 pass**, 0 failures |
+| ETL (`uv run pytest`) | **1359 pass**, 0 failures |
 
-Re-run on 2026-11-10 after the measurement, the current-assessment layer and
-the PR #125 reconciliation changed branch content. The earlier figures (API
-1990 / UI 826 / ETL 1334) described the tree before those.
+Re-run on 2026-11-10 after each change to branch content: the measurement,
+the current-assessment layer, the #125 reconciliation and the expanded TC-041
+set. Earlier figures in this file's history (API 1990 / UI 826 / ETL 1334,
+then ETL 1345) described earlier trees — the only number that has ever moved
+downward is none of them.
 
 ### Why this order
 
@@ -142,23 +144,44 @@ are separate decisions:
 | 1 | ~~Is `archive.sponsor` populated?~~ | **answered** — 7,246 rows, acronym `NSF` present, award reachable |
 | 2 | ~~Run the TC-041 measurement~~ | **done** — 15 embedding calls, read-only; results in `TC-041_MEASURED_RESULTS.md` |
 | 3 | ~~TC-041's status contradicting the investigation~~ | **resolved** — current assessment is now derived; the snapshot is untouched |
-| 4 | Build the corpus-vocabulary relevance gate the measurement supports | closing TC-041. Changes what the API returns, so it is its own change |
-| 5 | The six DEV activation approvals | any live authorization testing |
+| 4 | Run the **expanded** TC-041 measurement (33 queries) | deciding whether the vocabulary gate can ship at all. **Blocked on AWS credentials** — they expired mid-session (`ExpiredToken`); `buaws` needs re-running |
+| 5 | Whether to build the vocabulary gate | closing TC-041. It changes what the API returns, so it is its own change — and item 4 may rule it out |
+| 6 | The six DEV activation approvals | any live authorization testing |
 
-Neither remaining item blocks merging this release.
+**None of the three blocks merging this release.** Items 4 and 5 concern a
+change that is not in any of these five PRs.
+
+### Why item 4 is not a formality
+
+The gate scored 15/15 on the original 15 queries, and that score flattered
+it: every "should return" query there contained at least one word the corpus
+already uses, so the gate was never asked to decide a case where the
+searcher's words and the archive's words differ — the only case that can
+refute it, and the case semantic search exists for.
+
+The expanded set adds spelling variants (`paediatric`), synonym-only searches
+(`myocardial infarction`) and meaningful-but-absent phrases. **Both forms of
+the gate reject all of those by construction**, because such a query has no
+token in the corpus. Whether that is the right answer depends on whether
+semantic search would have returned anything useful for them — which has to
+be observed, not assumed.
+
+If it would have, the gate destroys useful discovery and must not become the
+permanent rule: that is PR #27's mistake in a new place. So TC-041 stays open
+and no rule is committed.
 
 ## Reviewed commits
 
 Recorded so the review attaches to something specific rather than to a branch
 name that keeps moving.
 
-| PR | Branch head (remote) | GitHub PR head |
-|---|---|---|
-| #127 | `14fae95` | `14fae95` ✓ |
-| #124 | `863ad72` | `863ad72` ✓ |
-| #125 | `7d1b214` | `7d1b214` ✓ |
-| #126 | `8b3c904` | `8b3c904` ✓ |
-| #123 | `a05bdbc` | `a05bdbc` ✓ |
+| Merge order | PR | Branch | Remote head | GitHub PR head |
+|---|---|---|---|---|
+| 1 | **#127** | `fix/declare-reserved-migration-v081` | `14fae95` | `14fae95` ✓ |
+| 2 | **#124** | `qa/global-search-tc040-tc041` | `863ad72` | `863ad72` ✓ |
+| 3 | **#125** | `fix/global-search-lexical-relevance` | `7d1b214` | `7d1b214` ✓ |
+| 4 | **#126** | `qa/semantic-relevance-measurement` | `9457b04` | `9457b04` ✓ |
+| 5 | **#123** | `feat/security-test-readiness` | `a1023b1` | `a1023b1` ✓ |
 
 All five reconciled on 2026-11-10: the remote branch head and the head
 GitHub reports for the PR are the same commit in every case.
