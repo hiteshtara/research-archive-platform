@@ -1,5 +1,7 @@
 package edu.bu.archive.application.award;
 
+import edu.bu.archive.application.search.MatchExplanation;
+import edu.bu.archive.application.search.LexicalMatch;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchResultResponse;
 import edu.bu.archive.adapter.in.web.dto.attachment.AttachmentSearchRow;
 import edu.bu.archive.adapter.in.web.dto.award.AwardAmountHistoryResponse;
@@ -653,6 +655,28 @@ public class AwardArchiveService {
                 (long) proposals.size(),
                 activeProposalCount
         );
+    }
+
+    /**
+     * Why these Awards matched, for results that cannot explain themselves.
+     *
+     * <p>Derives the pattern and the anchoring decision from the same raw
+     * query the search used, so an explanation can never name a field the
+     * search would not have matched.
+     */
+    public List<MatchExplanation> explainMatches(
+            java.util.Collection<Long> awardIds,
+            String query
+    ) {
+        String rawQuery = query == null ? "" : query.trim();
+        if (awardIds == null || awardIds.isEmpty() || rawQuery.isEmpty()) {
+            return List.of();
+        }
+        return repository.explainAwardMatches(
+                awardIds,
+                LexicalMatch.likePattern(rawQuery),
+                LexicalMatch.anchorsToWordStart(rawQuery),
+                LexicalMatch.wordStartRegex(rawQuery));
     }
 
     public AwardSearchResponse search(

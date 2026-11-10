@@ -55,13 +55,24 @@ export function describeGlobalSearchOutcome<T>(options?: {
 export function incompleteSearchMessage(failedModules?: string[]): string | null;
 export function noDirectMatchesMessage(query?: unknown): string;
 
+export interface CappedModuleDescription {
+  module: string;
+  label: string;
+  text: string;
+  /** Where that record type's own search lives, or null if unmapped. */
+  href: string | null;
+}
+
 export interface ResultCountDescription {
   showing: number;
   summary: string;
   truncated: boolean;
-  perModule: string[];
+  perModule: CappedModuleDescription[];
   truncationNote?: string;
 }
+
+export function moduleSearchRoute(module: string): string | null;
+export function moduleLabel(module: string): string;
 
 export function describeResultCounts(
   moduleTotals?: GlobalSearchModuleTotal[],

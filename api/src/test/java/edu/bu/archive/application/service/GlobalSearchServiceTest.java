@@ -1,6 +1,7 @@
 package edu.bu.archive.application.service;
 
 import edu.bu.archive.application.authorization.SqlFragment;
+import edu.bu.archive.application.search.MatchExplanation;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchItemResponse;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchModuleTotal;
 import edu.bu.archive.adapter.in.web.dto.GlobalSearchResponse;
@@ -145,6 +146,136 @@ class GlobalSearchServiceTest {
                 title, "Active", "Jane PI", "Human Subjects",
                 searchRank, matchedField, identifier
         );
+    }
+
+    // --- QA TC-040: matched-field explanations, from evidence --------------
+
+    @Test
+    void aNegotiationMatchedByTheAssociatedAwardsPiSaysSo() {
+        /*
+         * Measured on DEV: all 25 Negotiation rows for "WILSON WONG" came
+         * back explained as "Negotiation", because the match was the
+         * associated Award's PI - a field the DTO carries and the heuristic
+         * never read.
+         */
+        when(negotiationArchiveService.findPage("WILSON WONG", 0, 25)).thenReturn(
+                new PageResponse<>(
+                        List.of(new NegotiationSummaryResponse(
+                                6447L, "760067", null, null, "Abandoned",
+                                null, null, "Material Transfer Agreement",
+                                null, null, null, "4861",
+                                null, null, null, null, null,
+                                "An associated award title", "WILSON WONG",
+                                null, null, null, null, null
+                        )),
+                        0, 25, 1, 1, true, true));
+
+        GlobalSearchItemResponse item = service.search("WILSON WONG").results().stream()
+                .filter(r -> r.module().equals("NEGOTIATION"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(item.matchedField()).isEqualTo("Principal Investigator");
+        assertThat(item.matchedValue()).isEqualTo("WILSON WONG");
+    }
+
+    @Test
+    void aNegotiationThatCannotExplainItselfSaysNothingRatherThanNegotiation() {
+        when(negotiationArchiveService.findPage("mystery", 0, 25)).thenReturn(
+                new PageResponse<>(
+                        List.of(new NegotiationSummaryResponse(
+                                1L, "doc-1", null, null, "Executed",
+                                null, null, "Material Transfer Agreement",
+                                null, null, null, null,
+                                null, null, null, null, null,
+                                null, null, null, null, null, null, null
+                        )),
+                        0, 25, 1, 1, true, true));
+
+        GlobalSearchItemResponse item = service.search("mystery").results().stream()
+                .filter(r -> r.module().equals("NEGOTIATION"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(item.matchedField())
+                .as("the old fallback was the literal \"Negotiation\", which explains nothing")
+                .isNull();
+        assertThat(item.matchedValue()).isNull();
+    }
+
+    @Test
+    void anAwardIsNoLongerSaidToHaveMatchedOnATitleItOnlyContainsMidWord() {
+        /*
+         * The real title, from DEV. A search for "NSF" used to report
+         * "Matched on: Title" against it, because "nsf" sits inside
+         * "TRANSFER". The explanation now uses the same anchoring rule the
+         * SQL does, so it declines to claim the title.
+         */
+        when(awardArchiveService.search(eq("NSF"), eq(0), anyInt()))
+                .thenReturn(new AwardSearchResponse(null, new PageResponse<>(
+                        List.of(new AwardSearchResultResponse(
+                                714001L, "100533-00001", 1,
+                                "PROBING THE PRINCIPLES OF DYNAMICS AND ENERGY TRANSFER IN PROTEINS",
+                                "Active", "Jane PI", "National Science Foundation",
+                                "PHYSICS", null, null, null, null)),
+                        0, 25, 1, 1, true, true)));
+        when(awardArchiveService.explainMatches(any(), eq("NSF")))
+                .thenReturn(List.of(new MatchExplanation(714001L, "Sponsor", "NSF")));
+
+        GlobalSearchItemResponse item = service.search("NSF").results().stream()
+                .filter(r -> r.module().equals("AWARD"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(item.matchedField())
+                .as("explained by the sponsor's acronym, which is the real reason")
+                .isEqualTo("Sponsor");
+        assertThat(item.matchedValue()).isEqualTo("NSF");
+    }
+
+    @Test
+    void theDatabaseIsAskedOnceForThePageAndOnlyForRowsThatNeedIt() {
+        when(awardArchiveService.search(eq("NSF"), eq(0), anyInt()))
+                .thenReturn(new AwardSearchResponse(null, new PageResponse<>(
+                        List.of(
+                                // explainable from its own title
+                                new AwardSearchResultResponse(
+                                        1L, "100001-00001", 1, "An NSF funded study",
+                                        "Active", "Jane PI", "Somebody", "PHYSICS",
+                                        null, null, null, null),
+                                // not explainable
+                                new AwardSearchResultResponse(
+                                        2L, "100002-00001", 1, "Energy transfer",
+                                        "Active", "Jane PI", "Somebody", "PHYSICS",
+                                        null, null, null, null)),
+                        0, 25, 2, 1, true, true)));
+        when(awardArchiveService.explainMatches(any(), eq("NSF"))).thenReturn(List.of());
+
+        service.search("NSF");
+
+        org.mockito.Mockito.verify(awardArchiveService)
+                .explainMatches(List.of(2L), "NSF");
+    }
+
+    @Test
+    void aFailedExplanationNeverCostsTheCallerTheirResults() {
+        when(awardArchiveService.search(eq("NSF"), eq(0), anyInt()))
+                .thenReturn(new AwardSearchResponse(null, new PageResponse<>(
+                        List.of(new AwardSearchResultResponse(
+                                2L, "100002-00001", 1, "Energy transfer",
+                                "Active", "Jane PI", "Somebody", "PHYSICS",
+                                null, null, null, null)),
+                        0, 25, 1, 1, true, true)));
+        when(awardArchiveService.explainMatches(any(), eq("NSF")))
+                .thenThrow(new RuntimeException("explanation query failed"));
+
+        GlobalSearchResponse response = service.search("NSF");
+
+        assertThat(response.results()).hasSize(1);
+        assertThat(response.failedModules())
+                .as("a cosmetic query must not mark the module failed")
+                .isEmpty();
+        assertThat(response.results().get(0).matchedField()).isNull();
     }
 
     // --- QA TC-040: totalResults counts rows, not matches -----------------

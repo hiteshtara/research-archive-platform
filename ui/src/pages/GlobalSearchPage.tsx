@@ -1,7 +1,7 @@
-import { Alert, Box, Button, Chip, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, Link, Stack, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 
 import { globalSearch } from "../api/client";
 import { EmptyState } from "../components/common/EmptyState";
@@ -222,14 +222,27 @@ export function GlobalSearchPage() {
                   >
                     {counts.truncationNote}
                   </Typography>
-                  {counts.perModule.map((line) => (
+                  {counts.perModule.map((entry) => (
                     <Typography
-                      key={line}
+                      key={entry.module}
                       variant="caption"
                       color="text.secondary"
                       sx={{ display: "block" }}
                     >
-                      {line}
+                      {entry.text}
+                      {entry.href && (
+                        <>
+                          {" — "}
+                          {/* Saying results are capped without saying where
+                              the rest are is only half an answer. */}
+                          <Link
+                            component={RouterLink}
+                            to={`${entry.href}?q=${encodeURIComponent(query)}`}
+                          >
+                            see all {entry.label}
+                          </Link>
+                        </>
+                      )}
                     </Typography>
                   ))}
                 </Box>

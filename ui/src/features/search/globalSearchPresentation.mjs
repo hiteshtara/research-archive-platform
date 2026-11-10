@@ -54,6 +54,57 @@ const SEMANTIC_MATCH_CHIP_LABEL = "Semantic match";
 // backend in that case) - showing "Matched on: Semantic (<identifier>)"
 // underneath an identifier line that already shows the same value is a
 // duplicate, not new information.
+/*
+ * Where each record type's own search lives, so a capped result set can
+ * offer the page that CAN show all of it (QA TC-040). Taken from the live
+ * navigation, not guessed: Global Search itself is /search, and the module
+ * pages are the routes the sidebar links to.
+ */
+const MODULE_SEARCH_ROUTES = {
+  AWARD: "/awards/search",
+  PROPOSAL: "/proposals",
+  NEGOTIATION: "/negotiations",
+  SUBAWARD: "/subawards",
+};
+
+const MODULE_LABELS = {
+  AWARD: "Awards",
+  PROPOSAL: "Proposals",
+  NEGOTIATION: "Negotiations",
+  SUBAWARD: "Subawards",
+};
+
+export function moduleSearchRoute(module) {
+  return MODULE_SEARCH_ROUTES[module] ?? null;
+}
+
+export function moduleLabel(module) {
+  return MODULE_LABELS[module] ?? module;
+}
+
+/*
+ * A Negotiation is addressed by its Negotiation ID - /negotiations/6447 -
+ * but the API's `identifier` for it is the DOCUMENT number, so the card
+ * showed 760067 and the ID appeared nowhere (QA TC-040). A tester had no way
+ * to get from the card to the record they were reading about.
+ *
+ * Both are shown, each labelled, rather than picking a winner: the document
+ * number is what people quote from Kuali, and the ID is what the archive is
+ * addressed by.
+ */
+function negotiationIdentifierLine(result) {
+  const id = result?.recordId;
+  const document = result?.identifier;
+  const parts = [];
+  if (id !== null && id !== undefined) {
+    parts.push(`Negotiation ${id}`);
+  }
+  if (document) {
+    parts.push(`Document ${document}`);
+  }
+  return parts.join(" \u00b7 ");
+}
+
 export function describeResultCard(result) {
   const identifier = result?.identifier ?? "";
   const subtitle = result?.subtitle ?? null;
@@ -65,7 +116,14 @@ export function describeResultCard(result) {
   return {
     identifier,
     title: result?.title ?? identifier,
-    identifierLine: subtitle ? `${identifier} • ${subtitle}` : identifier,
+    identifierLine:
+      result?.module === "NEGOTIATION"
+        ? [negotiationIdentifierLine(result), subtitle]
+            .filter(Boolean)
+            .join(" • ")
+        : subtitle
+          ? `${identifier} • ${subtitle}`
+          : identifier,
     // The identifier is the result card's own first line, so a card
     // that shows it there uses subtitleLine for the secondary detail
     // instead of identifierLine, which would repeat the identifier.
@@ -206,11 +264,17 @@ export function describeResultCounts(moduleTotals = [], directCount = 0) {
 
   const perModule = totals
     .filter((t) => t?.capped)
-    .map((t) =>
-      t.totalMatches === null || t.totalMatches === undefined
-        ? `${t.module}: showing ${t.returned}, more exist`
-        : `${t.module}: showing ${t.returned} of ${t.totalMatches}`,
-    );
+    .map((t) => ({
+      module: t.module,
+      label: moduleLabel(t.module),
+      text:
+        t.totalMatches === null || t.totalMatches === undefined
+          ? `${moduleLabel(t.module)}: showing ${t.returned}, more exist`
+          : `${moduleLabel(t.module)}: showing ${t.returned} of ${t.totalMatches}`,
+      // Where to go to see all of them. Telling someone their results are
+      // capped without saying where the rest are is only half an answer.
+      href: moduleSearchRoute(t.module),
+    }));
 
   return {
     showing: directCount,
