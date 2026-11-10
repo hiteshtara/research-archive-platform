@@ -42,7 +42,40 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Typecheck and build
+        # Vite folds import.meta.env.VITE_* in at BUILD time, and both
+        # src/api/client.ts and src/auth.ts guard their configuration at module
+        # scope. Build with these unset and the guards become unconditional
+        # throws, the application is dead-code-eliminated behind them, and
+        # `vite build` still exits 0 - shipping a ~613 KB stub that CI used to
+        # wave through. These values exist so the build exercises the real
+        # application.
+        #
+        # NONE OF THESE IS A CREDENTIAL OR A REAL ENDPOINT. The hosts all sit
+        # under .invalid (RFC 2606), which is guaranteed never to resolve, and
+        # the Cognito identifiers are placeholders. The real values are set on
+        # the Amplify app and are never committed. Nothing here is ever
+        # deployed: this job builds and throws the artifact away.
+        #
+        # VITE_AWS_REGION and VITE_COGNITO_USER_POOL_ID must stay consistent -
+        # auth.ts rejects a pool id that does not start with "<region>_",
+        # which is a deliberate guard against the two being swapped.
+        env:
+          VITE_API_BASE_URL: https://api.ci.invalid
+          VITE_AWS_REGION: us-east-1
+          VITE_CANONICAL_ORIGIN: https://ui.ci.invalid
+          VITE_COGNITO_ALLOWED_ORIGINS: https://ui.ci.invalid/,http://localhost:5173/
+          VITE_COGNITO_CLIENT_ID: examplecicliendidnotreal00
+          VITE_COGNITO_DOMAIN: example-ci.auth.us-east-1.amazoncognito.com
+          VITE_COGNITO_IDENTITY_PROVIDER: ExampleIdP
+          VITE_COGNITO_LOGOUT_URL: https://idp.ci.invalid/idp/profile/Logout
+          VITE_COGNITO_REDIRECT_URL: https://ui.ci.invalid/
+          VITE_COGNITO_USER_POOL_ID: us-east-1_ciExample
+          VITE_EXPLORER_ENABLED: "true"
         run: npm run build
+      - name: Verify the production bundle contains the application
+        # The build above can succeed while shipping almost nothing. This opens
+        # the artifact and checks the routes and modules are actually in it.
+        run: npm run verify:bundle
 
   api-unit:
     name: API - unit tests

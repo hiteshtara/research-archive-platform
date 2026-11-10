@@ -182,6 +182,9 @@ treat any claim on this panel as "true on the date shown".
   `securityReadinessConsistency.test.mjs` asserts is still there
 - FU-003 in `docs/FOLLOW_UPS.md`, which is about this page's inability to read
   the running revision
+- the `"qa-status"` route and the `"Security readiness"` module marker in
+  `ui/scripts/verify-production-bundle.mjs` - that script is app-wide and stays,
+  but those two entries are about this page and would start failing the build
 - in `ui/src/features/archivedFiles/archivedFileFinderPresentation.test.mjs`,
   restore the single exact-list navigation assertion in place of the two that
   replaced it
