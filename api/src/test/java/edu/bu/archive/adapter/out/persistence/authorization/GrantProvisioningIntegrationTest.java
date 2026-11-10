@@ -36,6 +36,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
+import edu.bu.archive.application.authorization.KualiPersonId;
 import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
@@ -80,6 +81,7 @@ class GrantProvisioningIntegrationTest {
     private static ArchiveAdminService service;
     private static AdminRoleRepository adminRoles;
     private static AccessGrantRepository grants;
+    private static AdminIdentityRepository identities;
 
     @BeforeAll
     static void setUp() throws Exception {
@@ -106,8 +108,7 @@ class GrantProvisioningIntegrationTest {
         txManager = new DataSourceTransactionManager(dataSource);
         adminRoles = proxy(new JdbcAdminRoleRepository(jdbc), AdminRoleRepository.class);
         grants = proxy(new JdbcAccessGrantRepository(jdbc), AccessGrantRepository.class);
-        AdminIdentityRepository identities =
-                proxy(new JdbcAdminIdentityRepository(jdbc), AdminIdentityRepository.class);
+        identities = proxy(new JdbcAdminIdentityRepository(jdbc), AdminIdentityRepository.class);
         service = proxyClass(new ArchiveAdminService(
                 adminRoles,
                 proxy(new JdbcAdminAuditSink(jdbc),
@@ -834,6 +835,113 @@ class GrantProvisioningIntegrationTest {
         }
     }
 
+    /**
+     * A CONTACT_DERIVATION grant that would confer nothing.
+     *
+     * <p>Contact-derived access resolves through the Kuali PERSON_ID on the
+     * grantee's identity link. Without one, AccessScopeResolver carries no
+     * contact person, the contact clause is never added to the scope or to the
+     * list SQL, and the grant is inert - while appearing, in the grant table
+     * and the audit trail, to have been issued correctly.
+     *
+     * <p>Every test here provisions a real CONTACT_DERIVATION grant, which no
+     * other test in this class did; that is why the gap survived.
+     */
+    @Nested
+    @DisplayName("CONTACT_DERIVATION needs a PERSON_ID to confer anything (SEC-003)")
+    class ContactDerivationFeasibility {
+
+        private static final String ISSUER =
+                "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TEST";
+
+        @Test
+        void aGrantToAnIdentityLinkedWithoutAPersonIdIsRefused() {
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000aa",
+                    new InstitutionalIdentifier(GRANTEE), null, "grantee@bu.edu",
+                    "fixture: linked, no PERSON_ID");
+
+            GrantOutcome outcome = command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("no Kuali PERSON_ID")
+                    .contains("confer nothing at all");
+            assertThat(activeGrantsFor(GRANTEE))
+                    .as("the inert grant must not be written")
+                    .isZero();
+        }
+
+        @Test
+        void theRefusalNamesTheFieldToFixRatherThanTheEngine() {
+            /*
+             * The point of the check. "SEC-003 is broken" is where this ends
+             * up without it, so the message has to point at the link.
+             */
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000ab",
+                    new InstitutionalIdentifier(GRANTEE), null, "grantee@bu.edu",
+                    "fixture: linked, no PERSON_ID");
+
+            String problems = String.join(" ", command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build()).problems());
+
+            assertThat(problems).contains("Set the PERSON_ID on the link first");
+            assertThat(problems).doesNotContain("broken");
+        }
+
+        @Test
+        void aGrantToAnIdentityLinkedWithAPersonIdIsAllowed() {
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000ac",
+                    new InstitutionalIdentifier(GRANTEE), new KualiPersonId("1000570"),
+                    "grantee@bu.edu", "fixture: linked with PERSON_ID");
+
+            GrantOutcome outcome = command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("contact-derived access can resolve");
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+        }
+
+        @Test
+        void anUnlinkedGranteeIsAllowedWithAWarning() {
+            /*
+             * Staging a grant before the person is linked is legitimate -
+             * grants hang off the archive identity - so this is a NOTE, not a
+             * refusal. There is nothing to check yet, only something to say.
+             */
+            GrantOutcome outcome = command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("no active identity link yet")
+                    .contains("must carry one when it is created");
+        }
+
+        @Test
+        void theCheckDoesNotApplyToOtherGrantTypes() {
+            /*
+             * UNIT, CENTRAL, IO and PARENT_AWARD access do not use the
+             * PERSON_ID at all, so a link without one must not obstruct them.
+             */
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000ad",
+                    new InstitutionalIdentifier(GRANTEE), null, "grantee@bu.edu",
+                    "fixture: linked, no PERSON_ID");
+
+            GrantOutcome outcome = command().run(req().confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.checks()))
+                    .doesNotContain("PERSON_ID");
+        }
+    }
+
     // ---------------- helpers ----------------
 
     private static GrantProvisioningCommand command() {
@@ -842,7 +950,7 @@ class GrantProvisioningIntegrationTest {
 
     private static GrantProvisioningCommand command(RuntimeIdentity runtime) {
         return new GrantProvisioningCommand(
-                ACCOUNT, ENVIRONMENT, service, adminRoles, grants, runtime);
+                ACCOUNT, ENVIRONMENT, service, adminRoles, grants, identities, runtime);
     }
 
     /** A runtime that reports a specific account and cluster. */

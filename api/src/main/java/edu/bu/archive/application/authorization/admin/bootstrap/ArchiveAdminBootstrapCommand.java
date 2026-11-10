@@ -14,6 +14,7 @@ import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleMember;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
+import edu.bu.archive.application.authorization.admin.provisioning.OperatorChecks;
 import edu.bu.archive.application.authorization.admin.provisioning.RuntimeIdentity;
 import edu.bu.archive.application.authorization.admin.provisioning.RuntimeVerification;
 
@@ -45,10 +46,6 @@ import edu.bu.archive.application.authorization.admin.provisioning.RuntimeVerifi
  */
 public final class ArchiveAdminBootstrapCommand {
 
-    /** A Cognito subject is a UUID. Anything else is the wrong field. */
-    private static final Pattern COGNITO_SUBJECT =
-            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-                    + "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
     private static final Pattern EMAIL_SHAPED = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
 
     private final BootstrapTarget target;
@@ -176,12 +173,8 @@ public final class ArchiveAdminBootstrapCommand {
          * separately, so a typo in either shows up here instead of producing
          * a membership whose link can never resolve.
          */
-        String expected = target.expectedIssuer();
-        if (!expected.equals(trim(r.cognitoIssuer()))) {
-            problems.add("Cognito issuer does not match this user pool. Expected " + expected);
-        } else {
-            checks.add("OK     Cognito issuer matches the user pool");
-        }
+        OperatorChecks.cognitoIssuer(
+                r.cognitoIssuer(), target.expectedIssuer(), checks, problems);
 
         // Production is never bootstrapped by this utility.
         if ("prod".equals(target.environment()) || "production".equals(target.environment())) {
@@ -209,15 +202,15 @@ public final class ArchiveAdminBootstrapCommand {
     }
 
     private void checkIdentity(BootstrapRequest r, List<String> checks, List<String> problems) {
+        OperatorChecks.cognitoSubject(r.cognitoSubject(), checks, problems);
+
+        /*
+         * The RAW trimmed value, not the validated one. A malformed subject
+         * must still be compared against the identifier below, so that
+         * supplying the same wrong string for both reports BOTH problems in
+         * one run rather than one per re-run.
+         */
         String subject = trim(r.cognitoSubject());
-        if (subject == null) {
-            problems.add("Cognito subject is required and must be supplied explicitly");
-        } else if (!COGNITO_SUBJECT.matcher(subject).matches()) {
-            problems.add("Cognito subject must be the immutable 'sub' UUID. "
-                    + "A username, an email address or a NameID is not the subject.");
-        } else {
-            checks.add("OK     Cognito subject is a well-formed immutable sub " + mask(subject));
-        }
 
         if (r.mintArchiveIdentifier()) {
             if (trim(r.institutionalIdentifier()) != null) {

@@ -13,7 +13,9 @@ import java.util.regex.Pattern;
 import edu.bu.archive.application.authorization.AccessGrant;
 import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.GrantType;
+import edu.bu.archive.application.authorization.IdentityLink;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
+import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
@@ -49,19 +51,22 @@ public final class GrantProvisioningCommand {
     private final ArchiveAdminService admin;
     private final AdminRoleRepository adminRoles;
     private final AccessGrantRepository grants;
+    private final AdminIdentityRepository identities;
     /** Test seam: a fixed Clock makes expiry assertions deterministic. */
     private Clock clock = Clock.systemUTC();
 
     public GrantProvisioningCommand(
             String expectedAccountId, String expectedEnvironment,
             ArchiveAdminService admin, AdminRoleRepository adminRoles,
-            AccessGrantRepository grants, RuntimeIdentity runtime) {
+            AccessGrantRepository grants, AdminIdentityRepository identities,
+            RuntimeIdentity runtime) {
         this.expectedAccountId = Objects.requireNonNull(expectedAccountId);
         this.expectedEnvironment = expectedEnvironment.toLowerCase(Locale.ROOT);
         this.runtime = Objects.requireNonNull(runtime);
         this.admin = Objects.requireNonNull(admin);
         this.adminRoles = Objects.requireNonNull(adminRoles);
         this.grants = Objects.requireNonNull(grants);
+        this.identities = Objects.requireNonNull(identities);
     }
 
     /** Override the clock used to judge whether an expiry is in the future. */
@@ -275,43 +280,14 @@ public final class GrantProvisioningCommand {
     }
 
     private void checkEnvironment(GrantRequest r, List<String> checks, List<String> problems) {
-        String statedAccount = trim(r.awsAccountId());
-        String statedEnvironment = lower(r.environment());
-
-        if (statedAccount == null) {
-            problems.add("--aws-account-id is required");
-        }
-        if (statedEnvironment == null) {
-            problems.add("--environment is required");
-        }
-
-        /*
-         * The operator states an account and an environment; the runtime
-         * reports what is actually true. The rules live in
-         * RuntimeVerification, shared with the bootstrap utility so the two
-         * cannot drift apart.
-         *
-         * The first version of this compared the flag against itself - the
-         * CLI passed the same value as both expected and actual - so it
-         * always passed and verified nothing. A flag is an intention, not
-         * evidence.
-         */
-        RuntimeVerification.verify(
+        OperatorChecks.environment(
                 runtime,
-                statedAccount,
-                statedEnvironment,
+                trim(r.awsAccountId()),
+                lower(r.environment()),
+                expectedEnvironment,
                 r.confirmed() && !r.dryRun(),
                 checks,
                 problems);
-
-        if (statedEnvironment != null && !statedEnvironment.equals(expectedEnvironment)) {
-            problems.add("environment does not match this build's expectation. Expected "
-                    + expectedEnvironment + ", got " + statedEnvironment);
-        }
-        if ("prod".equals(statedEnvironment) || "production".equals(statedEnvironment)) {
-            problems.add("This utility refuses to run against production. "
-                    + "Production grants need their own approved procedure.");
-        }
     }
 
     /**
@@ -377,23 +353,7 @@ public final class GrantProvisioningCommand {
 
     private InstitutionalIdentifier checkIdentifier(
             String raw, String what, List<String> checks, List<String> problems) {
-        String value = trim(raw);
-        if (value == null) {
-            problems.add(what + " identifier is required and must be supplied explicitly");
-            return null;
-        }
-        if (value.contains("@")) {
-            problems.add(what + " looks like an email address. Supply the archive identifier "
-                    + "(ARP-XXXXXXXX-XXXXXXXX); an email is not an identity here.");
-            return null;
-        }
-        if (!ARP.matcher(value).matches()) {
-            problems.add(what + " is not a well-formed archive identifier "
-                    + "(expected ARP-XXXXXXXX-XXXXXXXX)");
-            return null;
-        }
-        checks.add("OK     " + what + " is a well-formed archive identifier " + mask(value));
-        return new InstitutionalIdentifier(value);
+        return OperatorChecks.identifier(raw, what, checks, problems);
     }
 
     private void checkScope(GrantRequest r, GrantType type,
@@ -493,23 +453,15 @@ public final class GrantProvisioningCommand {
     }
 
     private void checkProvenance(GrantRequest r, List<String> checks, List<String> problems) {
-        if (trim(r.operator()) == null) {
-            problems.add("--operator is required: the audit row records the person, not the account");
-        }
-        if (trim(r.reason()) == null) {
-            problems.add("--reason is required");
-        }
-        if (trim(r.approvalReference()) == null) {
-            problems.add("--approval-reference is required, so the audit row points at the approval");
-        }
-        if (problems.isEmpty()) {
-            checks.add("OK     operator, reason and approval reference recorded for the audit row");
-        }
+        OperatorChecks.provenance(
+                r.operator(), r.reason(), r.approvalReference(), checks, problems);
     }
 
     private void checkSubjects(GrantRequest r, InstitutionalIdentifier grantee,
             InstitutionalIdentifier actor, GrantType type,
             List<String> checks, List<String> problems) {
+
+        checkContactDerivationIsResolvable(grantee, type, checks, problems);
 
         if (adminRoles.findActive(actor).isEmpty()) {
             problems.add("the acting administrator " + mask(actor.value())
@@ -547,6 +499,56 @@ public final class GrantProvisioningCommand {
     }
 
     /**
+     * That a CONTACT_DERIVATION grant can actually confer anything.
+     *
+     * <p>Contact-derived access resolves through the grantee's Kuali
+     * PERSON_ID, which lives on their identity link.
+     * {@code AccessScopeResolver} carries a contact person only when the
+     * mapping HAS one, so with no PERSON_ID the contact clause is never added
+     * to the scope and never added to the list SQL. The grant row exists, the
+     * administrative table shows it, the audit trail records it - and the
+     * person sees nothing.
+     *
+     * <p>That failure is indistinguishable, from the outside, from
+     * contact derivation being broken. It is the shape of mistake that costs
+     * an afternoon of debugging the engine and is corrected by one field, so
+     * it is refused here with the field named.
+     *
+     * <p>Only an ACTIVE link with no PERSON_ID is refused. A grantee with no
+     * link at all is a NOTE: grants hang off the archive identity and may
+     * legitimately be staged before the person is linked, and at that point
+     * there is nothing to check yet.
+     */
+    private void checkContactDerivationIsResolvable(
+            InstitutionalIdentifier grantee, GrantType type,
+            List<String> checks, List<String> problems) {
+
+        if (type != GrantType.CONTACT_DERIVATION || grantee == null) {
+            return;
+        }
+        Optional<IdentityLink> active = identities.findLinksFor(grantee).stream()
+                .filter(IdentityLink::isActive)
+                .findFirst();
+
+        if (active.isEmpty()) {
+            checks.add("NOTE   grantee has no active identity link yet. CONTACT_DERIVATION "
+                    + "resolves through the Kuali PERSON_ID on that link, so the link must "
+                    + "carry one when it is created or this grant will confer nothing.");
+            return;
+        }
+        if (active.get().kualiPersonId().isEmpty()) {
+            problems.add("grantee " + mask(grantee.value()) + " has an ACTIVE identity link "
+                    + "(id " + active.get().id() + ") with no Kuali PERSON_ID. "
+                    + "CONTACT_DERIVATION resolves through that PERSON_ID, so this grant "
+                    + "would be written, shown in the administrative table, and confer "
+                    + "nothing at all. Set the PERSON_ID on the link first.");
+            return;
+        }
+        checks.add("OK     grantee's identity link carries a Kuali PERSON_ID, so "
+                + "contact-derived access can resolve");
+    }
+
+    /**
      * Whether an existing grant occupies the same scope slot as a request.
      *
      * <p>This read-then-write check exists to turn a constraint violation into
@@ -578,22 +580,15 @@ public final class GrantProvisioningCommand {
     }
 
     private static String trim(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return OperatorChecks.trim(value);
     }
 
     private static String lower(String value) {
-        String trimmed = trim(value);
-        return trimmed == null ? null : trimmed.toLowerCase(Locale.ROOT);
+        return OperatorChecks.lower(value);
     }
 
     /** Identifiers are not secrets, but they are not log fodder either. */
     private static String mask(String value) {
-        return value.length() <= 6
-                ? "****"
-                : value.substring(0, 2) + "****" + value.substring(value.length() - 2);
+        return OperatorChecks.mask(value);
     }
 }

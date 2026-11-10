@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import edu.bu.archive.application.authorization.AccessGrantRepository;
+import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantOutcome;
@@ -71,13 +72,15 @@ public class GrantProvisioningCli implements ApplicationRunner {
     private final ArchiveAdminService admin;
     private final AdminRoleRepository adminRoles;
     private final AccessGrantRepository grants;
+    private final AdminIdentityRepository identities;
 
     public GrantProvisioningCli(
             ArchiveAdminService admin, AdminRoleRepository adminRoles,
-            AccessGrantRepository grants) {
+            AccessGrantRepository grants, AdminIdentityRepository identities) {
         this.admin = admin;
         this.adminRoles = adminRoles;
         this.grants = grants;
+        this.identities = identities;
     }
 
     @Override
@@ -108,7 +111,7 @@ public class GrantProvisioningCli implements ApplicationRunner {
         GrantOutcome outcome = new GrantProvisioningCommand(
                 options.getOrDefault("aws-account-id", ""),
                 options.getOrDefault("environment", ""),
-                admin, adminRoles, grants,
+                admin, adminRoles, grants, identities,
                 // Read from the ECS task metadata endpoint, NOT from the
                 // flags - the flags are what we are checking.
                 new EcsTaskMetadataRuntimeIdentity()).run(request);
