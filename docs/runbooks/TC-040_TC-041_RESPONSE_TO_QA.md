@@ -7,7 +7,7 @@
 Hi Lalitha,
 
 Thank you for these — they were specific enough to reproduce exactly, and two
-of them found real problems we would not have caught otherwise. I re-ran
+of them found real problems I would not have caught otherwise. I re-ran
 everything on the current development site (API revision 87, UI build 186)
 and here is what each one turned out to be.
 
@@ -16,14 +16,14 @@ and here is what each one turned out to be.
 **The result count is misleading.** You were right that the number is not the
 number of matching records. Searching "NSF" reported **104 results**, but
 that was four separate page-sizes added together — each record type returns at
-most 25. The Negotiations module on its own matched **234**. We have changed
+most 25. The Negotiations module on its own matched **234**. I have changed
 this: the page now says "Showing 50 of 1434 matching records", lists the
 per-type breakdown, and says plainly that each type returns at most 25. Where
 a record type cannot count its matches, it now says "at least N" rather than
 inventing a total.
 
 **The NSF result was the most valuable thing you reported**, and the cause
-was not what any of us assumed. Award 100527-00001 is titled "NATIONAL
+was not what I assumed either. Award 100527-00001 is titled "NATIONAL
 SCIENCE FOUNDATION GRADUATE RESEARCH FELLOWSHIP PROGRAM", sponsored by the
 National Science Foundation — and the letters "NSF" appear nowhere in it.
 Search matches on letter sequences, so "NSF" cannot match that award
@@ -36,16 +36,20 @@ directly. What it *does* match is the "nsf" inside ordinary words:
 So the direct results fill up with words containing n-s-f, while the award
 that really is NSF-funded is pushed into "related". The relevance is
 backwards. Fixing it properly means changing what counts as a match, so it
-needs a decision from the team rather than a quick patch — it is written up
-and proposed.
+changes what counts as a match, so it is in review separately rather than
+bundled with the count fix. The short version of the fix: a short alphabetic
+term now has to match the START of a word, so "NSF" stops matching inside
+"transfer" — while "cardio" still finds "cardiology", because only the start
+of the word is anchored. And because award 100527 contains no "NSF" at all,
+it is now reached through its sponsor's recorded acronym.
 
 **Award team-member matches genuinely do not explain themselves.** A search
 can match a team member, a grant number or a sponsor code, but the result
 card can only show the award number, title, sponsor, lead unit and PI. When
 the match was none of those, the card falls back to "Matched on: Award",
-which tells you nothing. We have proposed having the search report which
-field actually matched, so a card can say "Matched on: Team member (name,
-role)".
+which tells you nothing. I have a fix in review that has the search itself
+report which field matched, so a card can say "Matched on: Team member
+(name, role)" instead of guessing.
 
 ## Where the behaviour is intended
 
@@ -55,8 +59,8 @@ page to page through all of its matches.
 
 **Negotiation cards showing the document number** is consistent with how the
 data is stored, but I agree it is confusing when the detail page is addressed
-by Negotiation ID. We have proposed showing both — "Negotiation 6447 ·
-document 760067".
+by Negotiation ID. I have a fix in review that shows both, each labelled —
+"Negotiation 6447 · Document 760067".
 
 ## One I could not reproduce — could you check?
 
@@ -72,7 +76,7 @@ result.
 So could you tell me which box you typed into when it "appeared first in
 Negotiations search"? If you searched `760067`, that explains it — an exact
 document-number match is deliberately promoted to the top. I would like to be
-sure before we close it.
+sure before I close it.
 
 ## TC-041 — still open, and you were right to keep questioning it
 
@@ -97,11 +101,11 @@ uses.
 So I am treating TC-041 as **not resolved**, and keeping it separate from
 TC-040's pass.
 
-What we will not do is pick a relevance cutoff out of the air — an earlier
+What I will not do is pick a relevance cutoff out of the air — an earlier
 experiment already found that no single number worked across record types,
 and I can see why: a Negotiation's searchable text is just a document number,
 an agreement type, a negotiator and a status, so thousands of them look
-nearly identical to the system. We have started recording how far away each
+nearly identical to the system. I have started recording how far away each
 result actually is, so the next step is to measure a set of good and bad
 searches and choose a rule on evidence. Your two nonsense strings are now
 part of that set.
@@ -111,13 +115,14 @@ part of that set.
 | Your observation | Outcome |
 |---|---|
 | Result count misleading | Fixed |
-| NSF awards shown as "related" | Confirmed defect; fix proposed |
-| Team-member matches unexplained | Confirmed defect; fix proposed |
+| NSF awards shown as "related" | Confirmed defect; fix in review |
+| Team-member matches unexplained | Confirmed defect; fix in review |
 | 25 per record type | Intended |
-| Negotiation cards show document number | Intended; improvement proposed |
+| Negotiation cards show document number | Improvement in review |
 | Negotiation 6447 missing | Not missing — please confirm which search box |
 | TC-041 nonsense results | Presentation fixed; relevance still open |
 
-Nothing is released yet — the count fix is in review.
+Nothing is released yet. The count fix and the matching fix are in separate
+reviews, so they can be released independently.
 
 Thanks again. The NSF one in particular was a genuinely good catch.
