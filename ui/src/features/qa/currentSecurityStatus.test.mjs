@@ -107,7 +107,7 @@ test("no current-status text names a superseded revision", () => {
    * opposite of a stale claim and is exactly the kind of detail that is
    * invisible later unless written down.
    */
-  const { imageReference, ...deploymentClaims } = readiness.deployment;
+  const { imageReference: _imageReference, ...deploymentClaims } = readiness.deployment;
   const text = JSON.stringify(matrix) + JSON.stringify(deploymentClaims);
 
   for (const [, named] of text.matchAll(/revision (\d+)/gi)) {

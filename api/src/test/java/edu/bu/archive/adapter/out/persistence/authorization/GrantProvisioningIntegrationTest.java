@@ -36,6 +36,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import edu.bu.archive.application.authorization.AccessGrantRepository;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
+import edu.bu.archive.application.authorization.KualiPersonId;
 import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
@@ -80,6 +81,7 @@ class GrantProvisioningIntegrationTest {
     private static ArchiveAdminService service;
     private static AdminRoleRepository adminRoles;
     private static AccessGrantRepository grants;
+    private static AdminIdentityRepository identities;
 
     @BeforeAll
     static void setUp() throws Exception {
@@ -106,8 +108,7 @@ class GrantProvisioningIntegrationTest {
         txManager = new DataSourceTransactionManager(dataSource);
         adminRoles = proxy(new JdbcAdminRoleRepository(jdbc), AdminRoleRepository.class);
         grants = proxy(new JdbcAccessGrantRepository(jdbc), AccessGrantRepository.class);
-        AdminIdentityRepository identities =
-                proxy(new JdbcAdminIdentityRepository(jdbc), AdminIdentityRepository.class);
+        identities = proxy(new JdbcAdminIdentityRepository(jdbc), AdminIdentityRepository.class);
         service = proxyClass(new ArchiveAdminService(
                 adminRoles,
                 proxy(new JdbcAdminAuditSink(jdbc),
@@ -834,6 +835,212 @@ class GrantProvisioningIntegrationTest {
         }
     }
 
+    /**
+     * A CONTACT_DERIVATION grant that would confer nothing.
+     *
+     * <p>Contact-derived access resolves through the Kuali PERSON_ID on the
+     * grantee's identity link. Without one, AccessScopeResolver carries no
+     * contact person, the contact clause is never added to the scope or to the
+     * list SQL, and the grant is inert - while appearing, in the grant table
+     * and the audit trail, to have been issued correctly.
+     *
+     * <p>Every test here provisions a real CONTACT_DERIVATION grant, which no
+     * other test in this class did; that is why the gap survived.
+     */
+    @Nested
+    @DisplayName("CONTACT_DERIVATION needs a PERSON_ID to confer anything (SEC-003)")
+    class ContactDerivationFeasibility {
+
+        private static final String ISSUER =
+                "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TEST";
+
+        @Test
+        void aGrantToAnIdentityLinkedWithoutAPersonIdIsRefused() {
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000aa",
+                    new InstitutionalIdentifier(GRANTEE), null, "grantee@bu.edu",
+                    "fixture: linked, no PERSON_ID");
+
+            GrantOutcome outcome = command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", outcome.problems()))
+                    .contains("no Kuali PERSON_ID")
+                    .contains("confer nothing at all");
+            assertThat(activeGrantsFor(GRANTEE))
+                    .as("the inert grant must not be written")
+                    .isZero();
+        }
+
+        @Test
+        void theRefusalNamesTheFieldToFixRatherThanTheEngine() {
+            /*
+             * The point of the check. "SEC-003 is broken" is where this ends
+             * up without it, so the message has to point at the link.
+             */
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000ab",
+                    new InstitutionalIdentifier(GRANTEE), null, "grantee@bu.edu",
+                    "fixture: linked, no PERSON_ID");
+
+            String problems = String.join(" ", command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build()).problems());
+
+            assertThat(problems).contains("Set the PERSON_ID on the link first");
+            assertThat(problems).doesNotContain("broken");
+        }
+
+        @Test
+        void aGrantToAnIdentityLinkedWithAPersonIdIsAllowed() {
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000ac",
+                    new InstitutionalIdentifier(GRANTEE), new KualiPersonId("1000570"),
+                    "grantee@bu.edu", "fixture: linked with PERSON_ID");
+
+            GrantOutcome outcome = command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("contact-derived access can resolve");
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+        }
+
+        @Test
+        void anUnlinkedGranteeIsAllowedWithAWarning() {
+            /*
+             * Staging a grant before the person is linked is legitimate -
+             * grants hang off the archive identity - so this is a NOTE, not a
+             * refusal. There is nothing to check yet, only something to say.
+             */
+            GrantOutcome outcome = command().run(
+                    req().type("CONTACT_DERIVATION").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.checks()))
+                    .contains("no active identity link yet")
+                    .contains("must carry one when it is created");
+        }
+
+        @Test
+        void theCheckDoesNotApplyToOtherGrantTypes() {
+            /*
+             * UNIT, CENTRAL, IO and PARENT_AWARD access do not use the
+             * PERSON_ID at all, so a link without one must not obstruct them.
+             */
+            service.linkIdentity(new InstitutionalIdentifier(ADMIN), ISSUER,
+                    "00000000-0000-0000-0000-0000000000ad",
+                    new InstitutionalIdentifier(GRANTEE), null, "grantee@bu.edu",
+                    "fixture: linked, no PERSON_ID");
+
+            GrantOutcome outcome = command().run(req().confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(String.join(" ", outcome.checks()))
+                    .doesNotContain("PERSON_ID");
+        }
+    }
+
+    /**
+     * Expiry is not revocation, and cannot be used to close a pilot.
+     *
+     * <p>The pilot's grants are proposed with an expiry so that an unreviewed
+     * pilot does not become permanent by inattention. It would be natural to
+     * assume that is also how the pilot gets cleaned up - let the grants
+     * expire and walk away. It is not, and the difference is not cosmetic.
+     *
+     * <p>V087's {@code ux_access_grant_active_scope} constrains UNREVOKED
+     * rows. An expired grant is still unrevoked, so it still occupies its
+     * scope: nobody can be granted that same scope again until it is revoked.
+     * A pilot "closed" by expiry leaves every scope it used blocked.
+     */
+    @Nested
+    @DisplayName("An expired grant is not a revoked one")
+    class ExpiryIsNotRevocation {
+
+        /** Ages a grant past its expiry, which the utility refuses to create. */
+        private void expire(long grantId) {
+            int updated = jdbc.sql("""
+                            UPDATE authz.access_grant
+                               SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 day'
+                             WHERE grant_id = :id
+                            """).param("id", grantId).update();
+            assertThat(updated).isEqualTo(1);
+        }
+
+        private long issue() {
+            GrantOutcome outcome = command().run(
+                    req().expiresAt("2027-06-30T00:00:00Z").confirmed(true).build());
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.APPLIED);
+            return outcome.grantId();
+        }
+
+        @Test
+        void anExpiredGrantStillBlocksTheSameScope() {
+            long grantId = issue();
+            expire(grantId);
+
+            GrantOutcome second = command().run(req().confirmed(true).build());
+
+            assertThat(second.result())
+                    .as("V087 constrains UNREVOKED rows, and an expired grant is "
+                            + "still unrevoked")
+                    .isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" ", second.problems()))
+                    .contains("identical active grant already exists");
+        }
+
+        @Test
+        void revokingItFreesTheScope() {
+            long grantId = issue();
+            expire(grantId);
+            assertThat(command().run(req().confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.REFUSED);
+
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId,
+                    "closing the pilot properly");
+
+            assertThat(command().run(req().confirmed(true).build()).result())
+                    .as("revocation is what actually releases the scope")
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+        }
+
+        @Test
+        void theRowSurvivesBothWays() {
+            /*
+             * Neither expiry nor revocation deletes anything. The audit trail
+             * depends on that, and so does being able to say afterwards what
+             * the pilot actually held.
+             */
+            long grantId = issue();
+            expire(grantId);
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId, "closing");
+
+            assertThat(jdbc.sql("""
+                            SELECT count(*) FROM authz.access_grant WHERE grant_id = :id
+                            """).param("id", grantId).query(Integer.class).single())
+                    .as("the grant row is still there, expired AND revoked")
+                    .isEqualTo(1);
+            assertThat(auditActions())
+                    .containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED");
+        }
+
+        @Test
+        void expiringChangesNothingAboutWhetherItIsRevoked() {
+            long grantId = issue();
+            expire(grantId);
+
+            assertThat(jdbc.sql("""
+                            SELECT revoked_at IS NULL FROM authz.access_grant
+                             WHERE grant_id = :id
+                            """).param("id", grantId).query(Boolean.class).single())
+                    .as("expiry writes expires_at and nothing else - the field the "
+                            + "index and isActiveAt both key on is untouched")
+                    .isTrue();
+        }
+    }
+
     // ---------------- helpers ----------------
 
     private static GrantProvisioningCommand command() {
@@ -842,7 +1049,7 @@ class GrantProvisioningIntegrationTest {
 
     private static GrantProvisioningCommand command(RuntimeIdentity runtime) {
         return new GrantProvisioningCommand(
-                ACCOUNT, ENVIRONMENT, service, adminRoles, grants, runtime);
+                ACCOUNT, ENVIRONMENT, service, adminRoles, grants, identities, runtime);
     }
 
     /** A runtime that reports a specific account and cluster. */
@@ -860,6 +1067,130 @@ class GrantProvisioningIntegrationTest {
         };
     }
 
+    @Nested
+    @DisplayName("PARENT_AWARD grants (SEC-005)")
+    class ParentAwardGrants {
+
+        /*
+         * The database has supported PARENT_AWARD since V088 and the evaluator
+         * has decided it since SEC-005 shipped, but the provisioning CLI - the
+         * only approved way to create a grant in DEV - had no --award-number
+         * flag and no PARENT_AWARD case in its scope validation. The switch
+         * fell through in silence, so the type parsed, nothing was checked,
+         * and GrantSpecification then threw from its constructor. An operator
+         * preparing SEC-005 acceptance testing got a stack trace and no grant.
+         */
+
+        @Test
+        @DisplayName("a PARENT_AWARD grant can be created, which it could not before")
+        void aParentAwardGrantCanBeCreated() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").unit(null).awardNumber("105698-00002")
+                            .confirmed(true).build());
+
+            assertThat(outcome.result())
+                    .as("problems: %s", outcome.problems())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+
+            String stored = jdbc.sql("""
+                            SELECT award_number FROM authz.access_grant
+                             WHERE institutional_identifier = :g AND grant_type = 'PARENT_AWARD'
+                            """).param("g", GRANTEE).query(String.class).single();
+            assertThat(stored).isEqualTo("105698-00002");
+        }
+
+        @Test
+        @DisplayName("omitting the Award number is a validation message, not a stack trace")
+        void aMissingAwardNumberIsRefusedClearly() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").unit(null).confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(outcome.problems())
+                    .anyMatch(problem -> problem.contains("PARENT_AWARD grants need --award-number"));
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("a malformed Award number is refused before anything is written")
+        void aMalformedAwardNumberIsRefused() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").unit(null).awardNumber("not-an-award")
+                            .confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(outcome.problems()).anyMatch(p -> p.contains("is not an Award number"));
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("scope arguments belonging to other grant types are refused")
+        void foreignScopeArgumentsAreRefused() {
+            GrantOutcome outcome = command().run(
+                    req().type("PARENT_AWARD").awardNumber("105698-00002")
+                            .unit("1250000000").io("IO-1").descendants(true)
+                            .confirmed(true).build());
+
+            assertThat(outcome.result()).isEqualTo(GrantOutcome.Result.REFUSED);
+            assertThat(String.join(" | ", outcome.problems()))
+                    .contains("meaningless for a PARENT_AWARD grant");
+            /*
+             * --include-descendants is the interesting one. It looks like it
+             * ought to control hierarchy depth, and it does not: depth is
+             * policy (app.authorization.parent-award-depth), not a per-grant
+             * flag. Accepting it silently would let an operator believe they
+             * had set something.
+             */
+            assertThat(String.join(" | ", outcome.problems()))
+                    .contains("parent-award-depth");
+            assertThat(grantCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("an unknown grant type names PARENT_AWARD among the valid ones")
+        void theErrorMessageListsEveryValidType() {
+            GrantOutcome outcome = command().run(
+                    req().type("NONSENSE").confirmed(true).build());
+
+            assertThat(String.join(" | ", outcome.problems()))
+                    .contains("CENTRAL, UNIT, IO, CONTACT_DERIVATION, PARENT_AWARD");
+        }
+
+        @Test
+        @DisplayName("a second PARENT_AWARD grant for a different Award is allowed")
+        void twoDifferentParentAwardsAreBothStorable() {
+            /*
+             * V088 rebuilt ux_access_grant_active_scope to include
+             * award_number, so these are different scopes rather than a
+             * duplicate. Worth pinning here: the index is what makes SEC-005
+             * usable for more than one Award per person.
+             */
+            assertThat(command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("105698-00002").confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("209653-00002").confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("the same PARENT_AWARD twice is still a duplicate")
+        void theSameParentAwardTwiceIsRefused() {
+            assertThat(command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("105698-00002").confirmed(true).build()).result())
+                    .isEqualTo(GrantOutcome.Result.APPLIED);
+
+            GrantOutcome second = command().run(req().type("PARENT_AWARD").unit(null)
+                    .awardNumber("105698-00002").confirmed(true).build());
+
+            assertThat(second.result()).isNotEqualTo(GrantOutcome.Result.APPLIED);
+            assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
+        }
+    }
+
     private static Req req() {
         return new Req();
     }
@@ -873,6 +1204,7 @@ class GrantProvisioningIntegrationTest {
         private String unit = "1250000000";
         private boolean descendants;
         private String io;
+        private String awardNumber;
         private String operator = "operator@bu.edu";
         private String reason = "first DEV grant";
         private String approval = "APPROVAL-2026-10-29";
@@ -888,6 +1220,7 @@ class GrantProvisioningIntegrationTest {
         Req type(String v) { this.type = v; return this; }
         Req unit(String v) { this.unit = v; return this; }
         Req io(String v) { this.io = v; return this; }
+        Req awardNumber(String v) { this.awardNumber = v; return this; }
         Req descendants(boolean v) { this.descendants = v; return this; }
         Req approval(String v) { this.approval = v; return this; }
         Req dryRun(boolean v) { this.dryRun = v; return this; }
@@ -898,14 +1231,15 @@ class GrantProvisioningIntegrationTest {
         Req revokeOnly(Object id) {
             this.revokeGrantId = String.valueOf(id);
             this.type = null; this.grantee = null; this.unit = null; this.io = null;
+            this.awardNumber = null;
             this.descendants = false; this.expiresAt = null;
             return this;
         }
 
         GrantRequest build() {
             return new GrantRequest(account, environment, grantee, actor, type, unit,
-                    descendants, io, operator, reason, approval, dryRun, confirmed,
-                    expiresAt, revokeGrantId);
+                    descendants, io, awardNumber, operator, reason, approval, dryRun,
+                    confirmed, expiresAt, revokeGrantId);
         }
     }
 

@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import edu.bu.archive.application.authorization.AccessGrantRepository;
+import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.provisioning.GrantOutcome;
@@ -35,9 +36,10 @@ import edu.bu.archive.application.authorization.admin.provisioning.EcsTaskMetada
  * --environment=dev
  * --actor=&lt;the acting administrator's ARP&gt;
  * --grantee=&lt;the ARP receiving access&gt;
- * --type=CENTRAL|UNIT|IO|CONTACT_DERIVATION
+ * --type=CENTRAL|UNIT|IO|CONTACT_DERIVATION|PARENT_AWARD
  * --unit-number=&lt;n&gt; [--include-descendants]   (UNIT only)
  * --io-value=&lt;v&gt;                              (IO only)
+ * --award-number=&lt;n&gt;                          (PARENT_AWARD only)
  * --operator=&lt;the person running this&gt;
  * --reason="..."
  * --approval-reference="..."
@@ -70,13 +72,15 @@ public class GrantProvisioningCli implements ApplicationRunner {
     private final ArchiveAdminService admin;
     private final AdminRoleRepository adminRoles;
     private final AccessGrantRepository grants;
+    private final AdminIdentityRepository identities;
 
     public GrantProvisioningCli(
             ArchiveAdminService admin, AdminRoleRepository adminRoles,
-            AccessGrantRepository grants) {
+            AccessGrantRepository grants, AdminIdentityRepository identities) {
         this.admin = admin;
         this.adminRoles = adminRoles;
         this.grants = grants;
+        this.identities = identities;
     }
 
     @Override
@@ -95,6 +99,7 @@ public class GrantProvisioningCli implements ApplicationRunner {
                 options.get("unit-number"),
                 args.containsOption("include-descendants"),
                 options.get("io-value"),
+                options.get("award-number"),
                 options.get("operator"),
                 options.get("reason"),
                 options.get("approval-reference"),
@@ -106,7 +111,7 @@ public class GrantProvisioningCli implements ApplicationRunner {
         GrantOutcome outcome = new GrantProvisioningCommand(
                 options.getOrDefault("aws-account-id", ""),
                 options.getOrDefault("environment", ""),
-                admin, adminRoles, grants,
+                admin, adminRoles, grants, identities,
                 // Read from the ECS task metadata endpoint, NOT from the
                 // flags - the flags are what we are checking.
                 new EcsTaskMetadataRuntimeIdentity()).run(request);

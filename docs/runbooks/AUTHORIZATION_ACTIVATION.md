@@ -354,6 +354,18 @@ first. The bootstrap row is history and is never deleted.
 disabled.** Every link in this stage is created by an administrator who
 has verified the person by some means outside the archive.
 
+> **How, concretely.** Not through the administrative API: its whole tree
+> returns 404 while `app.authorization.enforcement-enabled` is false, which
+> is the state this stage runs in. Use the `link-identity` operator utility
+> (`ops/grant-admin/dev-link-identity.taskdef.json`), which writes through
+> the same `ArchiveAdminService.linkIdentity` the API would. The ordered
+> sequence is in
+> [`DEV_TEST_ENABLEMENT.md`](DEV_TEST_ENABLEMENT.md).
+>
+> This paragraph previously said only "by an administrator", and the gap
+> between that and the 404 was invisible because it sat between two
+> documents rather than inside either.
+
 ### Rules
 
 - **Email is never an identity key.** It is mutable and reassignable.

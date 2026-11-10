@@ -15,6 +15,8 @@ public record GrantRequest(
         String unitNumber,
         boolean includeDescendants,
         String ioValue,
+        /** PARENT_AWARD only (SEC-005): the Award the grant is rooted at. */
+        String awardNumber,
         String operator,
         String reason,
         String approvalReference,
@@ -35,6 +37,23 @@ public record GrantRequest(
         String revokeGrantId) {
 
     /** True when the operator asked to revoke rather than to create. */
+    /**
+     * The shape before SEC-005 added {@code awardNumber}.
+     *
+     * <p>Kept so every existing caller and test keeps compiling and keeps
+     * meaning the same thing - a request with no Award number. Mirrors how
+     * {@code GrantSpecification} absorbed the same field.
+     */
+    public GrantRequest(String awsAccountId, String environment, String granteeIdentifier,
+                        String actorIdentifier, String grantType, String unitNumber,
+                        boolean includeDescendants, String ioValue, String operator,
+                        String reason, String approvalReference, boolean dryRun,
+                        boolean confirmed, String expiresAt, String revokeGrantId) {
+        this(awsAccountId, environment, granteeIdentifier, actorIdentifier, grantType,
+             unitNumber, includeDescendants, ioValue, null, operator, reason,
+             approvalReference, dryRun, confirmed, expiresAt, revokeGrantId);
+    }
+
     public boolean isRevocation() {
         return revokeGrantId != null && !revokeGrantId.isBlank();
     }
