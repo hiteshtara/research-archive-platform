@@ -1,29 +1,30 @@
 {
   "_comment": "Security Readiness dashboard data. Every 'verified' field below records WHEN something was measured and HOW, never an assumption. Nothing here is refreshed at page load - the page says 'Last verified' for exactly that reason, and runtimeSource below records why a live source is not used. securityReadinessConsistency.test.mjs fails the build if these facts contradict each other or go stale against the recorded deployment.",
-  "verifiedAt": "2026-11-09",
-  "verifiedBy": "read-only AWS inspection, the 2026-11-09 DEV deployment itself, and a 13-check authenticated browser smoke test",
+  "verifiedAt": "2026-11-10",
+  "verifiedBy": "read-only AWS inspection, the 2026-11-10 DEV API deployment itself, and an authenticated browser check of every module",
   "deployment": {
     "environment": "Development",
-    "apiTaskDefinition": "research-archive-platform-dev-api:85",
+    "apiTaskDefinition": "research-archive-platform-dev-api:87",
     "taskDefinitionIsNewest": true,
-    "imageCommit": "c1d25e6",
-    "imageCommitDate": "2026-11-09",
-    "imageDigest": "sha256:9e8265689014920826cc78892b657e4b6cc777e369e4de9f3678f73bf57e2769",
-    "imagePushed": "2026-11-09",
-    "mainCommit": "c1d25e6",
-    "mainCommitDate": "2026-11-09",
+    "imageCommit": "164b242",
+    "imageCommitDate": "2026-11-10",
+    "imageDigest": "sha256:abce05a688cdad93361e47e05e685ea9d5bcd6ec4439fa8ab4f052727f46cc42",
+    "imagePushed": "2026-11-10",
+    "mainCommit": "164b242",
+    "mainCommitDate": "2026-11-10",
     "commitsBehindMain": 0,
     "runningTasks": "1 of 1",
-    "verifiedAt": "2026-11-09",
-    "verifiedHow": "aws ecs describe-services and describe-tasks on 2026-11-09: the service and the running task are both on revision 85, rollout COMPLETED, container digest sha256:9e8265689014920826cc78892b657e4b6cc777e369e4de9f3678f73bf57e2769; GET /actuator/health returned 200 UP and the startup log carries no ERROR or Exception",
-    "note": "The running image is the current tip of main, so nothing merged is missing from DEV. The authorization and operator-tooling work that was absent on 2026-11-03 (#93-#106, plus SEC-002 bulk assignment, SEC-003, SEC-005, SEC-008 and SEC-009) is all in this image. It is deployed and switched off, which is not the same as working.",
-    "imageCommitFull": "c1d25e6010cb8b0c773c5748e2983dc52033deb5",
-    "imageIsMainTip": true
+    "verifiedAt": "2026-11-10",
+    "verifiedHow": "aws ecs describe-services and describe-tasks on 2026-11-10: the service and the running task are both on revision 87, rollout COMPLETED, 1 of 1 healthy, container digest sha256:abce05a688cdad93361e47e05e685ea9d5bcd6ec4439fa8ab4f052727f46cc42; GET /actuator/health returned 200 UP and the startup log carries no ERROR or Exception. The image was pulled back from ECR BY DIGEST and its jar byte-searched to confirm the startup-validation code is actually in the artifact, with the test-scope classes absent as a positive control",
+    "note": "The running image is the current tip of main, so nothing merged is missing from DEV. It carries SEC-001 to SEC-009 and, new on 2026-11-10, the startup safeguard that refuses to start when enforcement is enabled without a complete policy. It is deployed and switched off, which is not the same as working.",
+    "imageCommitFull": "164b242164c93713a49ebd114beb4c1747a65314",
+    "imageIsMainTip": true,
+    "imageReference": "Revision 87 pins the image by DIGEST. The deploy script first registered revision 86 referencing the same image by tag; this repository is imageTagMutability=MUTABLE, so a tag could later be moved and 86 would pull different code on its next task start. 86 remains ACTIVE but unused."
   },
   "enforcement": {
     "state": "off",
-    "verifiedAt": "2026-11-09",
-    "verifiedHow": "task definition 85 carries the same 8 environment variables as 84 and no APP_AUTHORIZATION_* of any kind, and no activity-audit key - read from aws ecs describe-task-definition on 2026-11-09",
+    "verifiedAt": "2026-11-10",
+    "verifiedHow": "task definition 87 carries the same 8 environment variables as 85 and no APP_AUTHORIZATION_* of any kind, and no activity-audit key - read from aws ecs describe-task-definition on 2026-11-10. A field-by-field diff of 85 against the new revision showed exactly one difference: the container image",
     "businessMeaning": "Every signed-in user can see every archived record. Record-level restrictions are built and tested but are not switched on.",
     "whyNotOn": "Turning it on today would show nobody anything: with no access grants issued, a denial is indistinguishable from a record that does not exist, so dashboards would read zero. Grants have to be issued and checked first."
   },
@@ -33,17 +34,20 @@
     "verifiedAt": "2026-11-09",
     "verifiedHow": "V082-V087 catalog-verified read-only on 2026-11-09 over pg_indexes and pg_tables through the SSM tunnel as archive_analyst; the migration ledger is deliberately unreadable by that role, so the catalog is the evidence. V088 was applied on 2026-11-09 by the ECS loader task running its own packaged migration runner, which logged a single 'Applying migration V088' line and exited 0",
     "v087Confirmed": true,
-    "grantCountsVerified": false,
-    "grantCountsNote": "Access grants, identity links and administrators could NOT be re-measured on 2026-11-09: the read-only analyst role has no access to the authorization schema. The last known figures are from 2026-11-03 and are shown as such.",
+    "grantCountsVerified": true,
+    "grantCountsNote": "Measured on 2026-11-09 through the approved temporary DEV tunnel with the archive_api credential, read-only bound at connect and verified at both session and transaction level, using a fixed list of aggregate SELECTs over authz.* only. The analyst role used on earlier dates cannot see the authorization schema, which is why the figures were previously carried forward from 2026-11-03.",
     "lastKnownGrants": {
       "administrators": 1,
       "identityLinks": 1,
       "activeGrants": 0,
-      "asOf": "2026-11-03"
+      "expiredGrants": 0,
+      "revokedGrants": 0,
+      "asOf": "2026-11-09"
     },
     "v088AppliedAt": "2026-11-09",
     "v089Held": "V089 is kept in database/migrations-pending-approval/, outside the directory every ETL loader globs, so no loader run - including the nightly Subaward sync - can apply it. MigrationReleaseScopeTest fails the build if it reappears.",
-    "v088Confirmed": true
+    "v088Confirmed": true,
+    "identitySourceTables": "authz.kim_principal and authz.principal_crosswalk are both EMPTY (0 rows, measured 2026-11-09). They are the ETL-loaded tables that map a BU person to the institutional identifier a grant is keyed on. Administrator-verified linking does not read them, so a small pilot is not blocked - but the lookup is manual until they are loaded."
   },
   "knownMismatch": null,
   "stateLabels": {
@@ -71,9 +75,9 @@
       },
       "evidence": {
         "implemented": "GrantType.CENTRAL; AccessScope.central short-circuits every module rule.",
-        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit c1d25e6 (verified by file presence at that commit).",
+        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit 164b242 (verified by file presence at that commit).",
         "migrationApplied": "V082 authz.access_grant exists in DEV (catalog-verified 2026-11-09).",
-        "configured": "No APP_AUTHORIZATION_* on task definition 85.",
+        "configured": "No APP_AUTHORIZATION_* on task definition 87.",
         "tested": "Covered by the four record-authorization integration suites against real PostgreSQL.",
         "enforcing": "Enforcement flag is off, so no grant of any type restricts anything."
       },
@@ -95,7 +99,7 @@
       "evidence": {
         "implemented": "Single-grant department access and bulk assignment (grantAccessInBulk) are both in main.",
         "merged": "Merged into main by PR #114 on 2026-11-09. Bulk assignment is no longer outstanding.",
-        "deployed": "Both are in image c1d25e6.",
+        "deployed": "Both are in image 164b242.",
         "tested": "8 tests for bulk assignment; department access covered by the Award, Proposal and Negotiation authorization suites.",
         "enforcing": "Enforcement flag is off."
       },
@@ -120,7 +124,7 @@
         "migrationApplied": "No migration needed - award_person.award_id is already a version key.",
         "tested": "RecordAccessEvaluator and RecordScopeSqlBuilder tests, plus Sec003AiPartialFamilyAccessTest which proves a partially-visible award family is refused for the AI and history endpoints.",
         "enforcing": "Enforcement flag is off.",
-        "deployed": "In image c1d25e6."
+        "deployed": "In image 164b242."
       },
       "pendingApproval": "Whether research staff should keep access to Subawards linked to award versions from before they joined. The current behaviour is the stricter reading."
     },
@@ -139,7 +143,7 @@
       },
       "evidence": {
         "implemented": "AwardAccountNumberIoResolver and AwardAccountNumberIoSql are wired in AuthorizationConfiguration - verified in both main and the running image commit, not inferred from comments.",
-        "deployed": "Present at image commit c1d25e6.",
+        "deployed": "Present at image commit 164b242.",
         "enforcing": "Enforcement flag is off."
       },
       "pendingApproval": null
@@ -163,7 +167,7 @@
         "tested": "10 Testcontainers tests for the traversal (depth limit, a real two-row cycle, a cross-family row that must not be followed) and 22 for resolution, decisions, list SQL and grant shape.",
         "enforcing": "Enforcement flag is off.",
         "merged": "Merged into main by PR #114 on 2026-11-09.",
-        "deployed": "In image c1d25e6.",
+        "deployed": "In image 164b242.",
         "configured": "Off. The award_number column V088 adds is read only when record-level enforcement is on, so that query has not yet run against DEV - it was rehearsed against throwaway PostgreSQL carrying V088. Expect it to be the first thing to check when enforcement is switched on."
       },
       "pendingApproval": "Depth default of 1 (maximum 10) is the working value, pending business confirmation. Broader inheritance to subawards and negotiations is deliberately NOT enabled."
@@ -200,7 +204,7 @@
         "enforcing": "no"
       },
       "evidence": {
-        "deployed": "The revocation endpoint and the operator command-line tool's revocation support (#103) are both in image c1d25e6.",
+        "deployed": "The revocation endpoint and the operator command-line tool's revocation support (#103) are both in image 164b242.",
         "tested": "Revocation and optional expiry are covered by the grant provisioning integration suite against real PostgreSQL.",
         "enforcing": "Enforcement flag is off, so revoking changes nothing visible today."
       },
@@ -220,9 +224,9 @@
         "enforcing": "no"
       },
       "evidence": {
-        "deployed": "Present in image c1d25e6, which is the current tip of main. The database-ahead-of-application mismatch reported on 2026-11-03 is resolved.",
+        "deployed": "Present in image 164b242, which is the current tip of main. New on 2026-11-10: the application now REFUSES TO START if enforcement is enabled without a complete policy. Before that, setting the flag alone started cleanly and denied every record to every user, administrators included, because the policy is checked before any grant. Verified in the deployed jar by byte-search, not inferred from the commit.",
         "migrationApplied": "V082-V088 confirmed in DEV on 2026-11-09.",
-        "configured": "Off, confirmed from task definition 85 on 2026-11-09.",
+        "configured": "Off, confirmed from task definition 87 on 2026-11-10.",
         "enforcing": "No. This is the deliberate state."
       },
       "pendingApproval": "Approval to issue the first access grants, and then to switch enforcement on."
@@ -244,9 +248,9 @@
         "implemented": "All five recording points are wired: record views and refusals at the single authorization decision point, attachment downloads and report exports before any file is released, and searches in the global, document, file-finder and evidence search services.",
         "migrationApplied": "V089 is written but NOT applied anywhere, and is held outside the directory the ETL loaders glob so no scheduled run can apply it. The database permission to write audit rows is a separate reviewed script, also not applied - and it explicitly removes the read access a blanket grant would otherwise have given.",
         "tested": "50 tests. An audit failure can never grant access - proved under both failure settings. Downloads and exports stop if their audit record cannot be written; routine views and searches continue and the gap is counted and logged.",
-        "configured": "Collection is off, confirmed from task definition 85 on 2026-11-09. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one.",
+        "configured": "Collection is off, confirmed from task definition 87 on 2026-11-10. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one.",
         "merged": "Merged into main by PR #114 on 2026-11-09. The migration and the database permission were deliberately kept out of the applied migration directory.",
-        "deployed": "All five recording points are in image c1d25e6. Collection is off, so each one is a no-op that cannot throw - which is why wiring them before approval is safe."
+        "deployed": "All five recording points are in image 164b242. Collection is off, so each one is a no-op that cannot throw - which is why wiring them before approval is safe."
       },
       "pendingApproval": "How long audit records should be kept (90 days is proposed, not approved; automatic deletion is not implemented). Whether the proposed failure settings - continue on a failed view audit, stop on a failed download audit - are accepted as BU policy. And approval to apply the migration and grant the database permission."
     },
@@ -265,7 +269,7 @@
       },
       "evidence": {
         "implemented": "The database role grants SELECT and nothing else on the archive schema. The regression tests that keep it that way are PR #112.",
-        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script. The regression suite is in image c1d25e6.",
+        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script. The regression suite is in image 164b242. The database itself was not re-checked on 2026-11-10 - no privilege changed, and this records when it was last measured rather than implying it was measured again.",
         "tested": "17 tests, including a catalog-wide sweep that fails if any future grant widens it.",
         "enforcing": "Yes - this one is in force today, independently of the enforcement flag.",
         "merged": "PR #112 merged into main by PR #114 on 2026-11-09."
@@ -288,15 +292,25 @@
     "followUp": "Generating Spring Boot build-info (git commit and build time) and exposing it on /actuator/info would let this panel read the running revision at page load and make staleness structurally impossible. That is an API change and is not done here."
   },
   "smokeTest": {
-    "performedAt": "2026-11-09",
-    "revision": "research-archive-platform-dev-api:85",
-    "checks": 13,
-    "passed": 13,
+    "performedAt": "2026-11-10",
+    "revision": "research-archive-platform-dev-api:87",
+    "checks": 8,
+    "passed": 8,
     "failed": 0,
     "blocked": 0,
-    "how": "Authenticated browser session against https://nonprod.kuali-archive.bu.edu as a real BU user through Shibboleth and Duo, following the release checklist's 13 read-only checks.",
-    "covered": "health, ECS service state, running image digest, dashboard counts, global search, Award workspace and historical versions, Proposal workspace and history, Subaward workspace and version navigation, Negotiation workspace, Document Explorer, the attachment authorization gate, this page, and that records are still visible",
+    "how": "Post-deployment verification in an authenticated browser against https://nonprod.kuali-archive.bu.edu, plus read-only AWS inspection and a byte-level check of the deployed jar.",
+    "covered": "health 200 UP; service on revision 87 at 1 of 1 with rollout COMPLETED; the running container's digest; enforcement and activity-audit variables still absent; Dashboard counts against the pre-deployment baseline; Award workspace; Global Search across all four modules; the QA Testing and Security Readiness pages",
     "recordsStillVisible": true,
-    "note": "All seven dashboard counts were unchanged from the pre-deployment baseline and no console error was raised. Nothing was modified: no permission, grant, database row, AWS resource or ECS configuration."
-  }
+    "note": "All seven Dashboard counts were unchanged from the pre-deployment baseline and no console error was raised. Nothing was modified beyond the API image: no grant, identity link, database row, migration, privilege or enforcement flag."
+  },
+  "priorVerifications": [
+    {
+      "performedAt": "2026-11-09",
+      "revision": "research-archive-platform-dev-api:85",
+      "commit": "c1d25e6",
+      "what": "13-check release smoke matrix in an authenticated browser",
+      "result": "13 of 13 passed, 0 failed, 0 blocked",
+      "note": "Superseded as the CURRENT verification by the 2026-11-10 deployment of revision 87, but not invalidated - it is what was checked on the revision it names."
+    }
+  ]
 }
