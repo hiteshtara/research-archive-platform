@@ -87,8 +87,8 @@ test("enforcement is recorded as off, matching the measured task definition", ()
 
 test("the deployed commit and revision are recorded, not inferred", () => {
   const deployment = deploymentSummary(readiness.deployment);
-  assert.equal(deployment.revision, "research-archive-platform-dev-api:85");
-  assert.equal(deployment.commit, "c1d25e6");
+  assert.equal(deployment.revision, "research-archive-platform-dev-api:87");
+  assert.equal(deployment.commit, "164b242");
   assert.equal(deployment.behind, 0);
   assert.equal(deployment.isCurrent, true);
   assert.ok(deployment.verifiedAt);
@@ -181,12 +181,29 @@ test("the image digest is shortened for display but kept in full in the data", (
   assert.ok(readiness.deployment.imageDigest.length > 40, "the full digest must survive in the data");
 });
 
-test("grant figures are presented with their real date, not as current", () => {
+test("grant figures carry the date they were actually measured", () => {
+  /*
+   * These were carried forward from 2026-11-03 for weeks, because the
+   * read-only analyst role cannot see the authorization schema and nothing
+   * else had been authorised to look. The Phase 2 inventory measured them
+   * directly on 2026-11-09, so they are now verified rather than last-known -
+   * and the date moves with the measurement, which is the property this test
+   * exists to hold.
+   */
   const grants = grantFigures(readiness.database);
-  assert.equal(grants.verified, false, "they could not be re-measured on 2026-11-09");
-  assert.equal(grants.asOf, "2026-11-03");
+  assert.equal(grants.verified, true, "measured 2026-11-09 through the approved tunnel");
+  assert.equal(grants.asOf, "2026-11-09");
   assert.equal(grants.activeGrants, 0);
-  assert.ok(grants.caveat, "an unverified figure must carry its caveat");
+  assert.equal(
+    grants.caveat,
+    null,
+    "a verified figure needs no caveat - the caveat exists for figures that could not be re-read",
+  );
+  assert.match(
+    readiness.database.grantCountsNote,
+    /read-only|archive_api/i,
+    "how they were measured must stay recorded, even once they are verified",
+  );
 });
 
 test("awaitingBusinessApproval lists only genuine decisions", () => {

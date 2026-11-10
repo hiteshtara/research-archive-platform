@@ -44,21 +44,29 @@ const CAPABILITIES = readiness.capabilities;
 const STAGES = ["implemented", "merged", "deployed", "migrationApplied", "configured", "tested", "enforcing"];
 
 /*
- * resolvedMismatches is the one place a superseded fact belongs - it exists to
- * say "this is what we used to report, and here is why we no longer do". Every
- * staleness rule below therefore reads the document with that subtree removed,
- * so history stays writable and live claims do not.
+ * Two subtrees are explicitly historical, and are the only places a superseded
+ * fact belongs: resolvedMismatches ("this is what we used to report, and why we
+ * no longer do") and priorVerifications ("this is what was checked, on the
+ * revision it names"). Every staleness rule below reads the document with both
+ * removed, so history stays writable and live claims do not.
+ *
+ * Nothing else may name an older revision. That asymmetry is the point - a
+ * stale claim is indistinguishable from a current one unless the historical
+ * places are enumerated rather than inferred.
  */
-const liveText = (() => {
-  const copy = JSON.parse(JSON.stringify(readiness));
-  delete copy.resolvedMismatches;
-  return JSON.stringify(copy);
-})();
+const HISTORICAL_SUBTREES = ["resolvedMismatches", "priorVerifications"];
 
-/** Every string in the document except the resolved-mismatch history. */
-function liveStrings() {
+function withoutHistory() {
   const copy = JSON.parse(JSON.stringify(readiness));
-  delete copy.resolvedMismatches;
+  for (const key of HISTORICAL_SUBTREES) delete copy[key];
+  return copy;
+}
+
+const liveText = JSON.stringify(withoutHistory());
+
+/** Every string in the document except the historical subtrees. */
+function liveStrings() {
+  const copy = withoutHistory();
   const out = [];
   const walk = (node, path) => {
     if (typeof node === "string") {
@@ -338,9 +346,9 @@ test("the recorded smoke test refers to the deployed revision and adds up", () =
 
 test("deploymentSummary reports being up to date without inventing it", () => {
   const summary = deploymentSummary(DEPLOYMENT);
-  assert.equal(summary.revision, "research-archive-platform-dev-api:85");
-  assert.equal(summary.commit, "c1d25e6");
-  assert.equal(summary.commitFull, "c1d25e6010cb8b0c773c5748e2983dc52033deb5");
+  assert.equal(summary.revision, "research-archive-platform-dev-api:87");
+  assert.equal(summary.commit, "164b242");
+  assert.equal(summary.commitFull, "164b242164c93713a49ebd114beb4c1747a65314");
   assert.equal(summary.behind, 0);
   assert.equal(summary.isCurrent, true);
   assert.equal(summary.runningTasks, "1 of 1");
@@ -398,6 +406,28 @@ test("the release checklist tells the next deployer to refresh this file", () =>
     /securityReadiness\.json/,
     "the release checklist must name this file as a post-deployment step",
   );
+});
+
+test("an earlier verification is kept, named with the revision it was run against", () => {
+  /*
+   * The 13-check matrix of 2026-11-09 was run against revision 85. Deleting it
+   * when 87 shipped would lose the record; promoting it to the current
+   * smokeTest would claim it covered code it never saw. So it moves here, and
+   * the current smokeTest is the one that actually ran against what is
+   * deployed.
+   */
+  const prior = readiness.priorVerifications ?? [];
+  assert.ok(prior.length > 0, "the earlier verification must be kept");
+
+  const current = readiness.deployment.apiTaskDefinition;
+  for (const entry of prior) {
+    assert.ok(entry.performedAt && entry.revision && entry.result);
+    assert.notEqual(
+      entry.revision,
+      current,
+      "a prior verification naming the CURRENT revision is not prior - it belongs in smokeTest",
+    );
+  }
 });
 
 // ── history stays history ────────────────────────────────────────────
