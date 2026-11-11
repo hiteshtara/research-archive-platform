@@ -426,7 +426,164 @@ class ProposalSubawardLexicalRelevanceIntegrationTest {
         }
     }
 
+    // ── the acceptance matrix for the acronym path ───────────────────
+
+    /**
+     * Numbered acceptance cases for Proposal sponsor-acronym matching, in the
+     * shape the security acceptance pack uses, so a tester can work through
+     * them and a reviewer can see which are covered.
+     *
+     * <p>Cases P1-P4 are the capability. P5-P6 are the agreement between the
+     * two surfaces a reader moves between. P7-P9 are the regression guard:
+     * the modules this change did NOT touch must behave exactly as they did
+     * at revision 89.
+     *
+     * <p>The sponsor rows below are {@code archive.sponsor} - Kuali's shared
+     * sponsor master, loaded by {@code sql/extract/reference/17_sponsor.sql},
+     * not a lookup invented for this test. That the master carries acronym
+     * "NSF" against the NSF sponsor code is already proven on DEV by the
+     * Award leg: a live search for "NSF" on 2026-11-10 returned 25 Awards
+     * captioned "Matched on: Sponsor (NSF)", and that caption is read from
+     * {@code archive.sponsor.acronym}. Proposal joins the same master on the
+     * same column.
+     */
+    @Nested
+    @DisplayName("Proposal sponsor-acronym acceptance (P1-P9)")
+    class AcronymAcceptance {
+
+        @Test
+        @DisplayName("P1: an NSF-sponsored Proposal with no NSF in any text field is returned")
+        void p1() {
+            assertThat(proposalNumbers("NSF")).contains("01091593");
+        }
+
+        @Test
+        @DisplayName("P2: it is returned through the sponsor master, not its own fields")
+        void p2() {
+            // Prove the path rather than the outcome: with the master emptied
+            // the same Proposal disappears, so nothing else can be matching it.
+            jdbc.sql("DELETE FROM archive.sponsor").update();
+            try {
+                assertThat(proposalNumbers("NSF")).doesNotContain("01091593");
+            } finally {
+                seedSponsors();
+            }
+            assertThat(proposalNumbers("NSF")).contains("01091593");
+        }
+
+        @Test
+        @DisplayName("P3: an unrelated word containing nsf mid-word is excluded")
+        void p3() {
+            assertThat(proposalNumbers("NSF"))
+                    .doesNotContain("01118224", "01098086", "01107145", "01116997");
+        }
+
+        @Test
+        @DisplayName("P4: a Proposal whose sponsor acronym is not NSF is excluded")
+        void p4() {
+            // 01118224's sponsor acronym is SOS. A search for NSF must not
+            // reach it through the acronym join either.
+            assertThat(proposalNumbers("NSF")).doesNotContain("01118224");
+            assertThat(proposalNumbers("SOS"))
+                    .as("and the acronym path is live for the acronym it does carry")
+                    .contains("01118224");
+        }
+
+        @Test
+        @DisplayName("P5: Global Search and the Proposal module return the same Proposals")
+        void p5() {
+            for (String term : List.of("NSF", "SOS", "transformation", "cardio", "1182")) {
+                assertThat(proposalNumbers(term))
+                        .as("the two surfaces disagree for \"%s\"", term)
+                        .containsExactlyInAnyOrderElementsOf(modulePage(term));
+            }
+        }
+
+        @Test
+        @DisplayName("P6: the Proposal module page and its own total agree")
+        void p6() {
+            for (String term : List.of("NSF", "SOS", "transformation", "cardio", "1182")) {
+                assertThat((long) modulePage(term).size())
+                        .as("page and count disagree for \"%s\"", term)
+                        .isEqualTo(proposals.countFamilyPage(term, ProposalSearchFilters.none()));
+            }
+        }
+
+        @Test
+        @DisplayName("P7: Award behaviour is unchanged - anchored text, and its own acronym path")
+        void p7() {
+            assertThat(awardNumbers("NSF"))
+                    .as("reached by its sponsor's acronym, exactly as at revision 89")
+                    .contains("100527-00001")
+                    .as("and still not by the letters inside TRANSFER")
+                    .doesNotContain("100543-00001");
+        }
+
+        @Test
+        @DisplayName("P8: Negotiation behaviour is unchanged - no Material Transfer match")
+        void p8() {
+            assertThat(negotiationIds("NSF")).isEmpty();
+            assertThat(negotiationIds("transfer"))
+                    .as("and a legitimate search for transfer still finds them")
+                    .isNotEmpty();
+        }
+
+        @Test
+        @DisplayName("P9: Subaward gains no acronym path, and says so by behaviour")
+        void p9() {
+            /*
+             * archive.subaward carries only the denormalized sponsor NAMES and
+             * no sponsor code, so there is nothing to join. 4319's sponsor is
+             * the National Institutes of Health and it is not reachable by
+             * "NIH" through an acronym - only by the spelled-out name. This is
+             * recorded as a KNOWN LIMITATION rather than left to be discovered
+             * during acceptance testing.
+             */
+            assertThat(subawardCodes("NIH"))
+                    .as("no acronym path exists for Subaward")
+                    .doesNotContain("4319");
+            assertThat(subawardCodes("National"))
+                    .as("the spelled-out sponsor name is the only way in")
+                    .contains("4319");
+        }
+    }
+
     // ---------------- fixtures and queries ----------------
+
+    private static List<String> modulePage(String term) {
+        return proposals.findFamilyPage(term, ProposalSearchFilters.none(), 100, 0).stream()
+                .map(ProposalFamilySummaryResponse::proposalNumber)
+                .sorted()
+                .toList();
+    }
+
+    /** The Award text branch as AwardArchiveRepository writes it, acronym included. */
+    private static List<String> awardNumbers(String term) {
+        return jdbc.sql("""
+                        SELECT av.award_number FROM archive.award_version av
+                         WHERE av.is_primary_current = TRUE
+                           AND (av.title ~* :wordRegex
+                                OR av.sponsor_name ~* :wordRegex
+                                OR av.lead_unit_name ~* :wordRegex
+                                OR EXISTS (
+                                    SELECT 1 FROM archive.sponsor sp2
+                                    WHERE sp2.sponsor_code = av.sponsor_code
+                                      AND sp2.acronym ~* :wordRegex))
+                         ORDER BY av.award_number
+                        """)
+                .param("wordRegex", LexicalMatch.wordStartRegex(term))
+                .query(String.class).list();
+    }
+
+    private static List<Long> negotiationIds(String term) {
+        return jdbc.sql("""
+                        SELECT n.negotiation_id FROM archive.negotiation n
+                         WHERE n.negotiation_agreement_type_description ~* :wordRegex
+                         ORDER BY n.negotiation_id
+                        """)
+                .param("wordRegex", LexicalMatch.wordStartRegex(term))
+                .query(Long.class).list();
+    }
 
     /** Global Search's Proposal leg, through the real repository. */
     private static List<String> proposalNumbers(String term) {
@@ -472,6 +629,41 @@ class ProposalSubawardLexicalRelevanceIntegrationTest {
 
     private static void seed() {
         seedSponsors();
+
+        /*
+         * Award and Negotiation rows exist here only as a REGRESSION GUARD
+         * (cases P7, P8). They are the same real DEV records
+         * GlobalSearchLexicalRelevanceIntegrationTest uses, so if this change
+         * disturbed the two modules it was not supposed to touch, these fail
+         * in the same file as the change rather than somewhere else.
+         */
+        jdbc.sql("""
+                INSERT INTO archive.award_version (
+                    award_id, award_number, sequence_number, title,
+                    status_description, sponsor_code, sponsor_name,
+                    lead_unit_number, lead_unit_name, award_effective_date,
+                    is_primary_current, workflow_document_number
+                ) VALUES
+                (1928503, '100527-00001', 12,
+                 'NATIONAL SCIENCE FOUNDATION GRADUATE RESEARCH FELLOWSHIP PROGRAM',
+                 'Closed', '301573', 'National Science Foundation',
+                 '1250000000', 'PHYSICS', DATE '2008-01-01', TRUE, 'DOC-100527'),
+                (714002, '100543-00001', 1,
+                 'PIRE: ORIGINS OF HIGH MARINE BIODIVERSITY: TRANSFORMING A BIODIVERSITY HOTSPOT',
+                 'Active', '000999', 'A sponsor with no acronym',
+                 '1250000000', 'PHYSICS', DATE '2010-01-01', TRUE, 'DOC-100543')
+                """).update();
+
+        jdbc.sql("""
+                INSERT INTO archive.negotiation (
+                    negotiation_id, document_number,
+                    negotiation_agreement_type_description,
+                    negotiation_status_description, negotiator_full_name
+                ) VALUES
+                (6447, '760067', 'Material Transfer Agreement', 'Abandoned', NULL),
+                (12724, '1149373', 'Material Transfer Agreement', 'Under Review',
+                 'WILLIAM P SEGARRA')
+                """).update();
 
         /*
          * proposal_id 5001 is the NSF-sponsored proposal whose title says
