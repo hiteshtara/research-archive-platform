@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import edu.bu.archive.application.authorization.AuthorizationPolicy;
 import edu.bu.archive.application.authorization.AuthorizationProperties;
 import edu.bu.archive.application.authorization.CurrentIdentityProvider;
+import edu.bu.archive.application.authorization.GrantType;
 import edu.bu.archive.application.authorization.IdentityLinkStatus;
 import edu.bu.archive.application.authorization.IdentityResolver;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
@@ -81,33 +82,113 @@ class AdminAuthorizationControllerTest {
     @DisplayName("While enforcement is off the surface does not exist")
     class EnforcementDisabled {
 
+        /*
+         * All twelve endpoints, not a sample of five.
+         *
+         * Every method goes through actor(), whose first statement is
+         * requireEnforcementEnabled(), so the seven endpoints this test used
+         * not to name were already protected - but by construction, which is
+         * a statement about the code as it stands rather than a guarantee a
+         * test holds in place. Moving actor() later in one method body would
+         * expose that endpoint while enforcement was off and nothing here
+         * would have noticed. The parallel 403 test below had exactly this
+         * gap once; its own comment records that the list covered 9 of 12.
+         */
         @Test
         void everyAdministrativeEndpointIs404() throws Exception {
             properties.setEnforcementEnabled(false);
             adminRoles.bootstrap(ADMIN, "operator", "test");
             MockMvc mvc = mvc();
 
+            // The four reads.
             mvc.perform(get("/api/v1/admin/administrators")).andExpect(status().isNotFound());
             mvc.perform(get("/api/v1/admin/identities").param("q", "x")).andExpect(status().isNotFound());
             mvc.perform(get("/api/v1/admin/identities/inst-subject")).andExpect(status().isNotFound());
             mvc.perform(get("/api/v1/admin/audit")).andExpect(status().isNotFound());
+
+            // The eight writes.
             mvc.perform(post("/api/v1/admin/identities/inst-subject/grants")
                             .contentType("application/json")
                             .content("{\"type\":\"CENTRAL\"}"))
                     .andExpect(status().isNotFound());
+            mvc.perform(patch("/api/v1/admin/identities/inst-subject/grants/1")
+                            .contentType("application/json")
+                            .content("{\"includeDescendants\":false}"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(delete("/api/v1/admin/identities/inst-subject/grants/1"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(post("/api/v1/admin/identities/inst-subject/links")
+                            .contentType("application/json")
+                            .content("{\"cognitoIssuer\":\"https://issuer\",\"cognitoSubject\":\"sub\"}"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(delete("/api/v1/admin/identities/inst-subject/links/1"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(put("/api/v1/admin/identities/inst-subject/suspension")
+                            .contentType("application/json")
+                            .content("{\"suspended\":true}"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(post("/api/v1/admin/administrators")
+                            .contentType("application/json")
+                            .content("{\"institutionalIdentifier\":\"inst-x\"}"))
+                    .andExpect(status().isNotFound());
+            mvc.perform(delete("/api/v1/admin/administrators/inst-admin"))
+                    .andExpect(status().isNotFound());
         }
 
+        /*
+         * A 404 is only half the guarantee - it must also be true that
+         * nothing changed. Each write is given real state to damage: a grant
+         * to modify or revoke, a link to remove, an administrator to revoke.
+         * A write that silently succeeded behind the 404 would show up here
+         * rather than merely going unreported.
+         */
         @Test
-        void nothingIsWrittenWhileTheSurfaceIsAbsent() throws Exception {
-            properties.setEnforcementEnabled(false);
+        void noWriteEndpointChangesAnythingWhileTheSurfaceIsAbsent() throws Exception {
             adminRoles.bootstrap(ADMIN, "operator", "test");
+            grants.grant(ORDINARY.value(), GrantType.CENTRAL, null, false, null);
+            audit.clear();
 
-            mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")
+            properties.setEnforcementEnabled(false);
+            MockMvc mvc = mvc();
+
+            mvc.perform(post("/api/v1/admin/identities/inst-ordinary/grants")
                     .contentType("application/json")
-                    .content("{\"type\":\"CENTRAL\"}"));
+                    .content("{\"type\":\"UNIT\",\"unit\":\"1250000000\"}"));
+            mvc.perform(patch("/api/v1/admin/identities/inst-ordinary/grants/1")
+                    .contentType("application/json")
+                    .content("{\"includeDescendants\":true}"));
+            mvc.perform(delete("/api/v1/admin/identities/inst-ordinary/grants/1"));
+            mvc.perform(post("/api/v1/admin/identities/inst-ordinary/links")
+                    .contentType("application/json")
+                    .content("{\"cognitoIssuer\":\"https://issuer\",\"cognitoSubject\":\"new-sub\"}"));
+            mvc.perform(delete("/api/v1/admin/identities/inst-ordinary/links/1"));
+            mvc.perform(put("/api/v1/admin/identities/inst-ordinary/suspension")
+                    .contentType("application/json")
+                    .content("{\"suspended\":true}"));
+            mvc.perform(post("/api/v1/admin/administrators")
+                    .contentType("application/json")
+                    .content("{\"institutionalIdentifier\":\"inst-ordinary\"}"));
+            mvc.perform(delete("/api/v1/admin/administrators/inst-admin"));
 
-            assertThat(grants.findForGrantee(new InstitutionalIdentifier("inst-subject"))).isEmpty();
-            assertThat(audit.events()).isEmpty();
+            assertThat(grants.findForGrantee(ORDINARY))
+                    .as("the seeded grant: neither modified nor revoked, and none added")
+                    .singleElement()
+                    .satisfies(grant -> {
+                        assertThat(grant.includeDescendants()).isFalse();
+                        assertThat(grant.revokedAt()).isNull();
+                    });
+            assertThat(links.findByCognitoIdentity(cognito(ORDINARY_SUBJECT)))
+                    .as("no link added and none removed")
+                    .hasSize(1);
+            assertThat(links.isSuspended(ORDINARY))
+                    .as("suspension must not have been applied")
+                    .isFalse();
+            assertThat(adminRoles.countActive())
+                    .as("no administrator added or revoked")
+                    .isEqualTo(1);
+            assertThat(audit.events())
+                    .as("an absent surface must leave no audit trail")
+                    .isEmpty();
         }
     }
 
