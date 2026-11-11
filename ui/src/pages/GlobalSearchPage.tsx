@@ -163,11 +163,18 @@ export function GlobalSearchPage() {
               <ResultCard
                 key={`${result.module}-${result.recordId}-${result.identifier}-${result.sequenceNumber}`}
                 to={result.route || undefined}
-                identifier={card.identifier}
+                /*
+                 * For a Negotiation this is "Negotiation <id> · Document
+                 * <number>" rather than the bare document number - the ID
+                 * the archive is addressed by was previously not shown at
+                 * all. Every other module is unaffected. The link target is
+                 * still result.route, which is unchanged.
+                 */
+                identifier={card.identifierHeading}
                 secondaryIdentifier={
                   <>
                     <Chip label={result.module} size="small" color="primary" />
-                    {result.documentNumber && (
+                    {card.showDocumentChip && result.documentNumber && (
                       <Chip
                         label={`Doc ${result.documentNumber}`}
                         size="small"

@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import edu.bu.archive.application.authorization.SqlFragment;
+import edu.bu.archive.application.search.LexicalMatch;
 import edu.bu.archive.application.subaward.SubawardSearchFilters;
 import java.util.List;
 import java.util.Optional;
@@ -220,6 +221,36 @@ public class SubawardArchiveRepository {
      * record per subaward_code is a separate, deliberate decision and
      * is not taken here.
      */
+    /*
+     * IDENTIFIER vs TEXT, the same split AwardArchiveRepository makes, and
+     * the completion of QA TC-040's word-start fix.
+     *
+     * subaward_id, subaward_code, document_number, organization_id and
+     * account_number keep substring matching: pasting a fragment of one is
+     * matching mid-string on purpose, and "1920" finding document_number
+     * 1119202 is a documented, deliberately-ordered-around property of this
+     * search rather than a defect.
+     *
+     * title, status_description and the two sponsor names are TEXT, and are
+     * anchored to the START of a word when the term qualifies. Measured on
+     * 2026-11-10 against the running revision, 70 of the first 100 Subaward
+     * rows for "NSF" contained no NSF at all - they matched inside
+     * "phosphoglycosyl transferase" and "Transformer-Based". Only the start
+     * of the word is anchored, never the whole word, so "cardio" still
+     * finds "cardiology".
+     *
+     * The FRN predicate stays on substring: looksLikeFrn admits only
+     * numeric-looking terms, which never qualify for anchoring anyway, so
+     * gating it would add a branch that can never be taken.
+     *
+     * :anchorWords is a bound constant, so the planner discards whichever
+     * branch is false. The substring branch keeps '%' || :query || '%'
+     * rather than moving to LexicalMatch.likePattern: this page does not
+     * translate '*' and AWARD_WILDCARD_HINT says so explicitly.
+     *
+     * One definition, used by both findSubawards and countSubawards through
+     * whereClause, so a page and its own total cannot disagree.
+     */
     private String subawardFilter(String normalizedQuery) {
         return normalizedQuery.isEmpty()
                 ? ""
@@ -228,12 +259,21 @@ public class SubawardArchiveRepository {
                         ILIKE '%' || :query || '%'
                    OR s.subaward_code ILIKE '%' || :query || '%'
                    OR s.document_number ILIKE '%' || :query || '%'
-                   OR s.title ILIKE '%' || :query || '%'
-                   OR s.status_description ILIKE '%' || :query || '%'
                    OR s.organization_id ILIKE '%' || :query || '%'
                    OR s.account_number ILIKE '%' || :query || '%'
-                   OR s.award_prime_sponsor_name ILIKE '%' || :query || '%'
-                   OR s.award_sponsor_name ILIKE '%' || :query || '%'
+                   OR (:anchorWords = FALSE AND (
+                            s.title ILIKE '%' || :query || '%'
+                         OR s.status_description ILIKE '%' || :query || '%'
+                         OR s.award_prime_sponsor_name
+                                ILIKE '%' || :query || '%'
+                         OR s.award_sponsor_name ILIKE '%' || :query || '%'
+                      ))
+                   OR (:anchorWords = TRUE AND (
+                            s.title ~* :wordRegex
+                         OR s.status_description ~* :wordRegex
+                         OR s.award_prime_sponsor_name ~* :wordRegex
+                         OR s.award_sponsor_name ~* :wordRegex
+                      ))
                 """ + frnFilter(normalizedQuery);
     }
 
@@ -332,7 +372,10 @@ public class SubawardArchiveRepository {
             SubawardSearchFilters filters
     ) {
         if (!normalizedQuery.isEmpty()) {
-            statement = statement.param("query", normalizedQuery);
+            statement = statement
+                    .param("query", normalizedQuery)
+                    .param("anchorWords", LexicalMatch.anchorsToWordStart(normalizedQuery))
+                    .param("wordRegex", LexicalMatch.wordStartRegex(normalizedQuery));
         }
         if (filters.status() != null) {
             statement = statement.param("status", filters.status());
