@@ -221,14 +221,20 @@ Mirroring the `authz` grant design exactly:
 
 ```sql
 GRANT USAGE ON SCHEMA qa TO archive_api;
-GRANT SELECT ON ALL TABLES IN SCHEMA qa TO archive_api;
+-- Table by table, never ON ALL TABLES: archive_api_role.sql grants
+-- SELECT ON ALL TABLES IN SCHEMA authz, so a re-run of the role script
+-- silently re-grants what a migration revoked (SEC-008 records this).
+-- A blanket grant here would also make any future qa table auto-readable.
+GRANT SELECT ON qa.test_case, qa.test_cycle, qa.test_result,
+                qa.assignment, qa.defect TO archive_api;
 GRANT INSERT ON qa.test_result, qa.defect, qa.assignment TO archive_api;
 GRANT INSERT ON qa.test_cycle TO archive_api;
 GRANT UPDATE (status, closed_at) ON qa.test_cycle TO archive_api;
 GRANT UPDATE (superseded_by) ON qa.test_result TO archive_api;
 GRANT UPDATE (status, closed_on, duplicate_of) ON qa.defect TO archive_api;
 GRANT UPDATE (confirmed_on, declined_on) ON qa.assignment TO archive_api;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA qa TO archive_api;
+GRANT USAGE ON SEQUENCE qa.test_result_id_seq, qa.defect_id_seq,
+                        qa.assignment_id_seq, qa.test_cycle_id_seq TO archive_api;
 -- No DELETE on anything. No privilege on qa.test_case beyond SELECT.
 ```
 
