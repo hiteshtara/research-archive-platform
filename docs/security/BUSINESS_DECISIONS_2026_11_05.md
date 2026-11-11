@@ -12,7 +12,7 @@ Email is not a decision record, so this is one.
 
 ---
 
-## 1. SEC-003 — version scope: PER_VERSION. Decision 2.1 is CLOSED.
+## 1. SEC-003 — contact access is version-specific. Decision 2.1 is NOT closed.
 
 The rule put to him, as the QA page then stated it:
 
@@ -25,24 +25,57 @@ His answer:
 > version should they have access. We would not want people not listed to
 > access records"**
 
-So `app.authorization.version-scope` = **`PER_VERSION`**, and `FAMILY_WIDE` is
-rejected. This closes §2.1 of
-[`AUTHORIZATION_POLICY_DECISIONS_OUTSTANDING.md`](AUTHORIZATION_POLICY_DECISIONS_OUTSTANDING.md),
-which had been open with the question *"if someone is authorized for an Award's
-current version, should they see that Award's entire history?"*
+### This is already implemented, and it is not a setting
+
+`RecordAccessEvaluator` decides contact-derived access against **the version
+being read**, unconditionally:
+
+> *"SEC-003, decided by the business 2026-11-05: contact-derived access is
+> ALWAYS version-specific, whatever versionScope says — being listed on one
+> version of a family must not reach the rest of it. … Hard-coded rather than
+> made configurable on purpose: the business decided this rule instead of
+> delegating it, and a setting could be configured back into non-compliance.
+> The explicit CENTRAL, UNIT and IO grants above were deliberately left under
+> versionScope."*
+
+Covered by **29 passing tests**: `Sec003VersionScopeAgreementIntegrationTest`
+("contact access stays version-specific under every version scope", 9) and
+`RecordAccessEvaluatorTest$Sec003ContactAccessIsAlwaysVersionSpecific` (20),
+including `aContactAddedOnALaterVersionDoesNotReachTheEarlierOne`,
+`aContactRemovedOnALaterVersionKeepsTheVersionTheyWereListedOnAndLosesTheOther`
+and `centralIsUnaffectedByContactVersionScoping`.
+
+So Anthony's decision is **satisfied today**, with enforcement off or on, and
+with `version-scope` set either way.
+
+### Two different mechanisms — do not conflate them
+
+| | Governs | Set by | Status |
+|---|---|---|---|
+| **Contact / researcher access** (SEC-003) | whether a listed contact reaches versions they are *not* listed on | **hard-coded version-specific** — not configurable | **decided and implemented** |
+| **`app.authorization.version-scope`** | whether an explicit **CENTRAL, UNIT or IO** grant reaching one version reaches the whole family | `PER_VERSION` \| `FAMILY_WIDE` | **STILL OPEN — §2.1** |
+
+An earlier draft of this document claimed Anthony's answer closed §2.1. **That
+was wrong.** He answered a question about contact access; §2.1 asks whether a
+*department or central* grant on one version should reach the family's history,
+and he has not been asked that.
+
+`PER_VERSION` is still the right value for the first DEV window — it is the
+narrower of the two and it makes the version boundary observable — but it is a
+**conservative engineering choice for that test**, not a business mandate.
+Choosing `FAMILY_WIDE` later would not contradict SEC-003.
 
 **Consequence to carry forward, not a defect.** Under `PER_VERSION` a family
 that is only partly visible makes the AI summary and question endpoints refuse
-with `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS`, by the derived
-family-completeness rule. That is the designed behaviour of this decision: an
-AI summary synthesised from versions the reader may not see would be a wrong
-answer dressed as a complete one. Expect it, and do not file it as a bug.
+with `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS`, by the derived family-completeness
+rule. An AI summary synthesised from versions the reader may not see would be a
+wrong answer dressed as a complete one.
 
 Real DEV data where this is visible: Awards `212137-00001` and `212137-00002`
 each have three versions whose lead unit changes mid-family — sequence 1 sits
 in CGS ADMINISTRATION (`1250400000`), sequences 2 and 3 in COLLEGE OF GENERAL
-STUDIES (`1250000000`). A UNIT grant on `1250000000` therefore reaches
-sequences 2 and 3 and **not** sequence 1.
+STUDIES (`1250000000`). A UNIT grant on `1250000000` under `PER_VERSION`
+therefore reaches sequences 2 and 3 and **not** sequence 1.
 
 ---
 
@@ -107,7 +140,7 @@ SEC-004, SEC-006, SEC-007 and SEC-009 — "Looks correct".
 
 | Decision | Status |
 |---|---|
-| **2.1** version scope | **CLOSED — `PER_VERSION`** |
+| **2.1** version scope (CENTRAL/UNIT/IO) | **STILL OPEN** — SEC-003 did not settle it |
 | 2.2 `contact-derivation` | still open. Moot for the first grant: the bootstrapped identity's link carries `kuali_person_id = NULL`, so contact derivation can never match. `EXPLICIT_GRANT` is the safe value for a one-user pilot |
 | 2.3 `research-staff-roles` | still open — these are BU role names and engineering cannot supply them. `PI` is used as a real placeholder, valid under `EXPLICIT_GRANT` |
 | D-ID-2(a) *who* the first administrators are | answered in practice: `ARP-FK7QY195-QW5HV7G0`, bootstrapped under the project-owner approval of 2026-10-28 and confirmed for the DEV pilot on 2026-11-11 |

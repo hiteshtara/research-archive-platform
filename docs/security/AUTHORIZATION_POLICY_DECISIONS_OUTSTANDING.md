@@ -33,14 +33,14 @@ widens nothing.
 
 ## 2. Outstanding — Anthony's decisions
 
-### 2.1 `app.authorization.version-scope` — **CLOSED: `PER_VERSION`**
+### 2.1 `app.authorization.version-scope` — `PER_VERSION` | `FAMILY_WIDE`
 
-> **Decided 2026-11-05 by Anthony Castellano** (Product Owner), answering the
-> SEC-003 question: *"Only if the staff is listed on the version should they
-> have access. We would not want people not listed to access records."*
-> `FAMILY_WIDE` is rejected. See
-> [`BUSINESS_DECISIONS_2026_11_05.md`](BUSINESS_DECISIONS_2026_11_05.md).
-> The table below is kept as the record of the trade-off that was weighed.
+> **STILL OPEN.** Anthony's 2026-11-05 answer on SEC-003 is about *contact*
+> access and does **not** settle this. Contact access is already
+> version-specific unconditionally and hard-coded, whatever this setting
+> says; `version-scope` governs the explicit **CENTRAL, UNIT and IO** grants
+> only, and no business answer exists for those. See
+> [`BUSINESS_DECISIONS_2026_11_05.md`](BUSINESS_DECISIONS_2026_11_05.md) §1.
 
 Whether a grant that reaches one version of an Award reaches the whole family.
 
@@ -56,8 +56,11 @@ spanning every version of a family requires every version to be visible, or
 an AI summary could be synthesised from versions the caller may not read and
 presented as the whole Award.
 
-~~**Question for Anthony:** if someone is authorized for an Award's current
-version, should they see that Award's entire history?~~ **Answered 2026-11-05: no — `PER_VERSION`.**
+**Question for Anthony:** if someone is authorized for an Award's current
+version, should they see that Award's entire history?
+
+*(Still unanswered. His SEC-003 reply covered contact access, which is a
+different mechanism — see the note above.)*
 
 ### 2.2 `app.authorization.contact-derivation` — `EXPLICIT_GRANT` | `VERIFIED_PRINCIPAL`
 
