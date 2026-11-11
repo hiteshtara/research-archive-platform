@@ -1,6 +1,8 @@
 # UAT feedback workflow and QA dashboard — implementation design
 
-**Design for review. Nothing is implemented.** No endpoint, no migration, no
+**Design for review. Nothing is implemented.** Updated 2026-11-11 with
+decisions Q1–Q7; see `UAT_ARCHITECTURE_SECURITY_REVIEW.md` for the findings
+behind them and for the six decisions still open (U1–U6). No endpoint, no migration, no
 schema, no IAM change, no DEV change, no invitation. Thursday's security test,
 the frozen runbook, revision 91 and the staged revision 92 configuration are
 untouched.
@@ -75,6 +77,26 @@ New schema `qa`. Forward-only migration, applied by the ETL loaders like every
 other migration in this project — **not** by Spring, since
 `spring.flyway.enabled: false`.
 
+### `qa.test_cycle` — what "closure" means (Q4)
+
+```sql
+CREATE TABLE qa.test_cycle (
+    id          BIGSERIAL PRIMARY KEY,
+    name        VARCHAR(120) NOT NULL,
+    status      VARCHAR(16)  NOT NULL,   -- planned | open | closed
+    opened_on   DATE,
+    closed_at   TIMESTAMPTZ              -- set once, when status becomes closed
+);
+```
+
+Retention is expressed as *12 months after test-cycle closure*, so without a
+cycle the rule is not evaluable even by hand. `closed_at` makes
+`closed_at + 12 months` a computable, reportable property.
+
+**Provisional**, pending BU records-retention and security approval, and **no
+deletion or retention job is designed or implemented** (Q4). The schema only
+makes the question answerable; it does not answer it.
+
 ### `qa.test_case` — the catalog, mirrored for referential integrity
 
 ```sql
@@ -92,12 +114,17 @@ CREATE TABLE qa.test_case (
 Seeded **from `qaSnapshot.json` by the migration**, so the file stays the
 source of truth and the table is a projection of it.
 
-**Drift is the obvious risk, and it has a precedent cure.** The repository
-already has `securityReadinessConsistency.test.mjs`, which asserts consistency
-*across* QA data files. A sibling test must assert that the migration's seeded
-case IDs exactly equal the IDs in `qaSnapshot.json` — same count, same set — so
-a new case added to the JSON without a migration fails CI rather than silently
-producing results that reference nothing.
+**Drift is the obvious risk, and it has a precedent cure. Parity lives in the
+API CI suite (Q7).** The check must read the migration's seed SQL as well as
+the catalog JSON, which puts it on the API side — `ReleaseMigrationRehearsalIntegrationTest`
+is the precedent for a test that reads migrations. It asserts **exact test-ID
+matching** and fails on **missing, duplicate or unexpected** IDs, so a case
+added to the JSON without a migration, a case seeded without a catalog entry,
+or a duplicated ID all break the build rather than silently producing results
+that reference nothing.
+
+The UI-side `securityReadinessConsistency.test.mjs` remains the precedent for
+consistency *between QA data files* and is unaffected.
 
 ### `qa.test_result` — append-only
 
@@ -107,7 +134,9 @@ CREATE TYPE qa.result_value AS ENUM ('PASS','FAIL','BLOCKED','NOT_TESTED','QUEST
 CREATE TABLE qa.test_result (
     id                  BIGSERIAL PRIMARY KEY,
     case_id             VARCHAR(16) NOT NULL REFERENCES qa.test_case(case_id),
-    tester_identifier   VARCHAR(64) NOT NULL,  -- institutional identifier, never an email
+    tester_identifier        VARCHAR(64) NOT NULL,  -- the subject: whose result this is
+    submitted_by_identifier  VARCHAR(64) NOT NULL,  -- the authenticated caller; from the token, always
+    cycle_id                 BIGINT NOT NULL REFERENCES qa.test_cycle(id),
     result              qa.result_value NOT NULL,
     record_number       VARCHAR(64),           -- the award/proposal/… actually opened
     comment             TEXT,
@@ -130,6 +159,16 @@ today" is answerable, which a mutable table would lose.
 `ui_version` and `api_revision` exist because the current catalog already
 records an `environment` string per case. A result without the build it was
 observed on becomes unusable within weeks.
+
+**Two identities, never one (Q3).** `submitted_by_identifier` is always taken
+from the validated token. `tester_identifier` equals it for an ordinary
+submission, and may differ **only** when the caller holds `ArchiveQaLead` — a
+delegated submission, rendered in the UI as "Recorded by <submitter>". Where
+the two differ and the caller is not a QA lead, the write is **refused**. Both
+identities persist in the immutable history, including on superseded rows, so a
+delegated entry can never be mistaken for a self-submission or quietly
+rewritten into one. This is the impersonation safeguard applied here: record
+both parties rather than forbid the action.
 
 ### `qa.assignment` — who is asked to test what
 
@@ -184,6 +223,8 @@ Mirroring the `authz` grant design exactly:
 GRANT USAGE ON SCHEMA qa TO archive_api;
 GRANT SELECT ON ALL TABLES IN SCHEMA qa TO archive_api;
 GRANT INSERT ON qa.test_result, qa.defect, qa.assignment TO archive_api;
+GRANT INSERT ON qa.test_cycle TO archive_api;
+GRANT UPDATE (status, closed_at) ON qa.test_cycle TO archive_api;
 GRANT UPDATE (superseded_by) ON qa.test_result TO archive_api;
 GRANT UPDATE (status, closed_on, duplicate_of) ON qa.defect TO archive_api;
 GRANT UPDATE (confirmed_on, declined_on) ON qa.assignment TO archive_api;
@@ -205,13 +246,33 @@ All under `/api/v1/qa`, behind a flag.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/qa/cases` | catalog joined with the latest result per case |
+| `GET` | `/qa/cases` | **the catalog itself**, served from the database and joined with results — see Q1 below |
 | `POST` | `/qa/results` | submit one result (append-only) |
 | `GET` | `/qa/dashboard` | the aggregates in §7 |
 | `GET` | `/qa/assignments` | assignments, with confirmation state |
 | `POST` | `/qa/assignments/{id}/confirm` | a tester confirms or declines their own |
 | `POST` | `/qa/defects` | raise a defect against a result |
 | `PATCH` | `/qa/defects/{id}` | triage (John) |
+
+### The catalog is served, not shipped (Q1)
+
+The catalog moves out of the UI bundle and is returned by
+`GET /api/v1/qa/cases`, which requires authentication. Requirement 5 is the
+point: it must be **loadable only after authentication**, not merely hidden
+behind a protected route. Today the opposite is true — the JSON is compiled
+into a publicly fetchable artifact, so the route is gated while the data is
+not.
+
+Removing the import is therefore part of the change, not a follow-up: leaving
+`qaSnapshot.json` in `ui/src` while also serving it would keep the public copy
+alive. The file remains in version control as the **source of truth** and is
+read by the migration that seeds `qa.test_case`; it simply stops being an
+input to the UI build.
+
+ECS revisions, image digests and other operational detail are dropped from
+whatever is published, per Q1. The audit of the other three build-time imports
+is complete and raised **U1** — see the security review; that decision is still
+open.
 
 ### Removable by construction
 
@@ -245,10 +306,21 @@ Three controls apply instead:
    server-side from the validated token, never accepted from the request body,
    so a tester cannot submit as someone else.
 3. **A tester may write only their own rows** — confirm and supersede operate
-   on rows whose `tester_identifier` matches the caller. John's triage
-   (`PATCH /qa/defects`) is the one elevated action and needs a named QA-lead
-   check, which should **not** reuse `ARCHIVE_ADMIN` — QA triage and
-   authorization administration are different jobs and should not be collapsed.
+   on rows whose `tester_identifier` matches the caller, except for a QA lead's
+   delegated submission above.
+4. **Reading is scoped server-side (Q2).** An ordinary tester may read **only
+   their assigned test cases and their own submitted results**. A holder of
+   `ArchiveQaLead` may read all DEV QA results. This is enforced in the query,
+   not in the UI: the row filter is applied server-side so a crafted request
+   cannot widen it, and the dashboard's aggregate counts are computed under the
+   same filter.
+5. **`ArchiveQaLead` is a Cognito group (Q5)**, following the
+   `ArchiveAttachmentViewer` precedent. It confers **no** archive-record access,
+   exactly as `ARCHIVE_ADMIN` confers none, and it is checked **independently**
+   of `ARCHIVE_ADMIN` in both directions: a QA lead who is not an administrator
+   must be able to triage, and an administrator who is not a QA lead must be
+   refused. The group is **not created and no member is assigned** without
+   separate approval.
 
 ---
 
@@ -286,10 +358,28 @@ built to protect it.
 
 ### Recommendation — two phases
 
-**Phase 1 (recommended now): a reference, not bytes.** `screenshot_ref` holds a
-link to BU-internal storage the tester already has — SharePoint, Teams, or an
-email thread. Zero new write surface, no new exposure path, and screenshots
-stay under BU's existing document controls and retention.
+**Phase 1, approved (Q6): a reference, not bytes.** `screenshot_ref` holds a
+link to BU-approved storage the tester already has. Zero new write surface, and
+evidence stays under BU's existing document controls and retention.
+
+The controls, as approved:
+
+- **Host allowlisting** against BU-approved evidence storage; anything else is
+  rejected at submit time.
+- **Known anonymous-sharing URL patterns rejected where feasible** — a
+  best-effort pattern check, not a guarantee.
+- **RAP never proxies, fetches, embeds, previews or caches** an evidence file.
+  The reference is stored as text and rendered as a plain external link with
+  `rel="noreferrer noopener"` in a new tab. The viewer's own browser
+  authenticates to BU storage, so permissions are enforced **there** and RAP
+  never holds the content. This is what makes "a tester cannot view evidence
+  beyond their existing BU storage permissions" true by construction rather
+  than by policy.
+- **Documented limitation, stated rather than implied:** these controls do
+  **not** independently prove SharePoint permissions. The API cannot
+  distinguish a tenant-scoped link from an anonymous sharing link without
+  calling Microsoft Graph, which phase 1 does not do. Allowlisting plus
+  attestation reduces the risk; it does not eliminate it.
 
 **Phase 2 (only if phase 1 proves insufficient): native upload.** Then it needs
 its own design covering bucket policy, encryption, lifecycle and retention, who
@@ -447,12 +537,29 @@ to Thursday's security test, the frozen runbook, revision 91 or the staged
 revision 92 configuration. No CI change. Production untouched, auditing OFF,
 V089 unapplied.
 
-### Open questions for your decision
+### Decisions taken, and what is still open
 
-| # | Question |
-|---|---|
-| Q1 | Screenshots — phase 1 (a link to BU storage) or native upload now? **Phase 1 recommended** |
-| Q2 | Who is the QA lead for defect triage, and confirm it is **not** `ARCHIVE_ADMIN` |
-| Q3 | `/qa-status` is temporary scaffolding — does a write-backed feature change that, or does it inherit the removal checklist? |
-| Q4 | Retention: how long do results and defects live, and do they survive into production? |
-| Q5 | Does the `qa` schema belong in DEV only, or eventually in production too? |
+The questions this document originally raised were **decided on 2026-11-11**
+and are applied above: screenshots by reference (Q6), `ArchiveQaLead` rather
+than `ARCHIVE_ADMIN` (Q5), the catalog served from an authenticated endpoint
+(Q1), `qa.test_cycle` with provisional 12-month retention and no deletion job
+(Q4), server-side read scoping (Q2), QA-lead-only delegated submission (Q3),
+and API-side parity verification (Q7).
+
+Two of those earlier questions were answered by decision rather than by this
+design:
+
+- **`/qa-status` is now a permanent, authenticated QA workspace.** Its
+  temporary status is removed only as part of a separately approved
+  implementation, so the removal checklist in `docs/QA_STATUS_PAGE.md` stands
+  until then.
+- **Phase 1 is DEV-only.** Production deployment requires separate approval.
+
+**Six decisions remain open — U1 to U6, recorded in
+`UAT_ARCHITECTURE_SECURITY_REVIEW.md`.** Two of them were raised by the Q1
+audit and by requirement 2 rather than existing beforehand: whether
+`securityRequirements.json` and `securityReadiness.json` also move behind
+authentication (U1), and whether the catalog itself needs scoping in
+production, since its test steps name record numbers (U3). The production
+record-existence disclosure risk is U2 and is recorded as its own blocker
+requiring its own security decision.

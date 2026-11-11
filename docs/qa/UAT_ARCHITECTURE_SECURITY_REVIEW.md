@@ -4,9 +4,11 @@ Pre-implementation review, 2026-11-11. **Nothing implemented.** No migration,
 schema, endpoint, UI change, IAM policy or role. Thursday's authorization test
 is frozen and unchanged; Production untouched, auditing OFF, V089 unapplied.
 
-**Verdict: the direction is sound and the data model holds.** Six findings need
-a decision before implementation. One (F1) contradicts an approved decision as
-currently stated and should be settled first.
+**Verdict: the direction is sound and the data model holds.** Six findings were
+raised; **Q1–Q7 were decided on 2026-11-11** and are recorded in §Decisions
+resolved. The F1 audit requested with Q1 is complete and its result is in
+§F1a — it **inverts the priority**: the catalog is the least sensitive of the
+four exposed files.
 
 ## Decisions folded into the design
 
@@ -66,6 +68,59 @@ what the build does, plus unnecessary operational disclosure.
 catalog should follow rather than leave the page half-static. **B as an interim
 regardless of choice**, because the image digest and ECS revision serve no
 purpose in a public file.
+
+---
+
+## F1a — The Q1 audit: all four build-time imports are public, and the catalog is the least sensitive
+
+Completed 2026-11-11 as required by Q1. Four JSON files are imported at build
+time in `ui/src`, totalling about 118 KB, and **every one ships in full** in
+the publicly downloadable bundle. Verified by sampling long string literals
+from each file and finding them in the fetched bundle — 12 of 12 for the large
+files, 2 of 2 for the small one.
+
+| File | Size | Publicly readable | What it discloses |
+|---|---|---|---|
+| `qaSnapshot.json` | 66.5 KB | **yes, in full** | the test catalog: steps, expected results, statuses, PR numbers, merge SHAs, per-case environment strings with ECS revisions and image digests |
+| `securityRequirements.json` | 25.5 KB | **yes, in full** | the SEC-001…009 control inventory — **including where security coverage is absent** |
+| `securityReadiness.json` | 23.3 KB | **yes, in full** | the readiness record: verification narrative, image digests, revision numbers |
+| `qaOpenFindings.json` | 3.4 KB | **yes, in full** | the open TC-041 finding and a path to an internal runbook |
+
+### The finding that changes the ordering
+
+`securityRequirements.json` contains **five statements admitting absent or
+partial security assurance, and all five are readable without authentication.**
+For example:
+
+> "No test asserts the absence of a write path, and no record exists of the
+> database grants the API role actually holds."
+
+> "No automated coverage yet. The resolver and the SQL clause exist; no test
+> drives an end-to-end SAP-account grant."
+
+This is a publicly readable inventory of where this system's security
+assurance is weakest. It is not an exploitable vulnerability and it leaks no
+credential or personal data — but it is materially more sensitive than the
+image digests that prompted F1, and it is the one an outside reader would find
+most useful.
+
+It may also be **stale**, which makes it worse rather than better: at least one
+of those statements has since been addressed by work recorded elsewhere in this
+repository. A public, out-of-date claim that a control is untested is both a
+disclosure and a misrepresentation.
+
+### Consequence for Q1
+
+Q1 approved moving **the catalog** to an authenticated API. The audit shows the
+catalog is the *least* sensitive of the four. **A new decision is therefore
+needed** — recorded as **U1** below — on whether
+`securityRequirements.json` and `securityReadiness.json` also move behind
+authentication, are trimmed, or stay public. Moving only the catalog would
+leave the more sensitive material exposed.
+
+Recommendation: move all four behind the authenticated endpoint. They are
+internal assurance records with no external audience, and `/qa-status` is
+becoming an authenticated workspace in any case.
 
 ---
 
@@ -185,17 +240,37 @@ refused triage.
 
 ---
 
-## Remaining design decisions
+## Decisions resolved 2026-11-11
 
-| # | Decision | Recommendation |
+| # | Decision taken |
+|---|---|
+| **Q1** | Catalog moves to an authenticated API. ECS revisions, image digests and unnecessary operational detail are removed from publicly downloadable bundles. Audit of other build-time imports **complete — see F1a**, which raises **U1** |
+| **Q2** | Ordinary testers see **only their assigned tests and their own results**; QA leads see all DEV results. Enforced **server-side** |
+| **Q3** | Delegated submission **by QA leads only**, persisting both the authenticated submitter and the subject, shown as "Recorded by", immutable history preserved |
+| **Q4** | `qa.test_cycle` added with lifecycle status and closure timestamp. 12-month retention **provisional** pending BU policy. **No deletion jobs** |
+| **Q5** | `ArchiveQaLead` accepted as the name. **Not created, no members assigned** without separate approval. Confers **no** archive-record access; independent of `ARCHIVE_ADMIN` in both directions |
+| **Q6** | Phase 1: BU-approved host allowlisting plus user attestation. **No proxying, fetching, embedding, previewing or caching** of evidence through RAP. Reject known anonymous-sharing URL patterns where feasible. Documented that these controls **do not independently prove SharePoint permissions** |
+| **Q7** | Catalog/migration parity verification in the **API CI suite**, with exact test-ID matching, failing on missing, duplicate or unexpected IDs |
+
+## Remaining unresolved decisions
+
+| # | Question | Status |
 |---|---|---|
-| **Q1** | **F1** — catalog server-side (A), trim the environment strings (B), or accept and reword decision 3 (C)? | **A**, with **B** immediately regardless |
-| **Q2** | **F3** — phase 1 result visibility: all authenticated testers, or submitter + `QA_LEAD`? | all authenticated testers for DEV; revisit before production |
-| **Q3** | **F4** — allow delegated submission at all in phase 1? | yes, `QA_LEAD` only, with both identities recorded |
-| **Q4** | **F5** — add `qa.test_cycle` now? | yes; it is free now and a backfill later |
-| **Q5** | **F6** — confirm `ArchiveQaLead` as a Cognito group, and who the initial members are | group confirmed; members need your explicit approval |
-| **Q6** | **F2/V1** — is allowlist plus attestation sufficient, or is Graph link validation required? | allowlist plus attestation for phase 1 |
-| **Q7** | Where does the CI parity check live — API (migrations are readable, `ReleaseMigrationRehearsalIntegrationTest` is the precedent) or UI (`securityReadinessConsistency.test.mjs` is the precedent)? | **API**, since it must read the migration's seed |
+| **U1** | Do `securityRequirements.json` and `securityReadiness.json` also move behind authentication, get trimmed, or stay public? The audit shows they are **more** sensitive than the catalog | **new, from F1a.** Recommendation: move all four |
+| **U2** | Production record-existence disclosure (**F3**) — result rows name record numbers, which in production would become a side channel around the 404 | **recorded as a separate blocker** requiring its own security decision, per requirement 4. Deliberately unresolved |
+| **U3** | In production, does the **catalog itself** need scoping? Test steps name record numbers (TC-056 names subaward `95015`), so an authenticated-but-unauthorized tester reading the catalog learns those records exist | **new.** Follows from requirement 2 combined with Q1. No effect in DEV, where enforcement is off. Belongs with U2 |
+| **U4** | Initial `ArchiveQaLead` members | awaiting separate approval (Q5) |
+| **U5** | Retention period and whether results survive into production | provisional at 12 months, pending BU records-retention and security approval (Q4) |
+| **U6** | Does the QA workspace ever deploy to production at all? | DEV-only for phase 1; production needs separate approval |
+
+### Why U3 is listed separately from U2
+
+U2 is about **results**; U3 is about the **catalog**. They need the same
+decision but have different blast radii: results accumulate record numbers as
+testing proceeds, whereas the catalog's record numbers are fixed, few, and
+chosen by us. U3 may therefore be acceptable where U2 is not — for instance by
+selecting catalog fixtures that every tester is authorized to see. Deciding
+them together risks applying the stricter answer to both unnecessarily.
 
 ## Not authorized by this review
 
