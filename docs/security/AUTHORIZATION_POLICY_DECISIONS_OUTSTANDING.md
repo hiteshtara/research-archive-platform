@@ -33,7 +33,14 @@ widens nothing.
 
 ## 2. Outstanding — Anthony's decisions
 
-### 2.1 `app.authorization.version-scope` — `PER_VERSION` | `FAMILY_WIDE`
+### 2.1 `app.authorization.version-scope` — **CLOSED: `PER_VERSION`**
+
+> **Decided 2026-11-05 by Anthony Castellano** (Product Owner), answering the
+> SEC-003 question: *"Only if the staff is listed on the version should they
+> have access. We would not want people not listed to access records."*
+> `FAMILY_WIDE` is rejected. See
+> [`BUSINESS_DECISIONS_2026_11_05.md`](BUSINESS_DECISIONS_2026_11_05.md).
+> The table below is kept as the record of the trade-off that was weighed.
 
 Whether a grant that reaches one version of an Award reaches the whole family.
 
@@ -49,8 +56,8 @@ spanning every version of a family requires every version to be visible, or
 an AI summary could be synthesised from versions the caller may not read and
 presented as the whole Award.
 
-**Question for Anthony:** if someone is authorized for an Award's current
-version, should they see that Award's entire history?
+~~**Question for Anthony:** if someone is authorized for an Award's current
+version, should they see that Award's entire history?~~ **Answered 2026-11-05: no — `PER_VERSION`.**
 
 ### 2.2 `app.authorization.contact-derivation` — `EXPLICIT_GRANT` | `VERIFIED_PRINCIPAL`
 
