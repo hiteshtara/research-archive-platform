@@ -196,3 +196,70 @@ test("the QA Testing page uses the derived cases, not the raw snapshot", () => {
     "the raw snapshot must not be what the page lists",
   );
 });
+
+// ── the refuted recommendation cannot come back ─────────────────────
+//
+// The first revision of this finding, written from the original 15-query
+// measurement, named the corpus-vocabulary check as "the recommended fix"
+// and said it "separates them cleanly". The expanded 31-query measurement
+// refuted that: the gate scored 24/31, withheld six searches a BU
+// researcher would plainly make - including NIAID and PCORI, a real NIH
+// institute and a real funder - and still admitted one nonsense search.
+// The claim had already been acted on, so it is recorded as superseded
+// rather than deleted, and these tests stop it being stated as current.
+
+test("the finding does not recommend the corpus-vocabulary gate", () => {
+  const finding = openFindingFor("TC-041", findings);
+  const current = [
+    finding.headline,
+    finding.whatWasVerified,
+    finding.whatRemainsOpen,
+    finding.evidence,
+    finding.blockedBy,
+    finding.whatWouldCloseIt,
+  ].join(" ");
+
+  assert.ok(
+    !/recommended fix/i.test(current),
+    "no filter is recommended - every one measured so far failed",
+  );
+  assert.ok(
+    !/separates? (them|the cases) cleanly/i.test(current),
+    "the claim that a vocabulary check separates the cases is refuted",
+  );
+});
+
+test("the superseded recommendation is kept and labelled, not deleted", () => {
+  const finding = openFindingFor("TC-041", findings);
+
+  assert.ok(finding.supersededRecommendation, "the earlier claim must be recorded");
+  assert.match(finding.supersededRecommendation, /refuted/i);
+  assert.match(
+    finding.supersededRecommendation,
+    /must not be implemented/i,
+    "a reader must not be able to act on it again",
+  );
+});
+
+test("the finding records the expanded measurement, not the first one", () => {
+  const evidence = openFindingFor("TC-041", findings).evidence;
+
+  assert.match(evidence, /31/, "the expanded query set is the measurement of record");
+  assert.match(evidence, /24 of 31/, "the gate's score");
+  assert.match(evidence, /six/i, "six useful searches withheld");
+  assert.match(evidence, /NIAID/, "a real NIH institute was withheld");
+  assert.match(evidence, /PCORI/, "a real funder was withheld");
+  assert.match(evidence, /snorfulate biodynamics/, "and nonsense was admitted");
+  assert.match(
+    evidence,
+    /overlap/i,
+    "the absolute and relative strategies failed to separate the two sets",
+  );
+});
+
+test("TC-041 stays open, and the recorded result stays passed", () => {
+  // The whole point of the two-file split, restated after editing one of them.
+  const reopened = find("TC-041");
+  assert.notEqual(reopened.status, "passed", "the current assessment is open");
+  assert.equal(reopened.recordedStatus, "passed", "what was recorded is untouched");
+});

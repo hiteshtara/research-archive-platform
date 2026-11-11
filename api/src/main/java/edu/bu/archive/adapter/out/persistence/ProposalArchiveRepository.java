@@ -5,10 +5,13 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalAwardResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalFamilySummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalRowResponse;
 import edu.bu.archive.application.proposal.ProposalSearchFilters;
+import edu.bu.archive.application.search.LexicalMatch;
+import edu.bu.archive.application.search.MatchExplanation;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -22,6 +25,81 @@ public class ProposalArchiveRepository {
     ) {
         this.jdbc = jdbc;
     }
+
+    /*
+     * The Proposal free-text predicate, in ONE place.
+     *
+     * It is used by Global Search's Proposal leg (findFamilies) and by the
+     * Proposal module's paged search and its count (findFamilyPage /
+     * countFamilyPage). Those were three separate copies of the same OR
+     * chain. QA TC-040's word-start fix landing in two of them and not the
+     * third would reproduce the very defect it fixes - a page and its own
+     * total describing different row sets - so there is now one definition
+     * and the drift is impossible rather than merely unlikely.
+     *
+     * IDENTIFIER vs TEXT, the same split AwardArchiveRepository makes.
+     * proposal_number keeps substring matching: pasting a fragment of a
+     * proposal number is matching mid-string on purpose. The four text
+     * fields are anchored to the START of a word when the term qualifies,
+     * so "NSF" stops matching inside "TRANSFORMATION" and
+     * "methyltransferase" - measured as 59 of the first 100 Proposal rows
+     * for NSF on 2026-11-10 - while "cardio" still finds "cardiology",
+     * because only the start of the word is anchored and not the whole word.
+     *
+     * :anchorWords is a bound constant, so the planner discards whichever
+     * branch is false. The substring branch keeps '%' || :query || '%'
+     * rather than moving to LexicalMatch.likePattern: this page does not
+     * translate '*', AWARD_WILDCARD_HINT says so in as many words, and
+     * quietly giving it wildcard semantics is a different change.
+     *
+     * REACHING THE RIGHT PROPOSAL. Anchoring alone would have made this
+     * module worse, not better. Measured on 2026-11-10 against the running
+     * revision: 3,746 Proposals are sponsored by the National Science
+     * Foundation, and of the first 100 of them, 99 carry no word-start
+     * "NSF" in any field this predicate reads - they matched "NSF" only
+     * through coincidences like "TRANSFORMATION". Removing the coincidence
+     * without adding a real path would leave them unreachable, which is the
+     * TC-040 complaint reproduced rather than fixed.
+     *
+     * archive.sponsor.acronym is that path, and it is the SAME path the
+     * Award leg already uses - not a mapping invented here. SPONSOR is
+     * Kuali's shared sponsor master (see sql/extract/reference/17_sponsor.sql),
+     * referenced by Award, Negotiation and Proposal alike, and
+     * sql/extract/proposal/01_proposal_versions.sql joins it on exactly
+     * this sponsor_code.
+     *
+     * Matched through an EXISTS so neither the page's FROM nor the count's
+     * FROM changes: if those two diverged, totalElements and the page would
+     * describe different row sets.
+     *
+     * See LexicalMatch for why the rule is word START and not whole word.
+     */
+    private static final String FAMILY_FREE_TEXT = """
+                    proposal_number ILIKE '%' || :query || '%'
+                    OR (:anchorWords = FALSE AND (
+                            title ILIKE '%' || :query || '%'
+                         OR sponsor_name ILIKE '%' || :query || '%'
+                         OR lead_unit_name ILIKE '%' || :query || '%'
+                         OR principal_investigator_name
+                                ILIKE '%' || :query || '%'
+                         OR EXISTS (
+                                SELECT 1 FROM archive.sponsor sp2
+                                WHERE sp2.sponsor_code = ranked.sponsor_code
+                                  AND sp2.acronym ILIKE '%' || :query || '%'
+                            )
+                    ))
+                    OR (:anchorWords = TRUE AND (
+                            title ~* :wordRegex
+                         OR sponsor_name ~* :wordRegex
+                         OR lead_unit_name ~* :wordRegex
+                         OR principal_investigator_name ~* :wordRegex
+                         OR EXISTS (
+                                SELECT 1 FROM archive.sponsor sp2
+                                WHERE sp2.sponsor_code = ranked.sponsor_code
+                                  AND sp2.acronym ~* :wordRegex
+                            )
+                    ))
+            """;
 
     public List<ProposalFamilySummaryResponse> findFamilies(
             String query,
@@ -47,16 +125,7 @@ public class ProposalArchiveRepository {
                         : query.trim();
         String filter = normalizedQuery.isEmpty()
                 ? ""
-                : """
-                  AND (
-                        proposal_number ILIKE '%' || :query || '%'
-                        OR title ILIKE '%' || :query || '%'
-                        OR sponsor_name ILIKE '%' || :query || '%'
-                        OR lead_unit_name ILIKE '%' || :query || '%'
-                        OR principal_investigator_name
-                            ILIKE '%' || :query || '%'
-                  )
-                """;
+                : "                  AND (\n" + FAMILY_FREE_TEXT + "                  )\n";
 
         JdbcClient.StatementSpec statement = jdbc.sql("""
                 WITH ranked AS (
@@ -68,6 +137,9 @@ public class ProposalArchiveRepository {
                         proposal_sequence_status,
                         sponsor_name,
                         lead_unit_name,
+                        -- Carried for the sponsor-acronym EXISTS in
+                        -- FAMILY_FREE_TEXT; not selected into the response.
+                        sponsor_code,
                         -- Carried for the record-authorization predicate
                         -- below; not selected into the response.
                         lead_unit_number,
@@ -99,7 +171,10 @@ public class ProposalArchiveRepository {
                 """);
         statement = bindScope(statement, familyScope);
         if (!normalizedQuery.isEmpty()) {
-            statement = statement.param("query", normalizedQuery);
+            statement = statement
+                    .param("query", normalizedQuery)
+                    .param("anchorWords", LexicalMatch.anchorsToWordStart(normalizedQuery))
+                    .param("wordRegex", LexicalMatch.wordStartRegex(normalizedQuery));
         }
         return statement
                 .param("limit", limit)
@@ -183,12 +258,7 @@ public class ProposalArchiveRepository {
     private static final String FAMILY_PAGE_WHERE = """
             WHERE row_rank = 1
               AND (CAST(:query AS TEXT) IS NULL OR (
-                    proposal_number ILIKE '%' || :query || '%'
-                    OR title ILIKE '%' || :query || '%'
-                    OR sponsor_name ILIKE '%' || :query || '%'
-                    OR lead_unit_name ILIKE '%' || :query || '%'
-                    OR principal_investigator_name
-                        ILIKE '%' || :query || '%'
+            """ + FAMILY_FREE_TEXT + """
               ))
               AND (CAST(:sponsor AS TEXT) IS NULL
                    OR sponsor_name ILIKE '%' || :sponsor || '%'
@@ -218,6 +288,18 @@ public class ProposalArchiveRepository {
                 filters == null ? ProposalSearchFilters.none() : filters;
         return statement
                 .param("query", normalizedQuery)
+                /*
+                 * Bound unconditionally, even for a null query: the
+                 * CAST(:query AS TEXT) IS NULL guard short-circuits the OR
+                 * chain, but the parameters still appear in the statement
+                 * text and must resolve. wordStartRegex returns a
+                 * deliberately unmatchable pattern for a term that does not
+                 * qualify, so a null or non-anchored query fails closed.
+                 */
+                .param("anchorWords",
+                        normalizedQuery != null
+                                && LexicalMatch.anchorsToWordStart(normalizedQuery))
+                .param("wordRegex", LexicalMatch.wordStartRegex(normalizedQuery))
                 .param("sponsor", f.sponsor())
                 .param("leadUnit", f.leadUnit())
                 .param("principalInvestigator", f.principalInvestigator());
@@ -265,6 +347,56 @@ public class ProposalArchiveRepository {
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(ProposalFamilySummaryResponse.class)
+                .list();
+    }
+
+    /**
+     * The database's own account of why these Proposals matched, for the one
+     * reason the response cannot carry: the sponsor's ACRONYM.
+     *
+     * <p>Every other field {@code FAMILY_FREE_TEXT} matches - proposal
+     * number, title, sponsor name, lead unit, principal investigator - is on
+     * {@link ProposalFamilySummaryResponse} and is explained from it with no
+     * query at all. The acronym is reference data on
+     * {@code archive.sponsor}, so once the acronym became a retrieval rule a
+     * Proposal that matched only through it would carry no caption - the
+     * reader would see an NSF-sponsored Proposal with no stated reason.
+     *
+     * <p>One query per page, and only for the rows that need it. The caller
+     * treats a failure as "no explanation available": a caption is a nicety,
+     * and losing 25 Proposals because a cosmetic query failed would be a
+     * poor trade.
+     */
+    public List<MatchExplanation> explainProposalMatches(
+            Collection<Long> proposalIds,
+            String rawQuery,
+            boolean anchorWords,
+            String wordRegex
+    ) {
+        if (proposalIds == null || proposalIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                SELECT
+                    pv.proposal_id AS record_id,
+                    'Sponsor' AS field,
+                    sp.acronym AS value
+                FROM archive.proposal_version pv
+                JOIN archive.sponsor sp
+                  ON sp.sponsor_code = pv.sponsor_code
+                WHERE pv.proposal_id IN (:proposalIds)
+                  AND sp.acronym IS NOT NULL
+                  AND (
+                        (:anchorWords AND sp.acronym ~* :wordRegex)
+                     OR (NOT :anchorWords
+                         AND sp.acronym ILIKE '%' || :query || '%')
+                  )
+                """)
+                .param("proposalIds", proposalIds)
+                .param("query", rawQuery)
+                .param("anchorWords", anchorWords)
+                .param("wordRegex", wordRegex)
+                .query(MatchExplanation.class)
                 .list();
     }
 

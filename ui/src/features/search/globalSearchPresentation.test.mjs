@@ -633,3 +633,110 @@ test("an unknown module is named rather than dropped, and offers no route", () =
   assert.equal(counts.perModule[0].label, "SOMETHING_NEW");
   assert.equal(counts.perModule[0].href, null);
 });
+
+// --- the Negotiation ID, finally on screen -------------------------------
+//
+// negotiationIdentifierLine was written for QA TC-040 and never reached a
+// screen: GlobalSearchPage rendered `identifier` as the heading plus a
+// "Doc <number>" chip, and since the API's `identifier` for a Negotiation IS
+// its document number, the card printed that number twice and the
+// Negotiation ID nowhere.
+//
+// The fixture is a real row read from the running revision on 2026-11-10:
+// recordId 12724, document 1149373, and /negotiations/12724 opens
+// "Negotiation 12724 - Material Transfer Agreement". The two values differ,
+// which is what makes the omission matter.
+
+const NEGOTIATION_ROW = {
+  module: "NEGOTIATION",
+  recordId: 12724,
+  identifier: "1149373",
+  documentNumber: "1149373",
+  title: "Material Transfer Agreement",
+  subtitle: "NIH/National Cancer Institute",
+  status: "Fully Executed",
+  route: "/negotiations/12724",
+  matchedField: "Principal Investigator",
+  matchedValue: "WILSON WONG",
+};
+
+test("a Negotiation card heading names both identifiers, each labelled", () => {
+  const card = describeResultCard(NEGOTIATION_ROW);
+
+  assert.equal(card.identifierHeading, "Negotiation 12724 · Document 1149373");
+  assert.match(card.identifierHeading, /Negotiation 12724/);
+  assert.match(card.identifierHeading, /Document 1149373/);
+});
+
+test("the Negotiation ID is present at all - the defect was that it was not", () => {
+  const card = describeResultCard(NEGOTIATION_ROW);
+
+  // Would have failed before the fix: the heading was the document number.
+  assert.ok(
+    card.identifierHeading.includes("12724"),
+    "the ID the archive is addressed by must appear on the card",
+  );
+});
+
+test("the document number is shown once, not twice", () => {
+  const card = describeResultCard(NEGOTIATION_ROW);
+
+  assert.equal(
+    card.showDocumentChip,
+    false,
+    "the heading already names the document number, so the Doc chip would repeat it",
+  );
+  const occurrences = card.identifierHeading.split("1149373").length - 1;
+  assert.equal(occurrences, 1);
+});
+
+test("every other module keeps its bare identifier and its Doc chip", () => {
+  for (const module of ["AWARD", "PROPOSAL", "SUBAWARD"]) {
+    const card = describeResultCard({
+      module,
+      recordId: 999,
+      identifier: "100533-00001",
+      documentNumber: "DOC-1",
+      title: "A title",
+    });
+    assert.equal(card.identifierHeading, "100533-00001", `${module} heading changed`);
+    assert.equal(card.showDocumentChip, true, `${module} lost its Doc chip`);
+  }
+});
+
+test("a Negotiation with no recordId still names its document rather than breaking", () => {
+  const card = describeResultCard({
+    ...NEGOTIATION_ROW,
+    recordId: null,
+  });
+
+  assert.equal(card.identifierHeading, "Document 1149373");
+  assert.equal(card.showDocumentChip, false);
+});
+
+test("a Negotiation whose id is zero is not mistaken for a missing one", () => {
+  // 0 is falsy; the check has to be on null/undefined, not truthiness.
+  const card = describeResultCard({ ...NEGOTIATION_ROW, recordId: 0 });
+
+  assert.match(card.identifierHeading, /Negotiation 0/);
+});
+
+test("the page renders the heading and gates the Doc chip on it", () => {
+  const source = readGlobalSearchPageSource();
+
+  assert.match(
+    source,
+    /identifier=\{card\.identifierHeading\}/,
+    "the page must render the labelled heading, not the bare identifier",
+  );
+  assert.match(
+    source,
+    /card\.showDocumentChip && result\.documentNumber/,
+    "the Doc chip must be gated so it cannot repeat the heading",
+  );
+  assert.match(
+    source,
+    /to=\{result\.route \|\| undefined\}/,
+    "the link target must still be the route the API supplies",
+  );
+});

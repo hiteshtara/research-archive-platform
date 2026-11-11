@@ -18,6 +18,8 @@ export function describeResultCard(
   result: GlobalSearchItem | null | undefined,
 ): {
   identifier: string;
+  identifierHeading: string;
+  showDocumentChip: boolean;
   title: string;
   identifierLine: string;
   subtitleLine: string | null;

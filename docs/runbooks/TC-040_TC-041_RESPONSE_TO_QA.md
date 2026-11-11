@@ -126,3 +126,55 @@ Nothing is released yet. The count fix and the matching fix are in separate
 reviews, so they can be released independently.
 
 Thanks again. The NSF one in particular was a genuinely good catch.
+
+---
+
+## Acceptance cases for the completed NSF fix (P1-P9)
+
+Added 2026-11-11, when the fix was extended to Proposal and Subaward. The
+first release anchored Award and Negotiation only; measured against the
+running build, 59 of the first 100 Proposal rows and 70 of the first 100
+Subaward rows for "NSF" still contained no NSF at all.
+
+Each case is executed by
+`ProposalSubawardLexicalRelevanceIntegrationTest.AcronymAcceptance` against a
+real PostgreSQL, driving the real repositories rather than a copy of their
+SQL. All nine pass.
+
+| # | Case | Expected |
+|---|---|---|
+| P1 | An NSF-sponsored Proposal with no "NSF" in any text field | returned |
+| P2 | The same Proposal with the sponsor master emptied | **not** returned, proving the acronym is the path |
+| P3 | `TRANSFORMATION`, `methyltransferase`, `TRANSFORM DBS`, `Chemical Transformations` | **not** returned for "NSF" |
+| P4 | A Proposal whose sponsor acronym is `SOS`, searched as "NSF" | **not** returned; searching "SOS" **does** return it |
+| P5 | Global Search's Proposal leg vs the Proposal module page | identical Proposals, for five different terms |
+| P6 | The Proposal module page vs its own total | identical counts, for five different terms |
+| P7 | Award, searched as "NSF" | `100527-00001` returned by acronym; `100543-00001` still excluded |
+| P8 | Negotiation, searched as "NSF" | nothing; searching "transfer" still finds the Transfer Agreements |
+| P9 | Subaward, searched as "NIH" | **not** returned — see the limitation below |
+
+### One thing testers should know before they start
+
+**Subaward has no sponsor-acronym path, and will not gain one here.**
+`archive.subaward` carries only the denormalised sponsor names
+(`award_sponsor_name`, `award_prime_sponsor_name`) and no sponsor code or
+Award link, so there is nothing to join to the sponsor master. A
+Subaward whose sponsor is "National Institutes of Health" is reachable by
+"National" or "Institutes" but **not** by "NIH".
+
+This is not a regression: those records were never reachable by the acronym.
+Before the fix they matched "NSF" only through letter coincidences like
+"phosphoglycosyl tra**nsf**erase", which is not the same as being findable.
+Giving Subaward a real acronym path needs a verified extraction mapping and is
+a separate change.
+
+### What the sponsor master is
+
+`archive.sponsor` is Kuali's shared sponsor master, loaded by
+`sql/extract/reference/17_sponsor.sql` and referenced by Award, Negotiation
+and Proposal alike - not a lookup table invented for search. That it carries
+acronym "NSF" against the NSF sponsor code is already proven on the running
+build by the Award leg: a live search for "NSF" returned 25 Awards captioned
+"Matched on: Sponsor (NSF)", and that caption is read from
+`archive.sponsor.acronym`. Proposal joins the same master on the same column,
+so the same 3,746 NSF-sponsored Proposals become reachable.

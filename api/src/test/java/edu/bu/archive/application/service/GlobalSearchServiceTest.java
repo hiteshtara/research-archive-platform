@@ -45,6 +45,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.times;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -707,7 +708,190 @@ class GlobalSearchServiceTest {
         assertThat(item.matchedField()).isEqualTo("Subaward Code");
     }
 
+    @Test
+    void aSubawardIsNoLongerSaidToHaveMatchedOnATitleItOnlyContainsMidWord() {
+        /*
+         * Subaward 4319's real title, read from DEV on 2026-11-10. Its only
+         * "nsf" is the one inside "tra-nsf-erase", and the whole row was
+         * checked field by field to confirm that. A search for "NSF" used to
+         * report "Matched on: Title" against it.
+         */
+        when(subawardArchiveService.findPage("NSF", 0, 25)).thenReturn(
+                new SubawardPageResponse(
+                        List.of(new SubawardSummaryResponse(
+                                93847L, "4319", 5, "1210089",
+                                "Structure and function of the monotopic phosphoglycosyl "
+                                        + "transferase superfamily",
+                                null, "07. Executed", "301396", null,
+                                null, null, "ACTIVE", null
+                        )),
+                        0, 25, 1, 1, true, true
+                )
+        );
+
+        GlobalSearchItemResponse item = service.search("NSF").results().stream()
+                .filter(r -> "SUBAWARD".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.matchedField())
+                .as("the title did not match under the rule the SQL applies")
+                .isNull();
+        assertThat(item.matchedValue())
+                .as("and no value is quoted as though it had")
+                .isNull();
+    }
+
+    @Test
+    void aSubawardNoLongerFallsBackToTheLiteralWordSubaward() {
+        /*
+         * The fabricated explanation. The SQL also matches the two sponsor
+         * names, which this response does not carry, so such a row cannot
+         * explain itself - and it used to say "Matched on: Subaward (4319)",
+         * which explains nothing.
+         */
+        when(subawardArchiveService.findPage("Foundation", 0, 25)).thenReturn(
+                new SubawardPageResponse(
+                        List.of(new SubawardSummaryResponse(
+                                93847L, "4319", 5, "1210089",
+                                "A title mentioning no sponsor at all",
+                                null, "07. Executed", "301396", null,
+                                null, null, "ACTIVE", null
+                        )),
+                        0, 25, 1, 1, true, true
+                )
+        );
+
+        GlobalSearchItemResponse item = service.search("Foundation").results().stream()
+                .filter(r -> "SUBAWARD".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.matchedField()).isNull();
+    }
+
+    @Test
+    void aSubawardStatusMatchIsAttributedToTheStatus() {
+        // A field the SQL has always matched and the explanation never read.
+        when(subawardArchiveService.findPage("Executed", 0, 25)).thenReturn(
+                new SubawardPageResponse(
+                        List.of(new SubawardSummaryResponse(
+                                93847L, "4319", 5, "1210089",
+                                "A title mentioning nothing relevant",
+                                null, "07. Executed", "301396", null,
+                                null, null, "ACTIVE", null
+                        )),
+                        0, 25, 1, 1, true, true
+                )
+        );
+
+        GlobalSearchItemResponse item = service.search("Executed").results().stream()
+                .filter(r -> "SUBAWARD".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.matchedField()).isEqualTo("Status");
+        assertThat(item.matchedValue()).isEqualTo("07. Executed");
+    }
+
     // --- Proposal mapping ----------------------------------------------------
+
+    @Test
+    void aProposalIsNoLongerSaidToHaveMatchedOnATitleItOnlyContainsMidWord() {
+        /*
+         * The real title, from DEV on 2026-11-10. A search for "NSF" used to
+         * report "Matched on: Title" against it, because "nsf" sits inside
+         * "Transformation". 59 of the first 100 Proposal rows for "NSF" were
+         * of this kind.
+         */
+        when(proposalArchiveRepository.findFamilies("NSF", SqlFragment.NONE, 25)).thenReturn(
+                List.of(new ProposalFamilySummaryResponse(
+                        "01118224",
+                        "Priority Sector Targeting and Structural Transformation in Ethiopia",
+                        "ACTIVE", "Some Other Sponsor", "ECONOMICS",
+                        "SAMUEL BAZZI", 1, 5002L
+                ))
+        );
+
+        GlobalSearchItemResponse item = service.search("NSF").results().stream()
+                .filter(r -> "PROPOSAL".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.matchedField())
+                .as("neither the title nor the literal word Proposal")
+                .isNull();
+        assertThat(item.matchedValue()).isNull();
+    }
+
+    @Test
+    void aProposalMatchedOnlyByItsSponsorAcronymIsExplainedByTheDatabase() {
+        /*
+         * The other half of the fix. 3,746 Proposals are NSF-sponsored and 99
+         * of the first 100 have no "NSF" in any displayed field, so without
+         * the acronym path they would be unreachable - and without this
+         * explanation they would be returned with no stated reason.
+         */
+        when(proposalArchiveRepository.findFamilies("NSF", SqlFragment.NONE, 25)).thenReturn(
+                List.of(new ProposalFamilySummaryResponse(
+                        "01091593",
+                        "A Novel Manipulative Experiment: Cascading Ecological Effect",
+                        "ACTIVE", "National Science Foundation", "BIOLOGY",
+                        "A RESEARCHER", 1, 5001L
+                ))
+        );
+        when(proposalArchiveRepository.explainProposalMatches(
+                any(), eq("NSF"), eq(true), any()))
+                .thenReturn(List.of(new MatchExplanation(5001L, "Sponsor", "NSF")));
+
+        GlobalSearchItemResponse item = service.search("NSF").results().stream()
+                .filter(r -> "PROPOSAL".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.matchedField()).isEqualTo("Sponsor");
+        assertThat(item.matchedValue()).isEqualTo("NSF");
+        assertThat(item.route())
+                .as("the explanation must not disturb the card's destination")
+                .isEqualTo("/proposals/dashboard/5001");
+    }
+
+    @Test
+    void aFailedProposalExplanationCostsTheCaptionAndNotTheResults() {
+        // A caption is a nicety; losing 25 Proposals over one would not be.
+        when(proposalArchiveRepository.findFamilies("NSF", SqlFragment.NONE, 25)).thenReturn(
+                List.of(new ProposalFamilySummaryResponse(
+                        "01091593", "A Novel Manipulative Experiment: Cascading Ecological Effect",
+                        "ACTIVE", "National Science Foundation", "BIOLOGY",
+                        "A RESEARCHER", 1, 5001L
+                ))
+        );
+        when(proposalArchiveRepository.explainProposalMatches(
+                any(), eq("NSF"), eq(true), any()))
+                .thenThrow(new RuntimeException("explanation query failed"));
+
+        GlobalSearchItemResponse item = service.search("NSF").results().stream()
+                .filter(r -> "PROPOSAL".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.identifier()).as("the result survives").isEqualTo("01091593");
+        assertThat(item.matchedField()).as("only the caption is lost").isNull();
+    }
+
+    @Test
+    void theDatabaseIsNotAskedToExplainAProposalThatExplainsItself() {
+        when(proposalArchiveRepository.findFamilies("Ethiopia", SqlFragment.NONE, 25)).thenReturn(
+                List.of(new ProposalFamilySummaryResponse(
+                        "01118224",
+                        "Priority Sector Targeting and Structural Transformation in Ethiopia",
+                        "ACTIVE", "Some Other Sponsor", "ECONOMICS",
+                        "SAMUEL BAZZI", 1, 5002L
+                ))
+        );
+
+        GlobalSearchItemResponse item = service.search("Ethiopia").results().stream()
+                .filter(r -> "PROPOSAL".equals(r.module()))
+                .findFirst().orElseThrow();
+
+        assertThat(item.matchedField()).isEqualTo("Title");
+        verify(proposalArchiveRepository, never())
+                .explainProposalMatches(any(), any(), anyBoolean(), any());
+    }
 
     @Test
     void mapsAProposalResultWithARouteToTheCurrentProposalId() {

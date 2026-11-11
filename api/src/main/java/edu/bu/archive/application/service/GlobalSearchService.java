@@ -991,41 +991,70 @@ public class GlobalSearchService {
         );
     }
 
-    // findSubawards' own SQL doesn't expose which column matched, same
-    // heuristic approach as awardMatchedField - see
-    // SubawardArchiveRepository.findSubawards.
+    /**
+     * Which of the Subaward's displayed fields matched, or null.
+     *
+     * <p>QA TC-040, the Subaward half. This used a plain substring test and
+     * fell through to the literal "Subaward", so a search for "NSF"
+     * reported "Matched on: Title" against "phosphoglycosyl transferase"
+     * and "Matched on: Subaward (4319)" for anything it could not place.
+     * Both are gone: the test is {@link LexicalMatch#matches}, the same rule
+     * the SQL now applies, and an unexplainable match says nothing at all.
+     *
+     * <p>Account number, status and the subaward id are tested too. The SQL
+     * has always matched them and this method never read them - the same
+     * omission that reported all 25 "WILSON WONG" Negotiations as
+     * "Negotiation".
+     *
+     * <p>Note what is NOT here: the two sponsor names the SQL also matches
+     * are not carried by this DTO, so a sponsor match is deliberately
+     * unexplainable and shows no caption, rather than being attributed to
+     * whichever field happens to contain the letters.
+     */
     private String subawardMatchedField(SubawardSummaryResponse result, String query) {
-        String normalizedQuery = query.toLowerCase();
-
-        if (result.subawardCode() != null
-                && result.subawardCode().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.subawardCode())) {
             return "Subaward Code";
         }
-        if (result.documentNumber() != null
-                && result.documentNumber().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.documentNumber())) {
             return "Document Number";
         }
-        if (result.title() != null
-                && result.title().toLowerCase().contains(normalizedQuery)) {
+        if (result.subawardId() != null
+                && LexicalMatch.matches(query, String.valueOf(result.subawardId()))) {
+            return "Subaward ID";
+        }
+        if (LexicalMatch.matches(query, result.title())) {
             return "Title";
         }
-        if (result.organizationId() != null
-                && result.organizationId().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.organizationId())) {
             return "Organization";
         }
-        return "Subaward";
+        if (LexicalMatch.matches(query, result.accountNumber())) {
+            return "Account Number";
+        }
+        if (LexicalMatch.matches(query, result.statusDescription())) {
+            return "Status";
+        }
+        return null;
     }
 
     private String subawardMatchedValue(
             SubawardSummaryResponse result,
             String matchedField
     ) {
+        if (matchedField == null) {
+            // No field to quote. The caller shows no caption rather than
+            // echoing the subaward code as though it were the match.
+            return null;
+        }
         return switch (matchedField) {
             case "Subaward Code" -> result.subawardCode();
             case "Document Number" -> result.documentNumber();
+            case "Subaward ID" -> String.valueOf(result.subawardId());
             case "Title" -> result.title();
             case "Organization" -> result.organizationId();
-            default -> result.subawardCode();
+            case "Account Number" -> result.accountNumber();
+            case "Status" -> result.statusDescription();
+            default -> null;
         };
     }
 
@@ -1037,20 +1066,85 @@ public class GlobalSearchService {
                 proposalArchiveRepository.findFamilies(
                         query, proposalAccess.proposalScopeSql("ranked"), PER_DOMAIN_LIMIT);
 
+        /*
+         * QA TC-040. A Proposal that matched only through its sponsor's
+         * acronym - 3,746 of them are NSF-sponsored - cannot explain itself
+         * from the fields it carries, so the reason is asked of the database
+         * ONCE for the whole page and only for the rows that need it. A row
+         * whose reason still cannot be established carries no explanation
+         * rather than a fabricated one.
+         */
+        List<Long> unexplained = results.stream()
+                .filter(r -> proposalMatchedField(r, query) == null)
+                .map(ProposalFamilySummaryResponse::currentProposalId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Map<Long, MatchExplanation> explanations = explainProposals(unexplained, query);
+
         List<GlobalSearchItemResponse> mapped = new ArrayList<>(results.size());
         for (ProposalFamilySummaryResponse result : results) {
-            mapped.add(toGlobalSearchItem(result, query));
+            mapped.add(toGlobalSearchItem(result, query, explanations));
         }
         return mapped;
     }
 
+    /** Same fault tolerance as {@link #explainAwards}: a caption is a nicety. */
+    private Map<Long, MatchExplanation> explainProposals(
+            List<Long> proposalIds, String query) {
+        String rawQuery = query == null ? "" : query.trim();
+        if (proposalIds.isEmpty() || rawQuery.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            Map<Long, MatchExplanation> byId = new LinkedHashMap<>();
+            for (MatchExplanation explanation
+                    : proposalArchiveRepository.explainProposalMatches(
+                            proposalIds,
+                            rawQuery,
+                            LexicalMatch.anchorsToWordStart(rawQuery),
+                            LexicalMatch.wordStartRegex(rawQuery))) {
+                byId.putIfAbsent(explanation.recordId(), explanation);
+            }
+            return byId;
+        } catch (RuntimeException exception) {
+            log.warn("Global Search: could not explain {} Proposal match(es)",
+                    proposalIds.size(), exception);
+            return Map.of();
+        }
+    }
+
     private GlobalSearchItemResponse toGlobalSearchItem(
             ProposalFamilySummaryResponse result,
-            String query
+            String query,
+            Map<Long, MatchExplanation> explanations
     ) {
         String matchedField = proposalMatchedField(result, query);
         Long currentProposalId = result.currentProposalId();
+        if (matchedField == null && currentProposalId != null) {
+            MatchExplanation explained = explanations.get(currentProposalId);
+            if (explained != null) {
+                return proposalItem(
+                        result, currentProposalId, explained.field(), explained.value());
+            }
+        }
 
+        return proposalItem(
+                result,
+                currentProposalId,
+                matchedField,
+                proposalMatchedValue(result, matchedField));
+    }
+
+    /**
+     * One place where a Proposal result card is built, so the self-explained
+     * and database-explained paths cannot drift in anything but the caption.
+     */
+    private GlobalSearchItemResponse proposalItem(
+            ProposalFamilySummaryResponse result,
+            Long currentProposalId,
+            String matchedField,
+            String matchedValue
+    ) {
         return new GlobalSearchItemResponse(
                 "PROPOSAL",
                 currentProposalId,
@@ -1060,7 +1154,7 @@ public class GlobalSearchService {
                 result.status(),
                 null,
                 matchedField,
-                proposalMatchedValue(result, matchedField),
+                matchedValue,
                 currentProposalId != null
                         ? "/proposals/dashboard/" + currentProposalId
                         : null,
@@ -1073,49 +1167,60 @@ public class GlobalSearchService {
         );
     }
 
-    // findFamilies' own SQL doesn't expose which column matched, same
-    // heuristic approach as awardMatchedField - see
-    // ProposalArchiveRepository.findFamilies.
+    /**
+     * Which of the Proposal's displayed fields matched, or null.
+     *
+     * <p>QA TC-040, the Proposal half. The test was a plain substring one,
+     * so a search for "NSF" reported "Matched on: Title" against "Priority
+     * Sector Targeting and Structural Transformation in Ethiopia". The test
+     * is now {@link LexicalMatch#matches}, the same rule the SQL applies.
+     *
+     * <p>Null means "this result cannot explain itself from what it
+     * carries", not "it did not match". The sponsor's acronym is now a
+     * retrieval rule and is not in this DTO; those rows are explained by
+     * {@code explainProposalMatches} instead of guessed at here.
+     *
+     * <p>The literal "Proposal" fallback is gone. With the predicate and
+     * the explanation sharing one rule it should now be unreachable, and if
+     * it is ever reached the honest answer is no caption rather than
+     * "Matched on: Proposal (01116997)".
+     */
     private String proposalMatchedField(
             ProposalFamilySummaryResponse result,
             String query
     ) {
-        String normalizedQuery = query.toLowerCase();
-
-        if (result.proposalNumber() != null
-                && result.proposalNumber().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.proposalNumber())) {
             return "Proposal Number";
         }
-        if (result.title() != null
-                && result.title().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.title())) {
             return "Title";
         }
-        if (result.sponsorName() != null
-                && result.sponsorName().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.sponsorName())) {
             return "Sponsor";
         }
-        if (result.leadUnitName() != null
-                && result.leadUnitName().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.leadUnitName())) {
             return "Lead Unit";
         }
-        if (result.principalInvestigator() != null
-                && result.principalInvestigator().toLowerCase().contains(normalizedQuery)) {
+        if (LexicalMatch.matches(query, result.principalInvestigator())) {
             return "Principal Investigator";
         }
-        return "Proposal";
+        return null;
     }
 
     private String proposalMatchedValue(
             ProposalFamilySummaryResponse result,
             String matchedField
     ) {
+        if (matchedField == null) {
+            return null;
+        }
         return switch (matchedField) {
             case "Proposal Number" -> result.proposalNumber();
             case "Title" -> result.title();
             case "Sponsor" -> result.sponsorName();
             case "Lead Unit" -> result.leadUnitName();
             case "Principal Investigator" -> result.principalInvestigator();
-            default -> result.proposalNumber();
+            default -> null;
         };
     }
 
