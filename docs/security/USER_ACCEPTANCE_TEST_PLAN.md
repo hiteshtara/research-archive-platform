@@ -19,7 +19,7 @@ see a zeroed dashboard and does not see a not-found page.
 So the Thursday 12 November window is a **technical** acceptance test of the
 authorization engine, run by one tester against one grant. It is not, and
 cannot be, user acceptance testing. UAT needs its own window, its own grants
-and its own approval — see §7.
+and its own approval — see §8.
 
 ## 2. Who is actually a tester
 
@@ -205,7 +205,49 @@ from any record available today.
 The No-Grant Control must stay unprovisioned. It is the only case that proves
 denial is the default rather than an accident of configuration.
 
-## 7. UAT needs its own window
+## 7. Defects that must be corrected before wider UAT
+
+### UAT-BLOCK-1 — Global Search tells an ungranted user to "try again shortly"
+
+**Found** 2026-11-11, while verifying the authorization response codes. Not
+fixed: no application code is being changed during window preparation.
+
+**Behaviour.** Global Search fans out to one leg per module and joins them in
+`joinOrRecordFailure`, which catches `RuntimeException` per leg, logs a
+warning, and adds the module to `failedModules`. Under enforcement each leg
+calls `requireProvisioned()`, so for a caller with no grant **every** leg
+throws `AccessNotProvisionedException` and every module is recorded as failed.
+
+The response is therefore **HTTP 200 with every module in `failedModules`** —
+not the 403 the same caller receives everywhere else, and not "0 results". The
+UI then renders its partial-failure warning:
+
+> "… could not be searched just now, so this is not the whole archive. Try
+> again shortly before concluding there is nothing to find."
+
+**Why it blocks wider UAT.** A permissions problem is described to the user as
+a transient outage. The message invites the tester to retry indefinitely
+instead of asking for access, and it is the opposite of the advice in §4: the
+tester is told to expect "Your access has not been set up yet", and Global
+Search alone will not say it. With several ungranted testers this would
+generate retry reports rather than provisioning requests.
+
+**Severity.** Medium — misleading, not unsafe. Nothing is disclosed: the
+caller learns only that a module failed, which is what a genuine outage also
+reports. There is no leak and no incorrect authorization decision.
+
+**What a correction looks like** (not implemented, for the fixing PR to
+decide): distinguish an authorization failure from a transient leg failure
+inside `joinOrRecordFailure` — either let the provisioning exception propagate
+so the request answers 403 consistently with every other endpoint, or classify
+it so the UI can show the access notice instead of the retry warning. The
+first is more consistent; the second keeps partial results working for a
+*scoped* caller whose single module legitimately fails.
+
+**Not in scope for the 12 November technical window.** That window runs with
+one provisioned tester, who will not hit this path.
+
+## 8. UAT needs its own window
 
 Keep this separate from the 13 technical acceptance tests.
 
