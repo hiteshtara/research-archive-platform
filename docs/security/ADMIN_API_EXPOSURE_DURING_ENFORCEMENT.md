@@ -1,7 +1,5 @@
 # The administrative API becomes reachable when enforcement is enabled
 
-Written for the project's security reviewers.
-
 Recorded 2026-11-11, before the 12 November DEV enforcement window, because
 this is a side effect of enabling enforcement rather than anything the window
 adds deliberately.

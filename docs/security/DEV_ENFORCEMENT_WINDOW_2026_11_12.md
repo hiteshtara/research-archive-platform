@@ -1,8 +1,5 @@
 # DEV enforcement window — Thursday 12 November 2026, 4:00–5:30 PM ET
 
-Written for the project's security reviewers and for whoever executes or
-audits this window.
-
 DEV only. Production is out of scope and is not touched at any point.
 
 ## Authorized changes, and nothing else
