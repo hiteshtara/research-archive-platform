@@ -1,5 +1,12 @@
 # DEV pilot dry runs — the eight roles
 
+> **Also run against the deployed artifact.** This file records the plan the
+> utilities produce when compiled from source. The same eight roles have since
+> been run through the image the DEV service actually runs, pinned by digest -
+> see [`DEV_PILOT_DRY_RUNS_REV89.md`](DEV_PILOT_DRY_RUNS_REV89.md), which also
+> covers PARENT_AWARD depth 0 and 1, the Kuali PERSON_ID requirement, and the
+> expiry/revocation/cleanup procedures.
+
 **Nothing here has been run against DEV.** Every block below is real output
 from the real commands, produced by `PilotDryRunPlanIntegrationTest` against a
 throwaway PostgreSQL with every committed migration applied. The plan is
