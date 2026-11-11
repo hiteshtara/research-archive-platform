@@ -15,7 +15,7 @@
   "containerDefinitions": [
     {
       "name": "link-identity",
-      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api@sha256:abce05a688cdad93361e47e05e685ea9d5bcd6ec4439fa8ab4f052727f46cc42",
+      "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api@sha256:f0f42ab61271e9d3bf4113836fe5736c7ff4aa2d563c5cfa8da9d39ba5b912f1",
       "essential": true,
       "environment": [
         {

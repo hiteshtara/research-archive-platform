@@ -158,9 +158,23 @@ SQL. All nine pass.
 **Subaward has no sponsor-acronym path, and will not gain one here.**
 `archive.subaward` carries only the denormalised sponsor names
 (`award_sponsor_name`, `award_prime_sponsor_name`) and no sponsor code or
-Award link, so there is nothing to join to the sponsor master. A
-Subaward whose sponsor is "National Institutes of Health" is reachable by
-"National" or "Institutes" but **not** by "NIH".
+Award link, so there is nothing to join to the sponsor master.
+
+An acronym therefore reaches a Subaward **only when the acronym happens to be
+written into the stored sponsor name itself.** Corrected 2026-11-11 against
+live DEV data, because the first version of this note got the example
+backwards:
+
+| Searched | Stored sponsor name on DEV | Reaches Subawards? |
+|---|---|---|
+| `NIH` | `NIH/National Institute of …` | **yes** — the letters are right there at a word start (6,230 rows) |
+| `NSF` | `National Science Foundation` | **no** — the string contains no "NSF" at all |
+
+That asymmetry is the whole reason NSF Subawards fell from 287 to 162 while
+NIH Subawards were unaffected: the 162 that remain are the ones whose *title*
+literally says NSF, such as "NSF PCL-Test Bed". It is luck of the data, not a
+capability — do not rely on it for any other acronym without checking the
+stored name first.
 
 This is not a regression: those records were never reachable by the acronym.
 Before the fix they matched "NSF" only through letter coincidences like
