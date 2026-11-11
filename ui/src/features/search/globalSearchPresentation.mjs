@@ -126,14 +126,40 @@ export function describeResultCard(result) {
   const matchedValue = result?.matchedValue ?? null;
   const isSemanticMatch = result?.matchType === "RELATED";
 
+  /*
+   * The Negotiation ID, finally rendered.
+   *
+   * negotiationIdentifierLine was written for QA TC-040 and then never
+   * reached a screen: the page showed `identifier` as the heading and a
+   * "Doc <number>" chip beside it, and since the API's `identifier` for a
+   * Negotiation IS its document number, the card printed that number twice
+   * and the Negotiation ID nowhere. Verified against the running revision
+   * on 2026-11-10: recordId 12724 and document 1149373 are different
+   * values, and only 1149373 was ever displayed.
+   *
+   * So the heading becomes the labelled pair, and the Doc chip is dropped
+   * for this module alone - it would now repeat what the heading says. Each
+   * identifier appears exactly once.
+   */
+  const negotiationLine =
+    result?.module === "NEGOTIATION" ? negotiationIdentifierLine(result) : "";
+
   return {
     identifier,
+    /*
+     * What the card prints as its heading. Identical to `identifier` for
+     * every module but Negotiation, which needs both of its identifiers.
+     */
+    identifierHeading: negotiationLine || identifier,
+    /*
+     * Whether the card should add its own "Doc <number>" chip. False only
+     * when the heading already names the document number.
+     */
+    showDocumentChip: !negotiationLine,
     title: result?.title ?? identifier,
     identifierLine:
       result?.module === "NEGOTIATION"
-        ? [negotiationIdentifierLine(result), subtitle]
-            .filter(Boolean)
-            .join(" • ")
+        ? [negotiationLine, subtitle].filter(Boolean).join(" • ")
         : subtitle
           ? `${identifier} • ${subtitle}`
           : identifier,
