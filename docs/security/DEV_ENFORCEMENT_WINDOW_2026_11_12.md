@@ -16,12 +16,20 @@ DEV only. Production is out of scope and is not touched at any point.
 
 The single reference for every assertion in this window:
 
-| Status | Meaning |
-|---|---|
-| **200** | authorized record |
-| **404** | out-of-scope record belonging to a **provisioned** identity |
-| **403** | unprovisioned or suspended identity (`ACCESS_NOT_PROVISIONED` / `ACCESS_DENIED`) |
-| **401** | expired or missing sign-in authentication |
+| Status | Code | Meaning |
+|---|---|---|
+| **200** | — | authorized record |
+| **404** | — | out-of-scope record belonging to a **provisioned** identity |
+| **403** | `ACCESS_NOT_PROVISIONED` | no identity link, or no active grant |
+| **403** | `ACCESS_DENIED` | suspended, ambiguous, revoked, or evaluation failure |
+| **403** | `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` | the caller may open the Award but not **every** version of its family, and the response spans the whole family |
+| **401** | — | expired or missing sign-in authentication |
+
+**Three different 403s, so a 403 is never interpreted by its status alone —
+the `code` is read every time.** `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` is an
+*expected* response in this window (see the PER_VERSION discriminator) and
+must not be mistaken for `ACCESS_NOT_PROVISIONED`, which would mean the grant
+is not being seen and would abort the window.
 
 **Any status outside this table, or any of these in a place the procedure does
 not predict, stops testing and triggers rollback to revision 91.**
@@ -291,7 +299,10 @@ enforcement is proved by behaviour before any test runs:
 | `GET /api/awards/114471-00001` (out of scope) | **404** |
 
 Both paths were confirmed to resolve while enforcement was off, where both
-returned 200.
+returned 200. Both are served by `findWorkspace`, which authorises the
+**current version only** (`requireAwardNumber`) and does not apply the
+family-completeness rule — so the gate is unaffected by the correction
+recorded in the PER_VERSION discriminator section below.
 
 The pair is diagnostic, which is why it is run as a pair:
 
@@ -305,6 +316,76 @@ The pair is diagnostic, which is why it is run as a pair:
 A 200/404 pair also proves the caller is provisioned, since an unprovisioned
 caller answers 403 to both. **If either assertion fails, abort immediately and
 restore revision 91.**
+
+## PER_VERSION discriminator — corrected instrumentation
+
+Verified explicitly alongside the paired gate, and **authorization decisions
+are read from unit numbers, never display names** (see the baseline section
+for the mapping and for the first-pass error that motivated saying so).
+
+### The correction
+
+The discriminator was specified as three probes of the per-version endpoint:
+sequence 3 → 200, sequence 2 → 200, sequence 1 → 404. Checked against the
+implementation on 2026-11-11, **that endpoint cannot produce those results**,
+and running it as specified would have reported three FAILs and triggered an
+unnecessary rollback.
+
+`GET /api/awards/{awardNumber}/history/{sequenceNumber}` is served by
+`AwardArchiveService.findSequence`, which applies the **family-completeness
+rule**:
+
+```java
+recordAccess.requireEveryAwardVersion(normalizedAwardNumber);
+```
+
+Its own comment states the intent:
+
+> "the whole family must be visible, decided per version. Under FAMILY_WIDE
+> version scope that is satisfied whenever any version is in scope, so this
+> costs nothing today; **under PER_VERSION it denies, which is the point.**"
+
+The response spans every version of the family, so a caller cleared for the
+current version but not an earlier one must not read it. With grant 2,
+sequence 1 sits at the child unit `1250400000` and is out of scope, so
+`requireEveryAwardVersion` throws `PartialFamilyAccessException` → **403**
+`AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS`, "This response needs access to every
+version of the Award." All three sequences answer 403, including sequence 1 —
+which is 403 rather than 404 because `requireAwardNumber` passes first and the
+family check throws after it.
+
+The paired gate is unaffected: `GET /api/awards/{awardNumber}` is served by
+`findWorkspace`, which calls only `requireAwardNumber` — the current version,
+no family rule.
+
+### How the discriminator is actually verified
+
+Two complementary probes, each with a recorded enforcement-off baseline so the
+change is unambiguous:
+
+| # | Probe | Enforcement OFF (verified 2026-11-11) | Expected under enforcement | What it discriminates |
+|---|---|---|---|---|
+| **D1** | `GET /api/v1/awards/versions/search?awardNumber=212137-00001&page=0&size=100` | 200, `totalElements` **3**, sequences **[3, 2, 1]** | 200, `totalElements` **2**, sequences **[3, 2]** — sequence 1 **absent** | row-level: `searchVersions` applies `awardScopeSql("av")`, a per-row predicate on `award_version`, so each version is decided on its own. FAMILY_WIDE would return all 3 |
+| **D2** | `GET /api/awards/212137-00001/history/3` | 200 | **403** `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` | the family-completeness rule firing. FAMILY_WIDE would return 200, per the comment above |
+
+D1 is the positive form — it names exactly which versions remain visible. D2
+is the designed negative form. Together they establish that authorization is
+per version and not family-wide, which is the evidence business decision 2.1
+needs; 2.1 remains OPEN.
+
+`/api/awards/212137-00001/history/2` and `/history/1` are probed and recorded
+for completeness, both expected **403** for the same reason. They are **not**
+treated as 200/200/404, and a 403 on them is **not** a FAIL.
+
+### Abort conditions for this step
+
+An unexpected status aborts the window and restores revision 91 — in
+particular:
+
+- D1 returning **3** sequences: authorization is behaving family-wide, not
+  per version
+- D1 returning **0** sequences, or 403: the grant is not being seen at all
+- D2 returning **200**: the family-completeness rule is not firing
 
 ## Principal and grant verification — immediately after the gate
 
