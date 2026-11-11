@@ -50,8 +50,11 @@ Binding: **every check must pass before revision 92 is registered**, except
 those marked *in-window*, which cannot be answered earlier and are noted as
 such with the reason.
 
-Status recorded 2026-11-11, the day before the window. A check verified today
-is still re-run at 16:00 — the point of the early pass is to find blockers
+Every check is reported as **PASS**, **FAIL**, **CONDITIONAL** or **NOT YET
+EXECUTED**. Indirect evidence is **CONDITIONAL**, never PASS.
+
+Status recorded 2026-11-11, the day before the window. A check that passes
+today is still re-run at 16:00 — the early pass exists to surface blockers
 with a day in hand, not to skip the check.
 
 ### Account and environment
@@ -65,7 +68,7 @@ with a day in hand, not to skip the check.
 
 | # | Check | Expected | Status 2026-11-11 |
 |---|---|---|---|
-| 3 | DEV request traffic before the window | no unexpected caller active; traffic attributable to known users | *in-window* — a traffic sample is only meaningful close to the window |
+| 3 | DEV request traffic before the window | no unexpected caller active; traffic attributable to known users | **NOT YET EXECUTED** — a traffic sample is only meaningful close to the window |
 | 4 | Known active users during the window | all covered by the notification | **PASS with a note**: one notified user's auto-reply states she returns **Thursday 12 November**, the window day. She is notified, so she is covered — but she is an actually-active user, not a presumed-inactive one |
 
 ### Conflicting ECS tasks, ETL, schedules and Amplify
@@ -112,9 +115,9 @@ account is created, changed, disabled, deleted or reset at any point.
 
 | # | Check | Expected | Status 2026-11-11 |
 |---|---|---|---|
-| 22 | Grant 2 active | `UNIT 1250000000`, descendants excluded, expires 2026-12-31, approval ref DEV-APPROVAL-3 | **INDIRECT only** — see the note below |
-| 23 | Exactly one ACTIVE identity link for the tester | one, link id 4 | **INDIRECT only** — see the note below |
-| 24 | An active archive administrator exists | exactly one | **INDIRECT only** — see the note below |
+| 22 | Grant 2 active | `UNIT 1250000000`, descendants excluded, expires 2026-12-31, approval ref DEV-APPROVAL-3 | **CONDITIONAL** — indirect evidence only; see below |
+| 23 | Exactly one ACTIVE identity link for the tester | one, link id 4 | **CONDITIONAL** — indirect evidence only; see below |
+| 24 | An active archive administrator exists | exactly one | **CONDITIONAL** — indirect evidence only; see below |
 
 **Ordering constraint, stated plainly.** Checks 22–24 read the `authz` tables,
 and there is no approved read-only path to them while enforcement is off: the
@@ -141,15 +144,14 @@ properly and is worth doing before any wider window.
 |---|---|---|---|
 | 25 | In-scope fixture resolves | `GET /api/awards/212137-00001` → 200 | **PASS** — path confirmed to resolve with enforcement off |
 | 26 | Out-of-scope fixture resolves | `GET /api/awards/114471-00001` → 200 with enforcement off | **PASS** — both return 200 now, which is what makes the later 200/404 split meaningful |
-| 27 | Version boundary baseline under `PER_VERSION` | the versions of the in-scope family, and each one's lead unit, captured **before** enforcement is enabled | *in-window*, and **must be captured while enforcement is still off** |
+| 27 | Version-boundary baseline under `PER_VERSION` | Award IDs, sequence numbers, lead units and expected decisions, captured **before** enforcement is enabled | **PASS** — captured 2026-11-11 with enforcement off; see the baseline section below |
 
-Check 27 is sequencing, not paperwork. `PER_VERSION` makes authorization
-version-specific, so some versions of an in-scope family are expected to be
-invisible. Once enforcement is on, a denied version is indistinguishable from
-one that never existed — so the list of versions and their lead units has to
-be recorded while they are all still visible, or there is nothing to compare
-the enforced result against. It needs an authenticated session, which the
-15:55 login provides.
+Check 27 was sequencing, not paperwork, and is now done: `PER_VERSION` makes
+authorization version-specific, so some versions of an in-scope family are
+expected to be invisible, and once enforcement is on a denied version is
+indistinguishable from one that never existed. The baseline was therefore
+captured on 2026-11-11 while all ten versions were still visible — see the
+baseline section below.
 
 ### Service and ALB health
 
@@ -204,14 +206,80 @@ APP_AUTHORIZATION_MAX_SIGN_IN_AGE       = 12h
 
 | # | Check | Expected | Status 2026-11-11 |
 |---|---|---|---|
-| 36 | Fresh BU Web Login with Duo | completed at 15:55 | *in-window* |
-| 37 | `auth_time` age | under 12 hours, read without exposing the token | *in-window* |
-| 38 | Genuinely fresh, not a reused IdP session | a silent Shibboleth reuse **stops** the window | *in-window* |
-| 39 | Identity is the designated federated test account | confirmed, and not the native control | *in-window* |
+| 36 | Fresh BU Web Login with Duo | completed at 15:55 | **NOT YET EXECUTED** |
+| 37 | `auth_time` age | under 12 hours, read without exposing the token | **NOT YET EXECUTED** |
+| 38 | Genuinely fresh, not a reused IdP session | a silent Shibboleth reuse **stops** the window | **NOT YET EXECUTED** |
+| 39 | Identity is the designated federated test account | confirmed, and not the native control | **NOT YET EXECUTED** |
 
 The session in use on 2026-11-11 had an `auth_time` 44 hours old. A stale
 session would have made both halves of the paired gate answer 404 and produced
 a false abort, which is why checks 36–39 run first and on their own.
+## Version-boundary baseline — captured 2026-11-11 with enforcement OFF
+
+Mandatory, and captured a day early because it can only be taken while
+enforcement is off: once it is on, a denied version is indistinguishable from
+one that never existed, so there would be nothing to compare the enforced
+result against.
+
+Taken from the live DEV API as the federated test account via
+`GET /api/v1/awards/versions/search`. Access-decision fields only — no
+investigator name or title was read or recorded.
+
+### The unit hierarchy, and why the field names mislead
+
+The API exposes `leadUnit` as a display **name**; the authorization engine
+matches on `lead_unit_number` (`{row}.lead_unit_number IN (:az_units)`), a
+column the API never returns. A first pass at this baseline compared the name
+against the granted number and therefore scored **every** version as a denial,
+including the Award the gate expects to allow. That output was wrong and is
+recorded here as the reason the mapping is stated explicitly rather than
+assumed.
+
+The mapping, established from two independent sources that agree — the live
+data above, and the committed acceptance matrix's hierarchy
+`1250000000 → 1250400000 → 1252060000` with its cases 2 and 3:
+
+| Unit number | Display name | Position |
+|---|---|---|
+| `1250000000` | COLLEGE OF GENERAL STUDIES (CGS) | **parent — the granted unit** |
+| `1250400000` | CGS ADMINISTRATION | child (excluded: grant 2 has descendants OFF) |
+
+### The baseline
+
+Grant 2: `UNIT 1250000000`, **descendants excluded**, `PER_VERSION`.
+
+| Award | Seq | `awardId` | Lead unit | Unit no. | Status | Current | Expected |
+|---|---|---|---|---|---|---|---|
+| `212137-00001` | 3 | 3798004 | COLLEGE OF GENERAL STUDIES (CGS) | `1250000000` | Approved Award | yes | **200** |
+| `212137-00001` | 2 | 3787291 | COLLEGE OF GENERAL STUDIES (CGS) | `1250000000` | Approved Award | no | **200** |
+| `212137-00001` | 1 | 3785806 | CGS ADMINISTRATION | `1250400000` | Approved Award | no | **404** |
+| `114471-00001` | 7 | 1014735 | CGS ADMINISTRATION | `1250400000` | Closed | yes | **404** |
+| `114471-00001` | 6 | 1014724 | CGS ADMINISTRATION | `1250400000` | Closed | no | **404** |
+| `114471-00001` | 5 | 994529 | CGS ADMINISTRATION | `1250400000` | PAFO/OSP (Closing) | no | **404** |
+| `114471-00001` | 4 | 826786 | CGS ADMINISTRATION | `1250400000` | PAFO/OSP (Closing) | no | **404** |
+| `114471-00001` | 3 | 254250 | CGS ADMINISTRATION | `1250400000` | Approved Award | no | **404** |
+| `114471-00001` | 2 | 254159 | CGS ADMINISTRATION | `1250400000` | Approved Award | no | **404** |
+| `114471-00001` | 1 | 7885 | CGS ADMINISTRATION | `1250400000` | Approved Award | no | **404** |
+
+Totals: the in-scope family has **3** versions, the out-of-scope family **7**.
+All ten are visible now, with enforcement off.
+
+### The one assertion that actually tests PER_VERSION
+
+**`212137-00001` sequence 1 (`awardId` 3785806) must return 404.**
+
+It belongs to the same Award family as the version the gate expects to allow,
+but it sits at the **child** unit. A family-wide implementation would return
+200 for it; a per-version implementation returns 404. It is therefore the
+single discriminator between the two, and the live evidence for Anthony's
+`PER_VERSION` requirement. Business decision 2.1 remains OPEN, so this is
+evidence for that decision rather than a closure of it.
+
+The acceptance matrix's own cases 2 and 3 are exactly the paired gate, which
+is why the gate assertions and this baseline agree by construction rather than
+by coincidence.
+
+
 ## Paired enforcement gate
 
 A healthy Spring Boot application does not prove enforcement is active, so
@@ -238,25 +306,35 @@ A 200/404 pair also proves the caller is provisioned, since an unprovisioned
 caller answers 403 to both. **If either assertion fails, abort immediately and
 restore revision 91.**
 
-## Principal and grant verification
+## Principal and grant verification — immediately after the gate
 
-The HTTP status of a granted Award does not by itself prove *which* identity
-is being tested, so identity is confirmed from the server's own point of view
-before any result is interpreted:
+Runs after the paired gate and **before any test result is interpreted**. The
+HTTP status of a granted Award does not by itself prove which identity is
+being tested.
 
-`GET /api/v1/admin/identities/{tester ARP}` returns `administrator`, `links[]`,
-`grants[]` and `recentAudit[]`. Because `actor()` resolves the caller from the
-live token and `ArchiveAdminService.describeIdentity` calls
-`requireAdministrator(actor)`, a 200 proves the server resolved **this token**
-to an active archive administrator, and the body states the grant association
-directly.
+`GET /api/v1/admin/identities/{tester ARP}` — read-only. Because `actor()`
+resolves the caller from the live token and
+`ArchiveAdminService.describeIdentity` calls `requireAdministrator(actor)`, a
+200 proves the server resolved **this token** to an active archive
+administrator, and the body states the links and grants directly.
 
-Expected: one ACTIVE link, and grant 2 as the only active grant —
-`UNIT 1250000000`, descendants excluded.
+Five assertions, all of which must hold:
 
-This endpoint is read-only. See `ADMIN_API_EXPOSURE_DURING_ENFORCEMENT.md` for
-why the whole administrative tree becomes reachable with enforcement, what
-protects it, and its test coverage.
+| # | Assertion |
+|---|---|
+| 1 | the authenticated administrator is the correct, expected identity |
+| 2 | **exactly one** active identity link, and it is the expected one |
+| 3 | grant 2 is active and associated with that identity |
+| 4 | scope is `UNIT 1250000000` with **descendants excluded** |
+| 5 | **no unexpected additional active grants** |
+
+**If any assertion fails: restore revision 91 immediately and do not proceed
+with tests 1–10.**
+
+This is the point at which the indirect pre-flight evidence for checks 22–24
+is replaced by direct verification. Until this response is read, that evidence
+remains indirect and is not treated as direct verification. No new read-only
+operator command is added during this window.
 
 ## Test order
 
@@ -301,12 +379,23 @@ no-grant authorization test**; test 12 is then UNVERIFIED, not passed.
 ## Rollback
 
 - **By 17:10 ET**, the service returns to revision 91 regardless of outcome.
-- Post-rollback verification: revision 91, 1/1, `COMPLETED`, health 200 `UP`,
-  and enforcement and auditing absent from the running definition.
+- Post-rollback verification, all four: revision 91 at 1/1 with rollout
+  `COMPLETED`; health 200 `UP`; enforcement **and** auditing absent from the
+  running definition; and **grant 2 revoked** (test 13's revocation confirmed
+  to have persisted).
 - Rollback is also triggered immediately by any unexpected authorization
   status, a failed gate assertion, or a failed pre-flight check.
 
 ## Reporting
+
+**Every one of the 39 pre-flight checks** is reported as **PASS**, **FAIL**,
+**CONDITIONAL** or **NOT YET EXECUTED**. Indirect evidence is reported as
+CONDITIONAL, never as PASS — checks 22–24 are CONDITIONAL until the
+administrator identity response is read.
+
+**The GO/NO-GO result is returned at the beginning of the window, before any
+activation.** If any mandatory pre-flight check reports FAIL, revision 92 is
+not registered.
 
 Test by test: **PASS / FAIL / NOT EXECUTED / UNVERIFIED**, with the status
 observed and the evidence. Twelve executable tests are not twelve passing
@@ -319,3 +408,16 @@ tests unless all twelve actually pass.
   taken from `ops/deploy-api.sh` and are sufficient.
 - No sensitive identifier, password, token, cookie or authentication header
   appears in any log, screenshot or repository file.
+- **External dependency (accepted residual risk).** The account-level
+  `shutdown-scheduler` rule fires every 5 minutes against a Lambda. It is a
+  shared BU non-production utility, outside this project's control and **not
+  to be modified**. Service stability is monitored throughout the window; if
+  the service is disrupted from outside, the window ends and revision 91 is
+  restored.
+- **No Amplify deployment is triggered during the window.** PRs #131, #132 and
+  #133 stay unmerged until after the test: Amplify auto-builds `main` from
+  `origin`, so merging any of them would move the deployed UI mid-window.
+  None of the three affects the API image used on Thursday — revision 92 pins
+  the existing `sha256:f0f42ab6…b912f1` built from commit `458de9c`.
+- No additional deployment, database change, identity provisioning or grant
+  modification outside the approved test.
