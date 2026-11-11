@@ -529,22 +529,35 @@ class ProposalSubawardLexicalRelevanceIntegrationTest {
         }
 
         @Test
-        @DisplayName("P9: Subaward gains no acronym path, and says so by behaviour")
+        @DisplayName("P9: Subaward has no acronym JOIN - only the letters in the stored name")
         void p9() {
             /*
              * archive.subaward carries only the denormalized sponsor NAMES and
-             * no sponsor code, so there is nothing to join. 4319's sponsor is
-             * the National Institutes of Health and it is not reachable by
-             * "NIH" through an acronym - only by the spelled-out name. This is
-             * recorded as a KNOWN LIMITATION rather than left to be discovered
-             * during acceptance testing.
+             * no sponsor code or Award link, so there is nothing to join to the
+             * sponsor master. An acronym reaches a Subaward only when the
+             * acronym is written into the stored name itself.
+             *
+             * The fixture uses the REAL DEV strings, because the first version
+             * of this test used "National Institutes of Health" and so implied
+             * that "NIH" is unreachable - which is false on DEV, where the
+             * stored name is "NIH/National Institutes of Health". Corrected
+             * 2026-11-11 after checking the live data: "NIH" matches 6,230
+             * Subaward rows and "NSF" matches 162, and the difference is
+             * entirely whether the letters are in the string.
              */
             assertThat(subawardCodes("NIH"))
-                    .as("no acronym path exists for Subaward")
-                    .doesNotContain("4319");
-            assertThat(subawardCodes("National"))
-                    .as("the spelled-out sponsor name is the only way in")
+                    .as("NIH is in the stored name, so it matches - not via an acronym join")
                     .contains("4319");
+            assertThat(subawardCodes("National"))
+                    .as("and so does the spelled-out part of the same name")
+                    .contains("4319");
+
+            // 4341's sponsor is 'National Science Foundation' - no "NSF" in it.
+            // It is reachable only because its TITLE says NSF.
+            assertThat(subawardCodes("NSF"))
+                    .as("no acronym join exists, so a Subaward is NOT reached by its "
+                            + "sponsor's acronym when the name does not contain it")
+                    .containsExactly("4341");
         }
     }
 
@@ -731,7 +744,7 @@ class ProposalSubawardLexicalRelevanceIntegrationTest {
                 (93847, '4319', 5, '1210089',
                  'Structure and function of the monotopic phosphoglycosyl transferase superfamily: Initiators of biosynthesis of complex bacterial glycoconjugates',
                  '07. Executed', '301396', NULL,
-                 'National Institutes of Health', NULL, 'ACTIVE', CURRENT_TIMESTAMP),
+                 'NIH/National Institutes of Health', NULL, 'ACTIVE', CURRENT_TIMESTAMP),
                 (93900, '4400', 1, '1210500',
                  'Transformer-Based Artificial Intelligence Methods to Evaluate the Impact of Military Service',
                  '07. Executed', '301396', NULL,
