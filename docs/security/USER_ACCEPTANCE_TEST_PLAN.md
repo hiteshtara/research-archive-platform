@@ -9,8 +9,12 @@ BU users can meaningfully take part in authorization testing.**
 
 `authz.access_grant` holds exactly one row — grant 2, `UNIT 1250000000`, issued
 to the designated test identity. Every other identity has **no grant**, and
-under record-level enforcement no grant means no records: zeroed dashboards and
-404 on everything.
+under record-level enforcement no grant means no archive at all. Note the
+shape of that denial, because it is **not** a 404: `requireProvisioned()` runs
+before any record is read, so the Dashboard itself returns **403
+`ACCESS_NOT_PROVISIONED`** and the UI renders "Your access has not been set up
+yet" (`AccessNotice`, reached from `DashboardPage`). An ungranted user does not
+see a zeroed dashboard and does not see a not-found page.
 
 So the Thursday 12 November window is a **technical** acceptance test of the
 authorization engine, run by one tester against one grant. It is not, and
@@ -114,13 +118,24 @@ specific Award family, or central access. Check that:
 
 ### What you should **not** be able to see
 
-Records outside your scope should behave as if **they do not exist** — a "not
-found" page, not an "access denied" page. That is deliberate: a denial that
-announced itself would tell you a record exists and who it belongs to.
+There are **two different denials**, and telling them apart is the single most
+useful thing a tester can do.
 
-So: *"I get a not-found page for a record I think I should see"* is worth
-reporting. *"I get a not-found page for a record outside my department"* is the
-system working.
+**Outside your scope — 404, "not found".** A record that exists but is not
+yours behaves as if it does not exist. That is deliberate: a denial that
+announced itself would confirm the record exists and hint whose it is.
+
+**No access provisioned at all — 403, "Your access has not been set up yet."**
+This is about *your account*, not about any record, so it is safe to say
+plainly, and saying it is what tells you to ask for access rather than go
+hunting for a bug.
+
+So:
+
+- *"Not found for a record I think I should see"* — worth reporting.
+- *"Not found for a record outside my department"* — the system working.
+- *"Your access has not been set up yet"* — you have no grant yet. Report it,
+  but as a provisioning request, not as a defect.
 
 ### Checking department-level access
 
@@ -147,8 +162,13 @@ Send to the project contact, with:
 
 Report in particular: a record you **can** see that you believe you should not
 (the most important finding of all), a record you cannot see that you should,
-any error page or spinner that never resolves, and anything that says "denied"
-rather than "not found".
+and any error page or spinner that never resolves.
+
+Do **not** report "Your access has not been set up yet" as a wrong-wording
+defect — that 403 is the designed response for an account with no grant. What
+*would* be a defect is the opposite: wording that names a record, a department
+or a person you were denied, or an "access denied" message where a plain **not
+found** was expected for an out-of-scope record.
 
 ## 5. The 12-hour sign-in age, and why it matters to testers
 
@@ -170,9 +190,9 @@ To be completed **once each participant's scope is confirmed and granted**. The
 scope column is deliberately empty for the five testers: it is not knowable
 from any record available today.
 
-| User | Role in testing | Assigned scope | Expected accessible | Expected denied (404) | Pass criteria |
+| User | Role in testing | Assigned scope | Expected accessible | Expected denied | Pass criteria |
 |---|---|---|---|---|---|
-| `lsreddy` | tester | *TBC — ask* | records in scope | everything outside it | every in-scope record opens; every out-of-scope record 404s; no "denied" wording |
+| `lsreddy` | tester | *TBC — ask* | records in scope | everything outside it | every in-scope record opens; every out-of-scope record returns **404**; the Dashboard never returns 403 once a grant is active |
 | `lhuval` | tester | *TBC — ask* | " | " | " |
 | `dhaywood` | tester | *TBC — ask* | " | " | " |
 | `wrh` | tester | *TBC — ask* | " | " | " |
