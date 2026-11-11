@@ -50,9 +50,11 @@ produced a false abort, so this gate runs first and on its own.
 
 ## 16:00 ET — pre-flight checklist
 
-One consolidated list. It restores the full approved checklist, which an
-earlier draft of this runbook had compressed to thirteen items, and keeps the
-safeguards added since. Nothing is dropped to preserve a round number.
+One consolidated list of **40** checks. It restores the full approved
+checklist, which an earlier draft of this runbook had compressed to thirteen
+items, and keeps every safeguard added since. Nothing is dropped to preserve a
+round number — check 40 was added on 2026-11-11 rather than folded into an
+existing one.
 
 Binding: **every check must pass before revision 92 is registered**, except
 those marked *in-window*, which cannot be answered earlier and are noted as
@@ -219,6 +221,12 @@ APP_AUTHORIZATION_MAX_SIGN_IN_AGE       = 12h
 | 38 | Genuinely fresh, not a reused IdP session | a silent Shibboleth reuse **stops** the window | **NOT YET EXECUTED** |
 | 39 | Identity is the designated federated test account | confirmed, and not the native control | **NOT YET EXECUTED** |
 
+### Discriminator identity binding
+
+| # | Check | Expected | Status 2026-11-11 |
+|---|---|---|---|
+| 40 | D1 and D2 bound to the fresh session | both probes execute as the identity signed in at 15:55 holding grant 2 — not a pre-existing, cached or stale session | **NOT YET EXECUTED** — confirmed at 16:00, before activation |
+
 The session in use on 2026-11-11 had an `auth_time` 44 hours old. A stale
 session would have made both halves of the paired gate answer 404 and produced
 a false abort, which is why checks 36–39 run first and on their own.
@@ -319,6 +327,14 @@ restore revision 91.**
 
 ## PER_VERSION discriminator — corrected instrumentation
 
+> **What these tests do and do not settle.** D1 and D2 verify that the
+> **temporary** `PER_VERSION` test configuration behaves as implemented. They
+> are not business approval of version-specific scoping. Business decision 2.1
+> remains **OPEN**, and a passing result here is evidence for that decision,
+> never a closure of it. SEC-003 is closed and is independent: contact-derived
+> access is version-specific unconditionally, whatever `versionScope` says.
+
+
 Verified explicitly alongside the paired gate, and **authorization decisions
 are read from unit numbers, never display names** (see the baseline section
 for the mapping and for the first-pass error that motivated saying so).
@@ -358,34 +374,90 @@ The paired gate is unaffected: `GET /api/awards/{awardNumber}` is served by
 `findWorkspace`, which calls only `requireAwardNumber` — the current version,
 no family rule.
 
-### How the discriminator is actually verified
+### The approved assertions
 
-Two complementary probes, each with a recorded enforcement-off baseline so the
-change is unambiguous:
+Approved 2026-11-11. These **replace** the superseded sequence-specific
+assertions (sequence 3 → 200, sequence 2 → 200, sequence 1 → 404), which the
+implementation cannot produce.
 
-| # | Probe | Enforcement OFF (verified 2026-11-11) | Expected under enforcement | What it discriminates |
-|---|---|---|---|---|
-| **D1** | `GET /api/v1/awards/versions/search?awardNumber=212137-00001&page=0&size=100` | 200, `totalElements` **3**, sequences **[3, 2, 1]** | 200, `totalElements` **2**, sequences **[3, 2]** — sequence 1 **absent** | row-level: `searchVersions` applies `awardScopeSql("av")`, a per-row predicate on `award_version`, so each version is decided on its own. FAMILY_WIDE would return all 3 |
-| **D2** | `GET /api/awards/212137-00001/history/3` | 200 | **403** `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` | the family-completeness rule firing. FAMILY_WIDE would return 200, per the comment above |
+Each has a recorded enforcement-off baseline taken on 2026-11-11, so the change
+under enforcement is unambiguous rather than inferred.
 
-D1 is the positive form — it names exactly which versions remain visible. D2
-is the designed negative form. Together they establish that authorization is
-per version and not family-wide, which is the evidence business decision 2.1
-needs; 2.1 remains OPEN.
+**D1 — version filtering**
 
-`/api/awards/212137-00001/history/2` and `/history/1` are probed and recorded
-for completeness, both expected **403** for the same reason. They are **not**
-treated as 200/200/404, and a 403 on them is **not** a FAIL.
+`GET /api/v1/awards/versions/search?awardNumber=212137-00001`
+
+| | Expected |
+|---|---|
+| Status | **200** |
+| `totalElements` | **2** |
+| Visible sequences | **[3, 2]** |
+| Sequence 1 | **absent** |
+
+Baseline with enforcement off: 200, `totalElements` **3**, sequences
+**[3, 2, 1]**. `searchVersions` applies `awardScopeSql("av")`, a per-row
+predicate on `award_version`, so each version is decided on its own.
+FAMILY_WIDE would return all three.
+
+**D2 — family completeness**
+
+`GET /api/awards/212137-00001/history/3`
+
+| | Expected |
+|---|---|
+| Status | **403** |
+| Error code | **`AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS`** |
+
+Baseline with enforcement off: 200. FAMILY_WIDE would return 200 under
+enforcement too, per the implementation comment above.
+
+**Sequences 2 and 1** are probed and must return **the same
+family-completeness denial** — 403 `AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` —
+for the same reason: the response spans the whole family, and sequence 1 is
+out of scope. Sequence 1 is 403 and **not** 404 because `requireAwardNumber`
+passes first and the family check throws after it.
+
+### Every 403 is classified by its error code, never by status
+
+There are three distinct 403s in this system (see the status reference).
+`AI_NOT_AVAILABLE_FOR_PARTIAL_ACCESS` is **expected** here;
+`ACCESS_NOT_PROVISIONED` in the same place would mean the grant is not being
+seen and aborts the window. The response body's `code` is read and recorded
+for **every** 403 observed, and no result is classified by HTTP status alone.
+
+### Executed as the freshly signed-in test identity
+
+D1 and D2 run **after** activation, but their binding is confirmed **before**
+activation as pre-flight check 40: both probes execute against the
+authenticated session created by the 15:55 fresh BU login and Duo — the
+designated federated test identity holding grant 2 — and not against any
+pre-existing, cached or stale session.
+
+This is not a formality. A stale token fails the `max-sign-in-age` check
+before enrollment is even read, so it would answer **401** — which falls under
+"an unexpected error" below and would abort the window for a reason that has
+nothing to do with version scoping. The session identity is re-confirmed from
+the administrator identity response before either result is interpreted.
 
 ### Abort conditions for this step
 
-An unexpected status aborts the window and restores revision 91 — in
-particular:
+Any of the following stops testing immediately and follows the approved
+rollback procedure to revision 91:
 
-- D1 returning **3** sequences: authorization is behaving family-wide, not
-  per version
-- D1 returning **0** sequences, or 403: the grant is not being seen at all
-- D2 returning **200**: the family-completeness rule is not firing
+| Condition | What it would mean |
+|---|---|
+| **D1 exposes sequence 1** | authorization is family-wide, not per version — restricted data reachable |
+| **D1 returns no accessible versions** | the grant is not being seen at all |
+| **D1 returns an unexpected error** | any status other than 200, including 401 (stale sign-in) or a 403 of any code |
+| **D2 returns 200, or an unexpected error code** | the family-completeness rule is not firing, or is failing for the wrong reason |
+| **Any restricted data is exposed** | see below |
+
+"Restricted data exposed" means, concretely: any field of
+`212137-00001` sequence 1 appearing in a D1 response; any content of
+`114471-00001` at any sequence appearing in any response; or any denial
+message naming a record, unit, department or person the identity is not
+cleared for. Any of these is a containment failure, not a test failure, and
+ends the window at once.
 
 ## Principal and grant verification — immediately after the gate
 
@@ -469,7 +541,7 @@ no-grant authorization test**; test 12 is then UNVERIFIED, not passed.
 
 ## Reporting
 
-**Every one of the 39 pre-flight checks** is reported as **PASS**, **FAIL**,
+**Every one of the 40 pre-flight checks** is reported as **PASS**, **FAIL**,
 **CONDITIONAL** or **NOT YET EXECUTED**. Indirect evidence is reported as
 CONDITIONAL, never as PASS — checks 22–24 are CONDITIONAL until the
 administrator identity response is read.
