@@ -41,7 +41,7 @@ Defects found: **5** (2 functional, 1 data-integrity, 1 data-coverage,
 | 9 | UI | partial | page loads, navigation renders; see §8 |
 | 10 | API behaviour | 6 | 6 PASS |
 | 11 | Data integrity | 6 | 4 PASS, **1 FAIL** (DEF-3), 1 BLOCKED |
-| 12 | Performance | 20+ timings | **systemic finding** (§6, DEF-5) |
+| 12 | Performance | 20+ timings, then repeated + content-verified | **root cause found**, fix proposed (§6, DEF-5; PR #141) |
 | 13 | Security (enforcement OFF) | 3 | 3 PASS |
 | 14 | Regression | CI | **all green** on `9729eff` |
 
@@ -111,33 +111,106 @@ into DEV is a prerequisite for that scope item.
 
 ### DEF-5 — Severe response times across search surfaces. **HIGH**
 
-Measured, single observations, uncached:
+**Root cause identified and a fix proposed (draft PR #141). Investigation
+and the full measurement record: PR #140.**
 
-| Endpoint | Time |
-|---|---|
-| `/api/v1/documents?query=NSF` | **42,505 ms** |
-| `/api/v1/documents?module=AWARD` | 18,057 ms |
-| `/api/global-search?query=zzzqqqxyz123` | **20,780 ms** |
-| `/api/v1/documents` (size=2) | 11,588 ms |
-| `/api/global-search?query=NSF` | 8,088 ms |
-| `/api/v1/documents?q=ZZQQXX9999` | 8,817 ms |
-| `/api/v1/documents` (size=2, repeat) | 6,386 ms |
-| `/api/global-search?query=212137-00001` | 5,003 ms |
-| `/api/dashboard` | 3,083 ms |
-| `/api/subawards?query=9500310349` | 3,892 ms |
+The figures first recorded here were single, uncached observations. They
+have since been re-measured with repeats, and **every timing below was
+recorded only for an HTTP 200 whose body also passed a content check** —
+no status-only acceptance, and no 401 counted as a measurement anywhere.
 
-For contrast, record reads are fast: award detail 42 ms, negotiation detail
-103 ms, award people 78 ms.
+#### Verified Documents timings (authenticated, DEV revision 93)
 
-**This materially exceeds the figure behind open decision TC-042**, which
-recorded a Global Search median of about 11.5 s. A `size=2` Documents request
-taking 11.6 s indicates the cost is in the query, not the payload. Two
-observations stand out as worth investigating first: the **42.5 s** Documents
-query, and a **nonsense** Global Search costing 20.8 s — more than a matching
-one, which suggests the semantic leg runs hardest when nothing matches.
+| Request | Repeats | Median | Min | Max |
+|---|---:|---:|---:|---:|
+| `/api/v1/documents?query=NSF` (all modules) | 5 | **43,406 ms** | 40,326 | 45,757 |
+| `…&module=AWARD` | 1 | **19,763 ms** | — | — |
+| `…&module=PROPOSAL` | 1 | **1,801 ms** | — | — |
+| `/api/v1/documents` no text query | 1 | ~6,700 ms | — | — |
+| `/api/v1/documents?size=1` no text query | 1 | 10,522 ms | — | — |
+| `module=PROPOSAL` only | 1 | 462 ms | — | — |
+| `query=NSF&size=1` vs `size=25` | 1 each | 40,909 / 41,629 ms | — | — |
+| award detail (baseline) | 1 | **32 ms** | — | — |
 
-Single measurements on a shared DEV host; they indicate magnitude, not a
-benchmark.
+The `module=AWARD` row is fully content-verified: 25 of 25 rows returned
+`module=AWARD`, every row contained NSF in `documentNumber`, `title` or
+`businessRecordNumber`, `totalElements` was 1,734 and the module facet
+agreed.
+
+#### Verified Global Search timings
+
+| Leg | Median |
+|---|---:|
+| `query=NSF` | 17,312 ms |
+| non-matching query | 18,110 ms |
+| identifier query | 10,571 ms |
+| …Award leg | 11,776 ms |
+| …Proposal leg | 1,042 ms |
+| …Negotiation leg | 722 ms |
+| …Subaward leg | 2,533 ms |
+
+#### What the numbers establish
+
+- **Not cold start.** Five consecutive warm repeats all exceeded 40 s.
+- **Not payload size.** `size=1` ≈ `size=25`, confirming the earlier
+  `size=2` observation.
+- **Not application overhead.** An unrelated authenticated endpoint
+  answered in 32 ms.
+- **Not a missing index.** The dominant plan nodes are full but
+  correctly-indexed scans.
+
+#### Root cause (Documents)
+
+A filtered `GET /api/v1/documents` evaluates the four-module
+`EXPLORER_CTE` **three times per request** (`count()`, `search()`,
+`moduleFacets()`). That CTE resolves Award's primary person, unit count
+and person count for all **267,386** `archive.award_version` rows —
+`DISTINCT ON` over `award_person` (325,468) and `GROUP BY` over
+`award_person_unit` (334,371) — before any filter or `LIMIT` applies.
+The filter is applied *after* the union, so the existing
+`ix_award_version_title_trgm` cannot be used.
+
+This is independently corroborated. The 2026-08-12 investigation
+(`docs/architecture/KUALI_DOCUMENT_EXPLORER_PERFORMANCE.md`) measured
+those three queries by `EXPLAIN (ANALYZE, BUFFERS)` at 13.4 / 12.9 /
+12.3 s. Three evaluations at ~14.5 s each is 43.5 s — the black-box
+median above. That investigation fixed **only** the unfiltered path and
+recorded the filtered cases as a known-accepted limitation, naming
+`module=AWARD` alone at ~12 s. **DEF-5 is that documented limitation
+coming due, not a new regression.**
+
+#### Two corrections to this report's earlier reading
+
+1. The original note suggested the Global Search "semantic leg runs
+   hardest when nothing matches". A non-matching query does cost
+   slightly more (18,110 vs 17,312 ms), but the gap is small — the
+   right reading is that cost is proportional to the **corpus**, not to
+   the matches, in both cases. The stronger claim is withdrawn.
+2. All-modules Documents (43,406 ms) costs substantially **more** than
+   the sum of its per-module timings (≈23 s). So the Award branch is
+   the largest single contributor but **not** the entire cost once a
+   filter is involved — the cross-module union and its sort carry their
+   own large cost.
+
+#### Status of the fix
+
+Draft PR #141 proposes the smallest change that addresses the measured
+cause: derive the total from the facet counts rather than a second
+`COUNT(*)`, and route filtered requests that do not read an Award person
+column through the two-stage light path that already exists for
+unfiltered requests. No migration, no new index, no change to the heavy
+CTE's SQL.
+
+Projected — **not yet measured** — `query=NSF` all modules at roughly
+8–12 s, a 3.5–5× reduction. Explicitly **not** an order of magnitude and
+**not** under a 5-second target: this environment's already-optimized
+unfiltered page measures ~6,700 ms, which is a floor the light path
+cannot beat. Sub-second filtered text search would require a different
+design.
+
+Global Search has a root cause **hypothesis only** — the same
+corpus-proportional shape — but its SQL has not been investigated and no
+fix is proposed for it.
 
 ## 4. Corrections to earlier records
 
@@ -209,7 +282,9 @@ Everything mechanical above was automated. These genuinely need a person:
    and amounts on a record match what BU believes is true. Automation confirms
    fields are populated and internally consistent; only a person knows whether
    they are *right*.
-2. **TC-042 response-time acceptability.** DEF-5 gives the numbers; what is
+2. **TC-042 response-time acceptability.** DEF-5 now gives repeated,
+   content-verified numbers and a proposed fix (PR #141) with explicit
+   timing and correctness gates; what is
    tolerable is a business judgement.
 3. **TC-041 relevance.** Whether the related results a nonsense query returns
    are acceptable or misleading.
