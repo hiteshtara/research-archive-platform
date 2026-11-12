@@ -1,5 +1,7 @@
 import {
   AccountCircleOutlined,
+  AccountTreeOutlined,
+  AdminPanelSettingsOutlined,
   ArchiveOutlined,
   FactCheckOutlined,
   CloseOutlined,
@@ -7,9 +9,11 @@ import {
   DescriptionOutlined,
   FindInPageOutlined,
   GavelOutlined,
+  GppGoodOutlined,
   HandshakeOutlined,
   HistoryOutlined,
   LogoutOutlined,
+  PeopleAltOutlined,
   MenuOutlined,
   SearchOutlined,
 } from "@mui/icons-material";
@@ -34,7 +38,14 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { currentUser, logout } from "../auth";
+
 import { sidebarNavigationItems } from "../features/navigation/navigationPresentation.mjs";
+import {
+  securityAdminNavigationItems,
+  showsModeToggle,
+} from "../features/securityAdmin/securityAdminPresentation.mjs";
+import { ModeToggle } from "../features/securityAdmin/ModeToggle";
+import { useCapabilities } from "../features/securityAdmin/useCapabilities";
 import { useAttachmentAccess } from "../hooks/useAttachmentAccess";
 
 // The only sidebar entry gated on Cognito group membership (rather than
@@ -78,6 +89,19 @@ type NavigationEntry = {
 // getExplorer* endpoints are all untouched and still gated by that same
 // flag - they were removed from the sidebar only, so the finished
 // application does not advertise developer tooling.
+const ADMIN_NAV_ICONS: Record<string, React.ReactNode> = {
+  overview: <GppGoodOutlined />,
+  identities: <PeopleAltOutlined />,
+  administrators: <AdminPanelSettingsOutlined />,
+  permissions: <AccountTreeOutlined />,
+  auditLog: <FactCheckOutlined />,
+};
+
+const adminNavigation: NavigationEntry[] = securityAdminNavigationItems.map((item) => ({
+  ...item,
+  icon: ADMIN_NAV_ICONS[item.key],
+}));
+
 const navigation: NavigationEntry[] = sidebarNavigationItems.map((item) => ({
   label: item.label,
   icon: NAV_ICONS[item.key],
@@ -134,9 +158,25 @@ export function AppLayout() {
     };
   }, []);
 
-  const visibleNavigation = attachmentAccess
+  const capabilities = useCapabilities();
+
+  /*
+   * Which sidebar the user is looking at. Driven by the route, so browser
+   * back/forward and a pasted URL all land in the right workspace without a
+   * separate piece of state that could disagree with the address bar.
+   *
+   * The administration sidebar is shown only to a verified administrator;
+   * anyone else in /admin/* keeps the archive navigation and meets the
+   * guard's access-denied screen in the content area.
+   */
+  const inSecurityAdmin =
+    location.pathname.startsWith("/admin") && showsModeToggle(capabilities);
+
+  const archiveNavigation = attachmentAccess
     ? navigation
     : navigation.filter((item) => item.path !== ATTACHMENT_GATED_PATH);
+
+  const visibleNavigation = inSecurityAdmin ? adminNavigation : archiveNavigation;
 
   async function handleSignOut() {
     try {
@@ -296,6 +336,10 @@ export function AppLayout() {
                 variant="outlined"
                 sx={{ display: { xs: "none", md: "flex" } }}
               />
+
+              {/* Research Archive / Security Admin. Rendered only for a
+                  verified administrator; absent for everyone else. */}
+              <ModeToggle capabilities={capabilities} />
 
               <Stack
                 sx={{
