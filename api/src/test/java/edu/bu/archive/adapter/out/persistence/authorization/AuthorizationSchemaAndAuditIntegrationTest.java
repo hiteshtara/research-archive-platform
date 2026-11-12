@@ -1,9 +1,11 @@
 package edu.bu.archive.adapter.out.persistence.authorization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
+import java.time.Instant;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
@@ -35,6 +37,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.admin.AdminAuditAction;
+import edu.bu.archive.application.authorization.admin.AuditQuery;
 import edu.bu.archive.application.authorization.admin.AdminAuditSink;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
@@ -657,6 +660,118 @@ class AuthorizationSchemaAndAuditIntegrationTest {
             return new edu.bu.archive.application.authorization.admin.GrantSpecification(
                     edu.bu.archive.application.authorization.GrantType.CENTRAL,
                     null, false, null, null, null);
+        }
+    }
+
+    /*
+     * The audit READ path, with nullable filters.
+     *
+     * Added after a live incident on 2026-11-11: with record enforcement on in
+     * DEV for the first time, GET /api/v1/admin/audit and
+     * GET /api/v1/admin/identities/{id} both returned HTTP 500.
+     *
+     *   PSQLException: ERROR: could not determine data type of parameter $1
+     *   PSQLException: ERROR: could not determine data type of parameter $3
+     *
+     * The statement filters with ":param IS NULL OR <condition>" so one query
+     * serves every combination. "IS NULL" constrains the type of neither side,
+     * so an uncast text parameter cannot be inferred and PostgreSQL refuses to
+     * prepare the statement. The two TIMESTAMPTZ parameters were already cast;
+     * :subject and :action were not.
+     *
+     * This class existed with 25 tests over the audit TABLE - its trigger,
+     * transactionality and JSONB validity - and none over the repository that
+     * READS it. The defect was therefore invisible to the suite, and invisible
+     * to any mock, because the failure is PostgreSQL's own type inference.
+     */
+    @Nested
+    class AuditReadFilters {
+
+        private JdbcAdminAuditRepository reader() {
+            return new JdbcAdminAuditRepository(jdbc);
+        }
+
+        private void seedOneAuditRow() {
+            requiresNew.executeWithoutResult(status ->
+                    service.bootstrapFirstAdministrator(
+                            ADMIN, "operator@test.invalid", "audit read fixture"));
+            requiresNew.executeWithoutResult(status -> service.recordGrantChange(
+                    ADMIN, AdminAuditAction.ACCESS_GRANTED, SUBJECT, "UNIT 1250000000"));
+        }
+
+        /**
+         * The whole point. Every combination of the four nullable filters must
+         * PREPARE and EXECUTE, not merely the ones a happy path supplies.
+         */
+        @Test
+        void everyCombinationOfNullableFiltersPreparesAndExecutes() {
+            seedOneAuditRow();
+            var reader = reader();
+            Instant from = Instant.parse("2000-01-01T00:00:00Z");
+            Instant to = Instant.parse("2100-01-01T00:00:00Z");
+
+            for (int mask = 0; mask < 16; mask++) {
+                String subject = (mask & 1) != 0 ? SUBJECT.value() : null;
+                AdminAuditAction action = (mask & 2) != 0 ? AdminAuditAction.ACCESS_GRANTED : null;
+                Instant f = (mask & 4) != 0 ? from : null;
+                Instant t2 = (mask & 8) != 0 ? to : null;
+                var query = new AuditQuery(subject, action, f, t2, 50);
+
+                assertThatCode(() -> reader.find(query))
+                        .as("filter mask %d (subject=%s action=%s from=%s to=%s) must prepare on PostgreSQL",
+                                mask, subject != null, action != null, f != null, t2 != null)
+                        .doesNotThrowAnyException();
+            }
+        }
+
+        /** The exact shape that returned 500 on GET /api/v1/admin/audit ($1). */
+        @Test
+        void theAllNullQueryIsTheShapeThatFailedLive() {
+            seedOneAuditRow();
+
+            assertThatCode(() -> reader().find(new AuditQuery(null, null, null, null, 20)))
+                    .doesNotThrowAnyException();
+        }
+
+        /** The shape describeIdentity uses: subject supplied, action null ($3). */
+        @Test
+        void forSubjectIsTheDescribeIdentityShapeThatFailedLive() {
+            seedOneAuditRow();
+
+            assertThatCode(() -> reader().find(AuditQuery.forSubject(SUBJECT.value())))
+                    .doesNotThrowAnyException();
+        }
+
+        /**
+         * Non-vacuity. Without this, a query that silently matched nothing
+         * would pass all three tests above.
+         */
+        @Test
+        void anUnfilteredReadReturnsTheSeededRowRatherThanNothing() {
+            seedOneAuditRow();
+
+            var all = reader().find(new AuditQuery(null, null, null, null, 20));
+
+            assertThat(all)
+                    .as("the seeded audit row must come back, or the tests above prove nothing")
+                    .isNotEmpty();
+            assertThat(all).anySatisfy(entry -> {
+                assertThat(entry.subject()).isEqualTo(SUBJECT.value());
+                assertThat(entry.action()).isEqualTo(AdminAuditAction.ACCESS_GRANTED.name());
+            });
+        }
+
+        /** A supplied filter must actually narrow, not be ignored. */
+        @Test
+        void aSubjectFilterNarrowsRatherThanBeingIgnored() {
+            seedOneAuditRow();
+
+            assertThat(reader().find(AuditQuery.forSubject("SYN-NOBODY-AT-ALL")))
+                    .as("a subject nobody holds must match no rows")
+                    .isEmpty();
+            assertThat(reader().find(AuditQuery.forSubject(SUBJECT.value())))
+                    .as("the real subject must still match")
+                    .isNotEmpty();
         }
     }
 }

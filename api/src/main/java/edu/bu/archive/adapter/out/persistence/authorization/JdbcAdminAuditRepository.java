@@ -29,12 +29,24 @@ public class JdbcAdminAuditRepository implements AdminAuditRepository {
         // Every filter is applied as "parameter IS NULL OR <condition>" so one
         // statement serves every combination, and an omitted filter cannot
         // accidentally become a condition that hides rows.
+        //
+        // EVERY parameter in that idiom must be explicitly CAST. In
+        // "$n IS NULL" the IS NULL constrains the type of neither side, so
+        // PostgreSQL cannot infer an uncast parameter and refuses to prepare
+        // the statement with "could not determine data type of parameter $n".
+        // The timestamps were cast from the start; :subject and :action were
+        // not, which took GET /api/v1/admin/audit and the identity-details
+        // endpoint down with HTTP 500 the first time record enforcement was
+        // switched on in DEV (2026-11-11). Both failed only when a filter was
+        // omitted, which is the normal case for both callers.
         return jdbc.sql("""
                         SELECT audit_id, occurred_at, actor, action,
                                institutional_identifier, detail::text AS detail
                         FROM authz.access_audit
-                        WHERE (:subject IS NULL OR institutional_identifier = :subject)
-                          AND (:action  IS NULL OR action = :action)
+                        WHERE (CAST(:subject AS TEXT) IS NULL
+                                 OR institutional_identifier = CAST(:subject AS TEXT))
+                          AND (CAST(:action  AS TEXT) IS NULL
+                                 OR action = CAST(:action AS TEXT))
                           AND (CAST(:fromTime AS TIMESTAMPTZ) IS NULL OR occurred_at >= CAST(:fromTime AS TIMESTAMPTZ))
                           AND (CAST(:toTime   AS TIMESTAMPTZ) IS NULL OR occurred_at <  CAST(:toTime   AS TIMESTAMPTZ))
                         ORDER BY occurred_at DESC, audit_id DESC
