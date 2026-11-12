@@ -121,33 +121,57 @@ no status-only acceptance, and no 401 counted as a measurement anywhere.
 
 #### Verified Documents timings (authenticated, DEV revision 93)
 
-| Request | Repeats | Median | Min | Max |
-|---|---:|---:|---:|---:|
-| `/api/v1/documents?query=NSF` (all modules) | 5 | **43,406 ms** | 40,326 | 45,757 |
-| `…&module=AWARD` | 1 | **19,763 ms** | — | — |
-| `…&module=PROPOSAL` | 1 | **1,801 ms** | — | — |
-| `/api/v1/documents` no text query | 1 | ~6,700 ms | — | — |
-| `/api/v1/documents?size=1` no text query | 1 | 10,522 ms | — | — |
-| `module=PROPOSAL` only | 1 | 462 ms | — | — |
-| `query=NSF&size=1` vs `size=25` | 1 each | 40,909 / 41,629 ms | — | — |
-| award detail (baseline) | 1 | **32 ms** | — | — |
+A **full five-sample baseline** was subsequently captured for every
+acceptance gate — `docs/performance/DEF5_REVISION93_BASELINE.md` (PR
+#140). **Zero samples discarded** across the whole capture. Those
+figures supersede the single-sample observations first recorded here:
 
-The `module=AWARD` row is fully content-verified: 25 of 25 rows returned
-`module=AWARD`, every row contained NSF in `documentNumber`, `title` or
-`businessRecordNumber`, `totalElements` was 1,734 and the module facet
-agreed.
+| Request | n | Median | Min | Max | totalElements |
+|---|---:|---:|---:|---:|---:|
+| `query=NSF` (all modules) | 5 | **38,014 ms** | 36,086 | 45,362 | 3,382 |
+| `query=NSF&module=AWARD` | 5 | **12,860 ms** | 10,131 | 16,780 | 1,734 |
+| `query=NSF&module=PROPOSAL` | 5 | **1,587 ms** | 1,435 | 3,295 | 1,361 |
+| unfiltered default page | 5 | **6,405 ms** | 5,285 | 10,598 | 491,685 |
+| `personName=SMITH` (heavy-path control) | 3 | **35,499 ms** | 35,090 | 42,065 | 1,040 |
+| `query=NSF&module=SUBAWARD` | 3 | 4,761 ms | 4,501 | 4,939 | 287 |
+| `query=NSF&module=NEGOTIATION` | 3 | 355 ms | 235 | 1,161 | **0** |
+| award detail (baseline) | 5 | **99 ms** | 59 | 387 | — |
+
+Internal consistency, checked rather than assumed: the per-module totals
+independently reproduce the all-modules facets
+(1,734 + 1,361 + 287 + 0 = 3,382 ✓), and the unfiltered facets sum to
+491,685 ✓. The `personName` check verified that **every** returned row's
+`primaryPersonName` contains SMITH, so that filter demonstrably applies.
+
+**Run-to-run variance on this 0.5 vCPU host is large** — a 26% spread
+inside one five-sample series, and `query=NSF` medians of 43,406 ms and
+38,014 ms in two sessions. Single observations here should be read as
+magnitudes, not benchmarks.
+
+**The union has grown 66% since the 2026-08-12 analysis**: 296,413 →
+**491,685** rows (Proposal 17,739 → 119,788; Subaward 513 → 93,736).
 
 #### Verified Global Search timings
 
-| Leg | Median |
-|---|---:|
-| `query=NSF` | 17,312 ms |
-| non-matching query | 18,110 ms |
-| identifier query | 10,571 ms |
-| …Award leg | 11,776 ms |
-| …Proposal leg | 1,042 ms |
-| …Negotiation leg | 722 ms |
-| …Subaward leg | 2,533 ms |
+| Leg | n | Median | Min | Max | Results |
+|---|---:|---:|---:|---:|---:|
+| `query=NSF` | 3 | 20,401 ms | 14,429 | 21,597 | 83 |
+| non-matching word | 3 | **28,097 ms** | 23,914 | 29,584 | 5 |
+| identifier query | 3 | **4,527 ms** | 3,856 | 9,091 | 1 |
+| …Award leg | 3 | 11,316 ms | 3,272 | 11,474 | 25 |
+| …Proposal leg | 3 | 365 ms | 353 | 1,571 | 30 |
+| …Negotiation leg | 3 | 718 ms | 408 | 739 | 3 |
+| …Subaward leg | 3 | 1,876 ms | 1,871 | 1,986 | 25 |
+
+No `failedModules` on any sample.
+
+Global Search was investigated separately and is **not** fixed by the
+Documents change — `docs/performance/DEF5_GLOBAL_SEARCH_SEPARATE_CAUSE.md`
+(PR #140). The dominant cost is the Award **lexical** leg, which
+evaluates its OR-chain predicate at least twice per request. Semantic
+search is enabled and does return results, but it is **cheap** and is
+not the bottleneck: `modules=PROPOSAL` pays the semantic leg too
+(eligibility does not depend on `modules`) and completed in 353 ms.
 
 #### What the numbers establish
 
