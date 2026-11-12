@@ -440,6 +440,30 @@ TC-066 direct URL denied for non-admin · TC-067 enforcement-disabled state ·
 TC-068 session-expired · TC-069 admin navigation reaches all five areas ·
 TC-070 archive navigation unchanged · TC-071 mobile layout.
 
+## 11a. Pre-merge checklist
+
+**Must be completed before PR #138 merges. Not before — the scaffolding is
+what renders the screens for design review.**
+
+- [ ] Delete `ui/security-preview.html`
+- [ ] Delete `ui/src/securityAdminPreview.tsx`
+- [ ] Confirm nothing imports either: `grep -rn "securityAdminPreview\|security-preview" ui/` returns nothing
+- [ ] Confirm the production bundle contains neither — check the **built** asset, not the source tree, since a stale build can hide a surviving import
+- [ ] Re-run the UI suite and confirm the count returns to its pre-scaffolding baseline with zero failures
+- [ ] Confirm `npm run build` and `npm run lint` are clean after removal
+
+**Why it must be deleted.** The harness injects capabilities as plain props to
+render the administrator screens without a session. It bypasses no
+authorization — the real application reads capabilities from the server and
+every administrator endpoint enforces independently — but a component that
+renders administration UI from caller-supplied capability values has no place
+in a production bundle, and leaving it would invite exactly the confusion this
+design exists to prevent.
+
+It mirrors `qaPreview.tsx`, which carries its own removal checklist in
+`docs/QA_STATUS_PAGE.md`. **Both should be removed together**; shipping one
+while deleting the other would leave the pattern half-retired.
+
 ## 12. Not authorized by this document
 
 No implementation, endpoint, component, route, migration, test, deployment or
