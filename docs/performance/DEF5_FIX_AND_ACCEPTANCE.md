@@ -189,13 +189,95 @@ they gate "the defect is fixed", not "the projection was exact".
 | # | Gate |
 |---|---|
 | 15 | For `query=NSF`: `totalElements` is **identical** before and after. |
-| 16 | For `query=NSF`: the 25 returned rows are the **same rows** before and after (same module + document number + target id multiset). |
+| 16 | For `query=NSF`: the **full result multiset** is identical before and after (module + document number + target id), at a page size covering every match — see §6.2 on why page 0 alone is not the right comparison. |
 | 17 | For a `personName` filter: results identical before and after (it must still take the heavy path). |
 | 18 | `moduleFacets` identical before and after for `query=NSF`. |
 
 Gates 15–18 require capturing the before-state from the currently
 deployed revision 93 **before** any deployment of this change. That
 capture has not been taken yet.
+
+## 6. Self-review findings
+
+Reviewed for SQL correctness, authorization, CI execution and
+query-plan regression. Four findings, all resolved or recorded.
+
+### 6.1 Authorization: no implication (verified)
+
+The Documents endpoint has **no per-row scope SQL at all**. It requires
+an unrestricted caller and throws `IdentityAccessDeniedException` (403)
+otherwise:
+
+- `DocumentExplorerService.java:89` —
+  `recordAccess.requireUnrestrictedForCrossModuleSearch("Document explorer")`
+- `AwardRecordAccess.java:50-58` — `requireProvisioned()` then refuse
+  unless `unrestricted()`
+
+That gate runs **before** the filter is constructed and well before any
+repository call. Neither the heavy nor the light SQL contains a scope
+predicate, so the light path cannot have dropped one. Enforcement is
+OFF on DEV, where `recordAccess` resolves to `PERMIT_ALL`; the
+conclusion holds either way.
+
+### 6.2 A real behavioural difference: the sort tie-breaker
+
+The heavy path orders by `document_number, module`. The light path adds
+`source_record_id` (the true per-row identity) as a final tie-breaker.
+
+`document_number` is **not** unique — `AWARD`/`141590` legitimately has
+8 archived rows sharing one workflow document number. For rows sharing
+both `document_number` and `module`, the heavy path's order is
+**not deterministic** while the light path's is. So for such a result
+set, a given page can legitimately contain a different selection of
+rows under the two paths.
+
+This is an improvement, and it is the same tradeoff the 2026-08-12 fix
+already made for the unfiltered path. But it has a direct consequence
+for acceptance gate 16 ("the 25 returned rows are the same rows before
+and after"): that gate can fail for a legitimate reason rather than a
+defect.
+
+**So gate 16 is refined:** compare the full result **multiset** at a
+page size large enough to contain every match, not page 0 alone. Where
+page 0 must be compared directly, first check whether the result set
+contains any repeated `(module, document_number)` pair; if it does, a
+page-boundary difference is expected and is not a failure. That
+pre-check is now part of the baseline capture.
+
+### 6.3 Query-plan regression: no plausible path (reasoned)
+
+The light union is the heavy union minus three aggregating CTEs, under
+an identical `WHERE`. The only added work is the enrichment stage,
+bounded at `size` ids resolved through existing indexes
+(`ix_award_person_award`, `ix_award_person_unit_award`). Strictly less
+work for the same filter, so a regression would require the planner to
+choose worse for a strictly smaller query — possible in principle,
+which is why gates 11 and 12 exist as explicit no-regression checks on
+the module-scoped and unfiltered cases.
+
+The light `ORDER BY` adds a third sort key (`source_record_id`, a text
+cast of a bigint for Award). Negligible against the removed
+aggregations, and already present on the unfiltered path.
+
+### 6.4 Two gaps found and closed in review
+
+- **Status-CASE drift.** Each union writes out its own literal `CASE`
+  per module. Comparing only filtered row sets could miss a drifted
+  mapping the fixture does not distinguish. Added: all six approved
+  normalized statuses to the equivalence set (24 light-eligible filters
+  now), plus a row-for-row comparison of the **derived values
+  themselves** — normalized status, native code, native description,
+  document number, business record number, title, lead unit, sponsor
+  code, document date — across all four modules.
+- **Unsafe reuse.** Both light methods are public, so a future caller
+  could pass a person-dependent filter, which `FILTER_WHERE_LIGHT` does
+  not contain — it would silently ignore the filter and return too many
+  rows. Added `requireLightEligible()` at the repository boundary,
+  enforcing the same rule as the service's routing decision so the two
+  cannot drift apart, with a test that both methods refuse.
+
+Test totals after review: integration suite 10 tests, repository 39,
+service 30 — **79 passing** for the three Documents suites.
 
 ## 6. Not addressed here
 

@@ -770,6 +770,7 @@ public class DocumentExplorerRepository {
      * union per request instead of computing the same total twice.
      */
     public List<ModuleFacetRow> moduleFacetsFilteredLight(DocumentExplorerFilter filter) {
+        requireLightEligible(filter);
         return bind(
                 jdbc.sql(LIGHT_SUPPORTING_CTE
                         + "SELECT module, COUNT(*) AS n FROM documents_light "
@@ -783,6 +784,7 @@ public class DocumentExplorerRepository {
 
     public List<DocumentExplorerRow> searchFilteredLight(
             DocumentExplorerFilter filter, int limit, int offset) {
+        requireLightEligible(filter);
         String sql = LIGHT_SUPPORTING_CTE
                 + ", paginated AS ( SELECT * FROM documents_light "
                 + FILTER_WHERE_LIGHT
@@ -796,6 +798,29 @@ public class DocumentExplorerRepository {
                 .param("offset", offset)
                 .query(DocumentExplorerRow.class)
                 .list();
+    }
+
+    /*
+     * Both light methods are public, so nothing in the type system stops
+     * a future caller handing them a filter whose predicate
+     * FILTER_WHERE_LIGHT does not contain. That would not fail - it
+     * would silently ignore the filter and return too many rows, which
+     * is the worst of the available outcomes. Fail loudly instead.
+     *
+     * DocumentExplorerService.canUseLightFilteredPath() is the routing
+     * decision; this is the same rule enforced at the boundary, so the
+     * two cannot drift apart without a test failing.
+     */
+    private static void requireLightEligible(DocumentExplorerFilter filter) {
+        if (!filter.personId().isEmpty()
+                || !filter.personName().isEmpty()
+                || !filter.personRole().isEmpty()
+                || filter.piOnly()
+                || (filter.includeAnyUnit() && !filter.unitNumber().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "The light filtered path cannot answer a person-dependent or "
+                            + "any-unit filter; use search()/moduleFacets() instead.");
+        }
     }
 
     public record ModuleFacetRow(String module, long n) {

@@ -219,7 +219,16 @@ class DocumentExplorerFilteredLightPathIntegrationTest {
                 Map.entry("module only, PROPOSAL", filter(f -> f.module("PROPOSAL"))),
                 Map.entry("module only, NEGOTIATION", filter(f -> f.module("NEGOTIATION"))),
                 Map.entry("module only, SUBAWARD", filter(f -> f.module("SUBAWARD"))),
-                Map.entry("normalized status", filter(f -> f.normalizedStatus("ACTIVE"))),
+                Map.entry("normalized status ACTIVE", filter(f -> f.normalizedStatus("ACTIVE"))),
+                // Every approved normalized status, because the two unions
+                // each define their own literal CASE per module: a drifted
+                // mapping would change which rows match and nothing else
+                // would catch it.
+                Map.entry("normalized status PENDING", filter(f -> f.normalizedStatus("PENDING"))),
+                Map.entry("normalized status ARCHIVED", filter(f -> f.normalizedStatus("ARCHIVED"))),
+                Map.entry("normalized status CANCELLED", filter(f -> f.normalizedStatus("CANCELLED"))),
+                Map.entry("normalized status CLOSED", filter(f -> f.normalizedStatus("CLOSED"))),
+                Map.entry("normalized status UNKNOWN", filter(f -> f.normalizedStatus("UNKNOWN"))),
                 Map.entry("native status", filter(f -> f.nativeStatus("Fully Executed"))),
                 Map.entry("lead unit without includeAnyUnit", filter(f -> f.unitNumber("5555"))),
                 Map.entry("sponsor code", filter(f -> f.sponsorCode("0100"))),
@@ -371,6 +380,60 @@ class DocumentExplorerFilteredLightPathIntegrationTest {
                     .as("sort: %s", sort)
                     .containsExactlyInAnyOrderElementsOf(repository.search(filter, 100, 0));
         }
+    }
+
+    /*
+     * Status normalization is a literal SQL CASE in BOTH unions, written
+     * out twice. Comparing only filtered row sets could miss a drifted
+     * mapping that happens to move a row between two statuses that the
+     * fixture does not distinguish. So the derived values themselves are
+     * compared, row by row, across every module.
+     */
+    @Test
+    void bothUnionsDeriveTheSameStatusAndDisplayValuesRowForRow() {
+        for (String module : List.of("AWARD", "PROPOSAL", "NEGOTIATION", "SUBAWARD")) {
+            DocumentExplorerFilter filter = filter(f -> f.module(module));
+            Map<String, String> heavy = statusByRow(repository.search(filter, 100, 0));
+            Map<String, String> light = statusByRow(repository.searchFilteredLight(filter, 100, 0));
+            assertThat(light).as("derived values, module: %s", module).isEqualTo(heavy);
+            assertThat(light).as("module %s produced no rows", module).isNotEmpty();
+        }
+    }
+
+    private static Map<String, String> statusByRow(List<DocumentExplorerRow> rows) {
+        return rows.stream().collect(Collectors.toMap(
+                row -> row.module() + "|" + row.targetId(),
+                row -> String.join("~",
+                        String.valueOf(row.normalizedStatus()),
+                        String.valueOf(row.nativeStatusCode()),
+                        String.valueOf(row.nativeStatusDescription()),
+                        String.valueOf(row.documentNumber()),
+                        String.valueOf(row.businessRecordNumber()),
+                        String.valueOf(row.title()),
+                        String.valueOf(row.leadUnitNumber()),
+                        String.valueOf(row.sponsorCode()),
+                        String.valueOf(row.documentDate()))));
+    }
+
+    /*
+     * The light methods refuse a filter they cannot answer rather than
+     * silently ignoring it and returning too many rows.
+     */
+    @Test
+    void theLightPathRefusesAFilterItCannotAnswer() {
+        DocumentExplorerFilter personFilter = new DocumentExplorerFilter(
+                "", "", "", "", "", "", "", false,
+                "", "SMITH", "", false, "", "", null, null, "documentNumber");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> repository.searchFilteredLight(personFilter, 25, 0));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> repository.moduleFacetsFilteredLight(personFilter));
+
+        DocumentExplorerFilter anyUnitFilter = new DocumentExplorerFilter(
+                "", "", "", "", "", "", "5555", true,
+                "", "", "", false, "", "", null, null, "documentNumber");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> repository.searchFilteredLight(anyUnitFilter, 25, 0));
     }
 
     private static Map<String, Long> facetMap(List<DocumentExplorerRepository.ModuleFacetRow> rows) {
