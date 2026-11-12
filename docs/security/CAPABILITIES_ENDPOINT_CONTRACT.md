@@ -122,13 +122,16 @@ That last test is the one that matters most: it is the reason the endpoint
 exists, and a regression there would silently return the UI to being unable to
 tell "disabled" from "not an administrator".
 
-## 8. Open decisions
+## 8. Decisions taken 2026-11-12
 
 | # | Decision |
 |---|---|
-| C-1 | Should `auditingEnabled` be added? The Configuration page wants it and it is the same class of state |
-| C-2 | Are there further prerequisites for `administrationAvailable` beyond `administrator && enforcementEnabled`? |
-| C-3 | Path: `/api/v1/me/capabilities` as proposed, or under a different prefix |
+| C-1 | **`auditingEnabled` is NOT added.** The initial response is exactly `administrator`, `enforcementEnabled`, `administrationAvailable`. The Configuration page shows auditing as **Unavailable** rather than inventing it |
+| C-2 | `administrationAvailable` stays `administrator && enforcementEnabled`. No further prerequisites for now |
+| C-3 | Path **approved** as `GET /api/v1/me/capabilities` |
+
+Confirmed unchanged: available with enforcement **OFF**, `no-store`, and
+**fails closed** on identity-resolution errors.
 
 ## 9. Not authorized
 

@@ -400,16 +400,88 @@ into the **guarded** CI database job.
 
 ---
 
-## 11. Open decisions
+## 11. Decisions taken 2026-11-12
 
 | # | Decision |
 |---|---|
-| D-1 | Cooling-off period for a newly promoted approver (§4.4) — length, or none |
-| D-2 | Whether administrator promotion should itself require an approval reference |
-| D-3 | Whether to normalise `InstitutionalIdentifier` at construction (§5) — recommended, separate change |
-| D-4 | Whether existing grants are reviewed for self-grants (requirement 9 defers this) |
-| D-5 | Request expiry of 7 days — confirm or change |
-| D-6 | Whether `IO` and `PARENT_AWARD` self-grants warrant the same control as `CENTRAL` — this design applies it to all types uniformly |
+| 1 | Independent approval applies to **all scope types** — CENTRAL, UNIT, IO, CONTACT_DERIVATION, PARENT_AWARD. No type is exempt |
+| 2 | **Any modification that expands access is a new privilege request** — see §11a |
+| 3 | **Administrator promotion itself requires independent approval**, and a newly promoted administrator may not approve a request that predates their promotion — see §11b |
+| 4 | Identity resolution uses **canonical database identity ids and active Cognito links**. Raw `InstitutionalIdentifier` string equality is never the comparison |
+| 5 | **Seven-day** expiry. An expired request cannot be approved or reactivated |
+| 6 | **No mandatory cooling-off** for ordinary approvals. Independence and auditability are the controls |
+| 7 | Existing grants preserved. A **separate read-only review** of historic grants *and administrator assignments* is prepared — see §11c |
+| 8 | Self-approval refused when one administrator exists. A separately controlled, audited bootstrap establishes a second. **No automatic approval and no web-based bypass** |
+| 9 | Transaction-safe approval, single-use requests, concurrency and replay protection — §8, unchanged |
+| 10 | **Two administrator accounts do not guarantee two independent people** — see §11d |
+
+### 11a. Expansion is a new request (decision 2)
+
+The rule is about the **effect**, not the endpoint. A change is expanding, and
+therefore requires approval, when it:
+
+- enables `includeDescendants` on an existing grant
+- extends `expiresAt`, or removes an expiry
+- changes scope to a broader unit, or to a broader grant type
+- in any other way makes the reachable record set larger
+
+**Narrowing and revocation remain unrestricted.** Disabling descendants,
+shortening an expiry or revoking entirely are de-escalations; obstructing them
+would make the system less safe, not more.
+
+This closes the `modifyAccess` path in §1.2 by effect rather than by guarding
+one method signature, so a future endpoint that widens access inherits the
+control instead of silently escaping it. **Implementation note:** the test is
+computed by comparing the reachable scope before and after, not by matching on
+parameter names.
+
+### 11b. Administrator promotion requires approval (decision 3)
+
+`assignAdministrator` becomes an approvable operation on the same machinery.
+This is what §4.4 could not achieve on its own: an administrator can no longer
+unilaterally manufacture an approver.
+
+**And the ordering rule that makes it bite:** an administrator promoted at time
+T **may not approve any request created before T**. Without it, the attack is
+merely two steps — promote a confederate, then have them approve the request
+that was already waiting. Keying on *request age relative to promotion* rather
+than on elapsed time is what decision 6 allows us to do: no arbitrary waiting
+period, and the specific sequence that matters is still blocked.
+
+Stored as a comparison of `self_grant_request.requested_at` against the
+approver's `admin_role_member.granted_at`, both already recorded.
+
+### 11c. Historic review (decision 7)
+
+Read-only, no migration, nothing revoked:
+
+1. every active grant whose `granted_by` equals its grantee — historic
+   self-grants
+2. every `ACCESS_MODIFIED` audit row where the actor was the grantee
+3. every administrator assignment, with who promoted whom, as a graph — so a
+   chain of promotions is visible rather than only single hops
+
+Output is a report for human judgement. **Nothing is revoked automatically**;
+a historic self-grant may well be legitimate, and this design cannot tell.
+
+### 11d. Two accounts are not two people (decision 10)
+
+**Recorded as a known limitation, not solved.** Everything above enforces
+*account* independence: a different active administrator, not the requester,
+not the subject, not promoted after the request. None of it establishes that
+the two accounts are two **people**. One person holding two BU identities
+satisfies every automated check.
+
+This is not closable in software. The control that addresses it is procedural:
+**administrator promotion requires independent identity verification** — a
+named human confirming the person being promoted is who they claim and is
+distinct from the promoter. Decision 3 gives that procedure a place to attach,
+since promotion now carries an approval record.
+
+The design must not claim more than it does. What it guarantees is that **no
+self-grant activates without a second administrator account acting
+deliberately, and every step is attributable**. Whether those accounts are two
+people is assured by the promotion procedure, not by this code.
 
 ## 12. Not authorized
 
