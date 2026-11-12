@@ -442,15 +442,28 @@ TC-070 archive navigation unchanged · TC-071 mobile layout.
 
 ## 11a. Pre-merge checklist
 
-**Must be completed before PR #138 merges. Not before — the scaffolding is
-what renders the screens for design review.**
+**COMPLETED 2026-11-12.** Design review is finished, so the scaffolding has
+been removed.
 
-- [ ] Delete `ui/security-preview.html`
-- [ ] Delete `ui/src/securityAdminPreview.tsx`
-- [ ] Confirm nothing imports either: `grep -rn "securityAdminPreview\|security-preview" ui/` returns nothing
-- [ ] Confirm the production bundle contains neither — check the **built** asset, not the source tree, since a stale build can hide a surviving import
-- [ ] Re-run the UI suite and confirm the count returns to its pre-scaffolding baseline with zero failures
-- [ ] Confirm `npm run build` and `npm run lint` are clean after removal
+- [x] Delete `ui/security-preview.html`
+- [x] Delete `ui/src/securityAdminPreview.tsx`
+- [x] Confirm nothing imports either: `grep -rn "securityAdminPreview\|security-preview" ui/` returns nothing
+- [x] Confirm the production bundle contains neither — checked against the **built** asset after `rm -rf dist && npm run build`: 0 occurrences of `securityAdminPreview`, `SecurityAdminPreview`, `qaPreview`, `QaPreview` in `dist/assets/*.js`, and `dist/` has exactly one HTML entry (`index.html`)
+- [x] Re-run the UI suite: **852 tests, 852 passing, 0 failures** — unchanged before and after removal, because the presentation helpers are tested directly and never through the harness
+- [x] Confirm `npm run build` and `npm run lint` are clean after removal — both clean; `oxlint` now reports **nothing at all**, the one previous warning having come from `securityAdminPreview.tsx` itself
+- [x] `qaPreview.tsx` + `qa-preview.html` removed in the same commit, so the pattern is fully retired rather than half-retired
+
+**One finding worth recording.** The preview code was **already absent from
+the production bundle** before removal: `index.html` is Vite's only entry, and
+root-level preview HTML files are served in dev but never built. So the
+exposure was dev-only, not a shipping leak. The removal still matters — a
+component that renders administration UI from caller-supplied capability
+values should not sit in the source tree — but the risk was smaller than the
+checklist implied, and that is worth knowing rather than claiming a leak was
+closed.
+
+Removing `qaPreview.tsx` retires only the **standalone harness**. The
+`/qa-status` route itself is untouched and still registered in `App.tsx`.
 
 **Why it must be deleted.** The harness injects capabilities as plain props to
 render the administrator screens without a session. It bypasses no
