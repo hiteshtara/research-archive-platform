@@ -172,14 +172,40 @@ content check, from the absolute API origin. A 401 is never recorded as
 a timing. Five warm repeats each; report median, min, max and sample
 count.
 
-| # | Gate | Before | Threshold |
+Baseline **captured** 2026-11-12 against the deployed revision 93 —
+`docs/performance/DEF5_REVISION93_BASELINE.md` on the investigation
+branch. All five-sample series, zero discarded samples.
+
+| # | Gate | Before (measured, n) | Threshold |
 |---|---|---:|---:|
-| 9 | `query=NSF`, all modules | 43,406 ms | median **≤ 15,000 ms** |
-| 10 | `query=NSF&module=AWARD` | 19,763 ms | median **≤ 9,000 ms** |
-| 11 | `query=NSF&module=PROPOSAL` | 1,801 ms | median **≤ 2,200 ms** (no regression) |
-| 12 | unfiltered default page | ~6,700 ms | median **≤ 8,000 ms** (no regression) |
-| 13 | a `personName`-filtered request | to be baselined first | within **+10%** of its own before-value (stays on the heavy path) |
-| 14 | unrelated endpoint baseline | 32 ms | **≤ 100 ms** |
+| 9 | `query=NSF`, all modules | **38,014 ms** (n=5) | median **≤ 15,000 ms** |
+| 10 | `query=NSF&module=AWARD` | **12,860 ms** (n=5) | median **≤ 9,000 ms** |
+| 11 | `query=NSF&module=PROPOSAL` | **1,587 ms** (n=5) | median **≤ 2,200 ms** (no regression) |
+| 12 | unfiltered default page | **6,405 ms** (n=5) | median **≤ 8,000 ms** (no regression) |
+| 13 | `personName=SMITH` (heavy-path control) | **35,499 ms** (n=3) | median **≤ +25%** (≤ 44,374 ms), re-measured in the same session |
+| 14 | unrelated endpoint baseline | **99 ms** (n=5, max 387) | **≤ 500 ms** |
+
+Two thresholds were **revised** by the baseline, because the originals
+were inside this host's noise:
+
+- **Gate 14** was `≤ 100 ms`. The measured baseline median is 99 ms with
+  a 387 ms max, so the original threshold would fail on an unchanged
+  system. Now `≤ 500 ms`.
+- **Gate 13** was `within +10%`. Its own baseline spread is
+  35,090–42,065 ms, wider than ±10%. Now `≤ +25%`, same-session.
+
+Gate 10's threshold is unchanged but is now known to be measured against
+**12,860 ms**, not the 19,763 ms single sample quoted earlier — so it
+asks for a 30% reduction, not 55%.
+
+### Measurement protocol, forced by observed variance
+
+The host is noisy: a 26% spread inside one five-sample series, and the
+same Global Search query measuring 28,097 ms and 15,000 ms minutes
+apart. **A before/after comparison against an hour-old baseline is not
+reliable.** So the after-measurement must re-measure the before in the
+**same session, back to back**, and compare against that — the recorded
+baseline is the sanity reference, not the comparator.
 
 Thresholds 9 and 10 are deliberately looser than the projection in §4:
 they gate "the defect is fixed", not "the projection was exact".
@@ -193,9 +219,21 @@ they gate "the defect is fixed", not "the projection was exact".
 | 17 | For a `personName` filter: results identical before and after (it must still take the heavy path). |
 | 18 | `moduleFacets` identical before and after for `query=NSF`. |
 
-Gates 15–18 require capturing the before-state from the currently
-deployed revision 93 **before** any deployment of this change. That
-capture has not been taken yet.
+Gates 15–18 **have been captured** from revision 93 (digests in
+`DEF5_REVISION93_BASELINE.md` §3). The identity key is
+`module | documentNumber | businessRecordNumber | versionOrSequence |
+targetRoute`; comparison is by SHA-256 digest of the sorted keys, plus
+`totalElements` and `moduleFacets`.
+
+Two things the capture settled:
+
+- **The §6.2 tie-breaker caveat is not triggered here.** Zero duplicate
+  `(module, documentNumber)` pairs in all four captured result sets, and
+  zero duplicate rows across the full 287-row Subaward multiset — so the
+  **ordered** digest is a valid comparison too, not only the sorted one.
+- **Gate 16 has a true multiset subject.** `query=NSF&module=SUBAWARD`
+  was enumerated in full (all 287 rows across pages), so that gate is
+  not limited to a sampled page.
 
 ## 6. Self-review findings
 
