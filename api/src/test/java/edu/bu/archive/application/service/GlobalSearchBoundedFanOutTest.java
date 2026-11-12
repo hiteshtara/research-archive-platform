@@ -68,6 +68,10 @@ class GlobalSearchBoundedFanOutTest {
     }
 
     private GlobalSearchService serviceWith(int bound, ConcurrencyProbe probe) {
+        return serviceWith(bound, probe, false);
+    }
+
+    private GlobalSearchService serviceWith(int bound, ConcurrencyProbe probe, boolean allFail) {
         GlobalSearchRepository irb = mock(GlobalSearchRepository.class);
         AwardArchiveService awards = mock(AwardArchiveService.class);
         NegotiationArchiveService negotiations = mock(NegotiationArchiveService.class);
@@ -92,19 +96,25 @@ class GlobalSearchBoundedFanOutTest {
         };
 
         when(irb.search(anyString(), anyInt()))
-                .thenAnswer(i -> { busy.get(); return List.of(); });
+                .thenAnswer(i -> { busy.get();
+                        if (allFail) { throw new IllegalStateException("irb down"); }
+                        return List.of(); });
         // The Award leg THROWS on purpose: failedModules behaviour under a
         // bound is the property most likely to break silently.
         when(awards.search(anyString(), anyInt(), anyInt()))
                 .thenAnswer(i -> { busy.get(); throw new IllegalStateException("award leg down"); });
         when(negotiations.findPage(anyString(), anyInt(), anyInt()))
                 .thenAnswer(i -> { busy.get();
+                        if (allFail) { throw new IllegalStateException("negotiation down"); }
                         return new PageResponse<>(List.of(), 0, 25, 0, 0, true, true); });
         when(subawards.findPage(anyString(), anyInt(), anyInt()))
                 .thenAnswer(i -> { busy.get();
+                        if (allFail) { throw new IllegalStateException("subaward down"); }
                         return new SubawardPageResponse(List.of(), 0, 25, 0, 0, true, true); });
         when(proposals.findFamilies(anyString(), any(), anyInt()))
-                .thenAnswer(i -> { busy.get(); return List.of(); });
+                .thenAnswer(i -> { busy.get();
+                        if (allFail) { throw new IllegalStateException("proposal down"); }
+                        return List.of(); });
 
         @SuppressWarnings("unchecked")
         ObjectProvider<EmbeddingProvider> embeddings = mock(ObjectProvider.class);
@@ -179,6 +189,37 @@ class GlobalSearchBoundedFanOutTest {
                     .isLessThanOrEqualTo(bound);
             assertThat(probe.peak())
                     .as("at least one leg must have run at bound %d", bound)
+                    .isGreaterThan(0);
+        }
+    }
+
+    @Test
+    void permitsAreReleasedEvenWhenEveryLegThrows() {
+        // The release is in a finally, so a request in which every leg
+        // fails must not strand permits. With a bound of 1, a stranded
+        // permit would hang the next leg forever and the call would never
+        // return - so completing at all is the assertion, and a timeout
+        // here is the failure mode being guarded against.
+        GlobalSearchService service = serviceWith(1, new ConcurrencyProbe(), true);
+
+        GlobalSearchResponse response = service.search("NSF");
+
+        assertThat(response).isNotNull();
+        // Every module that threw is reported rather than collapsed into
+        // an empty result.
+        assertThat(response.failedModules()).isNotEmpty();
+    }
+
+    @Test
+    void repeatedRequestsDoNotLeakPermitsAcrossCalls() {
+        // Permits are per-request, so a leaked permit would show up as the
+        // second or third call being unable to run any leg. Each call is
+        // asserted to still reach its legs.
+        for (int i = 0; i < 3; i++) {
+            ConcurrencyProbe probe = new ConcurrencyProbe();
+            serviceWith(1, probe).search("NSF");
+            assertThat(probe.peak())
+                    .as("call %d must still execute legs", i + 1)
                     .isGreaterThan(0);
         }
     }

@@ -178,10 +178,15 @@ Design choices and why:
   counts and `failedModules` cannot move.
 - **Release in a `finally`**, so a throwing leg cannot strand a permit
   and deadlock the remaining legs.
-- **An interrupt while waiting restores the flag and runs the work
-  anyway**, rather than returning an empty list. A missing leg would
-  surface as "found nothing", and "could not run" is the truth —
-  `joinOrRecordFailure` still records it in `failedModules`.
+- **An interrupt while waiting restores the flag and FAILS the leg**,
+  which `joinOrRecordFailure` turns into a `failedModules` entry. This
+  reverses the first version, which ran the work anyway. On review that
+  was wrong twice: it breaks the bound the method exists to enforce, and
+  it runs JDBC and HTTP work with the interrupt flag already set, which
+  some clients treat as an abort — so "ran anyway" could fail in a
+  harder-to-read way than simply failing. Failing loudly also matches
+  what the fan-out already does elsewhere: a failed module is reported,
+  never collapsed into an empty result.
 - **`LEG_<module>_PERMIT_WAIT`** is recorded separately from the work,
   so a bounded run can be read as waiting-for-a-permit versus
   executing. Recorded after the existing `LEG_*_QUEUE_WAIT` so that
@@ -198,6 +203,17 @@ not against hand-written expectations:
 | `aFailedLegStillAppearsInFailedModulesAtEveryBound` | the Award leg throws in every configuration; `AWARD` appears in `failedModules` at bounds 0, 3, 2 and 1. A bound must never turn "failed" into "found nothing" |
 | `theBoundIsActuallyEnforced` | peak observed concurrent legs never exceeds the bound, and is at least 1 |
 | `theUnboundedDefaultStillOverlapsSoTheProbeIsMeaningful` | **non-vacuity guard** — unbounded fan-out genuinely overlaps (peak > 1), without which the enforcement test would pass for free |
+| `permitsAreReleasedEvenWhenEveryLegThrows` | at bound 1, a request in which **every** leg throws still completes and reports them in `failedModules`. A stranded permit would hang the next leg forever, so completing at all is the assertion |
+| `repeatedRequestsDoNotLeakPermitsAcrossCalls` | three successive bounded requests each still execute legs, so no permit leaks between requests |
+
+### Review for deadlock, cancellation, interruption, release
+
+| Concern | Finding |
+|---|---|
+| Deadlock | **None possible.** One permit per leg, never nested, always released in `finally`; the joining thread holds no permit; `fanOutConcurrency > 0` guarantees a permit exists. No circular wait |
+| Cancellation | **No leak.** Nothing in the service cancels a leg — no `orTimeout`, `completeOnTimeout` or `cancel()`, and `joinOrRecordFailure` uses a plain `join()`. Even an external cancel cannot strand a permit, since `CompletableFuture.cancel` does not interrupt a running `supplyAsync` task |
+| Interruption | Fails the leg into `failedModules` rather than running unpermitted — corrected on review, see above |
+| Release | `finally`, unconditional once acquired; runs for `Error` as well as `Exception` |
 
 The legs sleep and record live concurrency through an `AtomicInteger`
 peak tracker, so the overlap measured is real rather than simulated.

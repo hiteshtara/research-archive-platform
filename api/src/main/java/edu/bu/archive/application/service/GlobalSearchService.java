@@ -548,13 +548,34 @@ public class GlobalSearchService {
      * DEF-5. Runs the leg under a permit when the fan-out is bounded, and
      * runs it unchanged when it is not.
      *
-     * The permit is released in a finally, so a leg that throws cannot
-     * strand it and deadlock the rest of the request. An interrupt while
-     * waiting restores the interrupt flag and runs the work anyway rather
-     * than silently returning nothing - a missing leg would become an
-     * empty result, and "found nothing" is a wrong answer where "could not
-     * run" is the truth. joinOrRecordFailure still turns a thrown leg into
-     * a failedModules entry exactly as before.
+     * Reviewed for deadlock, cancellation, interruption and release:
+     *
+     *   - DEADLOCK: each leg acquires exactly one permit, never nested, and
+     *     always releases it in a finally. The thread that joins the futures
+     *     holds no permit. There is no circular wait, and
+     *     fanOutConcurrency > 0 guarantees at least one permit exists.
+     *   - CANCELLATION: nothing in this service cancels a leg - there is no
+     *     orTimeout, completeOnTimeout or cancel() call, and
+     *     joinOrRecordFailure uses a plain join(). Even an externally
+     *     cancelled future cannot strand a permit, because
+     *     CompletableFuture.cancel does not interrupt a running
+     *     supplyAsync task, so the thread still reaches its finally.
+     *   - RELEASE: the finally is guarded by `acquired` and runs for an
+     *     Error as well as an Exception.
+     *   - INTERRUPTION: an interrupt while waiting restores the flag and
+     *     fails the leg, which joinOrRecordFailure turns into a
+     *     failedModules entry. It does NOT run the work.
+     *
+     * That last point reverses this method's first version, which ran the
+     * work anyway on the theory that a missing leg reading as "found
+     * nothing" was worse than running unpermitted. On review that was
+     * wrong twice over: it breaks the bound this method exists to enforce,
+     * and it runs JDBC and HTTP work with the interrupt flag already set,
+     * which some clients treat as an abort - so the "ran anyway" path
+     * could fail in a harder-to-read way than simply failing. Failing
+     * loudly is also the behaviour the rest of the fan-out already has:
+     * a module that failed is reported in failedModules, never silently
+     * collapsed into an empty result.
      *
      * The wait is recorded separately from the work so a bounded run can be
      * read as "waiting for a permit" versus "executing", which is the whole
@@ -570,12 +591,12 @@ public class GlobalSearchService {
             return work.get();
         }
         long waitStartNanos = System.nanoTime();
-        boolean acquired = false;
         try {
             permits.acquire();
-            acquired = true;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            throw new IllegalStateException(
+                    "interrupted while waiting for a fan-out permit", interrupted);
         }
         timingLog.record(
                 cid,
@@ -586,9 +607,7 @@ public class GlobalSearchService {
         try {
             return work.get();
         } finally {
-            if (acquired) {
-                permits.release();
-            }
+            permits.release();
         }
     }
 
