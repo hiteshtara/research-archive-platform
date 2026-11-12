@@ -41,7 +41,7 @@ Defects found: **5** (2 functional, 1 data-integrity, 1 data-coverage,
 | 9 | UI | partial | page loads, navigation renders; see §8 |
 | 10 | API behaviour | 6 | 6 PASS |
 | 11 | Data integrity | 6 | 4 PASS, **1 FAIL** (DEF-3), 1 BLOCKED |
-| 12 | Performance | baselined, fixed, re-verified | Documents **3.25× faster, 14/14 correctness PASS** (rev 94); Global Search open (§6, DEF-5) |
+| 12 | Performance | baselined, fixed, re-verified; CPU experiment run | Documents **3.25× faster, 14/14 correctness PASS** (rev 94); CPU refuted as the Global Search cause; DEV stays 0.5 vCPU (§6, DEF-5) |
 | 13 | Security (enforcement OFF) | 3 | 3 PASS |
 | 14 | Regression | CI | **all green** on `9729eff` |
 
@@ -149,13 +149,61 @@ Revision 93 remains registered as the immediate rollback target and was
 not needed.
 
 **Global Search: NOT fixed, and separately caused.** See
-`docs/performance/GLOBAL_SEARCH_ROOT_CAUSE.md` (PR #140). The cause is
-**CPU contention, not SQL**: the identical Award search request runs at
-a 1,443 ms median solo and 14,848 ms when issued alongside five other
-reads — **10.3×** — on a 0.5 vCPU task, and Global Search fans out six
-concurrent legs. Its result counts are unchanged (83 / 1 / 25). No fix
-is proposed; raising the task CPU is the highest-leverage option and is
-a capacity decision, not a code change.
+`docs/performance/GLOBAL_SEARCH_ROOT_CAUSE.md` (PR #140). The identical
+Award search request runs at a 1,443 ms median solo and 14,848 ms
+alongside five other reads — **10.3×** — and Global Search fans out six
+concurrent legs. Result counts are unchanged (83 / 1 / 25).
+
+#### The CPU capacity experiment settled what that 10.3× is NOT
+
+A controlled DEV experiment ran 0.5, 1 and 2 vCPU, each a task
+definition derived from revision 94 changing only `cpu`/`memory` with
+the same image digest. Full record:
+`docs/performance/DEV_CAPACITY_EXPERIMENT_RESULTS.md` (PR #140).
+
+| Row | n | 0.5 vCPU | 1 vCPU | 2 vCPU | 0.5→2 |
+|---|---:|---:|---:|---:|---|
+| Global Search `NSF` | 7 | 18,429 | **14,177** | 17,870 | −3% |
+| Award search **solo** | 5 | 4,820 | 4,561 | **2,298** | **−52%** |
+| Award search **contended** | 7 | **16,892** | 18,057 | 22,102 | **+31% WORSE** |
+| Documents, text query | 5 | 11,473 | 12,847 | **10,748** | −6% |
+| Record detail | 7 | 174 | 116 | **102** | −41% |
+
+**Only single-request work improved.** Everything concurrent was flat or
+worse — Award under load degraded monotonically on 4× the CPU.
+CloudWatch explains it: `CpuUtilized` peaked at **35% of reserved at
+1 vCPU and 26% at 2 vCPU**, so the share *fell* as capacity rose, and
+memory never exceeded **375 MB** at any size.
+
+**So "CPU contention" is refuted as the explanation.** The earlier
+attribution in this report's §6 and in the root-cause document was
+wrong on that point, and is corrected here rather than quietly dropped.
+
+A methodology correction is worth recording too: the first 1 vCPU
+measurement showed Global Search *slower*, which was a cold-task
+confound against a control warm for an hour. After a discarded warmup
+pass it moved 21,073 → 14,177 ms. **The cold numbers would have
+supported the opposite conclusion.**
+
+**Decision: DEV stays at 0.5 vCPU (revision 94).** Revisions 95 and 96
+remain registered but inactive. Paying +$18 or +$54 a month for no gain
+on the surfaces that hurt, plus a regression under concurrency, is not
+worth it.
+
+#### Where it now stands
+
+Read-only RDS metrics (`DOWNSTREAM_BOTTLENECK_ANALYSIS.md`, PR #143)
+show the database is **not** CPU-, credit-, IOPS-, latency-, queue- or
+connection-pool-bound, but is a **`db.t4g.micro` with 1 GB RAM** whose
+`FreeableMemory` sat at **95–105 MB all day** against a 491,685-row
+union. The binding constraint is recorded as a **hypothesis** —
+per-query execution on a cache-starved instance, oversubscribed by
+concurrency — not a finding, because Performance Insights is disabled
+and `/actuator/metrics` is not exposed.
+
+A bounded fan-out correction is implemented in draft PR #143, **default
+off**, with equivalence tests at bounds 3/2/1 and a designed experiment
+whose decisive gate is a ≥20% improvement in the contended case.
 
 The figures first recorded here were single, uncached observations. They
 have since been re-measured with repeats, and **every timing below was
