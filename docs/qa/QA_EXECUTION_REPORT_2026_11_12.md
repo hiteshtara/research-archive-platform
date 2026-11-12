@@ -41,7 +41,7 @@ Defects found: **5** (2 functional, 1 data-integrity, 1 data-coverage,
 | 9 | UI | partial | page loads, navigation renders; see §8 |
 | 10 | API behaviour | 6 | 6 PASS |
 | 11 | Data integrity | 6 | 4 PASS, **1 FAIL** (DEF-3), 1 BLOCKED |
-| 12 | Performance | 20+ timings, then repeated + content-verified | **root cause found**, fix proposed (§6, DEF-5; PR #141) |
+| 12 | Performance | baselined, fixed, re-verified | Documents **3.25× faster, 14/14 correctness PASS** (rev 94); Global Search open (§6, DEF-5) |
 | 13 | Security (enforcement OFF) | 3 | 3 PASS |
 | 14 | Regression | CI | **all green** on `9729eff` |
 
@@ -109,10 +109,53 @@ details, amendments, renewals, personnel, units and version history are
 therefore **NOT TESTABLE on DEV** — not failing, untestable. Loading IRB data
 into DEV is a prerequisite for that scope item.
 
-### DEF-5 — Severe response times across search surfaces. **HIGH**
+### DEF-5 — Severe response times across search surfaces. **PARTIALLY RESOLVED**
 
-**Root cause identified and a fix proposed (draft PR #141). Investigation
-and the full measurement record: PR #140.**
+**Documents search: FIXED and verified on DEV.** PR #141 merged
+(`543ab22`) and deployed as ECS task definition **revision 94**
+(image digest `sha256:1d440f251c…`). Full deployment record:
+`docs/performance/DEF5_DEV_DEPLOYMENT_VERIFICATION.md` (PR #140).
+
+| Gate | Before | After | Threshold | Verdict |
+|---|---:|---:|---:|:--:|
+| `query=NSF` all modules | 38,514 ms | **11,868 ms** | ≤ 15,000 | **PASS — 3.25×** |
+| `query=NSF&module=AWARD` | 11,209 ms | **6,174 ms** | ≤ 9,000 | PASS — 1.82× |
+| `query=NSF&module=PROPOSAL` | 1,930 ms | **1,144 ms** | ≤ 2,200 | PASS — 1.69× |
+| unfiltered default page | 5,988 ms | 6,062 ms | ≤ 8,000 | PASS (noise) |
+| `personName=SMITH` (heavy control) | 38,878 ms | **24,765 ms** | ≤ 48,598 | PASS — 1.57× |
+| award detail baseline | 56 ms | 93 ms | ≤ 500 | PASS (noise) |
+
+Before and after were measured **back to back in one authenticated
+session** because run-to-run variance on this 0.5 vCPU host reaches 26%
+within a single five-sample series. Zero samples were discarded in
+either half.
+
+**Correctness: 14 of 14 checks PASS.** Result identity was compared by
+SHA-256 digest over
+`module|documentNumber|businessRecordNumber|versionOrSequence|targetRoute`.
+Every digest — **sorted and ordered** — plus `totalElements` and
+`moduleFacets` is byte-identical to the revision 93 baseline, including
+the **full 287-row** `module=SUBAWARD` multiset. A stability control was
+run first: the same digests were re-captured from the *unchanged*
+revision 93 and reproduced exactly, so the comparator was proven before
+being used to judge the change.
+
+So the headline DEF-5 case now takes **about 26.6 seconds less** per
+search. It is still ~11.9 s, not sub-5 s, exactly as projected before
+deployment — the residual is the light union's own scan plus a sort
+spanning four physically distinct tables on half a core.
+
+Revision 93 remains registered as the immediate rollback target and was
+not needed.
+
+**Global Search: NOT fixed, and separately caused.** See
+`docs/performance/GLOBAL_SEARCH_ROOT_CAUSE.md` (PR #140). The cause is
+**CPU contention, not SQL**: the identical Award search request runs at
+a 1,443 ms median solo and 14,848 ms when issued alongside five other
+reads — **10.3×** — on a 0.5 vCPU task, and Global Search fans out six
+concurrent legs. Its result counts are unchanged (83 / 1 / 25). No fix
+is proposed; raising the task CPU is the highest-leverage option and is
+a capacity decision, not a code change.
 
 The figures first recorded here were single, uncached observations. They
 have since been re-measured with repeats, and **every timing below was
