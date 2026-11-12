@@ -123,6 +123,58 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
+/*
+ * What the signed-in caller may do, as the server sees it.
+ *
+ * Deliberately NOT routed through request(): that throws on any non-2xx,
+ * and here a 404 (endpoint not deployed yet) and a 401 (session gone) are
+ * both ordinary answers meaning "not an administrator", not failures to
+ * surface. Everything else is shared with request() on purpose - the
+ * absolute API_BASE_URL and the bearer token.
+ *
+ * A RELATIVE fetch would be wrong and silently so: on the deployed UI
+ * origin, /api/... is served the single-page app's own index.html with
+ * HTTP 200 and content-type text/html, so response.ok would be true and
+ * the body would not be the contract's JSON.
+ *
+ * The content-type is therefore checked explicitly rather than trusting
+ * the status, and anything unexpected returns null, which readCapabilities
+ * treats as "cannot verify" and fails closed.
+ */
+export async function getCapabilities(): Promise<unknown | null> {
+  const token = await accessToken();
+  if (!token) {
+    return null;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/v1/me/capabilities`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      // Capability is security state. A stale `true` after a revoked
+      // membership is exactly the wrong thing to serve from a cache.
+      cache: "no-store",
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+  if (!(response.headers.get("content-type") ?? "").includes("application/json")) {
+    return null;
+  }
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 export function getDashboard(): Promise<DashboardSummary> {
   return request<DashboardSummary>("/api/dashboard");
 }

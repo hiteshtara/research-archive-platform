@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { getCapabilities } from "../../api/client";
+
 import { readCapabilities } from "./securityAdminPresentation.mjs";
 import type { Capabilities } from "./securityAdminPresentation.d.mts";
 
@@ -20,18 +22,17 @@ import type { Capabilities } from "./securityAdminPresentation.d.mts";
 export function useCapabilities(): Capabilities {
   const query = useQuery({
     queryKey: ["me", "capabilities"],
-    queryFn: async () => {
-      const response = await fetch("/api/v1/me/capabilities", {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      // A 404 means the endpoint is not deployed yet; a 401 means the session
-      // is gone. Neither is an administrator, and neither is a crash.
-      if (!response.ok) {
-        return null;
-      }
-      return (await response.json()) as unknown;
-    },
+    // getCapabilities() lives in the shared API client so this call gets
+    // the same absolute API base URL and bearer token as every other
+    // request. The earlier relative fetch here reached the single-page
+    // app's own index.html on the deployed origin - HTTP 200, text/html -
+    // and carried no Authorization header, so it could never have reached
+    // the endpoint even once it ships.
+    //
+    // A 404 (not deployed yet), a 401 (session gone), a non-JSON body and
+    // a network failure all arrive as null. None is an administrator and
+    // none is a crash.
+    queryFn: getCapabilities,
     staleTime: 0,
     retry: false,
   });
