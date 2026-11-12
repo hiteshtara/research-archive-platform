@@ -346,10 +346,21 @@ is a separate feature request.
 ### 5.7 Documents — **new cases TC-060 to TC-063** (no coverage existed)
 
 The Documents module finds an archived document across every module.
-Verified 2026-11-11: a search for `NSF` matches **491,685** documents.
+**Correction, 2026-11-12.** An earlier draft of this guide stated that a
+search for `NSF` matches 491,685 documents. **That figure was wrong.** It came
+from `/api/documents/search`, which **ignores the search term entirely** —
+empty, `NSF`, a nonsense string and a specific record number all return the
+same 491,685 with the same first row, while `module=` filtering does work. So
+491,685 is the **unfiltered total**, not an NSF result.
+
+That endpoint is also unused by the application: its client function
+`searchDocuments()` is defined in `ui/src/api/client.ts` but never called. The
+Documents page calls **`/api/v1/documents`**, which is what TC-060 to TC-063
+should target. No corrected NSF figure is given here, because the filtered
+count has not yet been measured against the correct endpoint.
 
 **TC-060 — Document search returns results.**
-- **Go:** Documents → search `NSF`.
+- **Go:** Documents → search `NSF`. *(Tester note: the page calls `/api/v1/documents`. Do not rely on a total of 491,685 — see the correction above.)*
 - **Expect:** many results, each naming its module (AWARD, PROPOSAL, …), its
   document number and its business record number.
 - **PASS:** results appear and each names its module and record.
