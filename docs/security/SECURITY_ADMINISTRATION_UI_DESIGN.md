@@ -87,7 +87,13 @@ Authorization: Bearer <Cognito access token>     (required)
 |---|---|
 | `administrator` | the caller resolves to an **active** ARCHIVE_ADMIN membership |
 | `enforcementEnabled` | `app.authorization.enforcement-enabled` as the running process sees it |
-| `administrationAvailable` | `administrator && enforcementEnabled` — the only field the toggle reads |
+| `administrationAvailable` | `administrator && enforcementEnabled && any further server-side prerequisites` — gates whether the admin screens **function** |
+
+**Revised 2026-11-12.** The toggle's **visibility** keys on **`administrator`
+alone**. `administrationAvailable` no longer hides the toggle; it decides
+whether the Security Administration screens work or render the unavailable
+state. The two were previously conflated, which would have hidden the whole
+surface from administrators on DEV, where enforcement is off.
 
 `administrationAvailable` is computed **server-side** on purpose. If the client
 derived it, a client bug could show the toggle when the backend would refuse
@@ -188,8 +194,21 @@ Inserted into the existing right-hand `Stack` in `AppLayout.tsx`, between the
 signed-in user block and Sign out — matching the mockup. BU logo, title,
 **Development** chip, user and Sign out are **unchanged**.
 
-Rendered **only** when `administrationAvailable === true`. Absent — not
-disabled — otherwise, so a non-admin sees exactly today's header.
+**Visibility rule (revised 2026-11-12):**
+
+| `administrator` | `administrationAvailable` | Toggle | Selecting Security Admin |
+|---|---|---|---|
+| `false` | — | **absent** | n/a — route denied |
+| unverifiable / request failed | — | **absent (fail closed)** | n/a |
+| `true` | `true` | **shown** | full administration |
+| `true` | `false` | **shown** | **explicit unavailable screen** |
+
+Absent — not disabled — for non-administrators, so a non-admin sees exactly
+today's header with no hint the mode exists.
+
+**Fail closed:** if the capabilities call 401s, 5xxs, times out, or returns
+anything unparseable, the UI treats `administrator` as `false` and hides the
+toggle. There is no default-visible path.
 
 ## 5. Unit Permissions (new page)
 
@@ -240,7 +259,7 @@ it is configuration state of the same kind.
 | Loading | capabilities in flight | skeleton in the toggle slot; **no toggle** until resolved |
 | Normal archive | `administrator: false` | today's UI exactly |
 | Admin available | `administrationAvailable: true` | toggle shown |
-| **Enforcement disabled** | `administrator: true`, `enforcementEnabled: false` | toggle **hidden**; direct `/admin/*` shows "Security Administration is unavailable while record enforcement is disabled" — explanatory, not an error |
+| **Enforcement disabled** | `administrator: true`, `enforcementEnabled: false` | toggle **SHOWN**; selecting it renders the unavailable screen (§7a). **Zero admin API calls are issued.** Explanatory, not an error |
 | Unauthorized (401) | token expired | existing session-expired path; re-authenticate |
 | Forbidden (403) | non-admin hits an admin API | "You do not have administrator access", no retry |
 | Not found (404) | admin API with enforcement off | treated as **enforcement-disabled**, not as an error |
@@ -248,6 +267,111 @@ it is configuration state of the same kind.
 
 The 404-means-disabled mapping matters: without it the UI would show "not
 found" for a feature that exists and is merely switched off.
+
+### 7a. The unavailable screen (requirements 2, 3, 7)
+
+Rendered whenever `administrationAvailable === false` and the user is an
+administrator — at `/admin/overview` and at **every** `/admin/*` route.
+
+**What it shows:** that Security Administration exists, that it is unavailable
+because record-level enforcement is currently disabled, that this is a
+configuration state rather than a fault or a permissions problem, and that no
+action is available from this screen.
+
+**What it must not do — three hard rules:**
+
+1. **Zero admin API calls.** The capability state is known *before* any admin
+   request is attempted, so the screens must not call and then interpret a
+   404. Implementation: the admin route element checks capabilities first and
+   short-circuits; the React Query hooks on the four existing pages are
+   `enabled: administrationAvailable`, so they never fire.
+2. **No functional search form** (requirement 7). `AdminIdentitySearchPage`
+   today renders *"Find an identity"* with a working search box. Under this
+   state that form must **not** render — a box that cannot work is worse than
+   an honest message. This is a guard added to an existing page, not a rewrite.
+3. **No fabricated status.** No grant counts, no "0 users", no placeholder
+   figures. Unobtainable values are absent or labelled unavailable.
+
+**Verified against the live system 2026-11-12:** at `/admin/identities` on
+revision 93 with enforcement off, the page renders its "Find an identity"
+search form, issues **no** API call on load, and all three admin endpoints
+answer `404 NOT_FOUND`. So today a tester can type a query and press Search
+into a dead end. Requirement 7 is fixing an observed behaviour, not a
+hypothetical one.
+
+## 7b. Self-service administrator workflows
+
+The six workflows, each mapped to the endpoint that already serves it. **All
+six are supported by existing APIs — no new permission API is required.**
+
+| # | Workflow | Existing endpoint | State |
+|---|---|---|---|
+| 1 | Search and identify users | `GET /identities?q=` | exists |
+| 2 | View current roles and access | `GET /identities/{id}` — links, grants, administrator flag, recent audit | exists |
+| 3 | Assign and revoke permissions | `POST /identities/{id}/grants`, `PATCH .../grants/{id}`, `DELETE .../grants/{id}` | exists |
+| 4 | Manage authorized administrators | `GET`/`POST /administrators`, `DELETE /administrators/{id}` | exists |
+| 5 | Link authenticated to historical Kuali identities | `POST /identities/{id}/links`, `DELETE .../links/{linkId}` | exists |
+| 6 | Review the audit trail | `GET /audit` | exists — **and was broken until revision 93** (the untyped-parameter defect) |
+
+### RAP's actual permission model — not Kuali's
+
+Grants are **`CENTRAL`, `UNIT`, `IO`, `CONTACT_DERIVATION`, `PARENT_AWARD`**,
+each optionally with `includeDescendants` and an expiry. There are no Kuali
+roles, no permission strings and no role hierarchy. The UI must present these
+five and nothing else.
+
+**`ARCHIVE_ADMIN` membership is separate from and confers no record access** —
+administering access does not grant it (acceptance cases 20 and 20b). The
+interface must not imply otherwise by showing administrators as a kind of
+privileged data access.
+
+### Confirmation before sensitive changes
+
+Revoking a grant, unlinking an identity, suspending an identity, and
+adding or removing an administrator each require explicit confirmation naming
+the subject and the effect. Grant creation requires review of scope, unit and
+descendants before submission — the mistake to prevent is a wrong *scope*, not
+a mis-click.
+
+### Escalation controls — what the backend does and does not enforce
+
+Verified by reading `ArchiveAdminService`:
+
+| Control | State |
+|---|---|
+| Every operation requires an active ARCHIVE_ADMIN | **enforced** — `requireAdministrator(actor)` on all 12 |
+| The last administrator cannot be removed | **enforced** — 409 |
+| Relink four-eyes: the requester cannot approve their own relink | **enforced** |
+| Relink four-eyes: the approver cannot be the identity being linked | **enforced** — *"that would put one person on both sides of the decision"* |
+| Every security change is audited | **enforced** — actor, action, subject, timestamp |
+| Duplicate active grant for one scope | **enforced** — V087 unique index, surfaced as a controlled 409 |
+| **An administrator granting themselves a grant** | **NOT PREVENTED** |
+
+**The self-granting gap, stated plainly.** `grantAccess(actor, subject, …)`
+calls `requireAdministrator(actor)` and `requireSubject(subject)` and then
+creates the grant. **Nothing compares `actor` to `subject`.** An ARCHIVE_ADMIN
+can therefore grant themselves any scope, including `CENTRAL`, which reaches
+every record.
+
+It is **audited but not prevented** — the audit row names the actor and the
+subject, so it is detectable after the fact and attributable, but the operation
+succeeds.
+
+This matters directly to the requirement to "prevent unauthorized privilege
+escalation and self-granting": **the backend does not currently do so.** The
+relink path has genuine four-eyes; the grant path does not.
+
+**This design does not fix it, deliberately** — a self-grant guard is a backend
+authorization change, outside the approved UI scope and requiring its own
+approval and tests. Options, for a separate decision: refuse `actor == subject`
+outright; require a second administrator to approve a self-grant, mirroring the
+relink control that already exists; or accept it and rely on audit, documenting
+that choice.
+
+**The UI must not imply a control that does not exist.** It will not describe
+self-granting as blocked, and an administrator viewing their own identity will
+see the same grant controls as for anyone else, because that is what the
+backend permits.
 
 ## 8. Security review
 
@@ -257,7 +381,9 @@ found" for a feature that exists and is merely switched off.
 | 2 | Never rely on hiding UI as access control | **hiding is cosmetic only.** All 12 endpoints call `requireAdministrator(actor)` independently; typing `/admin/identities` loads a page whose every call is refused |
 | 3 | No impersonation or bypass | no act-as, no identity override; identity comes from the validated token alone, as the earlier audit confirmed |
 | 4 | No sensitive detail in browser logs | no console logging of identifiers, tokens or grant detail; capabilities returns booleans only |
-| 5 | Enforcement OFF: do not expose disabled routes | toggle hidden; `/admin/*` renders the explanatory state and issues **no** admin API calls |
+| 5 | Enforcement OFF: do not expose disabled routes | toggle **shown to administrators**; `/admin/*` renders the explanatory state and issues **no** admin API calls. "Expose" means exposing a *non-functional surface*, not hiding the mode's existence from an administrator |
+| 8 | Unverifiable admin status | **fails closed** — toggle hidden. No default-visible path |
+| 9 | Backend independent of UI visibility | unchanged by this revision: showing the toggle while enforcement is off grants nothing, because all 12 endpoints still 404 and, when enabled, still call `requireAdministrator(actor)` |
 | 6 | Status only from verified API data | no hardcoded counts or states; unobtainable values render as "Unavailable" |
 | 7 | Mode switch changes no enforcement | pure client-side routing; no request alters configuration |
 
