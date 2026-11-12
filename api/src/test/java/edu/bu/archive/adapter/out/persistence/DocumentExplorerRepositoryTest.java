@@ -607,4 +607,130 @@ class DocumentExplorerRepositoryTest {
         repository.searchDefaultPage(25, 0, "module");
         assertThat(capturedSql()).contains("ORDER BY module, document_number, source_record_id");
     }
+    // --- DEF-5: filtered light path SQL shape (no database needed) ---
+
+    @SuppressWarnings("unchecked")
+    private void stubFacets() {
+        JdbcClient.MappedQuerySpec<DocumentExplorerRepository.ModuleFacetRow> query =
+                mock(JdbcClient.MappedQuerySpec.class);
+        when(statement.query(DocumentExplorerRepository.ModuleFacetRow.class)).thenReturn(query);
+        when(query.list()).thenReturn(List.of());
+    }
+
+    private DocumentExplorerFilter queryFilter(String query) {
+        return new DocumentExplorerFilter(
+                "", "", query, "", "", "", "", false,
+                "", "", "", false, "", "", null, null, "documentNumber"
+        );
+    }
+
+    @Test
+    void filteredLightSearchFiltersAndPaginatesBeforeAnyAwardPersonAggregation() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchFilteredLight(queryFilter("NSF"), 25, 0);
+        String sql = capturedSql();
+
+        // The filter and the LIMIT must both land inside `paginated`,
+        // ahead of the enrichment CTE - that ordering IS the fix. If
+        // enrichment came first it would aggregate award_person over
+        // every Award row again, which is the DEF-5 defect.
+        int paginated = sql.indexOf("paginated AS (");
+        int where = sql.indexOf("WHERE (:documentNumber", paginated);
+        int limit = sql.indexOf("LIMIT :limit", paginated);
+        int enrichment = sql.indexOf("paginated_award_ids AS (");
+        assertThat(paginated).isGreaterThan(-1);
+        assertThat(where).isGreaterThan(paginated);
+        assertThat(limit).isGreaterThan(where);
+        assertThat(enrichment).isGreaterThan(limit);
+    }
+
+    @Test
+    void filteredLightSearchScopesEveryAwardAggregationToThePageIds() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchFilteredLight(queryFilter("NSF"), 25, 0);
+        String sql = capturedSql();
+
+        // Each of the three Award aggregations must be scoped. An
+        // unscoped one is the 325K/334K-row scan this fix removes.
+        assertThat(sql).contains(
+                "FROM archive.award_person ap WHERE ap.award_id IN (SELECT award_id FROM paginated_award_ids)");
+        assertThat(sql).contains(
+                "FROM archive.award_person_unit WHERE award_id IN (SELECT award_id FROM paginated_award_ids)");
+        assertThat(sql).contains(
+                "FROM archive.award_person WHERE award_id IN (SELECT award_id FROM paginated_award_ids)");
+    }
+
+    @Test
+    void filteredLightPathNeverReferencesAColumnTheLightUnionDoesNotCarry() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchFilteredLight(queryFilter("NSF"), 25, 0);
+        String sql = capturedSql();
+
+        // These four predicates were dropped because the light union's
+        // Award branch has no primary person. Re-adding one here would
+        // silently filter on NULL and return the wrong rows, so the
+        // light WHERE must not contain them.
+        int where = sql.indexOf("WHERE (:documentNumber");
+        int limit = sql.indexOf("LIMIT :limit");
+        String lightWhere = sql.substring(where, limit);
+        assertThat(lightWhere).doesNotContain(":personId");
+        assertThat(lightWhere).doesNotContain(":personName");
+        assertThat(lightWhere).doesNotContain(":personRole");
+        assertThat(lightWhere).doesNotContain(":piOnly");
+        assertThat(lightWhere).doesNotContain("award_any_units");
+    }
+
+    @Test
+    void filteredLightPathKeepsTheLeadUnitEqualityItCanStillAnswer() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchFilteredLight(queryFilter("NSF"), 25, 0);
+        // unitNumber without includeAnyUnit reduces to a plain equality
+        // on a column the light union carries, so it is kept rather
+        // than routed away.
+        assertThat(capturedSql()).contains(":unitNumber = '' OR lead_unit_number = :unitNumber");
+    }
+
+    @Test
+    void filteredLightSearchStillAppliesTheSourceRecordIdTieBreaker() {
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.searchFilteredLight(queryFilter("NSF"), 25, 0);
+        // document_number is not globally unique, so LIMIT/OFFSET
+        // paging needs the true per-row identity as a final tie-break.
+        assertThat(capturedSql())
+                .contains("ORDER BY document_number, module, source_record_id LIMIT :limit");
+    }
+
+    @Test
+    void filteredLightFacetsGroupTheLightUnionAndNeverTheHeavyCte() {
+        DocumentExplorerRepository repository = newRepository();
+        stubFacets();
+        repository.moduleFacetsFilteredLight(queryFilter("NSF"));
+        String sql = capturedSql();
+        assertThat(sql).contains("FROM documents_light");
+        assertThat(sql).contains("GROUP BY module");
+        // The heavy CTE's Award aggregations must not appear at all.
+        assertThat(sql).doesNotContain("award_unit_counts AS (");
+        assertThat(sql).doesNotContain("award_person_counts AS (");
+        assertThat(sql).doesNotContain("award_pi AS (");
+    }
+
+    @Test
+    void theHeavyFilteredPathIsUnchangedAndStillAggregatesOverEveryAwardRow() {
+        // The fix must not quietly alter the authoritative path that
+        // person/unit-filtered requests still use.
+        DocumentExplorerRepository repository = newRepository();
+        stubSearch();
+        repository.search(queryFilter("NSF"), 25, 0);
+        String sql = capturedSql();
+        assertThat(sql).contains("award_pi AS (");
+        assertThat(sql).contains(":personName");
+        assertThat(sql).contains("award_any_units");
+        assertThat(sql).doesNotContain("documents_light");
+    }
+
 }

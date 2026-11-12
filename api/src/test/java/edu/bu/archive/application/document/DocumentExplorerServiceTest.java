@@ -35,15 +35,27 @@ class DocumentExplorerServiceTest {
         // whether service.search()'s isUnfiltered() check routes to one
         // or the other - which path is actually taken is verified
         // separately by the isUnfiltered()-routing tests below.
+        // DEF-5: the response's totalElements is now derived by summing
+        // the per-module facet counts rather than from a separate
+        // COUNT(*), so every facet stub has to carry `total` for the
+        // pagination assertions to mean anything. One row is enough -
+        // the service sums whatever rows it is given.
+        List<DocumentExplorerRepository.ModuleFacetRow> facets =
+                List.of(new DocumentExplorerRepository.ModuleFacetRow("AWARD", total));
         when(repository.count(any())).thenReturn(total);
         when(repository.search(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(rows);
-        when(repository.moduleFacets(any())).thenReturn(List.of());
+        when(repository.moduleFacets(any())).thenReturn(facets);
         when(repository.countDefault()).thenReturn(total);
         when(repository.searchDefaultPage(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(), any()))
                 .thenReturn(rows);
-        when(repository.moduleFacetsDefault()).thenReturn(List.of());
+        when(repository.moduleFacetsDefault()).thenReturn(facets);
+        // DEF-5 filtered light path.
+        when(repository.moduleFacetsFilteredLight(any())).thenReturn(facets);
+        when(repository.searchFilteredLight(any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(rows);
     }
 
     private DocumentExplorerResponse search(String module) {
@@ -134,7 +146,8 @@ class DocumentExplorerServiceTest {
     void validModuleIsUppercasedAndBoundExactly() {
         stub(List.of(), 0L);
         search("award");
-        verify(repository).count(argThat(filter -> filter.module().equals("AWARD")));
+        verify(repository).moduleFacetsFilteredLight(
+                argThat(filter -> filter.module().equals("AWARD")));
     }
 
     @Test
@@ -181,7 +194,7 @@ class DocumentExplorerServiceTest {
                 null, null, null, null, null, null, null, false,
                 null, "Smith", null, false, null, null, null, null, null, 0, 25
         );
-        verify(repository).count(argThat(filter -> filter.module().equals("")));
+        verify(repository).moduleFacets(argThat(filter -> filter.module().equals("")));
     }
 
     // --- Scenario 22: pagination ---
@@ -226,7 +239,8 @@ class DocumentExplorerServiceTest {
                 malicious, null, null, null, null, null, null, false,
                 null, null, null, false, null, null, null, null, null, 0, 25
         );
-        verify(repository).count(argThat(filter -> filter.documentNumber().equals(malicious)));
+        verify(repository).moduleFacetsFilteredLight(
+                argThat(filter -> filter.documentNumber().equals(malicious)));
     }
 
     // --- includeAnyUnit / piOnly pass through unchanged ---
@@ -238,17 +252,28 @@ class DocumentExplorerServiceTest {
                 null, null, null, "AWARD", null, null, "1202020000", true,
                 null, null, null, true, null, null, null, null, null, 0, 25
         );
-        verify(repository).count(argThat(filter -> filter.includeAnyUnit() && filter.piOnly()));
+        verify(repository).moduleFacets(
+                argThat(filter -> filter.includeAnyUnit() && filter.piOnly()));
+        // Both flags read a column the light union does not carry, so
+        // this request must NOT be routed to the light path.
+        verify(repository, org.mockito.Mockito.never()).moduleFacetsFilteredLight(any());
+        verify(repository, org.mockito.Mockito.never()).searchFilteredLight(
+                any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     // --- Default-page fast path routing (2026-08-12 performance fix) ---
 
     @Test
-    void emptyFilterCountUsesTheLightweightDefaultPathNotTheFullCte() {
-        stub(List.of(), 0L);
-        search(null);
-        verify(repository).countDefault();
+    void emptyFilterTotalComesFromTheDefaultFacetsAndNeverTheFullCte() {
+        // DEF-5 replaced the separate COUNT(*) with a sum of the facet
+        // counts, so the assertion is no longer "countDefault() ran" but
+        // "no COUNT(*) query ran at all, on either path".
+        stub(List.of(), 7L);
+        DocumentExplorerResponse response = search(null);
+        assertThat(response.results().totalElements()).isEqualTo(7L);
+        verify(repository).moduleFacetsDefault();
         verify(repository, org.mockito.Mockito.never()).count(any());
+        verify(repository, org.mockito.Mockito.never()).countDefault();
     }
 
     @Test
@@ -274,9 +299,9 @@ class DocumentExplorerServiceTest {
                 null, null, null, null, null, null, null, false,
                 null, "Smith", null, false, null, null, null, null, null, 0, 25
         );
-        verify(repository).count(any());
         verify(repository).search(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
         verify(repository).moduleFacets(any());
+        verify(repository, org.mockito.Mockito.never()).count(any());
         verify(repository, org.mockito.Mockito.never()).countDefault();
         verify(repository, org.mockito.Mockito.never()).searchDefaultPage(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(), any());
@@ -284,20 +309,177 @@ class DocumentExplorerServiceTest {
     }
 
     @Test
-    void dateRangeFilterAloneAlsoFallsBackToTheFilteredPath() {
-        // A filter type not covered by the other routing tests -
-        // dateFrom/dateTo depend on document_date, which the light
-        // union DOES carry directly, but isUnfiltered() correctly still
-        // routes to the filtered path since ANY filter (not just
-        // person/unit ones) must use it.
+    void dateRangeFilterAloneUsesTheFilteredLightPathNotTheHeavyCte() {
+        // dateFrom/dateTo match on document_date, which the light union
+        // carries directly for all four modules, so DEF-5 routes this
+        // to the filtered light path. Before DEF-5 a date filter paid
+        // the full Award person/unit aggregation for nothing.
         stub(List.of(), 0L);
         service.search(
                 null, null, null, null, null, null, null, false,
                 null, null, null, false, null, null,
                 LocalDate.of(2020, 1, 1), null, null, 0, 25
         );
-        verify(repository).count(any());
+        verify(repository).moduleFacetsFilteredLight(any());
+        verify(repository).searchFilteredLight(any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repository, org.mockito.Mockito.never()).moduleFacets(any());
+        verify(repository, org.mockito.Mockito.never()).search(
+                any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
         verify(repository, org.mockito.Mockito.never()).countDefault();
+    }
+
+    // --- DEF-5: filtered light path routing ---
+
+    private void assertUsedLightFilteredPath() {
+        verify(repository).moduleFacetsFilteredLight(any());
+        verify(repository).searchFilteredLight(any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repository, org.mockito.Mockito.never()).moduleFacets(any());
+        verify(repository, org.mockito.Mockito.never()).search(
+                any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repository, org.mockito.Mockito.never()).count(any());
+    }
+
+    private void assertUsedHeavyFilteredPath() {
+        verify(repository).moduleFacets(any());
+        verify(repository).search(any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repository, org.mockito.Mockito.never()).moduleFacetsFilteredLight(any());
+        verify(repository, org.mockito.Mockito.never()).searchFilteredLight(
+                any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+        verify(repository, org.mockito.Mockito.never()).count(any());
+    }
+
+    @Test
+    void aTextQueryUsesTheLightFilteredPath() {
+        // The measured DEF-5 case: Documents + a text query across all
+        // modules, 43.4s before this routing existed.
+        stub(List.of(), 0L);
+        service.search(
+                null, null, "NSF", null, null, null, null, false,
+                null, null, null, false, null, null, null, null, null, 0, 25
+        );
+        assertUsedLightFilteredPath();
+    }
+
+    @Test
+    void aLeadUnitFilterWithoutIncludeAnyUnitUsesTheLightFilteredPath() {
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, "1202020000", false,
+                null, null, null, false, null, null, null, null, null, 0, 25
+        );
+        assertUsedLightFilteredPath();
+    }
+
+    @Test
+    void aSponsorCodeFilterUsesTheLightFilteredPath() {
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                null, null, null, false, "0100", null, null, null, null, 0, 25
+        );
+        assertUsedLightFilteredPath();
+    }
+
+    @Test
+    void aLeadUnitFilterWithIncludeAnyUnitStaysOnTheHeavyPath() {
+        // "Any associated unit" widens the match through
+        // award_any_units, which the light union does not carry.
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, "1202020000", true,
+                null, null, null, false, null, null, null, null, null, 0, 25
+        );
+        assertUsedHeavyFilteredPath();
+    }
+
+    @Test
+    void includeAnyUnitWithoutAUnitNumberIsStillLightEligible() {
+        // The flag alone filters nothing - the unit clause is a
+        // tautology when unitNumber is empty - so it must not force the
+        // expensive path.
+        stub(List.of(), 0L);
+        service.search(
+                null, null, "NSF", null, null, null, null, true,
+                null, null, null, false, null, null, null, null, null, 0, 25
+        );
+        assertUsedLightFilteredPath();
+    }
+
+    @Test
+    void aPersonIdFilterStaysOnTheHeavyPath() {
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                "12345", null, null, false, null, null, null, null, null, 0, 25
+        );
+        assertUsedHeavyFilteredPath();
+    }
+
+    @Test
+    void aPersonRoleFilterStaysOnTheHeavyPath() {
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                null, null, "PI", false, null, null, null, null, null, 0, 25
+        );
+        assertUsedHeavyFilteredPath();
+    }
+
+    @Test
+    void aPiOnlyFilterStaysOnTheHeavyPath() {
+        stub(List.of(), 0L);
+        service.search(
+                null, null, null, null, null, null, null, false,
+                null, null, null, true, null, null, null, null, null, 0, 25
+        );
+        assertUsedHeavyFilteredPath();
+    }
+
+    @Test
+    void noFilteredRequestIssuesASeparateCountQueryOnEitherPath() {
+        // DEF-5's other half: the total is summed from the facets, so a
+        // filtered request evaluates the union twice, not three times.
+        stub(List.of(), 9L);
+
+        DocumentExplorerResponse light = service.search(
+                null, null, "NSF", null, null, null, null, false,
+                null, null, null, false, null, null, null, null, null, 0, 25
+        );
+        assertThat(light.results().totalElements()).isEqualTo(9L);
+
+        DocumentExplorerResponse heavy = service.search(
+                null, null, null, null, null, null, null, false,
+                null, "Smith", null, false, null, null, null, null, null, 0, 25
+        );
+        assertThat(heavy.results().totalElements()).isEqualTo(9L);
+
+        verify(repository, org.mockito.Mockito.never()).count(any());
+        verify(repository, org.mockito.Mockito.never()).countDefault();
+    }
+
+    @Test
+    void theTotalIsTheSumOfEveryModuleFacetNotJustTheFirst() {
+        // A module that matches nothing contributes no GROUP BY row, so
+        // the sum has to come from whatever rows arrive - never from a
+        // single row or a hardcoded module list.
+        when(repository.moduleFacetsFilteredLight(any())).thenReturn(List.of(
+                new DocumentExplorerRepository.ModuleFacetRow("AWARD", 1734L),
+                new DocumentExplorerRepository.ModuleFacetRow("PROPOSAL", 12L),
+                new DocumentExplorerRepository.ModuleFacetRow("SUBAWARD", 3L)));
+        when(repository.searchFilteredLight(any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(List.of());
+
+        DocumentExplorerResponse response = service.search(
+                null, null, "NSF", null, null, null, null, false,
+                null, null, null, false, null, null, null, null, null, 0, 25
+        );
+
+        assertThat(response.results().totalElements()).isEqualTo(1749L);
+        assertThat(response.moduleFacets()).hasSize(3);
     }
 
 }

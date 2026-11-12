@@ -573,6 +573,43 @@ public class DocumentExplorerRepository {
               AND (CAST(:dateTo AS date) IS NULL OR document_date <= CAST(:dateTo AS date))
             """;
 
+    /*
+     * DEF-5. The filtered path's own light WHERE.
+     *
+     * Identical to FILTER_WHERE above, minus exactly the four predicates
+     * that read a column the light union does not carry:
+     * primary_person_id/_name/_role (NULL on the light Award branch,
+     * because resolving Award's primary person is the award_person
+     * DISTINCT ON that makes the heavy CTE expensive), piOnly (which
+     * reads primary_person_role), and the award_any_units EXISTS
+     * sub-select for "include any associated unit".
+     *
+     * Dropping them is safe ONLY because
+     * DocumentExplorerService.canUseLightFilteredPath() routes here
+     * exclusively when every one of them is at its default, where each
+     * is a tautology anyway:
+     *   :personId = '' / :personName = '' / :personRole = ''  -> TRUE
+     *   :piOnly = FALSE                                       -> TRUE
+     *   :includeAnyUnit = FALSE -> the unit clause reduces to
+     *       lead_unit_number = :unitNumber, which the light union DOES
+     *       carry for all four modules, so it is kept verbatim.
+     * Any request that actually sets one of them keeps using
+     * FILTER_WHERE and the heavy CTE, unchanged.
+     */
+    private static final String FILTER_WHERE_LIGHT = """
+            WHERE (:documentNumber = '' OR document_number ILIKE :documentNumberPattern)
+              AND (:businessRecordNumber = '' OR business_record_number ILIKE :businessRecordNumberPattern)
+              AND (:query = '' OR document_number ILIKE :queryPattern OR title ILIKE :queryPattern OR business_record_number ILIKE :queryPattern)
+              AND (:module = '' OR module = :module)
+              AND (:normalizedStatus = '' OR normalized_status = :normalizedStatus)
+              AND (:nativeStatus = '' OR native_status_description = :nativeStatus)
+              AND (:unitNumber = '' OR lead_unit_number = :unitNumber)
+              AND (:sponsorCode = '' OR sponsor_code = :sponsorCode)
+              AND (:subrecipientOrganizationId = '' OR subrecipient_organization_id ILIKE :subrecipientOrganizationPattern)
+              AND (CAST(:dateFrom AS date) IS NULL OR document_date >= CAST(:dateFrom AS date))
+              AND (CAST(:dateTo AS date) IS NULL OR document_date <= CAST(:dateTo AS date))
+            """;
+
     private static final String SELECT_LIST = """
             SELECT
                 module, document_number AS documentNumber,
@@ -714,6 +751,76 @@ public class DocumentExplorerRepository {
                 .param("subrecipientOrganizationPattern", "%" + filter.subrecipientOrganizationId() + "%")
                 .param("dateFrom", filter.dateFrom())
                 .param("dateTo", filter.dateTo());
+    }
+
+    // --- DEF-5: filtered light path. Same two-stage shape as the
+    // unfiltered fast path (filter and paginate on the light union
+    // first, then enrich only the <= size Award ids on the page), but
+    // with the caller's filter applied. search()/count()/moduleFacets()
+    // and the heavy EXPLORER_CTE are untouched and still serve every
+    // person/unit-dependent request. ---
+
+    /*
+     * Per-module counts for a filtered request, over the light union.
+     * DocumentExplorerService derives the response's totalElements by
+     * summing these rather than issuing a separate COUNT(*) - the two
+     * are the same number by construction (identical WHERE, and
+     * COUNT(*) over a predicate equals the sum of that predicate's
+     * per-group counts), so this removes one full evaluation of the
+     * union per request instead of computing the same total twice.
+     */
+    public List<ModuleFacetRow> moduleFacetsFilteredLight(DocumentExplorerFilter filter) {
+        requireLightEligible(filter);
+        return bind(
+                jdbc.sql(LIGHT_SUPPORTING_CTE
+                        + "SELECT module, COUNT(*) AS n FROM documents_light "
+                        + FILTER_WHERE_LIGHT
+                        + " GROUP BY module"),
+                filter
+        )
+                .query(ModuleFacetRow.class)
+                .list();
+    }
+
+    public List<DocumentExplorerRow> searchFilteredLight(
+            DocumentExplorerFilter filter, int limit, int offset) {
+        requireLightEligible(filter);
+        String sql = LIGHT_SUPPORTING_CTE
+                + ", paginated AS ( SELECT * FROM documents_light "
+                + FILTER_WHERE_LIGHT
+                + lightOrderByClause(filter.sort(), "")
+                + " LIMIT :limit OFFSET :offset ), "
+                + AWARD_ENRICHMENT_CTE
+                + DEFAULT_PAGE_SELECT
+                + lightOrderByClause(filter.sort(), "p.");
+        return bind(jdbc.sql(sql), filter)
+                .param("limit", limit)
+                .param("offset", offset)
+                .query(DocumentExplorerRow.class)
+                .list();
+    }
+
+    /*
+     * Both light methods are public, so nothing in the type system stops
+     * a future caller handing them a filter whose predicate
+     * FILTER_WHERE_LIGHT does not contain. That would not fail - it
+     * would silently ignore the filter and return too many rows, which
+     * is the worst of the available outcomes. Fail loudly instead.
+     *
+     * DocumentExplorerService.canUseLightFilteredPath() is the routing
+     * decision; this is the same rule enforced at the boundary, so the
+     * two cannot drift apart without a test failing.
+     */
+    private static void requireLightEligible(DocumentExplorerFilter filter) {
+        if (!filter.personId().isEmpty()
+                || !filter.personName().isEmpty()
+                || !filter.personRole().isEmpty()
+                || filter.piOnly()
+                || (filter.includeAnyUnit() && !filter.unitNumber().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "The light filtered path cannot answer a person-dependent or "
+                            + "any-unit filter; use search()/moduleFacets() instead.");
+        }
     }
 
     public record ModuleFacetRow(String module, long n) {

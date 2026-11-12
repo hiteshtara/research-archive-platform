@@ -113,14 +113,37 @@ public class DocumentExplorerService {
         int offset = safePage * safeSize;
 
         boolean unfiltered = isUnfiltered(filter);
+        boolean lightFiltered = !unfiltered && canUseLightFilteredPath(filter);
 
-        long totalElements = unfiltered ? repository.countDefault() : repository.count(filter);
+        /*
+         * DEF-5. The per-module facet counts are read FIRST and the
+         * response's totalElements is derived by summing them, instead
+         * of issuing a separate COUNT(*) over the same union under the
+         * same WHERE. COUNT(*) over a predicate is exactly the sum of
+         * that predicate's per-group counts, so the number is
+         * unchanged - but a filtered request now evaluates the union
+         * twice (facets + page) rather than three times
+         * (count + page + facets). A module that matches nothing
+         * contributes no GROUP BY row, which is a contribution of
+         * zero, so the sum is still the full total.
+         */
+        List<DocumentExplorerRepository.ModuleFacetRow> facetRows = unfiltered
+                ? repository.moduleFacetsDefault()
+                : lightFiltered
+                        ? repository.moduleFacetsFilteredLight(filter)
+                        : repository.moduleFacets(filter);
+
+        long totalElements = facetRows.stream()
+                .mapToLong(DocumentExplorerRepository.ModuleFacetRow::n)
+                .sum();
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(safePage, safeSize, totalElements);
 
         List<DocumentExplorerRow> rows = unfiltered
                 ? repository.searchDefaultPage(safeSize, offset, filter.sort())
-                : repository.search(filter, safeSize, offset);
+                : lightFiltered
+                        ? repository.searchFilteredLight(filter, safeSize, offset)
+                        : repository.search(filter, safeSize, offset);
         List<DocumentExplorerResultResponse> content = rows.stream()
                 .map(this::toResponse)
                 .toList();
@@ -130,10 +153,7 @@ public class DocumentExplorerService {
                 pageMetadata.totalPages(), pageMetadata.first(), pageMetadata.last()
         );
 
-        List<FacetCountResponse> moduleFacets = (unfiltered
-                ? repository.moduleFacetsDefault()
-                : repository.moduleFacets(filter)
-        ).stream()
+        List<FacetCountResponse> moduleFacets = facetRows.stream()
                 .map(row -> new FacetCountResponse(row.module(), row.n()))
                 .toList();
 
@@ -168,6 +188,46 @@ public class DocumentExplorerService {
                 && filter.subrecipientOrganizationId().isEmpty()
                 && filter.dateFrom() == null
                 && filter.dateTo() == null;
+    }
+
+    /*
+     * DEF-5. Whether a FILTERED request can use the light union
+     * (DocumentExplorerRepository's moduleFacetsFilteredLight()/
+     * searchFilteredLight()) instead of the heavy EXPLORER_CTE.
+     *
+     * The heavy CTE's expense is Award's person/unit resolution:
+     * award_pi (a DISTINCT ON over archive.award_person, 325K rows),
+     * award_unit_counts and award_person_counts (GROUP BY over
+     * award_person_unit, 334K rows, and award_person again), plus
+     * award_any_units - all computed for every one of the 267,386
+     * archive.award_version rows before any filter or LIMIT applies.
+     *
+     * Those columns are needed up front only when a filter actually
+     * MATCHES on them. For display they are needed for at most `size`
+     * rows, which the two-stage light path already resolves by
+     * award_id through the existing indexes. So the light path is
+     * correct for any filter that does not read a person column or
+     * widen a unit match across award_person_unit:
+     *
+     *   personId / personName / personRole -> primary_person_*
+     *   piOnly                             -> primary_person_role
+     *   unitNumber WITH includeAnyUnit     -> award_any_units
+     *
+     * Everything else (query, documentNumber, businessRecordNumber,
+     * module, normalizedStatus, nativeStatus, sponsorCode,
+     * subrecipientOrganizationId, dateFrom, dateTo, and unitNumber on
+     * its own) matches only columns the light union carries natively
+     * for all four modules.
+     *
+     * A unitNumber WITHOUT includeAnyUnit stays eligible: it reduces to
+     * lead_unit_number equality, which the light union does carry.
+     */
+    private boolean canUseLightFilteredPath(DocumentExplorerFilter filter) {
+        return filter.personId().isEmpty()
+                && filter.personName().isEmpty()
+                && filter.personRole().isEmpty()
+                && !filter.piOnly()
+                && !(filter.includeAnyUnit() && !filter.unitNumber().isEmpty());
     }
 
     private DocumentExplorerResultResponse toResponse(DocumentExplorerRow row) {
