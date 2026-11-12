@@ -299,6 +299,43 @@ A subaward is money passed to another organisation.
 - **Expect:** the matching subaward.
 - **PASS:** found. **FAIL:** not found, or unrelated results.
 
+#### Searching Subawards by Account — read this before testing TC-039
+
+This answers a dead end a tester hit on 2026-11-12: searching an account
+number returned nothing, and the obvious conclusion — that Account search is
+broken — is wrong.
+
+**Account searches the subaward's OWN `accountNumber`, not the parent Award's
+account number.** Entering an Award account number returns nothing, because it
+is a different field on a different record. That is the single most likely
+reason you see an empty result.
+
+Verified working examples, checked live on 2026-11-12 against API revision 93:
+
+| Search | Result |
+|---|---|
+| `9500310349` | **37 subawards** |
+| `9500314854` | matches (subaward codes 3700 / 3701) |
+| `95003` | partial searches are supported — matching is substring, not exact |
+
+**Why your own pick probably returned nothing.** Account numbers are populated
+on very few subawards. In a sample of **600 records, 12 had an account number
+— about 2%.** Treat that as a **sample observation, not a database-wide
+statistic**: the true proportion across all 93,736 subawards has not been
+measured.
+
+**What this does and does not mean.** The search **function is correct** — it
+returns the right records whenever an account number exists, which is why
+TC-039 remains **PASSED**. What is incomplete is the **source-data coverage**.
+These are separate concerns and the data gap is not a search defect. If you
+test the Account field, use one of the values above rather than a record picked
+at random, or you will be testing whether that record happens to have an
+account number rather than whether search works.
+
+This mirrors the caveat TC-039 already carries for Organization: Organization
+search matches an organization **ID**, and searching by organization **name**
+is a separate feature request.
+
 **TC-059 — Subaward relates to its award.**
 - **Go:** open any subaward; look for the funding award.
 - **Expect:** a named related award, navigable.
