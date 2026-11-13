@@ -7,6 +7,8 @@ import { AwardHierarchyPage } from "./pages/award/AwardHierarchyPage";
 import { AwardSearchPage } from "./pages/award/AwardSearchPage";
 import { AwardVersionSearchPage } from "./pages/award/AwardVersionSearchPage";
 
+import { AdminRouteGuard } from "./features/securityAdmin/AdminRouteGuard";
+import { SecurityAdminOverviewRoute } from "./pages/securityAdmin/SecurityAdminOverviewRoute";
 import { AdminAuditPage } from "./pages/admin/AdminAuditPage";
 import { AdminIdentitySearchPage } from "./pages/admin/AdminIdentitySearchPage";
 import { AdminIdentityWorkspacePage } from "./pages/admin/AdminIdentityWorkspacePage";
@@ -155,27 +157,68 @@ export default function App() {
           */}
         <Route
           path="admin"
-          element={<Navigate to="/admin/identities" replace />}
+          element={<Navigate to="/admin/overview" replace />}
+        />
+
+        {/* Every administration route goes through AdminRouteGuard, which
+            resolves capabilities BEFORE the page mounts. When administration
+            is unavailable the page never renders, so it never issues an
+            administrator request -- "zero admin API calls" is structural
+            rather than a rule to remember. The guard is convenience and
+            honesty only: the server refuses independently on all 12
+            endpoints regardless of what is rendered here. */}
+        <Route
+          path="admin/overview"
+          element={
+            <AdminRouteGuard>
+              <SecurityAdminOverviewRoute />
+            </AdminRouteGuard>
+          }
         />
 
         <Route
           path="admin/identities"
-          element={<AdminIdentitySearchPage />}
+          element={
+            <AdminRouteGuard>
+              <AdminIdentitySearchPage />
+            </AdminRouteGuard>
+          }
         />
 
         <Route
           path="admin/identities/:identifier"
-          element={<AdminIdentityWorkspacePage />}
+          element={
+            <AdminRouteGuard>
+              <AdminIdentityWorkspacePage />
+            </AdminRouteGuard>
+          }
         />
 
         <Route
           path="admin/administrators"
-          element={<AdministratorsPage />}
+          element={
+            <AdminRouteGuard>
+              <AdministratorsPage />
+            </AdminRouteGuard>
+          }
+        />
+
+        <Route
+          path="admin/units"
+          element={
+            <AdminRouteGuard>
+              <SecurityAdminOverviewRoute />
+            </AdminRouteGuard>
+          }
         />
 
         <Route
           path="admin/audit"
-          element={<AdminAuditPage />}
+          element={
+            <AdminRouteGuard>
+              <AdminAuditPage />
+            </AdminRouteGuard>
+          }
         />
 
         <Route
