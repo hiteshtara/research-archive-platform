@@ -141,10 +141,22 @@ figures, and that caveat should attach to them.
 
 ## 5. How to re-run it validly
 
-1. **Gate on burst balance before and after every configuration.**
-   Require `EBSByteBalance%` ≥ 80% and `CPUCreditBalance` ≥ 200 at the
-   start of each window, and record both at the end. Abort the window if
-   either falls below 20% mid-measurement.
+1. **Gate on `EBSByteBalance%` ≥ 80% before and after every
+   configuration**, and record it at both ends. Abort the window if it
+   falls below 20% mid-measurement.
+
+   **Corrected 2026-11-13:** this originally also required
+   `CPUCreditBalance` ≥ 200. That is dropped. Measurement showed the
+   credit balance recovers at only **+6.85/hour net**, so reaching 200
+   would take **~27 hours per window**; and RDS T4g runs in **Unlimited
+   mode**, so a zero credit balance does not throttle CPU and
+   `CPUSurplusCreditsCharged` has been **0 for 24 hours**. The CPU
+   credit balance is therefore neither a confound nor a cost here. See
+   `DEV_RDS_UPGRADE_ASSESSMENT.md` §9.3.
+
+   `EBSByteBalance%` by contrast refills from 0% to 99.5% within a
+   single five-minute period of idle, so this gate costs ~5 minutes
+   between windows.
 2. **Wait for recovery between configurations** rather than measuring
    back-to-back. The balance recovered to ~99% within about 5 minutes of
    idle, so this is cheap.

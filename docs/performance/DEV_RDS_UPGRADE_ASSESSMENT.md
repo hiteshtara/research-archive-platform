@@ -238,16 +238,115 @@ unapplied, grant 2 untouched, no schema/index/migration change,
 Production untouched. ECS stays on revision 94 throughout; 93 remains
 its own rollback target.
 
-## 9. Still unknown, and honestly so
+## 9. The outstanding checks, now completed (credentials refreshed)
 
-AWS credentials expired part-way through preparing this, so three
-read-only checks could not be completed:
+### 9.1 Unlimited mode is active, and it has cost nothing
 
-| Question | Why it matters |
+Both surplus metrics are **published** for this instance, which confirms
+Unlimited mode is in force:
+`CPUSurplusCreditBalance`, `CPUSurplusCreditsCharged`.
+
+| Metric, 24 h | Value |
 |---|---|
-| `CPUSurplusCreditBalance` / `CPUSurplusCreditsCharged` | whether Unlimited mode is already costing money (§1) |
-| Exact `EBSByteBalance%` recovery rate | it recovered 0% → 99.5% within ~5 minutes of idle in one observation; one observation is not a rate |
-| Documented EBS **baseline** (not burst) MB/s for t4g.micro | the burst figure is published; the baseline is what you are limited to at 0%, and it is the number that would let the drain be predicted rather than observed |
+| `CPUSurplusCreditsCharged` | **0 across all 288 datapoints** |
+| `CPUSurplusCreditBalance` | max 2.26, non-zero in only 7 of 288 periods |
+| `CPUCreditBalance` | max **288** — exactly the documented `t4g.micro` cap |
 
-None of these changes the recommendation in §5, but the first is a live
-cost question and should be checked when credentials are refreshed.
+**The live cost question is closed: no surplus charges have been
+incurred.** The instance briefly dipped into surplus for ~35 minutes
+total but never far enough, or long enough, to be billed. So Unlimited
+mode has been protecting performance for free rather than quietly
+costing money.
+
+### 9.2 Recovery behaviour — the two resources behave completely differently
+
+**`EBSByteBalance%` recovers almost instantly, and it is a step, not a ramp.**
+
+```
+21:07=0.0  21:12=0.0  21:17=0.0   <- throttled during bound-3 measurement
+21:20=0.0
+21:25=99.5                        <- full within ONE five-minute period
+21:30=97.0 ... 22:05=99.5         <- stable thereafter
+```
+
+Once load stops it refills inside ~5 minutes. (A naive linear fit gives
+"31%/hour", which is meaningless for a step function and should not be
+quoted.)
+
+**`CPUCreditBalance` recovers slowly and linearly.**
+
+```
+21:55=0.0  22:00=0.2  22:05=0.8  22:10=1.3  22:15=1.9 ...  00:30=17.7
+```
+
+Measured **+6.85 credits/hour net** over 155 minutes, against a
+documented gross accrual of **12/hour** for `t4g.micro` — the difference
+being idle baseline consumption. At that rate, from 17.7:
+
+| Target | Time to reach |
+|---|---|
+| 200 credits | **≈ 27 hours** |
+| 288 (full) | **≈ 39 hours** |
+
+`EBSIOBalance%` never reached zero (minimum 57.25%), so the **I/O**
+balance was never the constraint — only the **byte/throughput** balance
+was.
+
+### 9.3 This invalidates my own proposed experiment gate
+
+In `BOUNDED_FANOUT_EXPERIMENT_RESULTS.md` §5 I recommended requiring
+**`CPUCreditBalance` ≥ 200** before each measurement window. That
+recommendation is **wrong and should be dropped**, for two independent
+reasons now measured:
+
+1. **It is impractical.** Reaching 200 from the current balance would
+   take about **27 hours of idle** per window. A four-configuration
+   experiment would take most of a week.
+2. **It is unnecessary.** Unlimited mode means a zero CPU credit balance
+   does **not** throttle CPU (§1), and §9.1 shows it has not been
+   charged either. A depleted CPU credit balance is therefore not a
+   confound.
+
+**The corrected gate is `EBSByteBalance%` ≥ 80% only**, which costs
+about **five minutes of idle** between windows rather than a day. That
+is the resource that actually throttled, and it is cheap to satisfy.
+
+### 9.4 Backup and storage posture (for §6/§8)
+
+| Property | Value |
+|---|---|
+| `BackupRetentionPeriod` | **7 days** — automated backups **are** enabled |
+| `PreferredBackupWindow` | 05:19–05:49 UTC |
+| `PreferredMaintenanceWindow` | **Wed 09:54–10:24 UTC** |
+| `LatestRestorableTime` | current (within minutes) |
+| Automated snapshots retained | 10, most recent 2026-11-12 05:25, `available` |
+| `StorageThroughput` | **125 MB/s** (gp3 default at 20 GB) |
+| `Iops` | 3,000 |
+| `DeletionProtection` | **false** |
+| `PendingModifiedValues` | none |
+| Parameter group | `default.postgres17`, `in-sync` |
+
+Two consequences for the plan:
+
+- Automated backups at 7-day retention plus point-in-time recovery mean
+  the §6 manual snapshot is **belt-and-braces rather than the only
+  safety net** — but it should still be taken, because it gives a single
+  named artefact to point at.
+- `StorageThroughput` is confirmed at **125 MB/s**, and peak observed
+  `ReadThroughput` was **82.6 MB/s**. That closes the gp3 argument in §4
+  with a measured number rather than an inference: **the volume had 34%
+  headroom at peak while the instance-level byte balance went to zero.**
+  The limit is the instance, not the volume.
+- `DeletionProtection: false` is worth noting independently of this
+  work — not a blocker for a resize, but a DEV instance with no deletion
+  protection is a separate small risk someone may want to close.
+
+### 9.5 One item still unknown
+
+The **documented EBS baseline throughput** (as opposed to the published
+"up to 2,085 Mbps" burst) for `t4g.micro` is still not established. AWS
+publishes the burst ceiling for T4g but not a per-size baseline
+throughput figure in the pages consulted. Without it the drain rate can
+be observed but not predicted. This does not affect the recommendation —
+the drain was observed directly — but it means any claim about *how long*
+a given workload can run before throttling would be a guess.
