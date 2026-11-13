@@ -11,18 +11,23 @@ main `7b19533`, not against the branches in isolation.
 
 ## 1. Integration state
 
+Verified against a **real trial merge** of both branches onto main
+`7b19533`, re-checked after the test work landed.
+
 | Check | Result |
 |---|---|
-| #142 merges onto main | clean, no conflict |
-| #138 merges onto main | clean, no conflict |
+| #142 merges onto main | clean |
+| #138 merges onto main | clean |
 | #142 + #138 + main together | clean |
-| File overlap between the two PRs | **none** — #142 is API-only, #138 is UI-only |
+| File overlap between the two PRs | **none** — #142 API-only, #138 UI-only |
 | API clean `test-compile` on the combined tree | pass |
-| UI `tsc -b && vite build` on the combined tree | pass |
-| Behind main | #142 by 16 commits, #138 by 21 |
+| UI `tsc -b && vite build` | pass |
+| `oxlint` | clean |
+| #138 brought current with main | yes (`5ace547`) |
 
-The two PRs share no file, so the coupling between them is a **contract**,
-not a merge. Both sides name the same three booleans:
+The two PRs share no file, so the coupling is a **contract**, not a merge.
+Both sides name the same three booleans, and the UI uses strict `=== true`
+throughout, so contract drift degrades to **denied**, never to a false grant.
 
 | API (`CapabilitiesResponse`) | UI (`readCapabilities`) |
 |---|---|
@@ -30,70 +35,137 @@ not a merge. Both sides name the same three booleans:
 | `enforcementEnabled` | `raw.enforcementEnabled === true` |
 | `administrationAvailable` | `raw.administrationAvailable === true` |
 
-The UI uses strict `=== true` throughout and treats a null, a non-object,
-a non-JSON body and a failed request all as "not an administrator", so a
-contract drift degrades to **denied**, never to a false grant.
-
 ---
 
-## 2. Defect found — must be fixed before #138 merges
+## 2. The CI-execution defect — RESOLVED
 
-**`securityAdminPresentation.test.mjs` is never executed by CI.**
+`securityAdminPresentation.test.mjs` was never executed by CI: the `test`
+script in `ui/package.json` enumerates feature directories individually and
+`securityAdmin` was not among them.
 
-`ui/package.json`'s `test` script enumerates feature directories one by
-one, and `securityAdmin` is not among them:
+Fixed in `cb8da49`. `src/features/securityAdmin/*.test.mjs` is now in the
+glob, and CI's own log for that head prints the full command including it.
 
-```
-"test": "node --test src/features/access/*.test.mjs src/features/admin/*.test.mjs … src/features/subaward/*.test.mjs"
-```
-
-CI runs exactly that script (`.github/workflows/ci.yml`, "Unit tests").
-
-Measured on the trial merge:
-
-| Command | Tests |
-|---|---|
-| `npm run test` (what CI runs) | 852 pass |
-| `node --test src/features/securityAdmin/*.test.mjs` | **14 pass — none of them in the 852** |
-
-So PR #138 ships 14 tests, all of them green, that **no pipeline will ever
-run**. A later regression in the capability matrix would merge silently.
-
-**Fix** — add one glob to `ui/package.json`:
-
-```diff
--"test": "node --test src/features/access/*.test.mjs src/features/admin/*.test.mjs …
-+"test": "node --test src/features/access/*.test.mjs src/features/admin/*.test.mjs src/features/securityAdmin/*.test.mjs …
-```
-
-Not applied here: #138 is under review and this plan does not modify it.
-
-> The enumerated list is the underlying hazard — every new feature
-> directory must be remembered. A single `src/features/**/*.test.mjs`
-> glob would remove the class of defect, but that is a wider change than
-> this feature needs and is noted, not proposed.
-
----
-
-## 3. What is already covered automatically
-
-### API — PR #142: 27 tests, all passing on the combined tree
-
-| Suite | Tests | Covers |
+| | Before | After |
 |---|---|---|
-| `CapabilitiesServiceTest` | 13 | the decision: identity resolution, ACTIVE membership, enforcement state, three fail-closed paths |
-| `MeCapabilitiesControllerTest` | 8 | HTTP: 401 without/with a bad token, reachable with enforcement off, exactly three boolean keys, `Cache-Control: no-store` |
-| `CapabilitiesMembershipIntegrationTest` | 6 | the real `archive` schema via Testcontainers: no row, revoked row, suspended identity holding an active row, plus a non-vacuity check |
+| `npm run test` helper tests | 852 | **866** (+14) |
 
-`CapabilitiesMembershipIntegrationTest` is correctly routed in
-`.github/workflows/ci.yml` — added to the database-suites job and excluded
-from the unit job, matching how every other Testcontainers suite is handled.
+The enumerated list remains the underlying hazard — a new feature directory
+must be remembered — but the list is now correct and the gap is visible in
+CI output rather than silent.
 
-### UI — PR #138: 14 tests, passing but **not run by CI** (§2)
+---
 
-The central one is an eight-row table covering **every** combination of the
-three booleans, asserting toggle visibility, usability, and route state for
-each.
+## 3. Automated coverage, as measured
+
+Everything below was run on a trial merge of **#142 + #138 onto main
+`7b19533`**, and separately by CI on #138 head `cb8da49`.
+
+### 3.1 UI — now two suites, both executed by CI
+
+`npm run test` runs `test:helpers` (node:test) then `test:components`
+(vitest), so a new suite is executed rather than silently ignored.
+
+| Suite | Tests | Result |
+|---|---|---|
+| Presentation helpers (`node --test`, 17 directories) | **866** | pass |
+| Component tests (`vitest run`, 5 files) | **37** | pass |
+
+CI log, head `cb8da49`:
+
+```
+> npm run test:helpers && npm run test:components
+# tests 866
+# pass 866
+✓ src/features/securityAdmin/useCapabilities.test.tsx          (8 tests)
+✓ src/features/securityAdmin/AdminRouteGuard.test.tsx          (9 tests)
+✓ src/features/securityAdmin/ModeToggle.test.tsx               (6 tests)
+✓ src/features/securityAdmin/SecurityAdminUnavailable.test.tsx (5 tests)
+✓ src/features/securityAdmin/securityAdminRouting.test.tsx     (9 tests)
+ Test Files  5 passed (5)
+      Tests  37 passed (37)
+```
+
+### 3.2 The component-test harness
+
+This repo had none, so one was added: **vitest + jsdom +
+@testing-library/react**. vitest reuses the existing Vite pipeline, so TSX
+needs no separate transform and no second build configuration appears.
+
+vitest deliberately does **not** collect the `*.test.mjs` helper tests —
+they import `node:test` and keep running under `node --test`.
+
+The production bundle is unaffected: same byte size and the same content
+hash as before the change, no `vitest`/`@testing-library` strings in
+`dist/`, and the repo's own `verify:bundle` passes with 13 routes present.
+
+### 3.3 API — unchanged by this work, re-verified
+
+| Job | Tests | Result |
+|---|---|---|
+| API unit (CI, #138) | **1729** | pass |
+| API unit (local, #142 + #138 + main) | **1750** | pass |
+| PostgreSQL integration (CI, #138) | **530** | pass |
+| PostgreSQL integration (local, #142 + #138 + main) | **536** | pass |
+
+The differences are #142's own suites, absent from #138 alone: 21 unit
+tests, and the 6 of `CapabilitiesMembershipIntegrationTest`, which runs
+against a disposable PostgreSQL container and covers no row, a revoked
+row, a suspended identity holding an active row, enforcement on and off,
+plus a non-vacuity check on its fixture.
+
+---
+
+## 3A. What the component tests actually assert
+
+### Requirement 4 — non-administrators never see the toggle
+
+`ModeToggle` renders **nothing** — asserted as an empty container, not as a
+hidden or disabled control — for a non-administrator and for every
+unverifiable state: loading, errored, `null`, `undefined`, a non-object, and
+hostile bodies such as `{administrator: "true"}` or `{administrator: 1}`.
+
+### Requirement 5 — enforcement OFF shows the unavailable screen and calls nothing
+
+`AdminRouteGuard` renders `SecurityAdminUnavailable` and the child route
+**never mounts**. Zero administrator API calls is asserted against the
+fetches the tree actually issued — every `fetch` is captured and the test
+asserts no URL contains `/api/v1/admin`, after letting the tree settle.
+
+`SecurityAdminUnavailable` renders no button, textbox, searchbox, link,
+form, input, select or textarea. It reports the enforcement state it was
+given and, for an unverified capability, reads **OFF** rather than ON.
+
+### Requirement 3 — identity states and enforcement
+
+| State | Rendered | Admin API calls |
+|---|---|---|
+| Active administrator, enforcement ON | real screen | permitted |
+| Active administrator, enforcement OFF | unavailable screen | **0** |
+| Non-administrator | access-denied | **0** |
+| Suspended identity | access-denied | **0** |
+| Revoked membership | access-denied | **0** |
+| Expired session (401 → `null`) | access-denied | **0** |
+| Request rejected (network) | access-denied | **0** |
+| Still in flight | nothing administrative | **0** |
+
+Suspended, revoked, unprovisioned, ambiguous and plain non-administrator are
+**one response on the wire** — `CapabilitiesResponse.denied()`, all three
+false. The endpoint does not say which, because that would disclose
+membership state. The distinctions are server-side, in
+`CapabilitiesMembershipIntegrationTest`, against the real schema.
+
+### Requirement 6 — direct URL, back/forward, archive preserved
+
+Driven through the **real `App` route table**, not a rebuilt imitation, so a
+regression in `App.tsx`'s wiring cannot pass these.
+
+- Direct entry to `/admin/overview` and `/admin/identities` — denied, zero admin calls
+- `/admin` redirects to `/admin/overview` and is still guarded
+- Back out of a denied admin URL returns to `/` and the denial is gone
+- Forward back into it re-evaluates and denies again — the guard is not bypassable by history
+- An administrator returning from the unavailable screen finds the archive intact, toggle still offered
+- A non-administrator on `/` sees the ordinary archive header with no toggle and no admin nav entry
 
 ---
 
@@ -144,25 +216,22 @@ working search box while every admin endpoint answers 404."*
 
 ---
 
-## 5. Gaps automated tests do not cover
+## 5. What remains manual
 
-This repo has **no component-render harness** — no `@testing-library/react`,
-no jsdom, no vitest. `*.test.mjs` files are `node:test` unit tests of pure
-presentation helpers. So the following are **untested by any suite** and
-need manual verification:
+The component gap is closed — `ModeToggle`, `AdminRouteGuard`,
+`SecurityAdminUnavailable` and `useCapabilities` all have automated tests
+that CI runs. What jsdom cannot establish still needs a person:
 
-| Not covered | File |
+| Not covered by any suite | Why |
 |---|---|
-| The toggle actually renders, and where | `ModeToggle.tsx` |
-| Route guard redirects/blocks as intended | `AdminRouteGuard.tsx` |
-| The unavailable screen's rendered content | `SecurityAdminUnavailable.tsx` |
-| The hook's fetch/caching/error behaviour | `useCapabilities.ts` |
-| Nav entry visibility | `AppLayout.tsx`, `App.tsx` |
-| The real endpoint over real Cognito | end-to-end |
+| Real Cognito session, real token, real 401 | every test mocks the client boundary |
+| The live endpoint answering over HTTPS | #142 is not deployed; revision 94 predates it |
+| Visual layout, MUI breakpoints, the toggle's responsive `display` | jsdom computes no real styles |
+| Keyboard and screen-reader behaviour | not asserted |
+| A membership revoked *in the real database* mid-session | tests mock the response, not the row |
+| Genuine browser history across a page reload | the router's history is in memory |
 
-Adding a render harness is a larger decision than this feature; the
-manual sequence below is the alternative, and it is the one this plan
-assumes.
+These are what §6 exists for.
 
 ---
 
@@ -201,11 +270,23 @@ absolute API origin and check `content-type: application/json`.
 
 | | Status |
 |---|---|
-| PR #142 | **Ready** pending review. Merges clean, 27 tests pass, CI routing correct |
-| PR #138 | **Blocked** on the one-line `package.json` fix in §2 |
-| Contract between them | Verified consistent, fails closed |
-| Enforcement activation | **Out of scope** — nothing here turns it on |
+| PR #142 | **Ready** pending review — merges clean, 27 tests pass, CI routing correct |
+| PR #138 | **Ready** pending review — CI-execution defect fixed, 37 component tests added and executed |
+| Contract between them | verified consistent, fails closed |
+| Enforcement activation | **out of scope** — nothing here turns it on |
 
-Neither PR changes enforcement, auditing, migrations, grants, or any
-infrastructure. The capabilities endpoint reports state; it grants nothing,
-and every administrative endpoint re-checks the actor independently.
+Both remain **drafts**, unmerged and undeployed.
+
+Neither changes enforcement, auditing, migrations, grants, or infrastructure.
+The capabilities endpoint reports state and grants nothing; all 12
+administrative endpoints re-check the actor independently and 404 while
+enforcement is off.
+
+### One caveat worth stating
+
+Every automated test here mocks the capabilities response. They prove the UI
+behaves correctly **given** what the server says. That the server says the
+right thing is proved separately, server-side, by #142's 27 tests — including
+six against the real schema. What no suite covers is the two halves talking
+to each other over a real network with a real Cognito token, and that is
+exactly §6.
