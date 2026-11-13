@@ -358,7 +358,7 @@ resource "aws_ecs_task_definition" "api" {
   lifecycle {
     precondition {
       condition     = var.expected_live_image == null || var.expected_live_image == var.api_image
-      error_message = "api_image would roll the API back. Requested '${var.api_image}' but the newest ACTIVE revision of this task family runs '${coalesce(var.expected_live_image, "<unknown>")}'. Re-pin api_image_tag to the deployed image, or set api_image_rollback_guard = false for a deliberate rollback."
+      error_message = "api_image does not match what the ECS service is running. This configuration asks for '${var.api_image}' but the service is running '${coalesce(var.expected_live_image, "<unknown>")}'. Images are deployed by ops/deploy-api.sh, not by Terraform, so this almost always means the pin in terraform.tfvars is stale: re-pin api_image_digest (or api_image_tag) to the image the service is running, then re-plan. Set api_image_rollback_guard = false only for a deliberate rollback, or in an environment whose service does not exist yet."
     }
   }
 
