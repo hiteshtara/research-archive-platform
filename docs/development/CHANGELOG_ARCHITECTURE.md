@@ -4,6 +4,93 @@ This document records important architectural changes, why they were made, their
 
 ---
 
+## 2026-11-13 — Rollback guard corrected and re-enabled; DEV image pin re-synced (Option C)
+
+### Decision
+
+Merged the rollback-guard correction (PR #146, merge commit `0e2c3c1`)
+and applied Option C to DEV: re-synced `api_image_digest` to the serving
+image and set `api_image_rollback_guard = true`.
+
+Plan, from merged main, applied exactly as reviewed:
+
+```
+Plan: 1 to add, 0 to change, 1 to destroy.
+module.api_service.aws_ecs_task_definition.api  ["delete","create"]
+  action_reason : replace_because_cannot_update
+  revision      : 84 -> 101
+  image         : sha256:c9f3bc99… -> sha256:1d440f251c…
+ECS service changes : 0
+RDS changes         : 0
+```
+
+### What PR #146 actually fixed
+
+The guard resolved the "live" image from the **newest ACTIVE revision in
+the task-definition family**. That is not what the service is running.
+After the CPU capacity experiment the family's newest ACTIVE revision was
+100 — an experiment image the service never adopted — so the guard was
+comparing the pin against the wrong thing, and any newly registered
+revision silently became its reference point.
+
+It now reads `data.aws_ecs_service.api_live[0].task_definition`: the
+**serving** revision. Covered by seven `terraform test` cases.
+
+### Why a replacement, and why that is safe
+
+ECS task definitions are immutable; changing the image forces a new
+revision, which Terraform expresses as `["delete","create"]`. A
+replacement counts in **both** the add and the destroy column — hence
+`1 add … 1 destroy` for a single resource.
+
+`skip_destroy = true` makes the destroy half **state-only**: Terraform
+released revision 84 from that address and never called
+`DeregisterTaskDefinition`. Verified after the apply — revisions 84 and
+93–101 are all still `ACTIVE`.
+
+### Impact
+
+- New revision **101** registered, carrying the serving digest, and
+  **not serving**. The service remains on **revision 94**.
+- **No deployment and no restart.** Same task ARN
+  `84d161fae8ed45459663ccf7c4e6d47c`, same `startedAt`
+  (2026-11-12 19:58:14), ALB target `10.30.2.111` `healthy` before and
+  after. API verified live: 401 on a protected endpoint (not a 500),
+  `/actuator/health` `{"status":"UP"}`.
+- **Zero RDS changes** and **zero ECS service changes** in the plan;
+  nothing outside `module.api_service.aws_ecs_task_definition.api`.
+- A subsequent DEV plan with the guard active returns **`No changes.`**
+- One more unused ACTIVE revision on the family (101). That cost is real
+  but now harmless: with the guard reading the service rather than the
+  family, an unused revision can no longer become its reference.
+
+### A correction worth recording
+
+Two earlier reports of this plan gave the totals as `0 add, 0 change, 1
+destroy` and `1 add, 1 change, 1 destroy`. Both were mine, and both came
+from a script that counted an addition only when a resource's `actions`
+array was exactly `["create"]` — skipping the `["delete","create"]`
+replacement on the add side. Terraform's own summary was always `1 to
+add, 0 to change, 1 to destroy`. The affected-resource count was one
+throughout, so no risk assessment changed; the lesson is to quote
+Terraform's summary rather than recompute it.
+
+### Status
+
+**Applied and verified.** The temporary rollback-guard exception opened
+by the deletion-protection apply is **closed**: the guard is enabled, the
+pin matches the serving digest, and the guard is now reading the right
+revision.
+
+Note that `terraform.tfvars` is gitignored, so "guard enabled" lives in
+operational config rather than version control — the same property that
+let the guard sit disabled for roughly two weeks unnoticed. Moving
+`api_image_rollback_guard` out of tfvars so its declared default of
+`true` applies remains an open suggestion in
+`docs/operations/OPTION_C_PIN_RESYNC_PROPOSAL.md`.
+
+---
+
 ## 2026-11-13 — DEV RDS deletion protection enabled, with a temporary rollback-guard exception
 
 ### Decision
@@ -33,14 +120,17 @@ deployment". It was left disabled for this apply as well, deliberately:
   (`sha256:1d440f251c…`).
 - With the guard **enabled**, the plan **fails** — verified.
 - Correcting the pin to the serving image makes Terraform **replace the
-  task definition**, turning the plan into `1 add, 1 change, 1 destroy`.
+  task definition**, turning the plan into `1 add, 0 change, 1 destroy`
+  (corrected 2026-11-13 — an earlier draft of this entry said `1 add, 1
+  change, 1 destroy`, which came from a miscount of mine, not from
+  Terraform).
 
 Only the guard-disabled path produces the approved `0 add, 1 change, 0
 destroy`. **No image pin, task definition or ECS service was modified.**
 
-**This exception is not resolved.** The pin remains stale and the guard
-remains off. Reconciling both is tracked separately as "Option C" in
-`docs/operations/ROLLBACK_GUARD_ANALYSIS.md` and has not been approved.
+**This exception was resolved later the same day** by Option C — see the
+entry below. At the time of this apply the pin remained stale and the
+guard remained off.
 
 ### Impact
 
@@ -71,8 +161,8 @@ remains off. Reconciling both is tracked separately as "Option C" in
 ### Status
 
 **Applied.** Terraform-managed, so the setting survives future applies.
-The guard exception remains **open** and is the one follow-up this entry
-leaves behind.
+The guard exception this entry opened is **closed** — see the Option C
+entry below.
 
 ---
 
