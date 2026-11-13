@@ -447,4 +447,42 @@ resource "aws_ecs_service" "api" {
     aws_iam_role_policy_attachment.execution,
     aws_iam_role_policy.execution_secret_access
   ]
+
+  lifecycle {
+    # WHO OWNS THIS ATTRIBUTE: the deployment script, not Terraform.
+    #
+    # The only supported API deployment path is
+    # clean committed source -> local Docker build -> BU non-production
+    # ECR -> ops/deploy-api.sh, which registers a new task definition
+    # revision and repoints this service with aws ecs update-service.
+    # That happens entirely outside Terraform.
+    #
+    # Without this block Terraform owns task_definition and resets it to
+    # whatever aws_ecs_task_definition.api resolves to in state. On
+    # 2026-11-13 a dev plan proposed exactly that: reverting the service
+    # from revision 94 to revision 84, which would have silently undone
+    # every deployment since - including the merged DEF-5 Documents fix.
+    # Zero destroys, no warning in the output, just an in-place update
+    # that reads as routine.
+    #
+    # WHAT THIS DOES NOT DO: it does not stop Terraform managing the
+    # aws_ecs_task_definition resource. Terraform still owns and still
+    # diffs that resource's cpu, memory, roles, image, environment,
+    # secrets and log configuration, and a change to any of them still
+    # shows up in a plan.
+    #
+    # THE CONSEQUENCE TO KNOW ABOUT: because the pointer is ignored, a
+    # task definition revision that Terraform creates is registered but
+    # NOT adopted by the running service. A Terraform-side change to
+    # cpu, memory, image or environment will therefore apply cleanly and
+    # have no runtime effect until a deployment repoints the service.
+    # Task definition changes must be followed by ops/deploy-api.sh, or
+    # made through it in the first place.
+    #
+    # Everything else about this service stays Terraform-managed:
+    # desired_count, launch_type, platform_version, network
+    # configuration, load balancer attachment and the health check grace
+    # period are all still enforced and will still show drift.
+    ignore_changes = [task_definition]
+  }
 }
