@@ -9,20 +9,40 @@ data "aws_caller_identity" "current" {}
 # change would have reverted the API to the 2026-08-10 build - including
 # 846a840 "fix(api): make the application start again".
 #
-# These data sources read whatever is registered on the newest ACTIVE revision
-# of the task family. The precondition in terraform_data.config_guard then
-# fails the PLAN - not the apply - if the pin disagrees.
+# REFERENCE IMAGE: the revision the SERVICE IS RUNNING, read from the service
+# itself. This was previously the newest ACTIVE revision of the task family
+# (`data "aws_ecs_task_definition"` resolved by family name), which is wrong
+# for two reasons found on 2026-11-13:
 #
-data "aws_ecs_task_definition" "api_live" {
+#   1. ANY registered-but-unused revision poisons the reference. Revisions
+#      95-100 were registered for the CPU and bounded fan-out experiments and
+#      are deliberately retained INACTIVE-in-use but ACTIVE in the family, so
+#      family resolution returned revision 100 (an experiment image) while the
+#      service was running revision 94. The guard was comparing the pin against
+#      something nobody had deployed.
+#   2. The guard could DISARM ITSELF. If Terraform ever registered a revision
+#      carrying a stale image, that revision became the newest ACTIVE one, and
+#      every later plan would compare the stale pin against the equally stale
+#      reference and pass. Reading the service is immune: the service only
+#      changes when a deployment changes it.
+#
+# The precondition on module.api_service's task definition then fails the PLAN
+# - not the apply - if the pin disagrees with what is serving.
+#
+# An environment whose service does not exist yet must set
+# api_image_rollback_guard = false, exactly as before this change.
+#
+data "aws_ecs_service" "api_live" {
   count = var.api_image_rollback_guard ? 1 : 0
 
-  task_definition = "${var.project_name}-${var.environment}-api"
+  cluster_arn  = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.project_name}-${var.environment}-api"
+  service_name = "${var.project_name}-${var.environment}-api"
 }
 
 data "aws_ecs_container_definition" "api_live" {
   count = var.api_image_rollback_guard ? 1 : 0
 
-  task_definition = data.aws_ecs_task_definition.api_live[0].id
+  task_definition = data.aws_ecs_service.api_live[0].task_definition
   container_name  = "api"
 }
 
@@ -514,7 +534,8 @@ module "api_service" {
   api_image = local.api_image_desired
 
   # Rollback guard input - see modules/api_service's expected_live_image and
-  # var.api_image_rollback_guard.
+  # var.api_image_rollback_guard. This is the image on the revision the
+  # SERVICE IS RUNNING, not the newest ACTIVE revision of the family.
   expected_live_image = var.api_image_rollback_guard ? try(data.aws_ecs_container_definition.api_live[0].image, null) : null
 
   database_secret_arn        = module.rds.database_secret_arn
