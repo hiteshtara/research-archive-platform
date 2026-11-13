@@ -3,6 +3,32 @@
 Applies to `module.api_service.aws_ecs_service.api` in DEV. Production
 was **not** inspected and nothing here is asserted about it.
 
+---
+
+> ## ⚠️ OPERATIONAL WARNING — read before changing the task definition
+>
+> **Terraform manages the task definition *resource*. The deployment
+> pipeline owns *which revision the ECS service runs*.**
+>
+> Because `task_definition` is in `ignore_changes`, a revision that
+> Terraform creates is **registered but not adopted**. So:
+>
+> **A Terraform change to CPU, memory, image, environment variables,
+> secrets or logging will apply cleanly, report success, and have NO
+> RUNTIME EFFECT until a deployment repoints the service.**
+>
+> `terraform apply` finishing without error does **not** mean the change
+> is live. It means a new revision exists and the service is still
+> running the old one.
+>
+> **To make a task-definition change take effect:** apply in Terraform,
+> then run `ops/deploy-api.sh` (or
+> `aws ecs update-service --task-definition …:N`) so the service adopts
+> the new revision. Verify with
+> `aws ecs describe-services … --query 'services[0].taskDefinition'`.
+
+---
+
 ## 1. The problem this fixes
 
 `aws_ecs_service.api` set `task_definition = aws_ecs_task_definition.api.arn`
