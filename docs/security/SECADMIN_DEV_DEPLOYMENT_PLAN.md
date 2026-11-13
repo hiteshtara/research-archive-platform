@@ -56,14 +56,29 @@ route literals  "/api/v1/me" + "/capabilities"                 present
 
 **Not pushed to ECR.** The push is step R2 of the release below.
 
-### A note that refines the image-pin runbook
+### CORRECTION — the index/child trap applies to this path too
 
-`deploy-api.sh` uses plain `docker build --platform linux/amd64`, which
-produces a **single amd64 manifest**, not a buildx OCI index. The
-index-versus-child digest trap documented in
-`docs/runbooks/deployment/IMAGE_PIN_UPDATE.md` applies to the
-buildx-built images (revision 94's `def5-543ab22` is one), not to this
-path. The rule stays the same regardless: **take the pin from the serving
+An earlier revision of this section claimed `deploy-api.sh`'s plain
+`docker build --platform linux/amd64` produces a **single amd64
+manifest**, so the index-versus-child digest trap would not apply.
+
+**That was wrong**, and the release proved it. Modern BuildKit pushes an
+OCI image index regardless:
+
+```
+tag 20261113T165328Z-18750ba
+  -> sha256:ea3e68e3...  application/vnd.oci.image.index.v1+json   <- INDEX
+       linux/amd64       sha256:e0e40a46...                        <- the image
+       attestation       sha256:adfed8e1...
+```
+
+`aws ecr describe-images --image-ids imageTag=...` returns the **index**.
+The task definition must pin the **child**, which is what ECS records and
+what the rollback guard compares. Revision 102 pins
+`sha256:e0e40a46...`, and T1 confirmed the service reports exactly that.
+
+The rule in `docs/runbooks/deployment/IMAGE_PIN_UPDATE.md` was right all
+along and applies to **every** build path: **take the pin from the serving
 task definition**, never from `describe-images`.
 
 ---
@@ -194,11 +209,35 @@ API; the frontend is still unmerged, so nothing user-visible has changed.
 | T1 | Re-read the serving digest from the **service** | matches the deployed image |
 | T2 | Update `api_image_digest` in the dev tfvars | per `IMAGE_PIN_UPDATE.md` |
 | T3 | `api_image_rollback_guard` | still **unset** — default `true` applies |
-| T4 | `terraform plan` with no `-var` overrides | **`No changes.`**, exit 0 |
+| T4 | `terraform plan` with no `-var` overrides | see the correction below |
 | T5 | Guard still rejects a stale pin | plan with the old digest → precondition failure |
 
 Baseline before the release: pin `sha256:1d440f251c…`, zero guard override
 lines, `terraform plan` → `No changes.` (exit 0), verified today.
+
+### CORRECTION — T4 cannot be clean from a pin update alone
+
+This phase predicted `No changes.` after re-syncing the pin. **That was
+wrong.** `deploy-api.sh` registers its revision *outside* Terraform, so
+after the release Terraform's state still held revision 101 while the
+service ran 102. Updating the pin then makes Terraform plan a
+replacement:
+
+```
+Plan: 1 to add, 0 to change, 1 to destroy.
+module.api_service.aws_ecs_task_definition.api  ["delete","create"]
+  revision 101 -> (new)   image 1d440f251c... -> e0e40a46...
+  skip_destroy: true   ECS service changes: 0   RDS changes: 0
+```
+
+`docs/runbooks/deployment/IMAGE_PIN_UPDATE.md` already documents this as
+the expected outcome after a deploy Terraform never saw, and says
+applying it is a deliberate, separately approved act. The runbook was
+right; this phase's expectation was the error.
+
+Nothing is broken by leaving it pending: the service runs 102, the guard
+is armed and correct (T5 passed), and `ignore_changes = [task_definition]`
+means the pending replacement cannot move the service.
 
 ---
 
@@ -365,3 +404,70 @@ technical one. Everything else is verified rather than assumed: the image
 was checked inside the container, enforcement is off by absence rather
 than by configuration, and both rollback targets are recorded before
 anything moves.
+
+---
+
+## 12. Execution record — 2026-11-13
+
+**Executed and verified. One gate open (T4), one check NOT VERIFIED (U12).**
+
+| | |
+|---|---|
+| API revision | **102**, derived from 94 — only the image differs |
+| linux/amd64 digest | `sha256:e0e40a468b01673115b792521567a5f82fe967a1fe7e6dd6a7ea03eb44024c7a` |
+| Index digest (not pinned) | `sha256:ea3e68e3112245a4e68e2a547d4c231973219b0ad7115ec96ccecf621c69a42e` |
+| Source commit | `18750ba` |
+| Steady state | 17:04:09Z, 1/1, ALB healthy, no outage |
+
+Merges: #149 → `3a5d0d5`, #138 → `3a04f97`.
+
+| Amplify job | Commit | Status | Meaning |
+|---|---|---|---|
+| 200 | `18750ba` | SUCCEED | pre-release — **frontend rollback target** |
+| 201 | `3a5d0d5` | SUCCEED | #149, documentation only |
+| 202 | `3a04f97` | SUCCEED | **#138 — the UI release** |
+
+### Backend gates — all pass
+
+V1 enforcement/auditing env absent · V2 401 without a token · V3 real BU
+SSO/Duo session · V4 `{administrator:true, enforcementEnabled:false,
+administrationAvailable:false}` · V5 `Cache-Control: no-store` · V6
+exactly three boolean keys · V7 three admin endpoints 404
+`"administrative API is not available"` · V8 dashboard 40,926/3,511,
+award `212137-00001` 200, documents 491,685, Global Search 83 with zero
+failed modules.
+
+### Frontend gates — all pass except U12
+
+U1 toggle visible · U2 unavailable screen, enforcement reads OFF · U3 no
+controls · **U4 zero `/api/v1/admin` requests** · U5–U7 direct URLs
+guarded and `/admin` redirects · U8/U9 back and forward re-evaluate · U10
+all seven archive routes render · U11 zero console errors · U13/U14 no
+horizontal scroll at 390px · U15 toggle `display:none` at mobile.
+
+`/admin/identities` renders the unavailable screen with **0 buttons, 0
+inputs, 0 forms** — the live DEV defect this work existed to fix.
+
+**U12 — NOT VERIFIED.** No authorized non-administrator tester was
+available and no membership was altered. Isolated automated tests cover
+the logic; that is not evidence a real person sees no toggle.
+
+### Three probe errors that were mine, not defects
+
+During V7/V8 I used paths and parameters that do not exist —
+`/api/v1/awards/{number}` (the route is `/by-number/{number}`), `?query=`
+on the admin endpoint (it takes `q`), and `?q=` on global search (it
+takes `query`). Each returned a 400 or 404 that would have read as a
+regression. The controllers were checked rather than the results
+recorded as findings. All console errors during verification trace to
+those probes; none came from the application.
+
+### Open
+
+- **T4** — Terraform plan not clean; needs a separately approved apply
+  (1 add / 1 destroy, service stays on 102, revision 101 stays ACTIVE).
+- **U12** — needs a tester, or stands as NOT VERIFIED.
+
+Revisions 94, 101 and 102 all ACTIVE; none deregistered. RDS unchanged.
+Enforcement OFF, auditing OFF, V089 unapplied, grant 2 untouched,
+Production never accessed.
