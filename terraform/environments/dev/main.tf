@@ -342,9 +342,17 @@ locals {
   # When manage_cognito is true, use the pool this configuration just
   # created; otherwise fall back to the existing pool's IDs supplied as
   # variables.
-  cognito_issuer_uri       = var.manage_cognito ? module.cognito[0].issuer_uri : var.cognito_issuer_uri
-  cognito_client_id        = var.manage_cognito ? module.cognito[0].app_client_id : var.cognito_client_id
-  cognito_user_pool_id     = var.manage_cognito ? module.cognito[0].user_pool_id : var.cognito_user_pool_id
+  cognito_issuer_uri   = var.manage_cognito ? module.cognito[0].issuer_uri : var.cognito_issuer_uri
+  cognito_client_id    = var.manage_cognito ? module.cognito[0].app_client_id : var.cognito_client_id
+  cognito_user_pool_id = var.manage_cognito ? module.cognito[0].user_pool_id : var.cognito_user_pool_id
+
+  # Built from the pool id when the pool is not managed here, so the
+  # enrollment grant works in both modes without a second variable to keep
+  # in step. Null only if there is no pool at all, which disables the grant.
+  cognito_user_pool_arn = var.manage_cognito ? module.cognito[0].user_pool_arn : (
+    var.cognito_user_pool_id == null ? null
+    : "arn:aws:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/${var.cognito_user_pool_id}"
+  )
   cognito_hosted_ui_domain = var.manage_cognito ? module.cognito[0].hosted_ui_domain : var.cognito_hosted_ui_domain
 
   # Amplify.configure()'s OAuth `domain` field (and the manual Hosted UI
@@ -548,6 +556,10 @@ module "api_service" {
 
   cognito_issuer_uri = local.cognito_issuer_uri
   cognito_client_id  = local.cognito_client_id
+
+  # Read-only, AdminGetUser on this one pool, for operator identity
+  # enrollment - see docs/security/IDENTITY_ENROLLMENT_IAM.md.
+  cognito_user_pool_arn = local.cognito_user_pool_arn
 
   certificate_arn         = local.api_certificate_arn_effective
   alb_deletion_protection = var.alb_deletion_protection
