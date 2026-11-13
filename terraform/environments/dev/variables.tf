@@ -156,9 +156,25 @@ variable "database_backup_retention_days" {
 }
 
 variable "database_deletion_protection" {
+  # Enabled for dev on 2026-11-13. This dev database is NOT disposable:
+  # it is the authoritative dev data of record, repopulated from Oracle
+  # staging (see CLAUDE.md "Authoritative data location"), and its
+  # identifier sits alongside -dev-api, -dev-etl and -dev-dbtunnel in the
+  # same account, which is exactly the delete-the-wrong-thing accident
+  # this flag prevents. Recovery from a snapshot creates a NEW endpoint,
+  # so it would also require repointing the POSTGRES_HOST secret and
+  # redeploying - a real outage, not a quick undo.
+  #
+  # Set here as a tracked default rather than in terraform.tfvars, which
+  # is gitignored: a change made only in the untracked tfvars would be
+  # invisible to review and could silently revert.
+  #
+  # Consequence to know about: while this is true, a deliberate teardown
+  # of the dev database requires setting it back to false first. That is
+  # the intended trade.
   description = "Protect the RDS instance from accidental deletion. Should be true in test/prod."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "database_skip_final_snapshot" {

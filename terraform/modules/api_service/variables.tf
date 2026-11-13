@@ -115,10 +115,15 @@ variable "documents_bucket_name" {
 
 variable "expected_live_image" {
   description = <<-EOT
-    Image currently registered on the newest ACTIVE revision of this task
-    family, supplied by the caller. When non-null, the task definition refuses
-    to plan unless api_image matches it - the rollback guard. Null disables the
-    check (deliberate rollback, or an environment with no task family yet).
+    Image on the task-definition revision the ECS service IS RUNNING, supplied
+    by the caller. When non-null, the task definition refuses to plan unless
+    api_image matches it - the rollback guard. Null disables the check
+    (deliberate rollback, or an environment whose service does not exist yet).
+
+    Deliberately the SERVING revision rather than the newest ACTIVE revision of
+    the family: an unused registered revision would otherwise become the
+    reference, and a stale revision registered by Terraform would let the guard
+    disarm itself. See the caller's comment for the 2026-11-13 evidence.
     EOT
   type        = string
   default     = null

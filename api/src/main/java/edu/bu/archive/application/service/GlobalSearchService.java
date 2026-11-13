@@ -105,6 +105,31 @@ public class GlobalSearchService {
     private final ObjectProvider<EmbeddingProvider> embeddingProviderObjectProvider;
     // Temporary TC-042 measurement instrumentation, off by default.
     private final SearchTimingLog timingLog;
+
+    /*
+     * DEF-5 / Global Search. How many legs may execute AT THE SAME TIME
+     * within one request. 0 (the default) means unbounded, which is exactly
+     * today's behaviour, so merging this changes nothing until the property
+     * is set.
+     *
+     * Why this exists: the API task is not CPU-bound - a measured 4x CPU
+     * increase left Global Search flat and made the concurrent case 31%
+     * WORSE - so the binding constraint is downstream of the application.
+     * Reducing how many legs hit the database simultaneously is the
+     * remaining lever that does not require buying capacity.
+     *
+     * Deliberately a SEMAPHORE held for the duration of one request, not a
+     * shared executor. A shared bounded pool would couple concurrent users
+     * to each other and introduce head-of-line blocking between them; a
+     * per-request permit set bounds each request's own database load and
+     * nothing else.
+     *
+     * Every future is still created and still joined in the same order, so
+     * result content, ordering, counts and failedModules are untouched - a
+     * leg that would have failed still fails, and still appears in
+     * failedModules.
+     */
+    private final int fanOutConcurrency;
     /**
      * Carries the request's access decision onto the leg threads, and
      * answers the module-agnostic "is this caller scoped at all" question.
@@ -153,7 +178,9 @@ public class GlobalSearchService {
                     authorizationProperties
     ) {
         this(irbSearchRepository, awardArchiveService, negotiationArchiveService, subawardArchiveService, proposalArchiveRepository, semanticSearchRepository, semanticSearchProperties, embeddingProviderObjectProvider, timingLog, visibility, proposalAccessProvider, authorizationProperties,
-             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()));
+             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()),
+             // 0 = unbounded: exactly today's fan-out.
+             0);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -173,8 +200,11 @@ public class GlobalSearchService {
             ObjectProvider<edu.bu.archive.application.authorization.AuthorizationProperties>
                     authorizationProperties
     ,
-            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity) {
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${app.search.fan-out-concurrency:0}") int fanOutConcurrency) {
         this.activity = activity;
+        this.fanOutConcurrency = fanOutConcurrency;
 
         this.authorizationProperties = authorizationProperties;
         this.irbSearchRepository = irbSearchRepository;
@@ -266,20 +296,31 @@ public class GlobalSearchService {
          */
         Map<String, Long> knownTotals = new java.util.concurrent.ConcurrentHashMap<>();
 
+        /*
+         * DEF-5. One permit set for THIS request. Null when unbounded, which
+         * is the default and today's behaviour. Every leg still gets a
+         * future; the permit only decides how many RUN at once, so nothing
+         * about results, ordering, counts or failedModules moves.
+         */
+        final java.util.concurrent.Semaphore fanOutPermits =
+                fanOutConcurrency > 0
+                        ? new java.util.concurrent.Semaphore(fanOutConcurrency)
+                        : null;
+
         // Not merely filtered afterwards: the leg never runs, so no IRB
         // row, identifier or count is computed for an enforced session.
         CompletableFuture<List<GlobalSearchItemResponse>> irbFuture =
                 selected.isEmpty() && !irbExcludedFromSharedSearch()
-                        ? supplyLeg(cid, "IRB", () -> searchIrb(normalizedQuery, knownTotals))
+                        ? supplyLeg(cid, "IRB", () -> searchIrb(normalizedQuery, knownTotals), fanOutPermits)
                         : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<GlobalSearchItemResponse>> awardFuture =
-                startIfSelected(selected, cid, "AWARD", () -> searchAward(normalizedQuery, knownTotals));
+                startIfSelected(selected, cid, "AWARD", () -> searchAward(normalizedQuery, knownTotals), fanOutPermits);
         CompletableFuture<List<GlobalSearchItemResponse>> negotiationFuture =
-                startIfSelected(selected, cid, "NEGOTIATION", () -> searchNegotiation(normalizedQuery, knownTotals));
+                startIfSelected(selected, cid, "NEGOTIATION", () -> searchNegotiation(normalizedQuery, knownTotals), fanOutPermits);
         CompletableFuture<List<GlobalSearchItemResponse>> subawardFuture =
-                startIfSelected(selected, cid, "SUBAWARD", () -> searchSubaward(normalizedQuery, knownTotals));
+                startIfSelected(selected, cid, "SUBAWARD", () -> searchSubaward(normalizedQuery, knownTotals), fanOutPermits);
         CompletableFuture<List<GlobalSearchItemResponse>> proposalFuture =
-                startIfSelected(selected, cid, "PROPOSAL", () -> searchProposal(normalizedQuery, knownTotals));
+                startIfSelected(selected, cid, "PROPOSAL", () -> searchProposal(normalizedQuery, knownTotals), fanOutPermits);
 
         // Semantic search is a strictly optional 6th input - see the
         // class comment. It is never started at all (no Bedrock call,
@@ -312,7 +353,12 @@ public class GlobalSearchService {
                                 List::size)));
         CompletableFuture<List<GlobalSearchItemResponse>> semanticFuture =
                 semanticEligible
-                        ? CompletableFuture.supplyAsync(semanticWork)
+                        // Bounded like every other leg: it issues a pgvector
+                        // query plus enrichment lookups, so leaving it outside
+                        // the permit set would under-count the concurrency the
+                        // bound is meant to limit.
+                        ? CompletableFuture.supplyAsync(
+                                () -> gated(fanOutPermits, cid, "SEMANTIC", semanticWork))
                         : null;
 
         List<String> failedModules = new ArrayList<>();
@@ -469,12 +515,13 @@ public class GlobalSearchService {
             Set<String> selected,
             String cid,
             String module,
-            java.util.function.Supplier<List<GlobalSearchItemResponse>> search
+            java.util.function.Supplier<List<GlobalSearchItemResponse>> search,
+            java.util.concurrent.Semaphore fanOutPermits
     ) {
         if (!selected.isEmpty() && !selected.contains(module)) {
             return CompletableFuture.completedFuture(List.of());
         }
-        return supplyLeg(cid, module, search);
+        return supplyLeg(cid, module, search, fanOutPermits);
     }
 
     /*
@@ -497,10 +544,78 @@ public class GlobalSearchService {
      * does, scheduling is excluded and the cost is inside the work. If
      * it does not, that is the finding.
      */
-    private CompletableFuture<List<GlobalSearchItemResponse>> supplyLeg(
+    /*
+     * DEF-5. Runs the leg under a permit when the fan-out is bounded, and
+     * runs it unchanged when it is not.
+     *
+     * Reviewed for deadlock, cancellation, interruption and release:
+     *
+     *   - DEADLOCK: each leg acquires exactly one permit, never nested, and
+     *     always releases it in a finally. The thread that joins the futures
+     *     holds no permit. There is no circular wait, and
+     *     fanOutConcurrency > 0 guarantees at least one permit exists.
+     *   - CANCELLATION: nothing in this service cancels a leg - there is no
+     *     orTimeout, completeOnTimeout or cancel() call, and
+     *     joinOrRecordFailure uses a plain join(). Even an externally
+     *     cancelled future cannot strand a permit, because
+     *     CompletableFuture.cancel does not interrupt a running
+     *     supplyAsync task, so the thread still reaches its finally.
+     *   - RELEASE: the finally is guarded by `acquired` and runs for an
+     *     Error as well as an Exception.
+     *   - INTERRUPTION: an interrupt while waiting restores the flag and
+     *     fails the leg, which joinOrRecordFailure turns into a
+     *     failedModules entry. It does NOT run the work.
+     *
+     * That last point reverses this method's first version, which ran the
+     * work anyway on the theory that a missing leg reading as "found
+     * nothing" was worse than running unpermitted. On review that was
+     * wrong twice over: it breaks the bound this method exists to enforce,
+     * and it runs JDBC and HTTP work with the interrupt flag already set,
+     * which some clients treat as an abort - so the "ran anyway" path
+     * could fail in a harder-to-read way than simply failing. Failing
+     * loudly is also the behaviour the rest of the fan-out already has:
+     * a module that failed is reported in failedModules, never silently
+     * collapsed into an empty result.
+     *
+     * The wait is recorded separately from the work so a bounded run can be
+     * read as "waiting for a permit" versus "executing", which is the whole
+     * point of measuring the bound.
+     */
+    private List<GlobalSearchItemResponse> gated(
+            java.util.concurrent.Semaphore permits,
             String cid,
             String module,
             java.util.function.Supplier<List<GlobalSearchItemResponse>> work
+    ) {
+        if (permits == null) {
+            return work.get();
+        }
+        long waitStartNanos = System.nanoTime();
+        try {
+            permits.acquire();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(
+                    "interrupted while waiting for a fan-out permit", interrupted);
+        }
+        timingLog.record(
+                cid,
+                "LEG_" + module + "_PERMIT_WAIT",
+                (System.nanoTime() - waitStartNanos) / 1_000_000,
+                -1
+        );
+        try {
+            return work.get();
+        } finally {
+            permits.release();
+        }
+    }
+
+    private CompletableFuture<List<GlobalSearchItemResponse>> supplyLeg(
+            String cid,
+            String module,
+            java.util.function.Supplier<List<GlobalSearchItemResponse>> work,
+            java.util.concurrent.Semaphore fanOutPermits
     ) {
         /*
          * THREAD PROPAGATION (2026-10-26). Each leg runs on another thread,
@@ -527,7 +642,7 @@ public class GlobalSearchService {
                     (System.nanoTime() - scheduledAtNanos) / 1_000_000,
                     -1
             );
-            return timedLeg(cid, module, scopedWork);
+            return gated(fanOutPermits, cid, module, () -> timedLeg(cid, module, scopedWork));
         });
     }
 
