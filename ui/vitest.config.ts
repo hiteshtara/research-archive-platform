@@ -37,5 +37,9 @@ export default defineConfig({
       VITE_COGNITO_LOGOUT_URL: "https://ui.test.invalid/logout",
     },
     restoreMocks: true,
+    // The routing tests mount the whole application. 5s is enough locally
+    // and was not on a cold CI runner, where the first mount paid for the
+    // entire module graph.
+    testTimeout: 20000,
   },
 });

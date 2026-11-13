@@ -1,9 +1,14 @@
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, waitFor, within } from "@testing-library/react";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 
 import { serverSays } from "../../test/securityAdminHarness";
+// Imported statically, not inside the helper: a dynamic import() pulled the
+// whole application module graph into whichever test ran first, which cost
+// over five seconds on a cold CI runner and timed that test out. vi.mock
+// calls below are hoisted above this import, so the mocks still apply.
+import App from "../../App";
 
 /*
  * Routing tests against the REAL App route table, not a hand-built imitation
@@ -60,8 +65,7 @@ beforeEach(() => {
 
 const adminCalls = () => fetches.filter((u) => u.includes("/api/v1/admin"));
 
-async function renderApp(entries: string[] = ["/"], index = entries.length - 1) {
-  const { default: App } = await import("../../App");
+function renderApp(entries: string[] = ["/"], index = entries.length - 1) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
   });
@@ -72,81 +76,81 @@ async function renderApp(entries: string[] = ["/"], index = entries.length - 1) 
     [{ path: "*", element: <App /> }],
     { initialEntries: entries, initialIndex: index },
   );
-  render(
+  const { container } = render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return router;
+  return { router, container };
 }
 
 describe("Security Administration routing", () => {
   // ---- requirement 6: direct URL access ----
   test("a non-administrator typing /admin/overview directly is denied", async () => {
     getCapabilities.mockResolvedValue(serverSays.denied);
-    await renderApp(["/admin/overview"]);
+    const { container } = renderApp(["/admin/overview"]);
 
-    expect(await screen.findByText(/Administrator access required/i)).toBeTruthy();
+    expect(await within(container).findByText(/Administrator access required/i)).toBeTruthy();
     await new Promise((r) => setTimeout(r, 50));
     expect(adminCalls()).toEqual([]);
   });
 
   test("a non-administrator typing a deeper admin URL is denied the same way", async () => {
     getCapabilities.mockResolvedValue(serverSays.denied);
-    await renderApp(["/admin/identities"]);
+    const { container } = renderApp(["/admin/identities"]);
 
-    expect(await screen.findByText(/Administrator access required/i)).toBeTruthy();
+    expect(await within(container).findByText(/Administrator access required/i)).toBeTruthy();
     expect(adminCalls()).toEqual([]);
   });
 
   test("an administrator with enforcement OFF reaches the unavailable screen by direct URL", async () => {
     getCapabilities.mockResolvedValue(serverSays.activeAdministratorEnforcementOff);
-    await renderApp(["/admin/overview"]);
+    const { container } = renderApp(["/admin/overview"]);
 
-    expect(await screen.findByText("Security Administration is unavailable")).toBeTruthy();
+    expect(await within(container).findByText("Security Administration is unavailable")).toBeTruthy();
     await new Promise((r) => setTimeout(r, 50));
     expect(adminCalls()).toEqual([]);
   });
 
   test("/admin redirects to /admin/overview and is still guarded", async () => {
     getCapabilities.mockResolvedValue(serverSays.denied);
-    await renderApp(["/admin"]);
+    const { container } = renderApp(["/admin"]);
     // The redirect must not land anywhere unguarded.
-    expect(await screen.findByText(/Administrator access required/i)).toBeTruthy();
+    expect(await within(container).findByText(/Administrator access required/i)).toBeTruthy();
   });
 
   // ---- requirement 6: the archive interface is preserved ----
   test("a non-administrator sees the ordinary archive header, with no toggle", async () => {
     getCapabilities.mockResolvedValue(serverSays.denied);
-    await renderApp(["/"]);
+    const { container } = renderApp(["/"]);
 
     // The archive itself still renders.
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Security Admin" })).toBeNull(),
+      expect(within(container).queryByRole("button", { name: "Security Admin" })).toBeNull(),
     );
-    expect(screen.queryByRole("group", { name: "Application mode" })).toBeNull();
+    expect(within(container).queryByRole("group", { name: "Application mode" })).toBeNull();
   });
 
   test("an administrator on an archive route still sees the archive, plus the toggle", async () => {
     getCapabilities.mockResolvedValue(serverSays.activeAdministratorEnforcementOff);
-    await renderApp(["/"]);
+    const { container } = renderApp(["/"]);
 
-    expect(await screen.findByRole("button", { name: "Security Admin" })).toBeTruthy();
+    expect(await within(container).findByRole("button", { name: "Security Admin" })).toBeTruthy();
     // Being an administrator must not change the archive side of the app.
-    expect(screen.getByRole("button", { name: "Research Archive" }).getAttribute("aria-pressed"))
+    expect(within(container).getByRole("button", { name: "Research Archive" }).getAttribute("aria-pressed"))
       .toBe("true");
   });
 
   // ---- requirement 6: back / forward ----
   test("browser back from a denied admin URL returns to the archive", async () => {
     getCapabilities.mockResolvedValue(serverSays.denied);
-    const router = await renderApp(["/", "/admin/overview"], 1);
+    const { router, container } = renderApp(["/", "/admin/overview"], 1);
 
-    expect(await screen.findByText(/Administrator access required/i)).toBeTruthy();
+    expect(await within(container).findByText(/Administrator access required/i)).toBeTruthy();
 
     await router.navigate(-1);
     await waitFor(() =>
-      expect(screen.queryByText(/Administrator access required/i)).toBeNull(),
+      expect(within(container).queryByText(/Administrator access required/i)).toBeNull(),
     );
     expect(router.state.location.pathname).toBe("/");
     expect(adminCalls()).toEqual([]);
@@ -154,18 +158,18 @@ describe("Security Administration routing", () => {
 
   test("forward back into admin re-evaluates and denies again", async () => {
     getCapabilities.mockResolvedValue(serverSays.denied);
-    const router = await renderApp(["/", "/admin/overview"], 1);
-    await screen.findByText(/Administrator access required/i);
+    const { router, container } = renderApp(["/", "/admin/overview"], 1);
+    await within(container).findByText(/Administrator access required/i);
 
     await router.navigate(-1);
     await waitFor(() =>
-      expect(screen.queryByText(/Administrator access required/i)).toBeNull(),
+      expect(within(container).queryByText(/Administrator access required/i)).toBeNull(),
     );
 
     // The guard must not be bypassable by navigating forward into it.
     await router.navigate(1);
     await waitFor(() =>
-      expect(screen.queryByText(/Administrator access required/i)).not.toBeNull(),
+      expect(within(container).queryByText(/Administrator access required/i)).not.toBeNull(),
     );
     expect(router.state.location.pathname).toBe("/admin/overview");
     expect(adminCalls()).toEqual([]);
@@ -173,15 +177,15 @@ describe("Security Administration routing", () => {
 
   test("an administrator returning from the unavailable screen keeps the archive intact", async () => {
     getCapabilities.mockResolvedValue(serverSays.activeAdministratorEnforcementOff);
-    const router = await renderApp(["/", "/admin/overview"], 1);
-    await screen.findByText("Security Administration is unavailable");
+    const { router, container } = renderApp(["/", "/admin/overview"], 1);
+    await within(container).findByText("Security Administration is unavailable");
 
     await router.navigate(-1);
     await waitFor(() =>
-      expect(screen.queryByText("Security Administration is unavailable")).toBeNull(),
+      expect(within(container).queryByText("Security Administration is unavailable")).toBeNull(),
     );
     // Back on the archive side, with the toggle still offered.
-    expect(await screen.findByRole("button", { name: "Security Admin" })).toBeTruthy();
+    expect(await within(container).findByRole("button", { name: "Security Admin" })).toBeTruthy();
     expect(adminCalls()).toEqual([]);
   });
 });
