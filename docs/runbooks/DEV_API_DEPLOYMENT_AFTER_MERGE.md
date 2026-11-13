@@ -76,6 +76,20 @@ Register one further revision with `...dev-api@${DIGEST}` in place of the
 tag, and update the service to it. The service then runs an **immutable**
 reference.
 
+> ⚠️ **For a `buildx` multi-arch push, `$DIGEST` above is the OCI image
+> INDEX, not the linux/amd64 image.** Verified 2026-11-13: tag
+> `def5-543ab22` resolves to `sha256:6c0efb2e…`, whose
+> `imageManifestMediaType` is `application/vnd.oci.image.index.v1+json`,
+> while the revision actually serving (94) records the child manifest
+> `sha256:1d440f251c…`.
+>
+> ECS can pull either, but they are different digests, so pinning the
+> index here and then pinning Terraform's `api_image_digest` to what ECS
+> reports will look like a mismatch. Prefer the **linux/amd64 child**,
+> and in all cases take the value for Terraform from the serving task
+> definition rather than from `describe-images`. See
+> `docs/runbooks/deployment/IMAGE_PIN_UPDATE.md`.
+
 Confirm:
 
 ```
@@ -135,6 +149,37 @@ The search checks are the user-visible half of #124 and #125 and are worth
 doing in the browser, because the measured corpus numbers predict them: Award
 titles matching "NSF" should drop from **298** to **107**, and Negotiation
 agreement-type matches from **4,953** to **0**.
+
+## Step 5 — re-sync Terraform's image pin  ⚠️ also not automatic
+
+`deploy-api.sh` and Terraform hold the image separately. Step 2 pinned the
+**ECS task definition**; this step pins **Terraform's** copy, which lives
+in the gitignored `terraform/environments/dev/terraform.tfvars` as
+`api_image_digest`.
+
+Skipping it leaves Terraform believing the API runs an older image, so an
+unrelated `terraform apply` would register a task definition carrying that
+older image. `api_image_rollback_guard` (default `true`) refuses to plan
+in that state — which is the intended outcome, not a problem to work
+around by disabling it.
+
+Full procedure, including the multi-arch digest question:
+**`docs/runbooks/deployment/IMAGE_PIN_UPDATE.md`**.
+
+The short version:
+
+```
+TD=$(AWS_PROFILE=bu-nprd aws ecs describe-services --region us-east-1 \
+      --cluster research-archive-platform-dev-api \
+      --services research-archive-platform-dev-api \
+      --query 'services[0].taskDefinition' --output text)
+AWS_PROFILE=bu-nprd aws ecs describe-task-definition --region us-east-1 \
+  --task-definition "$TD" \
+  --query 'taskDefinition.containerDefinitions[?name==`api`].image' --output text
+```
+
+Put that digest in `api_image_digest`, leave `api_image_rollback_guard`
+unset, and confirm `terraform plan` reports **`No changes.`**
 
 ## Rollback
 

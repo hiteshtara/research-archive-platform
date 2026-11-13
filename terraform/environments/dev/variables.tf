@@ -482,7 +482,7 @@ variable "api_image_digest" {
 }
 
 variable "api_image_rollback_guard" {
-  description = "Refuse to plan when api_image_tag does not match the image already registered on the newest ACTIVE revision of the API task-definition family. ops/deploy-api.sh deploys outside Terraform, so this pin goes stale, and any module.api_service change then silently reverts the API to an older build. Set false only for a deliberate rollback, or for an environment where the task family does not exist yet."
+  description = "Refuse to plan when the configured API image (api_image_digest, else api_image_tag) does not match the image the ECS SERVICE is currently running. ops/deploy-api.sh deploys outside Terraform, so this pin goes stale, and any module.api_service change then silently reverts the API to an older build. Resolved from the service's own task definition, NOT from the newest ACTIVE revision of the family - the family's newest revision is frequently one the service never adopted (an experiment, or a revision Terraform registered and ignore_changes left unused), and comparing against it both misses real rollbacks and lets a newly registered revision become the guard's own reference. Leave this UNSET so the default applies; pass -var api_image_rollback_guard=false for a single deliberate rollback, or set it in code for an environment whose service does not exist yet. See docs/runbooks/deployment/IMAGE_PIN_UPDATE.md."
   type        = bool
   default     = true
 }
