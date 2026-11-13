@@ -36,17 +36,55 @@ module.api_service.aws_ecs_task_definition.api
     skip_destroy     : true
     replacement cause: container_definitions changed (image digest)
 
-TOTALS: 0 add, 0 change, 1 destroy
+Terraform's own summary:
+Plan: 1 to add, 0 to change, 1 to destroy.
+
 ECS SERVICE changes: 0
+RDS changes        : 0
 ```
 
 **No RDS change appears** — deletion protection is already applied, so
 Option C's remaining scope is purely the task definition.
 
-> Terraform counts a `["delete","create"]` replacement as one destroy
-> plus one create; the create is reported inside the replacement rather
-> than as a separate add, which is why the totals read `0 add … 1
-> destroy`.
+> **Correction.** An earlier revision of this document reported the
+> totals as `0 add, 0 change, 1 destroy`. That was wrong, and it was my
+> error, not Terraform's: the figure came from a script of mine that
+> counted an addition only when a resource's `actions` array was exactly
+> `["create"]`, so it skipped the `["delete","create"]` replacement
+> entirely on the add side while still counting its delete. Terraform
+> itself reports `Plan: 1 to add, 0 to change, 1 to destroy.` — a
+> replacement counts in BOTH columns, because a new task-definition
+> revision really is created and the old resource address really is
+> released. One resource changes either way; the count of affected
+> resources is unchanged by the correction.
+
+### 2a. The resource-change actions, read from the saved plan JSON
+
+One resource changes. These are its fields as `terraform show -json`
+reports them, not a paraphrase:
+
+```
+address            : module.api_service.aws_ecs_task_definition.api
+type               : aws_ecs_task_definition
+change.actions     : ["delete", "create"]
+replace            : true
+action_reason      : replace_because_cannot_update
+before.revision    : 84
+after.revision     : null          <- unknown until apply; AWS assigns it
+before.skip_destroy: true
+before image       : sha256:c9f3bc99be9a99fb480c577c0d78d82ea7ebdad3b7d6f3eb3aeb72114ddd4821
+after  image       : sha256:1d440f251c6d725b4e1d34907461f747a0367080a6a7bfbab395412ec1927981
+```
+
+`after.revision: null` is the direct evidence for the question "is a new
+revision registered?" — yes. Terraform cannot know the number in
+advance because ECS assigns it at registration time; the family's
+highest revision is currently 100, so it will be 101.
+
+Revision 84 is `ACTIVE` today and stays `ACTIVE`, because
+`skip_destroy = true` makes the destroy half of the replacement a
+**state** operation: Terraform stops tracking revision 84 at that
+address and never calls `DeregisterTaskDefinition`.
 
 ## 3. Confirming the ECS service remains on revision 94
 
