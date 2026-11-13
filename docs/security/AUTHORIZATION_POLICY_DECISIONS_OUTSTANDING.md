@@ -35,6 +35,13 @@ widens nothing.
 
 ### 2.1 `app.authorization.version-scope` — `PER_VERSION` | `FAMILY_WIDE`
 
+> **STILL OPEN.** Anthony's 2026-11-05 answer on SEC-003 is about *contact*
+> access and does **not** settle this. Contact access is already
+> version-specific unconditionally and hard-coded, whatever this setting
+> says; `version-scope` governs the explicit **CENTRAL, UNIT and IO** grants
+> only, and no business answer exists for those. See
+> [`BUSINESS_DECISIONS_2026_11_05.md`](BUSINESS_DECISIONS_2026_11_05.md) §1.
+
 Whether a grant that reaches one version of an Award reaches the whole family.
 
 | | `PER_VERSION` | `FAMILY_WIDE` |
@@ -51,6 +58,9 @@ presented as the whole Award.
 
 **Question for Anthony:** if someone is authorized for an Award's current
 version, should they see that Award's entire history?
+
+*(Still unanswered. His SEC-003 reply covered contact access, which is a
+different mechanism — see the note above.)*
 
 ### 2.2 `app.authorization.contact-derivation` — `EXPLICIT_GRANT` | `VERIFIED_PRINCIPAL`
 
