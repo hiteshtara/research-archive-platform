@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Alert,
+  AlertTitle,
   Box,
   Button,
   Chip,
@@ -62,16 +63,30 @@ export function AdminIdentitySearchPage() {
 
       {results.isError && (
         <Alert severity="error">
-          The search could not be completed. If record authorization is not yet
-          enabled, the administrative API is not available.
+          The search could not be completed. If Security Administration is not
+            enabled in this environment, the administrative API is not
+            available &mdash; separate from record-level authorization,
+            which can stay off.
         </Alert>
       )}
 
       {results.data?.length === 0 && (
-        <Alert severity="info">
-          No match. A person who has never signed in and is absent from the
-          historical extract can still be granted access by entering their
-          institutional identifier directly.
+        <Alert severity="info" data-testid="no-match">
+          <AlertTitle sx={{ fontWeight: 700, mb: 0.25 }}>No match</AlertTitle>
+          This searched three things: people who have signed in to the
+          archive, identities already linked to an institutional identifier,
+          and the historical Kuali extract.{" "}
+          <strong>
+            It does not search BU&rsquo;s directory, and it does not search
+            Cognito accounts that have never been linked.
+          </strong>{" "}
+          So someone with a working BU login can be absent from here: a login
+          name only becomes searchable once their identity has been linked.
+          The historical extract is narrow by design too &mdash; it covers
+          people referenced as unit administrators or award contacts, not
+          everyone at BU.{" "}
+          They can still be granted access by entering their institutional
+          identifier directly.
         </Alert>
       )}
 

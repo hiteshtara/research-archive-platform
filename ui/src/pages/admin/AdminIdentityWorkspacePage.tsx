@@ -15,6 +15,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
+import { ReadOnlyBanner } from "../../features/securityAdmin/ReadOnlyBanner";
+import { useAdminWritesAllowed } from "../../features/securityAdmin/useAdminWritesAllowed";
+
 import {
   createGrant,
   getAdminIdentity,
@@ -99,7 +102,18 @@ export function AdminIdentityWorkspacePage() {
     }
   }
 
+  /*
+   * Every mutation control on this page is gated on what the SERVER reports.
+   * askReason() is also gated, so a disabled control cannot even open a
+   * prompt - the window.prompt would otherwise block the page before the
+   * request was refused.
+   */
+  const writesAllowed = useAdminWritesAllowed();
+
   function askReason(action: string): string | null {
+    if (!writesAllowed) {
+      return null;
+    }
     // Destructive actions require a typed reason: an unexplained audit row is
     // a poor audit row, and the reason column exists on every table involved.
     const reason = window.prompt(`Reason for ${action}:`);
@@ -115,6 +129,8 @@ export function AdminIdentityWorkspacePage() {
           {data?.suspended && <Chip size="small" color="error" label="Suspended" />}
         </Stack>
       </Box>
+
+      <ReadOnlyBanner />
 
       {identity.isError && (
         <Alert severity="error">
@@ -155,7 +171,9 @@ export function AdminIdentityWorkspacePage() {
                   size="small"
                   color="error"
                   sx={{ mt: 1 }}
+                  disabled={!writesAllowed || revoke.isPending}
                   onClick={() => {
+                    if (!writesAllowed) return;
                     const reason = askReason("revoking this grant");
                     if (reason) revoke.mutate({ grantId: item.grantId, reason });
                   }}
@@ -241,7 +259,14 @@ export function AdminIdentityWorkspacePage() {
             value={form.reason}
             onChange={(event) => setForm({ ...form, reason: event.target.value })}
           />
-          <Button variant="contained" onClick={submitGrant} disabled={grant.isPending}>
+          <Button
+            variant="contained"
+            onClick={() => {
+              if (!writesAllowed) return;
+              submitGrant();
+            }}
+            disabled={!writesAllowed || grant.isPending}
+          >
             Grant access
           </Button>
           {grant.isError && <Alert severity="error">The grant was not created.</Alert>}
@@ -260,7 +285,9 @@ export function AdminIdentityWorkspacePage() {
           sx={{ mt: 1 }}
           color={data?.suspended ? "primary" : "error"}
           variant="outlined"
+          disabled={!writesAllowed || suspend.isPending}
           onClick={() => {
+            if (!writesAllowed) return;
             const reason = askReason(data?.suspended ? "restoring access" : "suspending access");
             if (reason) suspend.mutate({ suspended: !data?.suspended, reason });
           }}
