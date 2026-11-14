@@ -67,6 +67,10 @@ class AdministrationReadOnlyIntegrationTest {
     private static final String ADMIN_INST = "SYN-INST-ADMIN";
     private static final String ORDINARY_SUBJECT = "sub-ordinary";
     private static final String ORDINARY_INST = "SYN-INST-ORDINARY";
+    private static final String REVOKED_SUBJECT = "sub-revoked";
+    private static final String REVOKED_INST = "SYN-INST-REVOKED";
+    private static final String SUSPENDED_SUBJECT = "sub-suspended";
+    private static final String SUSPENDED_INST = "SYN-INST-SUSPENDED";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
@@ -110,13 +114,40 @@ class AdministrationReadOnlyIntegrationTest {
                       ('%1$s', '%2$s', '%3$s', 'SYNP-ADMIN', 'syn-admin', 'ADMIN_VERIFIED',
                        'ACTIVE', 'operator', now()),
                       ('%1$s', '%4$s', '%5$s', 'SYNP-ORD', 'syn-ord', 'ADMIN_VERIFIED',
+                       'ACTIVE', 'operator', now()),
+                      ('%1$s', '%6$s', '%7$s', 'SYNP-REV', 'syn-rev', 'ADMIN_VERIFIED',
+                       'ACTIVE', 'operator', now()),
+                      ('%1$s', '%8$s', '%9$s', 'SYNP-SUS', 'syn-sus', 'ADMIN_VERIFIED',
                        'ACTIVE', 'operator', now())
-                    """.formatted(ISSUER, ADMIN_SUBJECT, ADMIN_INST, ORDINARY_SUBJECT, ORDINARY_INST));
+                    """.formatted(ISSUER, ADMIN_SUBJECT, ADMIN_INST, ORDINARY_SUBJECT, ORDINARY_INST,
+                    REVOKED_SUBJECT, REVOKED_INST, SUSPENDED_SUBJECT, SUSPENDED_INST));
             statement.execute("""
                     INSERT INTO authz.admin_role_member (institutional_identifier, status,
                         granted_by, granted_at, reason)
-                    VALUES ('%s', 'ACTIVE', 'BOOTSTRAP', now(), 'test fixture')
+                    VALUES ('%1$s', 'ACTIVE', 'BOOTSTRAP', now(), 'test fixture')
                     """.formatted(ADMIN_INST));
+            /*
+             * ck_admin_role_member_revoked (V084) requires
+             * (status = 'REVOKED') = (revoked_at IS NOT NULL), so a revoked
+             * row must be inserted complete - setting revoked_at afterwards
+             * is rejected at INSERT time. The constraint is doing its job.
+             */
+            statement.execute("""
+                    INSERT INTO authz.admin_role_member (institutional_identifier, status,
+                        granted_by, granted_at, revoked_by, revoked_at, reason)
+                    VALUES ('%s', 'REVOKED', 'operator', now(), 'operator', now(),
+                            'revoked fixture')
+                    """.formatted(REVOKED_INST));
+            statement.execute("""
+                    INSERT INTO authz.admin_role_member (institutional_identifier, status,
+                        granted_by, granted_at, reason)
+                    VALUES ('%s', 'ACTIVE', 'operator', now(), 'suspended fixture')
+                    """.formatted(SUSPENDED_INST));
+            statement.execute("""
+                    INSERT INTO authz.person_status (institutional_identifier, suspended,
+                        changed_by, changed_at)
+                    VALUES ('%s', TRUE, 'operator', now())
+                    """.formatted(SUSPENDED_INST));
         }
 
         jdbc = JdbcClient.create(dataSource);
@@ -135,11 +166,23 @@ class AdministrationReadOnlyIntegrationTest {
 
     @Test
     void theFixtureIsRealSoTheseAssertionsAreNotVacuous() {
-        assertThat(count("authz.identity_link")).isGreaterThanOrEqualTo(2);
-        assertThat(jdbc.sql("SELECT count(*) FROM authz.admin_role_member WHERE status = 'ACTIVE'")
-                .query(Integer.class).single())
-                .as("an ACTIVE ARCHIVE_ADMIN must exist, or every read would 403 for the wrong reason")
+        assertThat(count("authz.identity_link")).isGreaterThanOrEqualTo(4);
+
+        // Asserted per identity rather than as a total: a bare count says
+        // nothing about WHICH identity holds the role, and the fixture
+        // deliberately contains a second ACTIVE row held by a suspended
+        // person, to prove suspension overrides the role.
+        assertThat(activeMemberships(ADMIN_INST))
+                .as("the reviewing administrator must hold an ACTIVE membership, "
+                        + "or every read would 403 for the wrong reason")
                 .isEqualTo(1);
+        assertThat(activeMemberships(SUSPENDED_INST))
+                .as("the suspended person really does hold an ACTIVE membership")
+                .isEqualTo(1);
+        assertThat(activeMemberships(REVOKED_INST))
+                .as("the revoked administrator holds none")
+                .isZero();
+        assertThat(activeMemberships(ORDINARY_INST)).isZero();
     }
 
     // ---- the four reads, against the real schema -----------------------
@@ -162,6 +205,62 @@ class AdministrationReadOnlyIntegrationTest {
         // 403, not 404: with administration enabled the surface exists.
         mvc.perform(get("/api/v1/admin/identities?q=syn")).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/admin/administrators")).andExpect(status().isForbidden());
+    }
+
+    // ---- revoked and suspended administrators ---------------------------
+
+    /**
+     * A revoked membership is not an administrator, asserted against the real
+     * table rather than a mocked resolution. The row still exists with
+     * status REVOKED, so this also proves the query filters on status rather
+     * than merely finding a row.
+     */
+    @Test
+    void aRevokedAdministratorIsRefusedOnEveryReadEndpoint() throws Exception {
+        caller = new ValidatedCognitoIdentity(ISSUER, REVOKED_SUBJECT);
+        MockMvc mvc = mvc();
+        mvc.perform(get("/api/v1/admin/identities?q=syn")).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/identities/" + ADMIN_INST)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/audit")).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/administrators")).andExpect(status().isForbidden());
+    }
+
+    /**
+     * A suspended person holding an ACTIVE membership is still refused: the
+     * resolver returns Suspended, which is not Mapped, so no identifier ever
+     * reaches the membership check. Suspension overrides the role.
+     */
+    @Test
+    void aSuspendedIdentityHoldingAnActiveMembershipIsRefused() throws Exception {
+        caller = new ValidatedCognitoIdentity(ISSUER, SUSPENDED_SUBJECT);
+        MockMvc mvc = mvc();
+        mvc.perform(get("/api/v1/admin/identities?q=syn")).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/administrators")).andExpect(status().isForbidden());
+
+        assertThat(jdbc.sql("""
+                        SELECT count(*) FROM authz.admin_role_member
+                         WHERE institutional_identifier = ? AND status = 'ACTIVE'
+                        """).param(SUSPENDED_INST).query(Integer.class).single())
+                .as("the membership really is ACTIVE, so the refusal came from suspension")
+                .isEqualTo(1);
+    }
+
+    /** Neither can reach a write, and the refusal is not a way in. */
+    @Test
+    void neitherRevokedNorSuspendedCanReachAWrite() throws Exception {
+        int grantsBefore = count("authz.access_grant");
+        int auditBefore = count("authz.access_audit");
+
+        for (String subject : new String[] {REVOKED_SUBJECT, SUSPENDED_SUBJECT}) {
+            caller = new ValidatedCognitoIdentity(ISSUER, subject);
+            mvc().perform(post("/api/v1/admin/identities/" + ORDINARY_INST + "/grants")
+                            .contentType("application/json")
+                            .content("{\"type\":\"IO\",\"ioValue\":\"9500012345\"}"))
+                    .andExpect(status().isConflict());
+        }
+
+        assertThat(count("authz.access_grant")).isEqualTo(grantsBefore);
+        assertThat(count("authz.access_audit")).isEqualTo(auditBefore);
     }
 
     // ---- the eight writes change NOTHING in the database ---------------
@@ -268,6 +367,13 @@ class AdministrationReadOnlyIntegrationTest {
                 .andExpect(refused);
         mvc.perform(delete("/api/v1/admin/administrators/" + ORDINARY_INST + "?reason=x"))
                 .andExpect(refused);
+    }
+
+    private int activeMemberships(String institutionalIdentifier) {
+        return jdbc.sql("""
+                SELECT count(*) FROM authz.admin_role_member
+                 WHERE institutional_identifier = ? AND status = 'ACTIVE'
+                """).param(institutionalIdentifier).query(Integer.class).single();
     }
 
     private int count(String table) {

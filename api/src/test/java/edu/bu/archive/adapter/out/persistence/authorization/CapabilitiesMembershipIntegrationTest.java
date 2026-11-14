@@ -128,6 +128,17 @@ class CapabilitiesMembershipIntegrationTest {
     }
 
     private CapabilitiesService serviceFor(IdentityResolution resolution, boolean enforcement) {
+        return serviceFor(resolution, enforcement, false);
+    }
+
+    /**
+     * Record enforcement and administration availability are set separately,
+     * because they ARE separate. A helper that took only one of them could
+     * not express the configuration this work exists to support -
+     * administration open while records stay unenforced.
+     */
+    private CapabilitiesService serviceFor(
+            IdentityResolution resolution, boolean enforcement, boolean administration) {
         CurrentIdentityProvider identities = mock(CurrentIdentityProvider.class);
         when(identities.current()).thenReturn(Optional.of(mock(ValidatedCognitoIdentity.class)));
 
@@ -136,6 +147,7 @@ class CapabilitiesMembershipIntegrationTest {
 
         AuthorizationProperties properties = new AuthorizationProperties();
         properties.setEnforcementEnabled(enforcement);
+        properties.setAdministrationEnabled(administration);
 
         return new CapabilitiesService(identities, resolver, adminRoles, properties);
     }
@@ -151,19 +163,52 @@ class CapabilitiesMembershipIntegrationTest {
 
         assertThat(actual.administrator())
                 .as("an ACTIVE row in authz.admin_role_member must be visible with "
-                        + "enforcement OFF - the property the admin API cannot offer")
+                        + "enforcement OFF - membership never depended on it")
                 .isTrue();
         assertThat(actual.enforcementEnabled()).isFalse();
         assertThat(actual.administrationAvailable()).isFalse();
     }
 
     @Test
-    void theSameRealMembershipWithEnforcementOnIsFullyAvailable() {
+    void enforcementOnAloneDoesNotOpenTheAdministrativeSurface() {
         CapabilitiesResponse actual = serviceFor(mapped(ADMIN), true).current();
 
         assertThat(actual.administrator()).isTrue();
         assertThat(actual.enforcementEnabled()).isTrue();
+        /*
+         * This asserted isTrue() and passed only because availability was
+         * derived from the enforcement flag. The two are independent now, so
+         * enforcement alone leaves the surface closed.
+         */
+        assertThat(actual.administrationAvailable()).isFalse();
+    }
+
+    @Test
+    void theRealMembershipMakesAdministrationAvailableWithEnforcementOff() {
+        // The configuration this separation exists for, against the real
+        // authz.admin_role_member table rather than a fixture.
+        CapabilitiesResponse actual = serviceFor(mapped(ADMIN), false, true).current();
+
+        assertThat(actual.administrator()).isTrue();
+        assertThat(actual.enforcementEnabled())
+                .as("record-level enforcement must stay off")
+                .isFalse();
         assertThat(actual.administrationAvailable()).isTrue();
+        assertThat(actual.administrationWritesAvailable())
+                .as("read-only until writes are separately enabled")
+                .isFalse();
+    }
+
+    @Test
+    void aRevokedMembershipIsNotRescuedByOpeningTheSurface() {
+        // Opening the administrative surface must not turn a non-administrator
+        // into one; the membership read is what decides.
+        CapabilitiesResponse actual = serviceFor(mapped(NOT_ADMIN), false, true).current();
+
+        assertThat(actual.administrator()).isFalse();
+        assertThat(actual.administrationAvailable())
+                .as("denied() reports nothing, whatever the flags say")
+                .isFalse();
     }
 
     @Test
