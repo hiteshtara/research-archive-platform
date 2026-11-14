@@ -471,3 +471,78 @@ those probes; none came from the application.
 Revisions 94, 101 and 102 all ACTIVE; none deregistered. RDS unchanged.
 Enforcement OFF, auditing OFF, V089 unapplied, grant 2 untouched,
 Production never accessed.
+
+
+---
+
+## 13. T4 reconciliation — applied 2026-11-13
+
+Approved separately and executed against a fresh saved plan.
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | AWS account | **770203350335** ✅ |
+| 2 | Serving revision + digest, read from the SERVICE | **102**, `sha256:e0e40a46…` ✅ |
+| 3 | Rollback guard enabled | zero override lines; declared `default = true` ✅ |
+| 4 | Exactly one task-definition replacement | 1 resource, `["delete","create"]`, **1 add / 0 change / 1 destroy** ✅ |
+| 5 | Zero ECS service, zero RDS, no other resource, no prod | 0 / 0 / 0 / 0 ✅ |
+| 6 | `skip_destroy = true`, revision 101 not deregistered | true; 101 still **ACTIVE** after apply ✅ |
+| 7 | Applied only the saved plan | `Apply complete! Resources: 1 added, 0 changed, 1 destroyed.` ✅ |
+| 8 | New revision registered but unused | **103** ACTIVE; service points at **102** ✅ |
+| 9 | 102 still serving, healthy, no restart | same task `41c8dc3f…`, same `startedAt` 12:02:00, ALB `healthy` ✅ |
+| 10 | Final DEV plan | **`No changes.`**, exit 0 ✅ |
+
+Guard re-verified after the apply: a plan pinning the old revision-94
+digest is still refused with `Resource precondition failed`.
+
+Revisions 94, 101, 102 and 103 are all ACTIVE; none deregistered. RDS
+unchanged. API `/actuator/health` UP throughout.
+
+### A transient credential failure worth recording
+
+Mid-verification, two `aws ecs` calls failed with
+`UnrecognizedClientException: The security token included in the request
+is invalid`, while `sts get-caller-identity` succeeded either side of
+them. The empty results made a pin comparison print **"PIN MISMATCH"**,
+which was an artifact of the failed calls, not a real mismatch — the
+retry showed an exact match. Nothing was applied on the strength of that
+output. If this recurs, re-read before concluding anything: an AWS error
+is not a negative result.
+
+---
+
+## 14. U12 — status NOT VERIFIED
+
+Lalitha (lhuval@bu.edu) is the designated tester; her DEV Cognito
+identity is `BUShibboleth_lhuval@bu.edu`, `EXTERNAL_PROVIDER`, enabled.
+Instructions: `docs/security/U12_NON_ADMINISTRATOR_TEST.md`.
+
+**The proviso is not yet verified.** Whether her identity holds an ACTIVE
+`ARCHIVE_ADMIN` membership is recorded in `authz.admin_role_member` in
+the DEV database, which this session cannot read:
+
+- the administrative API 404s while enforcement is off, by design
+- the SSM tunnel is **"proposed, not deployed"** — gated behind
+  `manage_db_tunnel_access`, default `false`; creating it would be an
+  infrastructure change
+- no administrator roster is recorded in the repository
+
+The approved read-only route is CloudShell, which **is** enabled
+(`manage_cloudshell_analyst_access = true`). The query:
+
+```sql
+SELECT institutional_identifier, status, granted_at
+FROM authz.admin_role_member
+WHERE status = 'ACTIVE'
+ORDER BY granted_at;
+```
+
+Note the table keys on `institutional_identifier`, never on a login name
+or email, so the result needs mapping to a person.
+
+Until that check is done **and** Lalitha completes the test, U12 stays
+**NOT VERIFIED** — not PASS. Her instructions also make the
+toggle-appeared case interpretable: it would mean she holds the role and
+is the wrong tester, not that the product is broken.
+
+**No account, membership or grant was changed.**
