@@ -30,6 +30,20 @@ export const serverSays = {
     enforcementEnabled: true,
     administrationAvailable: true,
   },
+  /** Administration open, writes off - the DEV read-only rollout state. */
+  activeAdministratorReadOnly: {
+    administrator: true,
+    enforcementEnabled: false,
+    administrationAvailable: true,
+    administrationWritesAvailable: false,
+  },
+  /** Phase 3 shape: writes permitted. Not enabled anywhere. */
+  activeAdministratorWritesOn: {
+    administrator: true,
+    enforcementEnabled: false,
+    administrationAvailable: true,
+    administrationWritesAvailable: true,
+  },
   activeAdministratorEnforcementOff: {
     administrator: true,
     enforcementEnabled: false,

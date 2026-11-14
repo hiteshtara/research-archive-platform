@@ -20,6 +20,8 @@ import {
   formatDate,
   revokeAdministratorDisabledReason,
 } from "../../features/admin/adminPresentation.mjs";
+import { ReadOnlyBanner } from "../../features/securityAdmin/ReadOnlyBanner";
+import { useAdminWritesAllowed } from "../../features/securityAdmin/useAdminWritesAllowed";
 
 /**
  * ARCHIVE_ADMIN membership.
@@ -58,7 +60,14 @@ export function AdministratorsPage() {
   });
 
   const active = administrators.data ?? [];
-  const canRevoke = canRevokeAdministrator(active.length);
+  /*
+   * Writes are gated on what the SERVER reports, not on anything this page
+   * decides. While administration is read-only every mutation control is
+   * disabled, so an administrator cannot fill in a form, press the button
+   * and be refused with a 409 - which is how this page behaved before.
+   */
+  const writesAllowed = useAdminWritesAllowed();
+  const canRevoke = canRevokeAdministrator(active.length) && writesAllowed;
 
   return (
     <Stack spacing={3} sx={{ p: 3 }}>
@@ -70,10 +79,14 @@ export function AdministratorsPage() {
         </Typography>
       </Box>
 
+      <ReadOnlyBanner />
+
       {administrators.isError && (
         <Alert severity="error">
-          The administrator list could not be loaded. If record authorization
-          is not yet enabled, the administrative API is not available.
+          The administrator list could not be loaded. If Security
+          Administration is not enabled in this environment, the
+          administrative API is not available &mdash; separate from
+          record-level authorization, which can stay off.
         </Alert>
       )}
 
@@ -98,7 +111,13 @@ export function AdministratorsPage() {
                 {member.reason ? ` — ${member.reason}` : ""}
               </Typography>
             </Box>
-            <Tooltip title={revokeAdministratorDisabledReason(active.length) ?? ""}>
+            <Tooltip
+              title={
+                !writesAllowed
+                  ? "Read-only mode: administrator changes are disabled in this environment"
+                  : revokeAdministratorDisabledReason(active.length) ?? ""
+              }
+            >
               <span>
                 <Button
                   size="small"
@@ -136,21 +155,43 @@ export function AdministratorsPage() {
             size="small"
             label="Institutional identifier"
             value={identifier}
+            disabled={!writesAllowed}
             onChange={(event) => setIdentifier(event.target.value)}
           />
           <TextField
             size="small"
             label="Reason"
             value={reason}
+            disabled={!writesAllowed}
             onChange={(event) => setReason(event.target.value)}
           />
-          <Button
-            variant="contained"
-            disabled={!identifier.trim() || !reason.trim() || assign.isPending}
-            onClick={() => assign.mutate()}
+          <Tooltip
+            title={
+              writesAllowed
+                ? ""
+                : "Read-only mode: appointing an administrator is disabled in this environment"
+            }
           >
-            Appoint
-          </Button>
+            <span>
+              <Button
+                variant="contained"
+                disabled={
+                  !writesAllowed
+                    || !identifier.trim()
+                    || !reason.trim()
+                    || assign.isPending
+                }
+                onClick={() => {
+                  // Belt and braces: the button is already disabled, and a
+                  // synthetic click must still not reach the API.
+                  if (!writesAllowed) return;
+                  assign.mutate();
+                }}
+              >
+                Appoint
+              </Button>
+            </span>
+          </Tooltip>
           {assign.isError && <Alert severity="error">The appointment was not made.</Alert>}
         </Stack>
       </Box>
