@@ -104,6 +104,9 @@ public class CapabilitiesService {
         if (!administrator) {
             return CapabilitiesResponse.denied();
         }
-        return CapabilitiesResponse.administrator(authorization.isEnforcementEnabled());
+        return CapabilitiesResponse.administrator(
+                authorization.isEnforcementEnabled(),
+                authorization.isAdministrationEnabled(),
+                authorization.isAdministrationWritesEnabled());
     }
 }

@@ -72,7 +72,16 @@ class AdminAuthorizationControllerTest {
         grants = new InMemoryAccessGrantRepository();
 
         properties = new AuthorizationProperties();
-        properties.setEnforcementEnabled(true);
+        /*
+         * The administrative surface is opened by its OWN flags now. Record
+         * enforcement is left OFF here on purpose: these tests assert the
+         * administrative API works without it, which is the point of the
+         * separation. Writes are enabled so the existing write assertions
+         * below still exercise what they were written for.
+         */
+        properties.setEnforcementEnabled(false);
+        properties.setAdministrationEnabled(true);
+        properties.setAdministrationWritesEnabled(true);
 
         caller = cognito(ADMIN_SUBJECT);
     }
@@ -83,7 +92,7 @@ class AdminAuthorizationControllerTest {
 
         @Test
         void everyAdministrativeEndpointIs404() throws Exception {
-            properties.setEnforcementEnabled(false);
+            properties.setAdministrationEnabled(false);
             adminRoles.bootstrap(ADMIN, "operator", "test");
             MockMvc mvc = mvc();
 
@@ -99,7 +108,7 @@ class AdminAuthorizationControllerTest {
 
         @Test
         void nothingIsWrittenWhileTheSurfaceIsAbsent() throws Exception {
-            properties.setEnforcementEnabled(false);
+            properties.setAdministrationEnabled(false);
             adminRoles.bootstrap(ADMIN, "operator", "test");
 
             mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")

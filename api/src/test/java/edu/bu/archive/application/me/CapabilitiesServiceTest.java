@@ -150,7 +150,7 @@ class CapabilitiesServiceTest {
     // --- Case: active administrator, enforcement ON ---
 
     @Test
-    void anActiveAdministratorWithEnforcementOnIsAllTrue() {
+    void enforcementOnAloneDoesNotMakeAdministrationAvailable() {
         ValidatedCognitoIdentity identity = signedIn();
         resolvesTo(mapped(identity));
         when(adminRoles.findActive(MEMBER)).thenReturn(Optional.of(mock(AdminRoleMember.class)));
@@ -159,7 +159,48 @@ class CapabilitiesServiceTest {
         CapabilitiesResponse actual = service.current();
         assertThat(actual.administrator()).isTrue();
         assertThat(actual.enforcementEnabled()).isTrue();
+        /*
+         * This assertion was `isTrue()` and passed only because availability
+         * was derived from the enforcement flag. The two are now independent,
+         * so enforcement alone leaves the administrative surface closed.
+         */
+        assertThat(actual.administrationAvailable()).isFalse();
+        assertThat(actual.administrationWritesAvailable()).isFalse();
+    }
+
+    // --- Case: the decoupling itself ---
+
+    @Test
+    void administrationIsAvailableWithRecordEnforcementOff() {
+        ValidatedCognitoIdentity identity = signedIn();
+        resolvesTo(mapped(identity));
+        when(adminRoles.findActive(MEMBER)).thenReturn(Optional.of(mock(AdminRoleMember.class)));
+        authorization.setEnforcementEnabled(false);
+        authorization.setAdministrationEnabled(true);
+
+        CapabilitiesResponse actual = service.current();
+        assertThat(actual.administrator()).isTrue();
+        assertThat(actual.enforcementEnabled()).isFalse();
         assertThat(actual.administrationAvailable()).isTrue();
+        assertThat(actual.administrationWritesAvailable())
+                .as("read-only until writes are separately enabled")
+                .isFalse();
+    }
+
+    @Test
+    void writesAreReportedOnlyWhenBothFlagsAreOn() {
+        ValidatedCognitoIdentity identity = signedIn();
+        resolvesTo(mapped(identity));
+        when(adminRoles.findActive(MEMBER)).thenReturn(Optional.of(mock(AdminRoleMember.class)));
+        authorization.setEnforcementEnabled(false);
+        authorization.setAdministrationEnabled(false);
+        authorization.setAdministrationWritesEnabled(true);
+
+        // Writes without the surface must not be reported as available.
+        assertThat(service.current().administrationWritesAvailable()).isFalse();
+
+        authorization.setAdministrationEnabled(true);
+        assertThat(service.current().administrationWritesAvailable()).isTrue();
     }
 
     // --- Case: membership revoked between calls, no caching ---

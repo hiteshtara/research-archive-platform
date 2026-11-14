@@ -2,6 +2,7 @@ export interface Capabilities {
   administrator: boolean;
   enforcementEnabled: boolean;
   administrationAvailable: boolean;
+  administrationWritesAvailable: boolean;
   verified: boolean;
 }
 
@@ -38,6 +39,10 @@ export function showsModeToggle(capabilities: Capabilities): boolean;
 export function administrationIsUsable(capabilities: Capabilities): boolean;
 export function adminRouteState(capabilities: Capabilities): "denied" | "unavailable" | "available";
 export function mayCallAdminApi(capabilities: Capabilities): boolean;
+export function allowsAdminWrites(capabilities: Capabilities): boolean;
+export function readOnlyNotice(
+  capabilities: Capabilities,
+): { title: string; detail: string } | null;
 export function rendersInteractiveControls(capabilities: Capabilities): boolean;
 export function unavailableNotice(capabilities: Capabilities): UnavailableNotice;
 export function systemStatusRows(

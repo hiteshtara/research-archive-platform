@@ -19,6 +19,43 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AuthorizationProperties {
 
     private boolean enforcementEnabled;
+
+    /**
+     * Whether the administrative API (/api/v1/admin) answers at all.
+     *
+     * <p>Deliberately SEPARATE from {@link #enforcementEnabled}. Administrator
+     * identity resolution and ARCHIVE_ADMIN membership never depended on
+     * record enforcement - the old 404 was a policy choice ("do not offer
+     * tools that cannot work"), not a technical dependency. Keeping them one
+     * flag made "manage administrators while records are unenforced"
+     * unexpressible.
+     *
+     * <p>Turning this on exposes the surface. It grants nothing: every
+     * endpoint still resolves its own actor and calls requireAdministrator,
+     * so a non-administrator gets 403 rather than data.
+     *
+     * <p>Defaults to false, so merging this change alters no deployment.
+     */
+    private boolean administrationEnabled;
+
+    /**
+     * Whether the EIGHT administrative WRITE endpoints are permitted.
+     *
+     * <p>Read-only administration is the first rollout step, and a read-only
+     * phase enforced only by not clicking anything is not a control - this is
+     * checked server-side, before the actor is resolved.
+     *
+     * <p>Separate from {@link #administrationEnabled} because the write paths
+     * carry open safeguard gaps (self-granting, grant expansion via
+     * includeDescendants, and single-administrator promotion). While record
+     * enforcement is off a bad grant has no visible effect, so it would sit
+     * undetected until enforcement is switched on.
+     *
+     * <p>Defaults to false. Has no effect unless administrationEnabled is
+     * also true.
+     */
+    private boolean administrationWritesEnabled;
+
     private AuthorizationPolicy.VersionScope versionScope;
     private AuthorizationPolicy.DepartmentMatch departmentMatch;
     private Set<String> researchStaffRoles = new LinkedHashSet<>();
@@ -123,6 +160,26 @@ public class AuthorizationProperties {
 
     public void setEnforcementEnabled(boolean enforcementEnabled) {
         this.enforcementEnabled = enforcementEnabled;
+    }
+
+    public boolean isAdministrationEnabled() {
+        return administrationEnabled;
+    }
+
+    public void setAdministrationEnabled(boolean administrationEnabled) {
+        this.administrationEnabled = administrationEnabled;
+    }
+
+    /**
+     * Writes are permitted only when the surface is open as well, so a
+     * writes-only configuration cannot accidentally expose anything.
+     */
+    public boolean isAdministrationWritesEnabled() {
+        return administrationEnabled && administrationWritesEnabled;
+    }
+
+    public void setAdministrationWritesEnabled(boolean administrationWritesEnabled) {
+        this.administrationWritesEnabled = administrationWritesEnabled;
     }
 
     public AuthorizationPolicy.VersionScope getVersionScope() {

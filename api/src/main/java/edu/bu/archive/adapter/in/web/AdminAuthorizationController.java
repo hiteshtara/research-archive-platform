@@ -37,6 +37,7 @@ import edu.bu.archive.application.authorization.admin.AdminAuditAction;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.AuditQuery;
 import edu.bu.archive.application.authorization.admin.GrantSpecification;
+import edu.bu.archive.application.authorization.admin.AdministrationWritesDisabledException;
 import edu.bu.archive.application.authorization.admin.NotAnArchiveAdministratorException;
 
 /**
@@ -112,6 +113,7 @@ public class AdminAuthorizationController {
     public ResponseEntity<AdminLinkResponse> link(
             @PathVariable("identifier") String identifier,
             @RequestBody AdminRequests.CreateLink request) {
+        requireAdministrationWrites();
 
         AdminLinkResponse created = AdminLinkResponse.from(admin.linkIdentity(
                 actor(),
@@ -130,6 +132,7 @@ public class AdminAuthorizationController {
             @PathVariable("identifier") String identifier,
             @PathVariable("linkId") long linkId,
             @RequestParam(value = "reason", required = false) String reason) {
+        requireAdministrationWrites();
 
         admin.unlinkIdentity(actor(), linkId, reason);
         return ResponseEntity.noContent().build();
@@ -139,6 +142,7 @@ public class AdminAuthorizationController {
     public ResponseEntity<Void> setSuspension(
             @PathVariable("identifier") String identifier,
             @RequestBody AdminRequests.Suspension request) {
+        requireAdministrationWrites();
 
         admin.setSuspended(actor(), subject(identifier), request.suspended(), request.reason());
         return ResponseEntity.noContent().build();
@@ -152,6 +156,7 @@ public class AdminAuthorizationController {
     public ResponseEntity<AdminGrantResponse> grant(
             @PathVariable("identifier") String identifier,
             @RequestBody AdminRequests.CreateGrant request) {
+        requireAdministrationWrites();
 
         GrantSpecification specification = new GrantSpecification(
                 grantType(request.type()),
@@ -171,6 +176,7 @@ public class AdminAuthorizationController {
             @PathVariable("identifier") String identifier,
             @PathVariable("grantId") long grantId,
             @RequestBody AdminRequests.ModifyGrant request) {
+        requireAdministrationWrites();
 
         return AdminGrantResponse.from(
                 admin.modifyAccess(actor(), grantId, request.expiresAt(),
@@ -183,6 +189,7 @@ public class AdminAuthorizationController {
             @PathVariable("identifier") String identifier,
             @PathVariable("grantId") long grantId,
             @RequestParam(value = "reason", required = false) String reason) {
+        requireAdministrationWrites();
 
         admin.revokeAccess(actor(), grantId, reason);
         return ResponseEntity.noContent().build();
@@ -217,6 +224,7 @@ public class AdminAuthorizationController {
     @PostMapping("/administrators")
     public ResponseEntity<AdminRoleMemberResponse> assignAdministrator(
             @RequestBody AdminRequests.AssignAdministrator request) {
+        requireAdministrationWrites();
 
         AdminRoleMemberResponse assigned = AdminRoleMemberResponse.from(admin.assignAdministrator(
                 actor(), subject(request.institutionalIdentifier()), request.reason()));
@@ -227,6 +235,7 @@ public class AdminAuthorizationController {
     public ResponseEntity<Void> revokeAdministrator(
             @PathVariable("identifier") String identifier,
             @RequestParam(value = "reason", required = false) String reason) {
+        requireAdministrationWrites();
 
         admin.revokeAdministrator(actor(), subject(identifier), reason);
         return ResponseEntity.noContent().build();
@@ -243,7 +252,7 @@ public class AdminAuthorizationController {
      * distinguishing those cases here would tell a caller why they failed.
      */
     private InstitutionalIdentifier actor() {
-        requireEnforcementEnabled();
+        requireAdministrationEnabled();
         return identities.current()
                 .map(resolver::resolve)
                 .filter(IdentityResolution.Mapped.class::isInstance)
@@ -253,11 +262,40 @@ public class AdminAuthorizationController {
                         "no resolved institutional identity for this request"));
     }
 
-    private void requireEnforcementEnabled() {
-        if (!properties.isEnforcementEnabled()) {
-            // 404, not 403: while enforcement is off the surface genuinely
-            // does not exist, and changes made through it would have no effect.
+    private void requireAdministrationEnabled() {
+        if (!properties.isAdministrationEnabled()) {
+            // 404, not 403: the surface genuinely does not exist when
+            // administration is switched off. 403 would confirm it exists and
+            // say the caller lacks access, which is a different statement.
+            //
+            // This used to read isEnforcementEnabled(). The two are now
+            // separate: administrator tooling does not require record-level
+            // enforcement, and never technically did.
             throw new NoSuchElementException("administrative API is not available");
+        }
+    }
+
+    /**
+     * Refuses the eight write endpoints while administration is read-only.
+     *
+     * <p>409, not 404: with administration enabled the endpoint plainly
+     * exists - the caller can GET the same resources - and the request is
+     * well formed and authorized. It is the server's configuration that
+     * refuses, and it will succeed once writes are enabled. That is the same
+     * reasoning the last-administrator and duplicate-grant guards use.
+     *
+     * <p>Called BEFORE the actor is resolved, so a read-only deployment
+     * cannot be talked into a write by any sequence of requests. The UI also
+     * hides these controls, but that is convenience; this is the control.
+     */
+    private void requireAdministrationWrites() {
+        requireAdministrationEnabled();
+        if (!properties.isAdministrationWritesEnabled()) {
+            throw new AdministrationWritesDisabledException(
+                    "administrative write operations are disabled in this environment. "
+                            + "Security Administration is available read-only; granting, "
+                            + "revoking, suspension, re-linking and administrator "
+                            + "appointment are switched off.");
         }
     }
 

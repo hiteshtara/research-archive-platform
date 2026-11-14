@@ -9,6 +9,8 @@ import {
   mayCallAdminApi,
   rendersInteractiveControls,
   unavailableNotice,
+  allowsAdminWrites,
+  readOnlyNotice,
   systemStatusRows,
   securityAdminNavigationItems,
 } from "./securityAdminPresentation.mjs";
@@ -136,5 +138,72 @@ test("navigation reuses the existing admin pages rather than new routes", () => 
   const paths = securityAdminNavigationItems.map((i) => i.path);
   for (const existing of ["/admin/identities", "/admin/administrators", "/admin/audit"]) {
     assert.ok(paths.includes(existing), `${existing} already exists and must be reused`);
+  }
+});
+
+
+// ── read-only administration phase ───────────────────────────────────
+const capsW = (administrator, enforcementEnabled, administrationAvailable, administrationWritesAvailable) =>
+  readCapabilities({
+    administrator, enforcementEnabled, administrationAvailable, administrationWritesAvailable,
+  });
+
+test("administration is available with record enforcement OFF", () => {
+  // The decoupling, from the UI's side: availability no longer tracks
+  // enforcement, because the server now reports them separately.
+  const c = capsW(true, false, true, false);
+  assert.equal(administrationIsUsable(c), true);
+  assert.equal(adminRouteState(c), "available");
+  assert.equal(mayCallAdminApi(c), true);
+});
+
+test("writes are withheld in the read-only phase", () => {
+  const c = capsW(true, false, true, false);
+  assert.equal(allowsAdminWrites(c), false);
+  assert.notEqual(readOnlyNotice(c), null);
+  assert.match(readOnlyNotice(c).detail, /review only/i);
+});
+
+test("writes are offered only when the server says so", () => {
+  assert.equal(allowsAdminWrites(capsW(true, false, true, true)), true);
+  assert.equal(readOnlyNotice(capsW(true, false, true, true)), null);
+});
+
+test("a client cannot conjure write access", () => {
+  // Availability false must veto writes however the flag arrives.
+  assert.equal(allowsAdminWrites(capsW(true, false, false, true)), false);
+  assert.equal(allowsAdminWrites(capsW(false, false, true, true)), false);
+  assert.equal(allowsAdminWrites(readCapabilities({ administrationWritesAvailable: "true" })), false);
+  assert.equal(allowsAdminWrites(readCapabilities(null)), false);
+});
+
+test("the status panel states the read-only condition explicitly", () => {
+  const rows = systemStatusRows(capsW(true, false, true, false));
+  const writes = rows.find((r) => r.key === "administrationWrites");
+  assert.equal(writes.value, "Disabled (read-only)");
+  const enforcement = rows.find((r) => r.key === "enforcement");
+  assert.equal(enforcement.value, "OFF", "record enforcement must still read OFF");
+  const administration = rows.find((r) => r.key === "administration");
+  assert.equal(administration.value, "Available");
+});
+
+test("the status panel reports enabled writes when they are on", () => {
+  const rows = systemStatusRows(capsW(true, false, true, true));
+  assert.equal(rows.find((r) => r.key === "administrationWrites").value, "Enabled");
+});
+
+test("no capability combination reports record enforcement as ON", () => {
+  for (const admin of [false, true]) {
+    for (const avail of [false, true]) {
+      for (const writes of [false, true]) {
+        const rows = systemStatusRows(capsW(admin, false, avail, writes));
+        assert.equal(
+          rows.find((r) => r.key === "enforcement").value,
+          "OFF",
+          `administration flags must never present enforcement as ON `
+            + `(administrator=${admin} available=${avail} writes=${writes})`,
+        );
+      }
+    }
   }
 });
