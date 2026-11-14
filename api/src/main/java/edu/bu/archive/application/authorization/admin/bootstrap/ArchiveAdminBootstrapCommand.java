@@ -284,11 +284,20 @@ public final class ArchiveAdminBootstrapCommand {
             checks.add("OK     no active administrator exists yet");
         }
 
-        if (properties != null && properties.isEnforcementEnabled()) {
-            checks.add("NOTE   enforcement is ON in this environment");
+        if (properties != null && properties.isAdministrationEnabled()) {
+            checks.add("NOTE   administration is ENABLED; the administrative API will answer"
+                    + (properties.isAdministrationWritesEnabled()
+                            ? " for reads and writes" : " for reads only"));
         } else {
-            checks.add("NOTE   enforcement is OFF; the administrator will exist but the "
-                    + "administrative API stays 404 until it is enabled");
+            checks.add("NOTE   administration is DISABLED; the administrator will exist but "
+                    + "the administrative API stays 404 until "
+                    + "app.authorization.administration-enabled is true");
+        }
+        if (properties != null && properties.isEnforcementEnabled()) {
+            checks.add("NOTE   record-level enforcement is ON in this environment");
+        } else {
+            checks.add("NOTE   record-level enforcement is OFF; this does not affect the "
+                    + "administrative API, which now has its own flag");
         }
     }
 

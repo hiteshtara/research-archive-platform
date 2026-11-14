@@ -33,14 +33,29 @@ export const SECURITY_ADMIN_MODE = "securityAdmin";
  */
 export function readCapabilities(raw, { isLoading = false, isError = false } = {}) {
   if (isLoading || isError || raw === null || raw === undefined || typeof raw !== "object") {
-    return { administrator: false, enforcementEnabled: false, administrationAvailable: false, verified: false };
+    return {
+      administrator: false, enforcementEnabled: false,
+      administrationAvailable: false, administrationWritesAvailable: false,
+      verified: false,
+    };
   }
   const administrator = raw.administrator === true;
   const enforcementEnabled = raw.enforcementEnabled === true;
   // Never recomputed from the other two: the server decides, because a client
   // bug must not be able to show a surface the backend would refuse.
   const administrationAvailable = raw.administrationAvailable === true;
-  return { administrator, enforcementEnabled, administrationAvailable, verified: true };
+  /*
+   * Whether administrative WRITES are permitted, reported by the server.
+   * Also never recomputed: the server refuses writes with 409 regardless of
+   * what this says, and a client that guessed `true` would render controls
+   * that cannot work - the exact failure the unavailable screen exists to
+   * prevent.
+   */
+  const administrationWritesAvailable = raw.administrationWritesAvailable === true;
+  return {
+    administrator, enforcementEnabled, administrationAvailable,
+    administrationWritesAvailable, verified: true,
+  };
 }
 
 /**
@@ -105,6 +120,41 @@ export function rendersInteractiveControls(capabilities) {
   return administrationIsUsable(capabilities);
 }
 
+/**
+ * Whether an administrator screen may offer a control that CHANGES something.
+ *
+ * Distinct from mayCallAdminApi: in the read-only rollout phase the screens
+ * work and the reads answer, but every write is refused server-side with 409.
+ * Rendering a save button there would be a control that cannot work.
+ *
+ * This is presentation only. The server is the control - it refuses writes
+ * before resolving the actor, so hiding these changes no authorization.
+ */
+export function allowsAdminWrites(capabilities) {
+  return administrationIsUsable(capabilities)
+    && capabilities?.administrationWritesAvailable === true;
+}
+
+/**
+ * What to tell an administrator on a screen whose writes are switched off.
+ */
+export function readOnlyNotice(capabilities) {
+  if (!administrationIsUsable(capabilities)) {
+    return null;
+  }
+  if (allowsAdminWrites(capabilities)) {
+    return null;
+  }
+  return {
+    title: "Read-only",
+    detail:
+      "Security Administration is available for review only in this "
+      + "environment. Granting, revoking, suspension, re-linking and "
+      + "administrator appointment are switched off, so no change can be "
+      + "made from these screens.",
+  };
+}
+
 /** Copy for the unavailable screen. Plain, and never an error. */
 export function unavailableNotice(capabilities) {
   return {
@@ -133,6 +183,16 @@ export function systemStatusRows(capabilities, { activeGrants = undefined } = {}
       label: "Administration",
       value: usable ? "Available" : "Unavailable",
       tone: usable ? "active" : "inactive",
+    },
+    {
+      key: "administrationWrites",
+      label: "Write Operations",
+      // Stated explicitly so a read-only environment does not look
+      // broken: the screens work, and changing anything is switched off.
+      value: usable
+        ? (allowsAdminWrites(capabilities) ? "Enabled" : "Disabled (read-only)")
+        : "Unavailable",
+      tone: allowsAdminWrites(capabilities) ? "active" : "inactive",
     },
     {
       key: "activeGrants",

@@ -101,16 +101,17 @@ class MeCapabilitiesControllerTest {
     // --- Case: response body shape - exactly three boolean keys ---
 
     @Test
-    void theResponseHasExactlyThreeBooleanKeysAndNothingElse() throws Exception {
-        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(true));
+    void theResponseHasExactlyFourBooleanKeysAndNothingElse() throws Exception {
+        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(true, true, false));
 
         mockMvc.perform(get("/api/v1/me/capabilities").with(jwt()))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith("application/json"))
-                .andExpect(jsonPath("$.*", org.hamcrest.Matchers.hasSize(3)))
+                .andExpect(jsonPath("$.*", org.hamcrest.Matchers.hasSize(4)))
                 .andExpect(jsonPath("$.administrator").isBoolean())
                 .andExpect(jsonPath("$.enforcementEnabled").isBoolean())
                 .andExpect(jsonPath("$.administrationAvailable").isBoolean())
+                .andExpect(jsonPath("$.administrationWritesAvailable").isBoolean())
                 // Nothing that could identify the caller or leak a grant.
                 .andExpect(jsonPath("$.institutionalIdentifier").doesNotExist())
                 .andExpect(jsonPath("$.subject").doesNotExist())
@@ -122,7 +123,7 @@ class MeCapabilitiesControllerTest {
 
     @Test
     void theResponseIsNoStore() throws Exception {
-        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(false));
+        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(false, true, false));
 
         mockMvc.perform(get("/api/v1/me/capabilities").with(jwt()))
                 .andExpect(status().isOk())
@@ -133,22 +134,42 @@ class MeCapabilitiesControllerTest {
     // --- Administrator, enforcement on and off, end to end ---
 
     @Test
-    void anAdministratorWithEnforcementOffSeesTheToggleButNotAUsableScreen() throws Exception {
-        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(false));
+    void anAdministratorWithEnforcementOffStillGetsAUsableAdministrationScreen() throws Exception {
+        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(false, true, false));
 
         mockMvc.perform(get("/api/v1/me/capabilities").with(jwt()))
                 .andExpect(jsonPath("$.administrator").value(true))
                 .andExpect(jsonPath("$.enforcementEnabled").value(false))
-                .andExpect(jsonPath("$.administrationAvailable").value(false));
+                // The decoupling, asserted: administration is available even
+                // though record-level enforcement is off. This assertion was
+                // the inverse before, which encoded the old single-flag
+                // behaviour rather than a requirement.
+                .andExpect(jsonPath("$.administrationAvailable").value(true))
+                // Read-only: the surface answers, writes do not.
+                .andExpect(jsonPath("$.administrationWritesAvailable").value(false));
     }
 
     @Test
-    void anAdministratorWithEnforcementOnIsAllTrue() throws Exception {
-        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(true));
+    void administrationStaysUnavailableWhenOnlyEnforcementIsOn() throws Exception {
+        // Enforcement alone no longer opens the administrative surface.
+        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(true, false, false));
 
         mockMvc.perform(get("/api/v1/me/capabilities").with(jwt()))
                 .andExpect(jsonPath("$.administrator").value(true))
                 .andExpect(jsonPath("$.enforcementEnabled").value(true))
-                .andExpect(jsonPath("$.administrationAvailable").value(true));
+                .andExpect(jsonPath("$.administrationAvailable").value(false))
+                .andExpect(jsonPath("$.administrationWritesAvailable").value(false));
+    }
+
+    @Test
+    void anAdministratorWithWritesEnabledReportsWritesAvailable() throws Exception {
+        // The Phase 3 shape, reported correctly. Not enabled anywhere.
+        when(capabilities.current()).thenReturn(CapabilitiesResponse.administrator(false, true, true));
+
+        mockMvc.perform(get("/api/v1/me/capabilities").with(jwt()))
+                .andExpect(jsonPath("$.administrator").value(true))
+                .andExpect(jsonPath("$.enforcementEnabled").value(false))
+                .andExpect(jsonPath("$.administrationAvailable").value(true))
+                .andExpect(jsonPath("$.administrationWritesAvailable").value(true));
     }
 }

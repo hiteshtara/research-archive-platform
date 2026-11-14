@@ -7,6 +7,7 @@ import edu.bu.archive.application.authorization.PartialFamilyAccessException;
 import edu.bu.archive.application.authorization.ReauthenticationRequiredException;
 import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
 import edu.bu.archive.application.authorization.admin.LastArchiveAdministratorException;
+import edu.bu.archive.application.authorization.admin.AdministrationWritesDisabledException;
 import edu.bu.archive.application.authorization.admin.NotAnArchiveAdministratorException;
 import edu.bu.archive.application.authorization.admin.RelinkApprovalRequiredException;
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
@@ -232,6 +233,29 @@ public class GlobalExceptionHandler {
      * whose identity link is broken. No detail about the caller's own state is
      * returned either way.
      */
+    /*
+     * 409 rather than 403 or 404: with administration enabled the endpoint
+     * exists and the caller can read the same resources, so neither "not
+     * found" nor "you lack access" is true. The configuration refuses the
+     * write, and the request will succeed once writes are enabled.
+     */
+    @ExceptionHandler(AdministrationWritesDisabledException.class)
+    public ResponseEntity<Map<String, Object>> handleAdministrationWritesDisabled(
+            AdministrationWritesDisabledException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(
+                        body(
+                                HttpStatus.CONFLICT,
+                                "ADMINISTRATION_WRITES_DISABLED",
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
     @ExceptionHandler(NotAnArchiveAdministratorException.class)
     public ResponseEntity<Map<String, Object>> handleNotAnAdministrator(
             NotAnArchiveAdministratorException exception,

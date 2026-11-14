@@ -3,7 +3,7 @@ package edu.bu.archive.adapter.in.web.dto.me;
 /**
  * What the signed-in caller may do, as the server sees it.
  *
- * <p>Exactly three booleans, and deliberately nothing else. No grants, no
+ * <p>Exactly four booleans, and deliberately nothing else. No grants, no
  * institutional identifier, no Cognito subject, no membership dates, no
  * administrator roster, no auditing flag. A non-administrator learns only
  * {@code false}, which they already knew.
@@ -19,14 +19,17 @@ package edu.bu.archive.adapter.in.web.dto.me;
  *        membership
  * @param enforcementEnabled whether record-level enforcement is on.
  *        Reported only to an administrator - see {@link #denied()}
- * @param administrationAvailable {@code administrator && enforcementEnabled}:
- *        whether the administration screens can actually function, as
- *        opposed to merely being offered
+ * @param administrationAvailable whether the administrative API will
+ *        answer for this caller, i.e. the screens can function at all
+ * @param administrationWritesAvailable whether administrative WRITES are
+ *        permitted. False in the read-only rollout phase, where the
+ *        screens work but change nothing
  */
 public record CapabilitiesResponse(
         boolean administrator,
         boolean enforcementEnabled,
-        boolean administrationAvailable
+        boolean administrationAvailable,
+        boolean administrationWritesAvailable
 ) {
 
     /**
@@ -51,11 +54,30 @@ public record CapabilitiesResponse(
      * non-administrator has no screen whose behaviour depends on it.
      */
     public static CapabilitiesResponse denied() {
-        return new CapabilitiesResponse(false, false, false);
+        return new CapabilitiesResponse(false, false, false, false);
     }
 
-    /** An administrator's capabilities, given the live enforcement state. */
-    public static CapabilitiesResponse administrator(boolean enforcementEnabled) {
-        return new CapabilitiesResponse(true, enforcementEnabled, enforcementEnabled);
+    /**
+     * An administrator's capabilities.
+     *
+     * <p>{@code administrationAvailable} is no longer derived from
+     * {@code enforcementEnabled}. The two are independent: administration can
+     * be open while record-level enforcement stays off, which is the whole
+     * point of the separation. Record enforcement is still reported, because
+     * an administrator should be able to see that it is off.
+     */
+    public static CapabilitiesResponse administrator(
+            boolean enforcementEnabled,
+            boolean administrationEnabled,
+            boolean administrationWritesEnabled
+    ) {
+        return new CapabilitiesResponse(
+                true,
+                enforcementEnabled,
+                administrationEnabled,
+                // Never true without the surface being open; the properties
+                // object already enforces that, and this re-states it so a
+                // future caller cannot reintroduce the gap.
+                administrationEnabled && administrationWritesEnabled);
     }
 }
