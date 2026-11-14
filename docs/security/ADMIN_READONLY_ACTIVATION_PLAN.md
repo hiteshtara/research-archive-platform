@@ -308,3 +308,132 @@ No enforcement activation, no administrator writes, no V089, no migration,
 no grant or membership change, no RDS change, no Production access. Phase 3
 write safeguards (self-granting, grant expansion, administrator promotion)
 remain open and are why writes stay off.
+
+---
+
+## Appendix — the exact activation sequence
+
+Verified against DEV on 2026-11-13. The serving revision is **102** and its
+container carries **8** environment variables, **none** authorization-related:
+
+```
+APP_EXPLORER_ENABLED            APP_CORS_ALLOWED_ORIGINS
+SPRING_PROFILES_ACTIVE          APP_SEARCH_SEMANTIC_ENABLED
+COGNITO_ISSUER_URI              ARCHIVE_DOCUMENTS_BUCKET
+COGNITO_CLIENT_ID               APP_SEARCH_TIMING_ENABLED
+```
+
+That absence is the current proof that record enforcement and
+administration are both off. Activation adds exactly **one**.
+
+### A0 — preconditions
+
+```bash
+export AWS_PROFILE=bu-nprd
+aws sts get-caller-identity --query Account --output text    # expect 770203350335
+```
+
+PR #152 merged, deployed, serving and healthy. Record the serving revision
+as the rollback target.
+
+### A1 — derive a new revision, adding one variable
+
+Derived from the **serving** revision so nothing else can drift:
+
+```bash
+SERVING=$(aws ecs describe-services --region us-east-1 \
+  --cluster research-archive-platform-dev-api \
+  --services research-archive-platform-dev-api \
+  --query 'services[0].taskDefinition' --output text)
+
+aws ecs describe-task-definition --region us-east-1 \
+  --task-definition "$SERVING" --query 'taskDefinition' > /tmp/td.json
+```
+
+Then, in that JSON: drop the server-assigned fields
+(`taskDefinitionArn`, `revision`, `status`, `requiresAttributes`,
+`compatibilities`, `registeredAt`, `registeredBy`, `deregisteredAt`) and
+append **one** entry to `containerDefinitions[0].environment`:
+
+```json
+{ "name": "APP_AUTHORIZATION_ADMINISTRATION_ENABLED", "value": "true" }
+```
+
+Before registering, assert the diff is exactly that — the same
+object-comparison check used for revision 102, which proved only the image
+differed:
+
+- environment count **8 → 9**
+- no `*WRITES*` variable present
+- no `APP_AUTHORIZATION_ENFORCEMENT_ENABLED` present
+- image digest **unchanged**
+- cpu, memory, roles, log configuration unchanged
+
+```bash
+aws ecs register-task-definition --region us-east-1 \
+  --cli-input-json file:///tmp/td.json \
+  --query 'taskDefinition.revision' --output text
+```
+
+### A2 — deploy and wait
+
+```bash
+aws ecs update-service --region us-east-1 \
+  --cluster research-archive-platform-dev-api \
+  --service research-archive-platform-dev-api \
+  --task-definition research-archive-platform-dev-api:<new> \
+  --force-new-deployment
+
+aws ecs wait services-stable --region us-east-1 \
+  --cluster research-archive-platform-dev-api \
+  --services research-archive-platform-dev-api
+```
+
+Then confirm one deployment, 1/1 running, ALB target `healthy`, and
+`/actuator/health` returning `{"status":"UP"}`.
+
+### A3 — the decisive check, in one request
+
+```bash
+# with a real BU SSO session's bearer token
+curl -s https://api-dev.app-nprd.aws-cloud.bu.edu/api/v1/me/capabilities \
+  -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json' -i
+```
+
+Required:
+
+```json
+{ "administrator": true,
+  "enforcementEnabled": false,
+  "administrationAvailable": true,
+  "administrationWritesAvailable": false }
+```
+
+with `Cache-Control: no-store`. All four booleans in one response — this is
+the fastest way to see that administration is open while both enforcement
+and writes are off. If `enforcementEnabled` is anything but `false`, stop
+and roll back.
+
+### A4 — rollback, if needed
+
+```bash
+aws ecs update-service --region us-east-1 \
+  --cluster research-archive-platform-dev-api \
+  --service research-archive-platform-dev-api \
+  --task-definition research-archive-platform-dev-api:102 \
+  --force-new-deployment
+```
+
+The surface returns to 404. No code change, no data change, no migration,
+no revision deregistered. Nothing written during a read-only activation
+needs undoing, because nothing can be written.
+
+### Note on Terraform
+
+The image is unchanged, so the `api_image_digest` pin stays correct. But the
+task-definition **revision** moves, so Terraform's state goes one revision
+behind again and a plan will show the familiar `1 to add, 0 to change, 1 to
+destroy` replacement. That is the reconciliation in
+`docs/runbooks/deployment/IMAGE_PIN_UPDATE.md` and needs its own approval —
+it is not part of activation, and leaving it pending breaks nothing because
+`ignore_changes = [task_definition]` keeps the service where it is.
