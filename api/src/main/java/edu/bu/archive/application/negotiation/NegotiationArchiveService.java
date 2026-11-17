@@ -177,17 +177,25 @@ public class NegotiationArchiveService {
      * {@link NegotiationArchiveRepository#findNegotiations} does in SQL for
      * the list, so the workspace and the list agree.
      *
-     * <p>The association TYPE stays: it is the Negotiation's own column,
-     * shown and filterable on every row, and names no record.
+     * <p>Follow-up (QA review of #164): a hidden association is presented as
+     * no association - the archive's own "NO"/"None" type, exactly as
+     * {@link #NO_ASSOCIATION} and the list statement present it - and a
+     * genuine "NO" row drops its identifier (only the Negotiation's own
+     * document number), so the row cannot tell the two apart either.
      *
      * <p>Unchanged when unrestricted (enforcement off, or Central).
      */
     private NegotiationRowResponse withoutHiddenAssociation(NegotiationRowResponse row) {
-        if (recordAccess.unrestricted()
-                || associationVisible(row.negotiationAssociationTypeCode(), row.associatedDocumentId())) {
+        if (recordAccess.unrestricted()) {
             return row;
         }
-        boolean fromAward = "AWARD".equals(row.attributeSource());
+        boolean genuineNone = "NO".equals(row.negotiationAssociationTypeCode());
+        boolean visible = associationVisible(row.negotiationAssociationTypeCode(), row.associatedDocumentId());
+        if (visible && !genuineNone) {
+            return row;
+        }
+        boolean hidden = !visible;
+        boolean fromAward = hidden && "AWARD".equals(row.attributeSource());
         return new NegotiationRowResponse(
                 row.negotiationId(),
                 row.documentNumber(),
@@ -197,9 +205,11 @@ public class NegotiationArchiveService {
                 row.negotiationAgreementTypeId(),
                 row.negotiationAgreementTypeCode(),
                 row.negotiationAgreementTypeDescription(),
-                row.negotiationAssociationTypeId(),
-                row.negotiationAssociationTypeCode(),
-                row.negotiationAssociationTypeDescription(),
+                hidden
+                        ? repository.findNoAssociationTypeId().orElse(null)
+                        : row.negotiationAssociationTypeId(),
+                hidden ? NO_ASSOCIATION.associationTypeCode() : row.negotiationAssociationTypeCode(),
+                hidden ? NO_ASSOCIATION.associationTypeDescription() : row.negotiationAssociationTypeDescription(),
                 row.negotiatorPersonId(),
                 row.negotiatorFullName(),
                 row.negotiationStartDate(),
@@ -540,8 +550,10 @@ public class NegotiationArchiveService {
             List<String> documentNumbers
     ) {
         recordAccess.requireProvisioned();
+        // B4/H2 follow-up: the title is a resolved attribute, so an
+        // Award-sourced title of a hidden association is withheld here too.
         return repository.findSummariesForDocumentNumbers(
-                documentNumbers, recordAccess.negotiationScopeSql("n"));
+                documentNumbers, recordAccess.negotiationScopeSql("n"), associationVisibilitySql());
     }
 
 }

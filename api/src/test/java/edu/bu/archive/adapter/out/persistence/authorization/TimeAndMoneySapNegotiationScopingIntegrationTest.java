@@ -323,14 +323,14 @@ class TimeAndMoneySapNegotiationScopingIntegrationTest {
             statement.execute("""
                     INSERT INTO archive.negotiation (
                         negotiation_id, document_number,
-                        negotiation_association_type_code,
+                        negotiation_association_type_id, negotiation_association_type_code,
                         negotiation_association_type_description,
                         associated_document_id, negotiator_person_id, negotiator_full_name
                     ) VALUES
-                    (701, 'NDOC-701', 'AWD', 'Award',                  'KID-00002',  'P-NEG', 'Neg One'),
-                    (702, 'NDOC-702', 'AWD', 'Award',                  'ROOT-00001', 'P-NEG', 'Neg Two'),
-                    (703, 'NDOC-703', 'NO',  'None',                   'NDOC-703',   'P-NEG', 'Neg Three'),
-                    (704, 'NDOC-704', 'IP',  'Institutional Proposal', 'P-OUT',      'P-NEG', 'Neg Four')
+                    (701, 'NDOC-701', 11, 'AWD', 'Award',                  'KID-00002',  'P-NEG', 'Neg One'),
+                    (702, 'NDOC-702', 11, 'AWD', 'Award',                  'ROOT-00001', 'P-NEG', 'Neg Two'),
+                    (703, 'NDOC-703', 12, 'NO',  'None',                   'NDOC-703',   'P-NEG', 'Neg Three'),
+                    (704, 'NDOC-704', 13, 'IP',  'Institutional Proposal', 'P-OUT',      'P-NEG', 'Neg Four')
                     """);
             statement.execute("""
                     INSERT INTO archive.negotiation_search_attribute (
@@ -491,7 +491,7 @@ class TimeAndMoneySapNegotiationScopingIntegrationTest {
         // Visible associations and unassociated rows are untouched.
         assertThat(row(rows, 702L).associatedDocumentId()).isEqualTo("ROOT-00001");
         assertThat(row(rows, 702L).title()).isEqualTo("Root award");
-        assertThat(row(rows, 703L).associatedDocumentId()).isEqualTo("NDOC-703");
+        assertThat(row(rows, 703L).associatedDocumentId()).as("a genuine NO identifier is withheld too, as on /associated-record").isNull();
         assertThat(row(rows, 703L).title()).isEqualTo("Plain neg");
 
         // The workspace row agrees with the list.
@@ -564,7 +564,7 @@ class TimeAndMoneySapNegotiationScopingIntegrationTest {
                     };
                     assertThat(listed.associatedDocumentId())
                             .as("%s negotiation %s: SQL redaction vs canSee", caller, listed.negotiationId())
-                            .isEqualTo(visible ? raw.associatedDocumentId() : null);
+                            .isEqualTo(visible && !"NO".equals(raw.negotiationAssociationTypeCode()) ? raw.associatedDocumentId() : null);
                 }
                 return null;
             });
@@ -630,7 +630,96 @@ class TimeAndMoneySapNegotiationScopingIntegrationTest {
                 assertThat(workspace).as("%s workspace %s", caller, id)
                         .isEqualTo(permitAll.findWorkspace(id));
             }
+            for (String type : List.of("Award", "None")) {
+                PageResponse<NegotiationSummaryResponse> byType =
+                        as(caller, access -> negotiation(access).findPage(associationType(type), 0, 25));
+                assertThat(byType).as("%s associationType=%s", caller, type)
+                        .isEqualTo(permitAll.findPage(associationType(type), 0, 25));
+            }
+            Object semantic = as(caller, access -> negotiation(access).findSummariesForDocumentNumbers(SEMANTIC_DOCS));
+            assertThat(semantic).as("%s semantic summaries", caller)
+                    .isEqualTo(permitAll.findSummariesForDocumentNumbers(SEMANTIC_DOCS));
         }
+        assertThat(permitAll.findSummariesForDocumentNumbers(SEMANTIC_DOCS))
+                .extracting(edu.bu.archive.adapter.out.persistence.NegotiationSemanticSummaryRow::title)
+                .contains("Kid award title");
+    }
+
+    private static final List<String> SEMANTIC_DOCS = List.of("NDOC-701", "NDOC-702", "NDOC-703", "NDOC-704");
+
+    /**
+     * QA review of #164 (MEDIUM): Global Search's semantic/related enrichment
+     * reads the Negotiation title through findSummariesForDocumentNumbers,
+     * whose resolved-attribute join was not rewritten - a department caller
+     * got title 'Kid award title' for NDOC-701 while list and workspace
+     * returned null.
+     */
+    @Test
+    void semanticEnrichmentDoesNotLeakHiddenAwardTitle() {
+        List<edu.bu.archive.adapter.out.persistence.NegotiationSemanticSummaryRow> rows =
+                as(DEPT, access -> negotiation(access).findSummariesForDocumentNumbers(SEMANTIC_DOCS));
+
+        assertThat(rows).extracting(edu.bu.archive.adapter.out.persistence.NegotiationSemanticSummaryRow::documentNumber)
+                .containsExactlyInAnyOrder("NDOC-701", "NDOC-702", "NDOC-703", "NDOC-704");
+        assertThat(rows.stream().filter(r -> r.documentNumber().equals("NDOC-701")).findFirst().orElseThrow().title())
+                .as("NDOC-701's title was resolved FROM the hidden Award KID-00002")
+                .isNull();
+        assertThat(rows.stream().filter(r -> r.documentNumber().equals("NDOC-702")).findFirst().orElseThrow().title())
+                .isEqualTo("Root award");
+        assertThat(rows.stream().filter(r -> r.documentNumber().equals("NDOC-703")).findFirst().orElseThrow().title())
+                .isEqualTo("Plain neg");
+        for (Caller caller : SCOPED) {
+            assertThat(String.valueOf((Object) as(caller, access ->
+                    negotiation(access).findSummariesForDocumentNumbers(SEMANTIC_DOCS))))
+                    .as("%s semantic summaries", caller)
+                    .doesNotContain("Kid award title");
+        }
+    }
+
+    /**
+     * QA review of #164 (LOW): a hidden association's row still said
+     * 'AWD'/'Award' while /associated-record said 'NO'/'None'. The row type,
+     * the associationType filter and free text on the type now agree with
+     * the redacted response.
+     */
+    @Test
+    void hiddenAssociationRowTypeMatchesRedactedAssociatedRecord() {
+        List<NegotiationSummaryResponse> rows = summaries(DEPT, NegotiationSearchFilters.none());
+        NegotiationSummaryResponse none = row(rows, 703L);
+
+        for (long hidden : List.of(701L, 704L)) {
+            NegotiationSummaryResponse listed = row(rows, hidden);
+            assertThat(List.of(String.valueOf(listed.negotiationAssociationTypeId()),
+                    String.valueOf(listed.negotiationAssociationTypeCode()),
+                    String.valueOf(listed.negotiationAssociationTypeDescription()),
+                    String.valueOf(listed.associatedDocumentId())))
+                    .as("list row %s: association presented as none", hidden)
+                    .containsExactly(String.valueOf(none.negotiationAssociationTypeId()), "NO", "None", "null");
+
+            NegotiationRowResponse workspace = as(DEPT, access -> negotiation(access).findWorkspace(hidden).current());
+            assertThat(List.of(String.valueOf(workspace.negotiationAssociationTypeId()),
+                    String.valueOf(workspace.negotiationAssociationTypeCode()),
+                    String.valueOf(workspace.negotiationAssociationTypeDescription()),
+                    String.valueOf(workspace.associatedDocumentId())))
+                    .as("workspace row %s: association presented as none", hidden)
+                    .containsExactly("12", "NO", "None", "null");
+
+            NegotiationAssociatedRecordResponse associated =
+                    as(DEPT, access -> negotiation(access).findAssociatedRecord(hidden));
+            assertThat(workspace.negotiationAssociationTypeCode()).isEqualTo(associated.associationTypeCode());
+            assertThat(workspace.negotiationAssociationTypeDescription())
+                    .isEqualTo(associated.associationTypeDescription());
+        }
+
+        // The type filter and type free text see the same thing the row shows.
+        assertThat(ids(DEPT, associationType("Award"))).containsExactly(702L);
+        assertThat(ids(DEPT, associationType("Institutional Proposal"))).isEmpty();
+        assertThat(ids(DEPT, associationType("None"))).containsExactlyInAnyOrder(701L, 703L, 704L);
+        assertThat(ids(DEPT, NegotiationSearchFilters.ofQuery("Institutional"))).isEmpty();
+
+        // A visible association keeps its real type.
+        assertThat(row(rows, 702L).negotiationAssociationTypeCode()).isEqualTo("AWD");
+        assertThat(row(rows, 702L).negotiationAssociationTypeDescription()).isEqualTo("Award");
     }
 
     // =====================================================================
@@ -774,6 +863,11 @@ class TimeAndMoneySapNegotiationScopingIntegrationTest {
     private static NegotiationSearchFilters associationId(String value) {
         return new NegotiationSearchFilters(
                 null, null, null, null, null, null, null, null, value, null, null, null, null);
+    }
+
+    private static NegotiationSearchFilters associationType(String value) {
+        return new NegotiationSearchFilters(
+                null, null, null, null, null, null, null, value, null, null, null, null, null);
     }
 
     private static List<NegotiationSummaryResponse> summaries(Caller caller, NegotiationSearchFilters filters) {
