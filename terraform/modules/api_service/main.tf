@@ -334,6 +334,49 @@ resource "aws_iam_role_policy" "task_bedrock" {
   policy = data.aws_iam_policy_document.task_bedrock.json
 }
 
+# Operator identity enrollment (adapter/out/cognito/CognitoIdentityProviderDirectory)
+# corroborates the Cognito subject an operator types against the real user
+# pool before any authz.identity_link row is written.
+#
+# AdminGetUser is the ONLY action, and deliberately so. ListUsers would also
+# resolve a subject - via a sub="..." filter - but it can enumerate the entire
+# pool, and it is not needed: verified against the live DEV pool on
+# 2026-11-03, Cognito resolves a sub supplied in AdminGetUser's Username
+# field even for federated users, whose username is BUShibboleth_<name>@bu.edu
+# and therefore differs from their sub. Of the 13 DEV users, the 6 federated
+# ones differ; the 7 native ones have username == sub.
+#
+# Read-only: no Admin*User write action, no group action, no ListUsers. The
+# API service shares this task role with the grant-admin task, so this grant
+# is also reachable by the running service - which is why it is narrowed to a
+# single read action on a single pool and nothing else. The Spring bean is
+# additionally behind @Profile("aws") and is only constructed by the
+# grant-admin task; IAM is the outer boundary, not the only one.
+data "aws_iam_policy_document" "task_cognito_enrollment" {
+  count = var.cognito_user_pool_arn == null ? 0 : 1
+
+  statement {
+    sid    = "ReadOneUserForIdentityEnrollment"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminGetUser"
+    ]
+
+    resources = [
+      var.cognito_user_pool_arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_cognito_enrollment" {
+  count = var.cognito_user_pool_arn == null ? 0 : 1
+
+  name   = "${var.project_name}-${var.environment}-api-cognito-enrollment"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_cognito_enrollment[0].json
+}
+
 #
 # ECS cluster, task definition and service
 #

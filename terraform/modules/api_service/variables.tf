@@ -66,6 +66,12 @@ variable "cognito_issuer_uri" {
   type        = string
 }
 
+variable "cognito_user_pool_arn" {
+  description = "ARN of the Cognito User Pool the operator identity-enrollment task may READ (cognito-idp:AdminGetUser only). Null disables the grant entirely, which makes a confirmed enrollment refuse rather than proceed unverified."
+  type        = string
+  default     = null
+}
+
 variable "cognito_client_id" {
   description = "Cognito app client ID Spring Security validates the JWT client_id claim against (app.security.cognito.client-id)."
   type        = string
