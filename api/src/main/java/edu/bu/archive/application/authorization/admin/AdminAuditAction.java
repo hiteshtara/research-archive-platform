@@ -25,5 +25,13 @@ public enum AdminAuditAction {
     RELINK_APPROVAL_REVOKED,
     IDENTITY_UNLINKED,
     IDENTITY_SUSPENDED,
-    IDENTITY_RESTORED
+    IDENTITY_RESTORED,
+    // A-category control 3 (V090, held back): one row per approval transition.
+    PRIVILEGE_APPROVAL_REQUESTED,
+    PRIVILEGE_APPROVAL_GRANTED,
+    PRIVILEGE_APPROVAL_REVOKED,
+    PRIVILEGE_APPROVAL_CONSUMED,
+    PRIVILEGE_APPROVAL_EXPIRED,
+    /** The one-time operator seating of the second administrator (design 11.1). */
+    ADMIN_ROLE_SECOND_BOOTSTRAPPED
 }

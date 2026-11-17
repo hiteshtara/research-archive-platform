@@ -26,8 +26,12 @@ public class JdbcAdminRoleRepository implements AdminRoleRepository {
      * Arbitrary but fixed: every bootstrap attempt must choose the same value
      * or they do not serialise against each other. Scoped to the transaction,
      * so it cannot leak if a caller fails.
+     *
+     * <p>Package-visible so the second-administrator bootstrap
+     * ({@link JdbcAdministratorSeatStore}) takes the SAME lock: a first and a
+     * second bootstrap running together must serialise against each other too.
      */
-    private static final long BOOTSTRAP_LOCK_KEY = 8_262_027_431_001L;
+    static final long BOOTSTRAP_LOCK_KEY = 8_262_027_431_001L;
 
     private static final String COLUMNS = """
             admin_member_id, institutional_identifier, status,

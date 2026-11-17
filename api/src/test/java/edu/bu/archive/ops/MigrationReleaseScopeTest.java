@@ -102,6 +102,18 @@ class MigrationReleaseScopeTest {
     }
 
     @Test
+    @DisplayName("V090 specifically is held back")
+    void v090IsHeldBack() throws IOException {
+        assertThat(versionsIn(migrationsDirectory()))
+                .as("the privilege-approval migration must not reach a shared database "
+                        + "before its DEV application is separately approved")
+                .doesNotContain(90);
+        assertThat(versionsIn(pendingDirectory()))
+                .as("and it must still exist, so phase 2 can release it unchanged")
+                .contains(90);
+    }
+
+    @Test
     @DisplayName("the applied directory still has no gap below the ceiling")
     void theReleasedSequenceHasNoUnexplainedGap() throws IOException {
         /*
