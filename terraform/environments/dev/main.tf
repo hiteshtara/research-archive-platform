@@ -412,7 +412,11 @@ locals {
   # (VITE_EXPLORER_ENABLED=true + APP_EXPLORER_ENABLED unset -> the nav/
   # route rendered but every request 404'd, masked as a 403 until the
   # /error permitAll fix). Never set in test/prod.
-  explorer_enabled_ui = true
+  # Disabled 2026-11-17 (owner-approved, QA finding H4): Explorer is not in
+  # the RAP release scope and its endpoints have no record-level
+  # authorization. API side: APP_EXPLORER_ENABLED = "false" in tfvars.
+  # See docs/operations/EXPLORER_DEV_DISABLEMENT.md.
+  explorer_enabled_ui = false
 }
 
 module "amplify" {
