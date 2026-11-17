@@ -83,6 +83,7 @@ class ActivityAuditEndToEndIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        ActivityAuditFixture.attachmentStorage(registry);
     }
 
     @BeforeAll
@@ -99,7 +100,7 @@ class ActivityAuditEndToEndIntegrationTest {
     @Autowired
     private AuthorizationProperties authorization;
 
-    private static final long ATTACHMENT_ID = 4242L;
+    private static final long ATTACHMENT_ID = ActivityAuditFixture.ATTACHMENT_ID;
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /** One activity row, as an auditor would read it. */
@@ -278,7 +279,9 @@ class ActivityAuditEndToEndIntegrationTest {
         enforcement(true);
         Instant before = Instant.now().minusSeconds(1);
 
-        perform(module.download(module.permittedId, ATTACHMENT_ID), ActivityAuditFixture.linkedUser());
+        var response = mockMvc.perform(get(module.download(module.permittedId, ATTACHMENT_ID))
+                .with(ActivityAuditFixture.linkedUser())).andReturn();
+        assertThat(response.getResponse().getStatus()).as("the file was really released").isEqualTo(200);
 
         List<Row> downloads = rows("ATTACHMENT_DOWNLOADED");
         assertThat(downloads)
@@ -287,18 +290,57 @@ class ActivityAuditEndToEndIntegrationTest {
         Row row = downloads.get(0);
         assertThat(row.actor()).as("actor").isEqualTo(ActivityAuditFixture.INSTITUTIONAL_ID);
         assertThat(row.resourceType()).as("target module").isEqualTo(module.name());
-        assertThat(row.resourceKey()).as("target record id")
-                .isEqualTo(String.valueOf(module.permittedId));
+        assertThat(row.resourceKey())
+                .as("target record: the same business key a view of it carries")
+                .isEqualTo(module.permittedKey);
+        assertThat(row.detailMap()).as("target record id")
+                .containsEntry("recordId", (int) module.permittedId);
         assertThat(row.detailMap()).as("target attachment id")
                 .containsEntry("attachmentId", (int) ATTACHMENT_ID);
         assertThat(row.occurredAt()).as("timestamp")
                 .isBetween(before, Instant.now().plusSeconds(1));
         assertThat(row.outcome()).as("outcome").isEqualTo("PERMITTED");
         assertThat(row.correlationId()).as("correlation id").isNotBlank();
+        assertThat(rows("RECORD_VIEWED")).singleElement()
+                .extracting(Row::resourceKey, Row::correlationId)
+                .as("the view and the download of one request share key and correlation id")
+                .containsExactly(module.permittedKey, row.correlationId());
 
         assertThat(row.detailMap().keySet())
                 .as("a download row holds ids and the release phase - no file name, no content")
                 .isSubsetOf(Set.of("phase", "attachmentId", "recordId"));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Module.class)
+    @DisplayName("another record's attachment id, requested under a permitted record, writes no download row")
+    void aForeignAttachmentIdWritesNoDownloadRow(Module module) throws Exception {
+        enforcement(true);
+
+        var response = mockMvc.perform(get(module.download(module.permittedId,
+                        ActivityAuditFixture.FOREIGN_ATTACHMENT_ID))
+                .with(ActivityAuditFixture.linkedUser())).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(404);
+        assertThat(rows("ATTACHMENT_DOWNLOADED"))
+                .as("%s: the attachment does not belong to the record, nothing was released", module)
+                .isEmpty();
+        assertThat(rows(null)).noneMatch(row ->
+                row.action().equals("ATTACHMENT_DOWNLOADED") && row.outcome().equals("PERMITTED"));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Module.class)
+    @DisplayName("an attachment id that does not exist writes no download row")
+    void aMissingAttachmentIdWritesNoDownloadRow(Module module) throws Exception {
+        enforcement(true);
+
+        var response = mockMvc.perform(get(module.download(module.permittedId,
+                        ActivityAuditFixture.MISSING_ATTACHMENT_ID))
+                .with(ActivityAuditFixture.linkedUser())).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(404);
+        assertThat(rows("ATTACHMENT_DOWNLOADED")).as("%s: nothing was released", module).isEmpty();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -361,7 +403,9 @@ class ActivityAuditEndToEndIntegrationTest {
                         .andReturn().getResponse();
                 assertThat(response.getStatus()).as(release).isEqualTo(503);
                 assertThat(response.getContentAsString()).contains("AUDIT_UNAVAILABLE")
-                        .doesNotContain("simulated audit store outage");
+                        .doesNotContain("simulated audit store outage")
+                        .as("not a byte of the file reached the caller")
+                        .doesNotContain(ActivityAuditFixture.SECRET_CONTENT);
                 assertThat(response.getHeader("Content-Disposition"))
                         .as("%s: no file was released", release).isNull();
                 assertThat(response.getContentType()).doesNotContain("pdf");

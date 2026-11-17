@@ -49,7 +49,7 @@ The six fields the requirement asks for, and nothing else:
 | `occurred_at` | partition key |
 | `actor` | the **institutional identifier** — the same key grants are held on, so a reassigned login name is not mistaken for the same person, resolved exactly as the administrative API resolves its actor (`RequestActivityContext`). An **authenticated caller with no resolvable link** (not provisioned, revoked, suspended, ambiguous) is recorded as `cognito-sub:<subject>` — the opaque Cognito subject, never the token, a login name or an email — so their activity is still attributable. `NULL` **only** for a genuinely unauthenticated request. Never a token, never a raw login name |
 | `action` | one of five, CHECK-constrained: `RECORD_VIEWED`, `RECORD_ACCESS_DENIED`, `ATTACHMENT_DOWNLOADED`, `EXPORT_GENERATED`, `SEARCH_PERFORMED` |
-| `resource_type` / `resource_key` | the module (`AWARD`, `PROPOSAL`, `SUBAWARD`, `NEGOTIATION`) and its business key: award number, proposal number, `subaward_code`, negotiation id. A view addressed by row id also carries `detail.recordId` (the `award_id` / `proposal_id` / `subaward_id`). **Downloads** carry the record id from the download path as `resource_key` and the attachment id as `detail.attachmentId` — ids only, never a file name or content |
+| `resource_type` / `resource_key` | the module (`AWARD`, `PROPOSAL`, `SUBAWARD`, `NEGOTIATION`) and its business key: award number, proposal number, `subaward_code`, negotiation id. A view addressed by row id also carries `detail.recordId` (the `award_id` / `proposal_id` / `subaward_id`). **Downloads use the same business key** as a view of that record, plus `detail.recordId` (the row id in the download path) and `detail.attachmentId` — ids only, never a file name, description or content. View and download rows for one record therefore share `resource_key` and, within one request, `correlation_id` |
 | `outcome` | `PERMITTED` / `DENIED` / `ERROR` |
 | `reason` | the engine's own vocabulary — an `AccessReason` or a denial code. Never prose |
 | `correlation_id` | one id per HTTP request, shared by every row that request writes; reuses the Global Search timing `cid` when the request has one, otherwise a random UUID. Never derived from caller input |
@@ -196,7 +196,7 @@ throw, because it never chooses the path.
 |---|---|---|
 | `RECORD_VIEWED` | `RecordAuthorizationService.audited` / `auditUnenforcedView`, reached only from the public `requireAward`, `requireAwardNumber`, `requireEveryAwardVersion`, `requireProposal`, `requireProposalNumber`, `requireEveryProposalVersion`, `requireSubaward`, `requireNegotiation` | wired with actor + correlation id (2026-11-17) |
 | `RECORD_ACCESS_DENIED` | the same place, on the refusal branch (including not-provisioned / identity refusals) | wired with actor + correlation id (2026-11-17) |
-| `ATTACHMENT_DOWNLOADED` | `AttachmentAuthorizationService.requireAttachmentDownload(auth, type, recordId, attachmentId)`, called by the Award, Proposal, Subaward and Negotiation download endpoints | wired with actor + attachment id (2026-11-17) |
+| `ATTACHMENT_DOWNLOADED` | `AttachmentAuthorizationService.recordAttachmentDownload(type, recordId, attachmentId, opened)`, called by the Award, Proposal, Subaward and Negotiation download endpoints after the service resolved the download | wired with actor + attachment id (2026-11-17) |
 | `EXPORT_GENERATED` | `AwardV1Controller.report` and `reportWithAttachments`, via `recordExport` | wired with actor (2026-11-17) |
 | `SEARCH_PERFORMED` | `GlobalSearchService`, `DocumentSearchService`, `AttachmentSearchService`, `AwardEvidenceSearchService` | wired with actor (2026-11-17) |
 
@@ -221,7 +221,11 @@ collection ON — 24 of 24 tests failed:
    Central and uses `INHERITED`, non-reportable decisions).
 4. **A download refused at the record level still wrote
    `ATTACHMENT_DOWNLOADED / PERMITTED`**, because the release row was written
-   before the record-level check ran.
+   before the record-level check ran. Independent QA (2026-11-17) found the
+   same false row for another record's attachment id, a missing attachment and
+   a missing object - all of which 404 in the service after the row was
+   written. Fixed by recording only after the service has resolved the
+   download (below).
 
 All four are fixed; the same test file passes 24/24 on the fix.
 
@@ -238,21 +242,33 @@ weaker guarantee wearing a stronger name. Every release row carries
 `detail.phase = "release_authorized"` so the limitation is visible in the data
 rather than only here.
 
-### Ordering: the record decision, then the audit, then the file
+### Ordering: decide, resolve, audit, then stream
 
-For downloads, with collection on, the **record-level decision for the owning
-record runs first** (so a refused caller never produces a release row), then
-the release row is written, and only then is the attachment resolved and
-streamed. For exports the recorder is called after the report data (and so the
-record decision) is built and before the response body exists.
+For a **download** the endpoint:
 
-For downloads and exports the recorder is called **before** the attachment is
-resolved and before the response body exists. Under the FAIL_CLOSED tier a
-failed audit write therefore throws out of the gate and **no byte is
-released** - which is the requirement, and the reason downloads have their own
-method rather than a flag on the listing gate. A listing must not be recorded
-as a download, and a download must not be served on a listing's weaker
+1. applies the attachment-viewer group gate (first, before any repository
+   call);
+2. calls the archive service, which decides the record (recording that view
+   or refusal), confirms the attachment id **belongs to that record**,
+   confirms the archived object exists and opens it;
+3. writes the `ATTACHMENT_DOWNLOADED` row
+   (`AttachmentAuthorizationService.recordAttachmentDownload`);
+4. only then creates the response body that streams the bytes.
+
+So a `PERMITTED` release row exists only for a release that is about to
+happen: a refused record, a foreign attachment id, a missing attachment or a
+missing object each throws out of step 2 and leaves **no** download row. Under
+the FAIL_CLOSED tier a failed write in step 3 closes the opened object and
+answers `503 AUDIT_UNAVAILABLE`: **no byte is released**, because the body that
+would stream it does not exist yet.
+
+For an **export** the recorder is called after the report data (and so the
+record decision) is built and before the response body exists - the same
 guarantee.
+
+A listing must not be recorded as a download, and a download must not be
+served on a listing's weaker guarantee - which is why downloads have their own
+recording method rather than a flag on the listing gate.
 
 `AttachmentSearchService.searchAttachments` wraps its three record-type
 branches so the search is recorded once, around all of them - a new branch
@@ -282,6 +298,17 @@ Every constructor that does not take a recorder defaults to
 `ArchiveActivityRecorder.disabled(clock)`, so wiring a call site changes
 nothing until collection is switched on.
 
+### Known characteristic: view volume (for retention sizing)
+
+A record view is recorded **once per record per HTTP request**, not once per
+page. A workspace page load issues a request per section (summary, versions,
+people, amounts, terms, attachments, ...) - roughly **20 requests for an Award
+workspace** - and each section request that gates on the record writes its own
+`RECORD_VIEWED` row, all with the same actor and key but different correlation
+ids. Expect on the order of 20 rows per workspace open. This is documented,
+not changed: collapsing it would need a page-level view signal the API does not
+have. BU retention sizing should use rows-per-page-open, not one row per view.
+
 ## 6. What is NOT built yet
 
 - **No scheduled retention job.** A tested procedure exists
@@ -309,7 +336,7 @@ PostgreSQL: partitions route by month, the default partition catches the rest,
 the append-only trigger fires on UPDATE and DELETE, and both CHECK constraints
 reject unknown values.
 
-`ActivityAuditEndToEndIntegrationTest` — 28 tests (24 at the main-branch proof, plus related-list parent-only ×2, no-secrets-in-rows and FAIL_CLOSED-on-audit-outage), real HTTP through the real
+`ActivityAuditEndToEndIntegrationTest` — 36 tests (24 at the main-branch proof, plus related-list parent-only ×2, no-secrets-in-rows, FAIL_CLOSED-on-audit-outage, and foreign / missing attachment id ×4 modules each), real HTTP through the real
 controllers and wiring, V089 applied, collection ON, synthetic identities: for
 each of Award, Proposal, Subaward and Negotiation a permitted view writes
 exactly one `RECORD_VIEWED` row asserting all five fields (actor, action,

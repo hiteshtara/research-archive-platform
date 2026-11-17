@@ -172,9 +172,18 @@ public class ArchiveActivityRecorder {
      */
     public void attachmentDownloaded(String resourceType, String resourceKey, String reason,
                                      Long attachmentId) {
-        ActivityAuditEvent event = event(ActivityAction.ATTACHMENT_DOWNLOADED, resourceType,
-                resourceKey, ActivityOutcome.PERMITTED, reason)
-                .withDetail("phase", RELEASE_PHASE);
+        attachmentDownloaded(resourceType, resourceKey, reason, null, attachmentId);
+    }
+
+    /**
+     * As above, also naming the archive row id of the owning record, so a
+     * download row keyed by business key can be joined to the exact version.
+     */
+    public void attachmentDownloaded(String resourceType, String resourceKey, String reason,
+                                     Long recordId, Long attachmentId) {
+        ActivityAuditEvent event = withRecordId(event(ActivityAction.ATTACHMENT_DOWNLOADED,
+                resourceType, resourceKey, ActivityOutcome.PERMITTED, reason)
+                .withDetail("phase", RELEASE_PHASE), recordId);
         if (attachmentId != null) {
             event = event.withDetail("attachmentId", attachmentId);
         }

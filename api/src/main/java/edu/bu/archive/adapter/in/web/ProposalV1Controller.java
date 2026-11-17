@@ -191,11 +191,15 @@ public class ProposalV1Controller {
 
             Authentication authentication
     ) {
-        // SEC-008: audited before the attachment is resolved or streamed.
-        attachmentAuthorizationService.requireAttachmentDownload(
-                authentication, "PROPOSAL", proposalId, attachmentId);
+        attachmentAuthorizationService.requireAttachmentAccess(authentication);
         ProposalAttachmentDownload download =
                 service.downloadAttachment(proposalId, attachmentId);
+        // SEC-008: recorded only once the service has authorised the record
+        // and confirmed this attachment belongs to it and exists - and still
+        // before the response body exists, so a failed (FAIL_CLOSED) audit
+        // write closes the object and releases nothing.
+        attachmentAuthorizationService.recordAttachmentDownload(
+                "PROPOSAL", proposalId, attachmentId, download.stream());
 
         StreamingResponseBody body = output -> {
             try (var input = download.stream()) {
