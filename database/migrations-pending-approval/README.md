@@ -24,6 +24,20 @@ available that does not require changing the runner.
 | File | Held for | Released when |
 |---|---|---|
 | `V089__archive_activity_audit.sql` | SEC-008 activity audit | retention period, failure policies, privacy defaults and the `GRANT INSERT` are all approved |
+| `V090__privilege_approval.sql` | A-category control 3: independent approval for privilege escalation (`docs/security/A_CATEGORY_CONTROLS_DESIGN.md` §3, §9) | the approval workflow (phase 2 gates in `ArchiveAdminService`) is reviewed, its DEV application is explicitly approved, and `database/roles/archive_api_privilege_approval_grant.sql` is approved alongside it |
+
+V089 and V090 are independent: V090 touches only `authz.privilege_approval`
+(plus a read-only foreign key to `authz.access_grant`), V089 only the
+activity-audit objects. Either can be released without the other. Because
+both sit above the highest released version (V088), holding them back leaves
+no gap in `database/migrations/`, so the ETL runner neither warns nor fails.
+If V090 is released while V089 is still held, V089 becomes a gap below it and
+must be added to `RESERVED_MIGRATION_VERSIONS` in
+`etl/archive_etl/upload/migrations.py` in that same PR (design §9).
+
+Each held-back migration has a hand-run rollback in `database/rollback/` and,
+where the API needs a privilege on its objects, a separate grant script in
+`database/roles/` that refuses to run before the migration exists.
 
 ## Moving one back
 
