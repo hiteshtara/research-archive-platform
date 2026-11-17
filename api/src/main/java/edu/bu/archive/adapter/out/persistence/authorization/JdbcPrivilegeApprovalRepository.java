@@ -26,6 +26,13 @@ import edu.bu.archive.application.authorization.admin.approval.PrivilegeApproval
  * {@code authz.privilege_approval} (V090, held back in
  * {@code database/migrations-pending-approval/}).
  *
+ * <p><strong>Time.</strong> Every validity comparison uses
+ * {@code clock_timestamp()} - the wall clock - never {@code CURRENT_TIMESTAMP},
+ * which is the transaction START and would let a long-open transaction treat
+ * an expired approval as live. No statement here writes a {@code *_at} column:
+ * the V090 trigger stamps them from the same wall clock and refuses a supplied
+ * value.
+ *
  * <p>Parameters that may be NULL are always CAST: PostgreSQL cannot infer the
  * type of a bare NULL in {@code IS NOT DISTINCT FROM}, and the NULL-safe
  * comparison is the point - "no expiry" must match "no expiry" and nothing else.
@@ -125,13 +132,12 @@ public class JdbcPrivilegeApprovalRepository implements PrivilegeApprovalReposit
                         UPDATE authz.privilege_approval
                            SET status = 'APPROVED',
                                approved_by = :approvedBy,
-                               approved_at = CURRENT_TIMESTAMP,
                                approval_reason = :approvalReason
                          WHERE approval_id = :id
                            AND status = 'PENDING'
                            AND requested_by <> :approvedBy
                            AND subject_identifier <> :approvedBy
-                           AND valid_until > CURRENT_TIMESTAMP
+                           AND valid_until > clock_timestamp()
                            AND """ + APPROVER_ELIGIBLE.formatted(":approvedBy", ":approvedBy"))
                 .param("approvedBy", approvedBy)
                 .param("approvalReason", approvalReason)
@@ -146,7 +152,6 @@ public class JdbcPrivilegeApprovalRepository implements PrivilegeApprovalReposit
                         UPDATE authz.privilege_approval
                            SET status = 'REVOKED',
                                revoked_by = :revokedBy,
-                               revoked_at = CURRENT_TIMESTAMP,
                                revocation_reason = :reason
                          WHERE approval_id = :id AND status IN ('PENDING', 'APPROVED')
                         """)
@@ -173,11 +178,10 @@ public class JdbcPrivilegeApprovalRepository implements PrivilegeApprovalReposit
         return bind(jdbc.sql("""
                         UPDATE authz.privilege_approval
                            SET status = 'CONSUMED',
-                               consumed_at = CURRENT_TIMESTAMP,
                                consumed_by = :consumedBy
                          WHERE approval_id = :id
                            AND status = 'APPROVED'
-                           AND valid_until > CURRENT_TIMESTAMP
+                           AND valid_until > clock_timestamp()
                            AND """ + TARGET_KEY + """
                            AND include_descendants IS NOT DISTINCT FROM CAST(:includeDescendants AS BOOLEAN)
                            AND expires_at IS NOT DISTINCT FROM CAST(:expiresAt AS TIMESTAMPTZ)
@@ -199,10 +203,9 @@ public class JdbcPrivilegeApprovalRepository implements PrivilegeApprovalReposit
                         UPDATE authz.privilege_approval
                            SET status = 'REVOKED',
                                revoked_by = :expiredActor,
-                               revoked_at = CURRENT_TIMESTAMP,
                                revocation_reason = 'expired: 72 hours passed since the request'
                          WHERE status IN ('PENDING', 'APPROVED')
-                           AND valid_until <= CURRENT_TIMESTAMP
+                           AND valid_until <= clock_timestamp()
                            AND """ + TARGET_KEY + """
                         RETURNING approval_id
                         """), action, subject, binding)

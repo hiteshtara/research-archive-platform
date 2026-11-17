@@ -29,9 +29,11 @@
 --   * 72h expiry:    valid_until = requested_at + 72 hours, set by the
 --                    trigger and pinned by a CHECK (section 3.2b, D2)
 --   * the database owns the clock: requested_at, approved_at, consumed_at
---                    and revoked_at are set to now() by the trigger and a
---                    caller-supplied value is refused; approve and consume
---                    require valid_until > now() (QA M1)
+--                    and revoked_at are stamped by the trigger from the WALL
+--                    CLOCK (clock_timestamp(), not the transaction start)
+--                    and any caller-supplied value is refused; approve and
+--                    consume require valid_until > that same instant, so a
+--                    long-open transaction cannot outlive expiry (QA M1/LOW)
 --   * approver eligibility: approved_by must be an ACTIVE, unsuspended
 --                    ARCHIVE_ADMIN at approval AND at consumption
 --   * own sign-in:   a LINK_PRIVILEGED approver must not hold an active link
@@ -79,7 +81,9 @@ CREATE TABLE IF NOT EXISTS authz.privilege_approval (
     proposed_kuali_person_id TEXT,
 
     requested_by        TEXT NOT NULL,
-    requested_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- No default: the trigger stamps it from the wall clock and refuses a
+    -- caller-supplied value. NOT NULL is checked after the trigger runs.
+    requested_at         TIMESTAMPTZ NOT NULL,
     reason               TEXT NOT NULL,
 
     approved_by          TEXT,
@@ -224,6 +228,21 @@ $$;
 
 CREATE OR REPLACE FUNCTION authz.privilege_approval_guard() RETURNS trigger
     LANGUAGE plpgsql AS $$
+DECLARE
+    -- WALL-CLOCK time, captured ONCE per row decision (owner-approved QA
+    -- hardening). Not CURRENT_TIMESTAMP/now(): those are the TRANSACTION
+    -- START, so a transaction opened a moment before valid_until would see
+    -- the approval as live for as long as it stayed open.
+    --
+    -- clock_timestamp() rather than statement_timestamp(): the decision is
+    -- made for this row, at this moment, and capturing it once means the
+    -- stamp written (approved_at, consumed_at, ...) and the expiry check
+    -- that admitted it are the SAME instant - so ck_pa_*_in_window can never
+    -- disagree with the check that ran here. statement_timestamp() would be
+    -- defensible too, but it is a few microseconds to seconds stale for a
+    -- long multi-row statement, and there is no row here that needs to
+    -- agree with another row in the same statement.
+    ts TIMESTAMPTZ := clock_timestamp();
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'authz.privilege_approval is append-only: approval % cannot be deleted',
@@ -243,15 +262,14 @@ BEGIN
         -- The DATABASE owns the clock (QA M1). A caller-chosen requested_at
         -- moves the whole 72-hour window: backdated, an expired approval
         -- looks live to every CHECK; future-dated, the window stretches.
-        -- The column default supplies CURRENT_TIMESTAMP; anything else is
-        -- refused rather than silently replaced, so a caller that tries
-        -- learns it cannot.
-        IF NEW.requested_at IS NOT NULL AND NEW.requested_at <> CURRENT_TIMESTAMP THEN
+        -- The column has no default and any supplied value is refused rather
+        -- than silently replaced, so a caller that tries learns it cannot.
+        IF NEW.requested_at IS NOT NULL THEN
             RAISE EXCEPTION 'requested_at is set by the database; a caller-supplied value '
                             'is refused (approval timeline must not be backdated or postdated)';
         END IF;
-        NEW.requested_at := CURRENT_TIMESTAMP;
-        NEW.valid_until := NEW.requested_at + INTERVAL '72 hours';
+        NEW.requested_at := ts;
+        NEW.valid_until := ts + INTERVAL '72 hours';
         RETURN NEW;
     END IF;
 
@@ -284,12 +302,12 @@ BEGIN
             RAISE EXCEPTION 'approving privilege approval % may set only the approval columns',
                 OLD.approval_id;
         END IF;
-        IF NEW.approved_at IS NOT NULL AND NEW.approved_at <> CURRENT_TIMESTAMP THEN
+        IF NEW.approved_at IS NOT NULL THEN
             RAISE EXCEPTION 'approved_at is set by the database; a caller-supplied value is '
                             'refused (approval %)', OLD.approval_id;
         END IF;
-        NEW.approved_at := CURRENT_TIMESTAMP;
-        IF OLD.valid_until <= CURRENT_TIMESTAMP THEN
+        NEW.approved_at := ts;
+        IF OLD.valid_until <= ts THEN
             RAISE EXCEPTION 'privilege approval % expired at % and cannot be approved',
                 OLD.approval_id, OLD.valid_until;
         END IF;
@@ -317,12 +335,12 @@ BEGIN
             RAISE EXCEPTION 'consuming privilege approval % may set only the consumption columns',
                 OLD.approval_id;
         END IF;
-        IF NEW.consumed_at IS NOT NULL AND NEW.consumed_at <> CURRENT_TIMESTAMP THEN
+        IF NEW.consumed_at IS NOT NULL THEN
             RAISE EXCEPTION 'consumed_at is set by the database; a caller-supplied value is '
                             'refused (approval %)', OLD.approval_id;
         END IF;
-        NEW.consumed_at := CURRENT_TIMESTAMP;
-        IF OLD.valid_until <= CURRENT_TIMESTAMP THEN
+        NEW.consumed_at := ts;
+        IF OLD.valid_until <= ts THEN
             RAISE EXCEPTION 'privilege approval % expired at % and cannot be used',
                 OLD.approval_id, OLD.valid_until;
         END IF;
@@ -339,11 +357,11 @@ BEGIN
             RAISE EXCEPTION 'revoking privilege approval % may set only the revocation columns',
                 OLD.approval_id;
         END IF;
-        IF NEW.revoked_at IS NOT NULL AND NEW.revoked_at <> CURRENT_TIMESTAMP THEN
+        IF NEW.revoked_at IS NOT NULL THEN
             RAISE EXCEPTION 'revoked_at is set by the database; a caller-supplied value is '
                             'refused (approval %)', OLD.approval_id;
         END IF;
-        NEW.revoked_at := CURRENT_TIMESTAMP;
+        NEW.revoked_at := ts;
     ELSE
         RAISE EXCEPTION 'illegal privilege approval transition % -> % (approval %)',
             OLD.status, NEW.status, OLD.approval_id;

@@ -103,10 +103,10 @@ class PrivilegeApprovalGrantIntegrationTest {
             id = rs.getLong(1);
         }
         assertThatCode(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                + "approved_by = 'SYN-B', approved_at = now(), approval_reason = 'approved as the API role' "
+                + "approved_by = 'SYN-B', approval_reason = 'approved as the API role' "
                 + "WHERE approval_id = " + id)).doesNotThrowAnyException();
         assertThatCode(() -> asApi("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
-                + "consumed_at = now(), consumed_by = 'SYN-A' WHERE approval_id = " + id))
+                + "consumed_by = 'SYN-A' WHERE approval_id = " + id))
                 .doesNotThrowAnyException();
     }
 
@@ -202,24 +202,27 @@ class PrivilegeApprovalGrantIntegrationTest {
     void expiredApprovalCannotBeApprovedOrConsumedBySql() throws Exception {
         long pending = apiRequest("SYN-M1-EXP-P");
         expireAsOwner(pending);
-        for (String approvedAt : new String[] {"requested_at + interval '1 hour'", "now()"}) {
-            assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                    + "approved_by = 'SYN-B', approved_at = " + approvedAt + ", "
-                    + "approval_reason = 'approving an expired request' WHERE approval_id = " + pending))
-                    .as("approved_at = %s", approvedAt)
-                    .isInstanceOf(SQLException.class);
-        }
+        // The plain case (stamp left to the database) is refused as EXPIRED;
+        // supplying an in-window-looking stamp is refused as well.
+        assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
+                + "approved_by = 'SYN-B', approval_reason = 'approving an expired request' "
+                + "WHERE approval_id = " + pending))
+                .hasMessageContaining("expired");
+        assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
+                + "approved_by = 'SYN-B', approved_at = requested_at + interval '1 hour', "
+                + "approval_reason = 'approving an expired request' WHERE approval_id = " + pending))
+                .isInstanceOf(SQLException.class);
         assertThat(statusOf(pending)).isEqualTo("PENDING");
 
         long approved = apiApproved("SYN-M1-EXP-A");
         expireAsOwner(approved);
-        for (String consumedAt : new String[] {"approved_at + interval '1 minute'", "now()"}) {
-            assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
-                    + "consumed_at = " + consumedAt + ", consumed_by = 'SYN-A' "
-                    + "WHERE approval_id = " + approved))
-                    .as("consumed_at = %s", consumedAt)
-                    .isInstanceOf(SQLException.class);
-        }
+        assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
+                + "consumed_by = 'SYN-A' WHERE approval_id = " + approved))
+                .hasMessageContaining("expired");
+        assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
+                + "consumed_at = approved_at + interval '1 minute', consumed_by = 'SYN-A' "
+                + "WHERE approval_id = " + approved))
+                .isInstanceOf(SQLException.class);
         assertThat(statusOf(approved)).isEqualTo("APPROVED");
     }
 
@@ -228,7 +231,7 @@ class PrivilegeApprovalGrantIntegrationTest {
     void approverMustBeAnActiveAdministratorInTheDatabase() throws Exception {
         long notAdmin = apiRequest("SYN-M1-ELIG-1");
         assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                + "approved_by = 'SYN-NOT-AN-ADMIN', approved_at = now(), "
+                + "approved_by = 'SYN-NOT-AN-ADMIN', "
                 + "approval_reason = 'approved by a non-administrator' WHERE approval_id = " + notAdmin))
                 .hasMessageContaining("active, unsuspended ARCHIVE_ADMIN");
 
@@ -239,7 +242,7 @@ class PrivilegeApprovalGrantIntegrationTest {
                 VALUES ('SYN-SUSPENDED-ADMIN', TRUE, 'test-fixture', now(), 'synthetic suspension')
                 """);
         assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                + "approved_by = 'SYN-SUSPENDED-ADMIN', approved_at = now(), "
+                + "approved_by = 'SYN-SUSPENDED-ADMIN', "
                 + "approval_reason = 'approved by a suspended administrator' WHERE approval_id = " + notAdmin))
                 .hasMessageContaining("active, unsuspended ARCHIVE_ADMIN");
         assertThat(statusOf(notAdmin)).isEqualTo("PENDING");
@@ -251,11 +254,11 @@ class PrivilegeApprovalGrantIntegrationTest {
                 """);
         long leaving = apiRequest("SYN-M1-ELIG-2");
         asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', approved_by = 'SYN-LEAVING-ADMIN', "
-                + "approved_at = now(), approval_reason = 'approved before leaving' WHERE approval_id = " + leaving);
+                + "approval_reason = 'approved before leaving' WHERE approval_id = " + leaving);
         asOwner("UPDATE authz.admin_role_member SET status = 'REVOKED', revoked_by = 'test-fixture', "
                 + "revoked_at = now() WHERE institutional_identifier = 'SYN-LEAVING-ADMIN'");
         assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
-                + "consumed_at = now(), consumed_by = 'SYN-A' WHERE approval_id = " + leaving))
+                + "consumed_by = 'SYN-A' WHERE approval_id = " + leaving))
                 .hasMessageContaining("active, unsuspended ARCHIVE_ADMIN");
         assertThat(statusOf(leaving)).isEqualTo("APPROVED");
     }
@@ -285,10 +288,139 @@ class PrivilegeApprovalGrantIntegrationTest {
             id = rs.getLong(1);
         }
         assertThatThrownBy(() -> asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                + "approved_by = 'SYN-B', approved_at = now(), "
+                + "approved_by = 'SYN-B', "
                 + "approval_reason = 'approving my own sign-in' WHERE approval_id = " + id))
                 .hasMessageContaining("own Cognito identity");
         assertThat(statusOf(id)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("the grant script sets idle_in_transaction_session_timeout on archive_api ONLY")
+    void idleInTransactionTimeoutIsScopedToTheApiRole() throws Exception {
+        List<String> settings = new ArrayList<>();
+        try (Statement s = owner.createStatement();
+             ResultSet rs = s.executeQuery("""
+                     SELECT coalesce(r.rolname, '<all roles>') || ' @ '
+                            || coalesce(d.datname, '<all databases>') || ': ' || cfg
+                       FROM pg_db_role_setting st
+                       LEFT JOIN pg_roles r ON r.oid = st.setrole
+                       LEFT JOIN pg_database d ON d.oid = st.setdatabase
+                       CROSS JOIN LATERAL unnest(st.setconfig) AS cfg
+                      WHERE cfg LIKE 'idle_in_transaction_session_timeout=%'
+                     """)) {
+            while (rs.next()) {
+                settings.add(rs.getString(1));
+            }
+        }
+        assertThat(settings)
+                .as("exactly one setting: on archive_api, for every database; nothing server-wide, "
+                        + "nothing on any other role")
+                .containsExactly("archive_api @ <all databases>: idle_in_transaction_session_timeout=5min");
+
+        // In effect for a fresh archive_api session, and not for the owner.
+        try (Connection fresh = DriverManager.getConnection(postgres.getJdbcUrl(),
+                ArchiveApiRoleHarness.API_USER, ArchiveApiRoleHarness.API_PASSWORD);
+             Statement s = fresh.createStatement();
+             ResultSet rs = s.executeQuery("SHOW idle_in_transaction_session_timeout")) {
+            rs.next();
+            assertThat(rs.getString(1)).isEqualTo("5min");
+        }
+        try (Statement s = owner.createStatement();
+             ResultSet rs = s.executeQuery("SHOW idle_in_transaction_session_timeout")) {
+            rs.next();
+            assertThat(rs.getString(1)).as("the owner/superuser is unaffected").isEqualTo("0");
+        }
+    }
+
+    // ── QA LOW (owner-approved): expiry is judged by the wall clock ──────
+    //
+    // CURRENT_TIMESTAMP is the TRANSACTION START. A transaction opened a
+    // moment before expiry would otherwise see the approval as live for as
+    // long as it stays open. These open a transaction as archive_api before
+    // expiry, wait past valid_until, then try the transition in that same
+    // transaction.
+
+    @Test
+    @DisplayName("an approval cannot be approved after expiry within a long transaction")
+    void anApprovalCannotBeApprovedAfterExpiryWithinALongTransaction() throws Exception {
+        long id = seedNearlyExpired("SYN-LONGTX-APPROVE", false);
+        SQLException refused = inLongTransactionPastExpiry(
+                "UPDATE authz.privilege_approval SET status = 'APPROVED', approved_by = 'SYN-B', "
+                        + "approval_reason = 'approved after the window closed' WHERE approval_id = " + id);
+        assertThat((Throwable) refused).as("the approval must be refused").isNotNull();
+        assertThat(refused.getMessage()).contains("expired");
+        assertThat(statusOf(id)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("an approval cannot be consumed after expiry within a long transaction")
+    void anApprovalCannotBeConsumedAfterExpiryWithinALongTransaction() throws Exception {
+        long id = seedNearlyExpired("SYN-LONGTX-CONSUME", true);
+        SQLException refused = inLongTransactionPastExpiry(
+                "UPDATE authz.privilege_approval SET status = 'CONSUMED', consumed_by = 'SYN-A' "
+                        + "WHERE approval_id = " + id);
+        assertThat((Throwable) refused).as("the consumption must be refused").isNotNull();
+        assertThat(refused.getMessage()).contains("expired");
+        assertThat(statusOf(id)).isEqualTo("APPROVED");
+    }
+
+    /**
+     * A row whose window closes ~2 seconds from now. Seeded as the OWNER with
+     * triggers off for this one transaction - the trigger would (rightly)
+     * refuse to let anyone choose requested_at. Test fixture only.
+     */
+    private static long seedNearlyExpired(String subject, boolean approved) throws SQLException {
+        boolean auto = owner.getAutoCommit();
+        owner.setAutoCommit(false);
+        try (Statement s = owner.createStatement()) {
+            s.execute("SET LOCAL session_replication_role = replica");
+            String start = "clock_timestamp() - interval '72 hours' + interval '2 seconds'";
+            String sql = approved
+                    ? "INSERT INTO authz.privilege_approval (action, subject_identifier, requested_by, "
+                        + "reason, requested_at, valid_until, status, approved_by, approved_at, approval_reason) "
+                        + "SELECT 'ADMIN_ASSIGN', '" + subject + "', 'SYN-A', 'nearly expired request', "
+                        + "t, t + interval '72 hours', 'APPROVED', 'SYN-B', t + interval '1 second', "
+                        + "'approved while still in the window' FROM (SELECT " + start + " AS t) x "
+                        + "RETURNING approval_id"
+                    : "INSERT INTO authz.privilege_approval (action, subject_identifier, requested_by, "
+                        + "reason, requested_at, valid_until) "
+                        + "SELECT 'ADMIN_ASSIGN', '" + subject + "', 'SYN-A', 'nearly expired request', "
+                        + "t, t + interval '72 hours' FROM (SELECT " + start + " AS t) x "
+                        + "RETURNING approval_id";
+            long id;
+            try (ResultSet rs = s.executeQuery(sql)) {
+                rs.next();
+                id = rs.getLong(1);
+            }
+            owner.commit();
+            return id;
+        } finally {
+            owner.setAutoCommit(auto);
+        }
+    }
+
+    /**
+     * BEGIN as archive_api while the row is still valid, wait past
+     * valid_until, then run {@code transition} in the SAME transaction.
+     *
+     * @return the refusal, or null if the statement was (wrongly) accepted
+     */
+    private static SQLException inLongTransactionPastExpiry(String transition) throws SQLException {
+        api.setAutoCommit(false);
+        try (Statement s = api.createStatement()) {
+            // Pin the transaction start (CURRENT_TIMESTAMP) before expiry.
+            s.execute("SELECT now()");
+            s.execute("SELECT pg_sleep(3)");
+            try {
+                s.execute(transition);
+                return null;
+            } catch (SQLException e) {
+                return e;
+            }
+        } finally {
+            api.rollback();
+            api.setAutoCommit(true);
+        }
     }
 
     /** A PENDING ADMIN_ASSIGN row inserted AS archive_api, with database-chosen timestamps. */
@@ -306,7 +438,7 @@ class PrivilegeApprovalGrantIntegrationTest {
     private static long apiApproved(String subject) throws SQLException {
         long id = apiRequest(subject);
         asApi("UPDATE authz.privilege_approval SET status = 'APPROVED', approved_by = 'SYN-B', "
-                + "approved_at = now(), approval_reason = 'approved as the API role' "
+                + "approval_reason = 'approved as the API role' "
                 + "WHERE approval_id = " + id);
         return id;
     }

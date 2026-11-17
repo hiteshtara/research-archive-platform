@@ -51,3 +51,4 @@ COMMIT;
 -- The privilege is reversed separately:
 --     REVOKE SELECT, INSERT, UPDATE ON authz.privilege_approval FROM archive_api;
 --     REVOKE USAGE ON SEQUENCE authz.privilege_approval_approval_id_seq FROM archive_api;
+--     ALTER ROLE archive_api RESET idle_in_transaction_session_timeout;

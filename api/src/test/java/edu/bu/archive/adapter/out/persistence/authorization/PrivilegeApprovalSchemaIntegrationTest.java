@@ -67,7 +67,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
     private static long approved() {
         long id = pending();
         sql("UPDATE authz.privilege_approval SET status = 'APPROVED', approved_by = 'SYN-B', "
-                + "approved_at = now(), approval_reason = 'approved in a schema test' "
+                + "approval_reason = 'approved in a schema test' "
                 + "WHERE approval_id = " + id);
         return id;
     }
@@ -86,7 +86,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
         db.seedAdministrator("SYN-A");
         long id = pending();
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                + "approved_by = 'SYN-A', approved_at = now(), "
+                + "approved_by = 'SYN-A', "
                 + "approval_reason = 'approving my own request' WHERE approval_id = " + id))
                 .hasMessageContaining("ck_pa_two_people");
         assertThat(db.status(id)).isEqualTo("PENDING");
@@ -98,7 +98,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
         db.seedAdministrator("SYN-S");
         long id = pending();
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'APPROVED', "
-                + "approved_by = 'SYN-S', approved_at = now(), "
+                + "approved_by = 'SYN-S', "
                 + "approval_reason = 'approving my own escalation' WHERE approval_id = " + id))
                 .hasMessageContaining("ck_pa_not_subject");
         assertThat(db.status(id)).isEqualTo("PENDING");
@@ -163,7 +163,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
                 .hasMessageContaining("immutable");
         // Not even folded into a legal transition.
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
-                + "consumed_at = now(), consumed_by = 'SYN-A', proposed_kuali_person_id = 'SYN-KP-0004' "
+                + "consumed_by = 'SYN-A', proposed_kuali_person_id = 'SYN-KP-0004' "
                 + "WHERE approval_id = " + withPrincipal))
                 .hasMessageContaining("immutable");
 
@@ -199,7 +199,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
                 + "'link request in a schema test', now()) RETURNING approval_id")
                 .query(Long.class).single();
         sql("UPDATE authz.privilege_approval SET status = 'APPROVED', approved_by = 'SYN-B', "
-                + "approved_at = now(), approval_reason = 'approved in a schema test' "
+                + "approval_reason = 'approved in a schema test' "
                 + "WHERE approval_id = " + id);
         return id;
     }
@@ -209,11 +209,11 @@ class PrivilegeApprovalSchemaIntegrationTest {
     void approvalColumnsAreFrozenAfterApproval() {
         long id = approved();
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
-                + "consumed_at = now(), consumed_by = 'SYN-A', approved_by = 'SYN-C' "
+                + "consumed_by = 'SYN-A', approved_by = 'SYN-C' "
                 + "WHERE approval_id = " + id))
                 .hasMessageContaining("only the consumption columns");
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'REVOKED', "
-                + "revoked_at = now(), revoked_by = 'SYN-A', revocation_reason = 'withdrawn by test', "
+                + "revoked_by = 'SYN-A', revocation_reason = 'withdrawn by test', "
                 + "approval_reason = 'rewritten justification' WHERE approval_id = " + id))
                 .hasMessageContaining("only the revocation columns");
         assertThat(db.status(id)).isEqualTo("APPROVED");
@@ -222,18 +222,18 @@ class PrivilegeApprovalSchemaIntegrationTest {
     // ── legal transitions only ──────────────────────────────────────────
 
     static Stream<Arguments> illegalTransitions() {
-        String approve = "status = 'APPROVED', approved_by = 'SYN-B', approved_at = now(), "
+        String approve = "status = 'APPROVED', approved_by = 'SYN-B', "
                 + "approval_reason = 'approved in a schema test'";
         return Stream.of(
                 Arguments.of("PENDING -> CONSUMED", "PENDING",
-                        "status = 'CONSUMED', consumed_at = now(), consumed_by = 'SYN-A'"),
+                        "status = 'CONSUMED', consumed_by = 'SYN-A'"),
                 Arguments.of("APPROVED -> PENDING", "APPROVED", "status = 'PENDING'"),
                 Arguments.of("APPROVED -> APPROVED (re-approval)", "APPROVED",
                         "approved_by = 'SYN-C'"),
                 Arguments.of("CONSUMED -> APPROVED", "CONSUMED", "status = 'APPROVED', "
                         + "consumed_at = NULL, consumed_by = NULL"),
                 Arguments.of("CONSUMED -> REVOKED", "CONSUMED", "status = 'REVOKED', "
-                        + "consumed_at = NULL, consumed_by = NULL, revoked_at = now(), "
+                        + "consumed_at = NULL, consumed_by = NULL, "
                         + "revoked_by = 'SYN-A', revocation_reason = 'revoking a used approval'"),
                 Arguments.of("REVOKED -> APPROVED", "REVOKED", approve.replace("approved_by = 'SYN-B'",
                         "approved_by = 'SYN-C'") + ", revoked_at = NULL, revoked_by = NULL, "
@@ -258,13 +258,13 @@ class PrivilegeApprovalSchemaIntegrationTest {
             case "APPROVED" -> approved();
             case "CONSUMED" -> {
                 long id = approved();
-                sql("UPDATE authz.privilege_approval SET status = 'CONSUMED', consumed_at = now(), "
+                sql("UPDATE authz.privilege_approval SET status = 'CONSUMED', "
                         + "consumed_by = 'SYN-A' WHERE approval_id = " + id);
                 yield id;
             }
             case "REVOKED" -> {
                 long id = pending();
-                sql("UPDATE authz.privilege_approval SET status = 'REVOKED', revoked_at = now(), "
+                sql("UPDATE authz.privilege_approval SET status = 'REVOKED', "
                         + "revoked_by = 'SYN-A', revocation_reason = 'withdrawn in schema test' "
                         + "WHERE approval_id = " + id);
                 yield id;
@@ -280,7 +280,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
         assertThat(db.status(rowIn("REVOKED"))).isEqualTo("REVOKED");
         long approvedThenRevoked = approved();
         assertThatCode(() -> sql("UPDATE authz.privilege_approval SET status = 'REVOKED', "
-                + "revoked_at = now(), revoked_by = 'SYN-A', revocation_reason = 'withdrawn after approval' "
+                + "revoked_by = 'SYN-A', revocation_reason = 'withdrawn after approval' "
                 + "WHERE approval_id = " + approvedThenRevoked)).doesNotThrowAnyException();
     }
 
@@ -357,7 +357,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
         long first = pending();
         assertThatThrownBy(PrivilegeApprovalSchemaIntegrationTest::pending)
                 .hasMessageContaining("ux_privilege_approval_live");
-        sql("UPDATE authz.privilege_approval SET status = 'REVOKED', revoked_at = now(), "
+        sql("UPDATE authz.privilege_approval SET status = 'REVOKED', "
                 + "revoked_by = 'SYN-A', revocation_reason = 'withdrawn in schema test' "
                 + "WHERE approval_id = " + first);
         assertThatCode(PrivilegeApprovalSchemaIntegrationTest::pending).doesNotThrowAnyException();

@@ -46,6 +46,37 @@ GRANT SELECT, INSERT, UPDATE ON authz.privilege_approval TO archive_api;
 -- The sequence behind approval_id. Without it the first INSERT fails.
 GRANT USAGE ON SEQUENCE authz.privilege_approval_approval_id_seq TO archive_api;
 
+-- Idle-in-transaction timeout, on archive_api ONLY.
+--
+-- Why: V090 judges expiry by the wall clock, so a long-open transaction no
+-- longer extends an approval's life. But an API session left "idle in
+-- transaction" still holds the row locks an approve/consume took, which
+-- blocks every other approve/consume/revoke of that row and any bootstrap
+-- waiting on the admin-membership rows. The server should end such a
+-- session rather than let it hold locks indefinitely.
+--
+-- Why 5 minutes: scanned api/src/main on 2026-11-17. Every @Transactional
+-- unit is either a readOnly repository/controller query sequence (Global
+-- Search, Document Explorer, IRB, Dashboard, semantic search - the query
+-- embedding is computed BEFORE the transaction) or an administrative write
+-- of a handful of statements; the longest is the bulk department grant,
+-- which issues its statements back to back. None waits on a client or an
+-- external service between statements: the OpenAI call (timeout 60s +
+-- connect 10s) and the Bedrock embedding call (2s) run outside any
+-- transaction, and PDF report generation is not transactional. So
+-- legitimate idle time inside a transaction is milliseconds. 5 minutes is
+-- over four times the longest external timeout the API has, so even a
+-- future change that wrongly wrapped an AI call in a transaction would not
+-- be cut off, while a genuinely leaked session is still reaped quickly.
+--
+-- Scope: ALTER ROLE ... SET, with no IN DATABASE and no server-wide
+-- setting, so it applies to archive_api sessions in every database and to
+-- NO other role (archive_admin, the ETL and operators are unaffected). It
+-- takes effect for NEW sessions; the API's pool picks it up as connections
+-- recycle. Reverse with:
+--     ALTER ROLE archive_api RESET idle_in_transaction_session_timeout;
+ALTER ROLE archive_api SET idle_in_transaction_session_timeout = '5min';
+
 COMMIT;
 
 -- Verification (expect exactly this):
@@ -55,3 +86,5 @@ COMMIT;
 --   SELECT has_table_privilege('archive_api','authz.privilege_approval','UPDATE');   -- t
 --   SELECT has_table_privilege('archive_api','authz.privilege_approval','DELETE');   -- f
 --   SELECT has_table_privilege('archive_api','authz.privilege_approval','TRUNCATE'); -- f
+--   SELECT setconfig FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole
+--    WHERE r.rolname = 'archive_api';   -- {idle_in_transaction_session_timeout=5min}
