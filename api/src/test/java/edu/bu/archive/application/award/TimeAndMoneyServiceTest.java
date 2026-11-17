@@ -45,6 +45,42 @@ class TimeAndMoneyServiceTest {
         );
         when(repository.findAwardNumberForId(3L))
                 .thenReturn(Optional.of("100004-00003"));
+        // B4/H1: transactions and documents are bound to the Award family.
+        // Every fixture below belongs to 100004-00003 unless a test says so.
+        when(repository.timeAndMoneyTransactionBelongsToAwardNumber(
+                org.mockito.ArgumentMatchers.eq("100004-00003"),
+                org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(true);
+        when(repository.timeAndMoneyDocumentBelongsToAwardNumber(
+                org.mockito.ArgumentMatchers.eq("100004-00003"),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(true);
+    }
+
+    @Test
+    void findTimeAndMoneyTransactionOutsideTheAwardFamilyIsNotFoundAndNeverRead() {
+        when(repository.timeAndMoneyTransactionBelongsToAwardNumber("100004-00003", 777L))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> service.findTimeAndMoneyTransaction(3L, 777L))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("Time and Money transaction not found: 777");
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .findTimeAndMoneyTransactionHeader(777L);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .findTimeAndMoneyTransactionDetails(777L);
+    }
+
+    @Test
+    void findTimeAndMoneyDocumentOutsideTheAwardFamilyIsNotFoundAndNeverRead() {
+        when(repository.timeAndMoneyDocumentBelongsToAwardNumber("100004-00003", "OTHER-DOC"))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> service.findTimeAndMoneyDocument(3L, "OTHER-DOC"))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("Time and Money document not found: OTHER-DOC");
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .findTimeAndMoneyDocument("OTHER-DOC");
     }
 
     // --- Summary ---------------------------------------------------------

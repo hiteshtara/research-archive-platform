@@ -25,6 +25,16 @@ import java.util.NoSuchElementException;
 @Service
 public class NegotiationArchiveService {
 
+    /**
+     * B4/H2: what a restricted caller receives for a Negotiation whose
+     * associated record they cannot see, and for a genuinely unassociated
+     * one - identical by construction, so the two cannot be told apart.
+     * "NO"/"None" is the archive's own association type for an unassociated
+     * Negotiation (8,533 of 10,775 rows - see V080's migration header).
+     */
+    static final NegotiationAssociatedRecordResponse NO_ASSOCIATION =
+            new NegotiationAssociatedRecordResponse("NO", "None", null, "NONE", null, false);
+
     private final NegotiationArchiveRepository repository;
     private final NegotiationAttachmentStorage attachmentStorage;
     private final edu.bu.archive.application.authorization.NegotiationRecordAccess recordAccess;
@@ -112,8 +122,11 @@ public class NegotiationArchiveService {
 
         edu.bu.archive.application.authorization.SqlFragment scope =
                 recordAccess.negotiationScopeSql("n");
+        // B4/H2: null when unrestricted, so the statement is unchanged.
+        edu.bu.archive.application.authorization.SqlFragment associationVisible =
+                associationVisibilitySql();
 
-        long totalElements = repository.countNegotiations(filters, scope);
+        long totalElements = repository.countNegotiations(filters, scope, associationVisible);
         PaginationSupport.PageMetadata pageMetadata =
                 PaginationSupport.metadata(
                         safePage,
@@ -126,6 +139,7 @@ public class NegotiationArchiveService {
                 repository.findNegotiations(
                         filters,
                         scope,
+                        associationVisible,
                         safeSize,
                         offset
                 );
@@ -151,8 +165,126 @@ public class NegotiationArchiveService {
 
         return new NegotiationWorkspaceResponse(
                 negotiationId,
-                current
+                withoutHiddenAssociation(current)
         );
+    }
+
+    /**
+     * B4/H2: the workspace row with everything that came from an associated
+     * record the caller cannot see removed - the identifier, and the
+     * resolved attributes when the V080 rebuild took them from that Award
+     * ({@code attributeSource = 'AWARD'}). Mirrors, for one row, what
+     * {@link NegotiationArchiveRepository#findNegotiations} does in SQL for
+     * the list, so the workspace and the list agree.
+     *
+     * <p>Follow-up (QA review of #164): a hidden association is presented as
+     * no association - the archive's own "NO"/"None" type, exactly as
+     * {@link #NO_ASSOCIATION} and the list statement present it - and a
+     * genuine "NO" row drops its identifier (only the Negotiation's own
+     * document number), so the row cannot tell the two apart either.
+     *
+     * <p>Unchanged when unrestricted (enforcement off, or Central).
+     */
+    private NegotiationRowResponse withoutHiddenAssociation(NegotiationRowResponse row) {
+        if (recordAccess.unrestricted()) {
+            return row;
+        }
+        boolean genuineNone = "NO".equals(row.negotiationAssociationTypeCode());
+        boolean visible = associationVisible(row.negotiationAssociationTypeCode(), row.associatedDocumentId());
+        if (visible && !genuineNone) {
+            return row;
+        }
+        boolean hidden = !visible;
+        boolean fromAward = hidden && "AWARD".equals(row.attributeSource());
+        return new NegotiationRowResponse(
+                row.negotiationId(),
+                row.documentNumber(),
+                row.negotiationStatusId(),
+                row.negotiationStatusCode(),
+                row.negotiationStatusDescription(),
+                row.negotiationAgreementTypeId(),
+                row.negotiationAgreementTypeCode(),
+                row.negotiationAgreementTypeDescription(),
+                hidden
+                        ? repository.findNoAssociationTypeId().orElse(null)
+                        : row.negotiationAssociationTypeId(),
+                hidden ? NO_ASSOCIATION.associationTypeCode() : row.negotiationAssociationTypeCode(),
+                hidden ? NO_ASSOCIATION.associationTypeDescription() : row.negotiationAssociationTypeDescription(),
+                row.negotiatorPersonId(),
+                row.negotiatorFullName(),
+                row.negotiationStartDate(),
+                row.negotiationEndDate(),
+                row.anticipatedAwardDate(),
+                row.documentFolder(),
+                null,
+                row.sourceUpdateTimestamp(),
+                row.sourceUpdateUser(),
+                row.sourceVersionNumber(),
+                row.sourceObjectId(),
+                row.documentSourceUpdateTimestamp(),
+                row.documentSourceUpdateUser(),
+                row.documentSourceVersionNumber(),
+                row.documentSourceObjectId(),
+                fromAward ? null : row.title(),
+                fromAward ? null : row.principalInvestigatorName(),
+                fromAward ? null : row.sponsorCode(),
+                fromAward ? null : row.sponsorName(),
+                fromAward ? null : row.primeSponsorCode(),
+                fromAward ? null : row.primeSponsorName(),
+                fromAward ? null : row.leadUnitNumber(),
+                fromAward ? null : row.leadUnitName(),
+                fromAward ? null : row.sponsorAwardNumber(),
+                fromAward ? null : row.attributeSource()
+        );
+    }
+
+    /**
+     * B4/H2: a boolean SQL expression over Negotiation alias {@code n},
+     * true when the caller may see the record the Negotiation is associated
+     * with - the SQL form of {@link #associationVisible}, so the list and
+     * the per-record decision agree.
+     *
+     * <p>No new rule: the Award and Proposal branches are the related
+     * modules' OWN predicates ({@code relatedScopeSql}, defect B1), applied
+     * to the version {@code canSeeAwardNumber} / {@code canSeeProposalNumber}
+     * decide - the primary-current Award version, and the latest Proposal
+     * version ordered exactly as {@code latestProposalVersionKey} orders it.
+     * The identifier is matched exactly, as those methods match it.
+     *
+     * <p>{@code null} when unrestricted, which leaves every statement
+     * byte-for-byte unchanged.
+     */
+    private edu.bu.archive.application.authorization.SqlFragment associationVisibilitySql() {
+        if (recordAccess.unrestricted()) {
+            return null;
+        }
+        edu.bu.archive.application.authorization.SqlFragment award =
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.AWARD, "az_xa");
+        edu.bu.archive.application.authorization.SqlFragment proposal =
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.PROPOSAL, "az_xp");
+        java.util.Map<String, Object> params = new java.util.LinkedHashMap<>();
+        params.putAll(award.params());
+        params.putAll(proposal.params());
+        String sql = "n.associated_document_id IS NULL"
+                + " OR TRIM(n.associated_document_id) = ''"
+                + " OR n.negotiation_association_type_code IS NULL"
+                + " OR n.negotiation_association_type_code = 'NO'"
+                + " OR (n.negotiation_association_type_code = 'AWD'"
+                + " AND EXISTS (SELECT 1 FROM archive.award_version az_xa"
+                + " WHERE az_xa.award_number = n.associated_document_id"
+                + " AND az_xa.is_primary_current = TRUE" + award.sql() + "))"
+                + " OR (n.negotiation_association_type_code = 'IP'"
+                + " AND EXISTS (SELECT 1 FROM archive.proposal_version az_xp"
+                + " WHERE az_xp.proposal_number = n.associated_document_id"
+                + " AND az_xp.proposal_id = (SELECT az_xpl.proposal_id"
+                + " FROM archive.proposal_version az_xpl"
+                + " WHERE az_xpl.proposal_number = az_xp.proposal_number"
+                + " ORDER BY az_xpl.version_number DESC,"
+                + " az_xpl.source_update_timestamp DESC NULLS LAST,"
+                + " az_xpl.proposal_id DESC LIMIT 1)" + proposal.sql() + "))";
+        return new edu.bu.archive.application.authorization.SqlFragment(sql, params);
     }
 
     public List<NegotiationActivityResponse> findActivities(
@@ -289,19 +421,24 @@ public class NegotiationArchiveService {
          * associated record's identifier, its resolved id and a navigable
          * link to a record they may not read.
          *
-         * Omitted entirely, never stubbed and never counted: the response
-         * degrades to exactly the shape an unassociated Negotiation
-         * produces, so a restricted association is indistinguishable from
-         * no association at all. A "you may not see this one" marker would
-         * itself be the existence disclosure D7 forbids.
+         * Omitted entirely, never stubbed and never counted. B4/H2
+         * (2026-11-17): the earlier form of this redaction nulled the
+         * identifier but still answered with the association's own code and
+         * description ('AWD'/'Award'), so a restricted association remained
+         * distinguishable from none - the existence disclosure D7 forbids.
+         * For a restricted caller a hidden association and a genuine "NO"
+         * association now produce the SAME response, NO_ASSOCIATION. A
+         * genuine "NO" therefore also drops its identifier for them - it is
+         * only the Negotiation's own document number, already on the row -
+         * because a "NO" answer carrying an identifier while a hidden one
+         * did not would tell the two apart again.
          *
          * Gated on !unrestricted(): with enforcement off, or for Central,
          * the response is byte-for-byte what it always was.
          */
-        if (!recordAccess.unrestricted() && !associatedRecordVisible(code, documentId)) {
-            return new NegotiationAssociatedRecordResponse(
-                    code, description, null, "NONE", null, false
-            );
+        if (!recordAccess.unrestricted()
+                && ("NO".equals(code) || !associationVisible(code, documentId))) {
+            return NO_ASSOCIATION;
         }
 
         return switch (code) {
@@ -385,7 +522,13 @@ public class NegotiationArchiveService {
      * ambiguously - so the honest answer is to disclose nothing rather than
      * guess. They remain fully visible to Central and with enforcement off.
      */
-    private boolean associatedRecordVisible(String code, String documentId) {
+    private boolean associationVisible(String code, String documentId) {
+        // Nothing is associated, so nothing can be hidden - the same cases
+        // findAssociatedRecord answers before any check, and the SQL form
+        // (associationVisibilitySql) treats as visible.
+        if (code == null || documentId == null || documentId.isBlank()) {
+            return true;
+        }
         return switch (code) {
             case "AWD" -> recordAccess.canSeeAwardNumber(documentId);
             case "IP" -> recordAccess.canSeeProposalNumber(documentId);
@@ -407,8 +550,10 @@ public class NegotiationArchiveService {
             List<String> documentNumbers
     ) {
         recordAccess.requireProvisioned();
+        // B4/H2 follow-up: the title is a resolved attribute, so an
+        // Award-sourced title of a hidden association is withheld here too.
         return repository.findSummariesForDocumentNumbers(
-                documentNumbers, recordAccess.negotiationScopeSql("n"));
+                documentNumbers, recordAccess.negotiationScopeSql("n"), associationVisibilitySql());
     }
 
 }

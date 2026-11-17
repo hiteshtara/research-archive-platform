@@ -1611,23 +1611,73 @@ public class AwardArchiveService {
             long pendingTransactionId
     ) {
         recordAccess.requireAward(awardId);
-        requireAwardNumberForId(awardId);
+        String awardNumber = requireAwardNumberForId(awardId);
+
+        /*
+         * B4/H1 (2026-11-17): the gate above authorises THIS Award, and the
+         * lookups below are keyed by the transaction id alone. Without
+         * binding the two, anyone who can open one Award could read every
+         * Time and Money transaction in the archive through it (an IDOR).
+         * A transaction outside this Award family is answered exactly like
+         * a missing one - same exception, same message, same 404 - so the
+         * response does not confirm that it exists elsewhere.
+         *
+         * Applied unconditionally, not only under enforcement: it is a
+         * sub-resource integrity rule, and every link the UI renders comes
+         * from this Award's own History tab, which uses the same definition
+         * of "belongs" (see the repository), so no legitimate link changes.
+         */
+        if (!repository.timeAndMoneyTransactionBelongsToAwardNumber(
+                awardNumber, pendingTransactionId)) {
+            throw timeAndMoneyTransactionNotFound(pendingTransactionId);
+        }
 
         Optional<TimeAndMoneyTransactionHeaderRow> header =
                 repository.findTimeAndMoneyTransactionHeader(
                         pendingTransactionId
                 );
-        List<TimeAndMoneyTransactionDetailResponse> details =
+        List<TimeAndMoneyTransactionDetailResponse> allDetails =
                 repository.findTimeAndMoneyTransactionDetails(
                         pendingTransactionId
                 );
 
-        if (header.isEmpty() && details.isEmpty()) {
-            throw new NoSuchElementException(
-                    "Time and Money transaction not found: "
-                            + pendingTransactionId
-            );
+        if (header.isEmpty() && allDetails.isEmpty()) {
+            throw timeAndMoneyTransactionNotFound(pendingTransactionId);
         }
+
+        /*
+         * B4/H1: a transaction moves money between hierarchy nodes, and its
+         * rows name OTHER award_numbers - the source and destination of the
+         * move, and (on detail rows) the Award each hop was recorded
+         * against. The gate above authorised only this Award.
+         *
+         * Detail rows naming an Award the caller cannot open are OMITTED,
+         * not stubbed - the convention findHierarchy already follows for the
+         * same family relationship ("an Award exists here that you may not
+         * see" is itself the disclosure). A detail row is one hop of the
+         * move: with an endpoint blanked out it is meaningless, and its
+         * amounts and comments would still describe the hidden Award.
+         *
+         * The header is the transaction itself and is already bound to this
+         * Award family, so it cannot be omitted; only its source/destination
+         * award number is nulled when that Award is not visible.
+         *
+         * canSeeAwardNumber is true for every Award when enforcement is off
+         * or the caller is Central, so both are byte-for-byte unchanged.
+         */
+        Map<String, Boolean> visibility = new java.util.HashMap<>();
+        java.util.function.Predicate<String> visible = number ->
+                number == null
+                        || visibility.computeIfAbsent(
+                                number, recordAccess::canSeeAwardNumber);
+
+        List<TimeAndMoneyTransactionDetailResponse> details =
+                allDetails.stream()
+                        .filter(detail ->
+                                visible.test(detail.awardNumber())
+                                        && visible.test(detail.sourceAwardNumber())
+                                        && visible.test(detail.destinationAwardNumber()))
+                        .toList();
 
         // pending_transaction may no longer exist for an old,
         // already-processed transaction (see
@@ -1637,16 +1687,18 @@ public class AwardArchiveService {
         // always available even when the header is not.
         String timeAndMoneyDocumentNumber = header
                 .map(TimeAndMoneyTransactionHeaderRow::timeAndMoneyDocumentNumber)
-                .orElseGet(() -> details.isEmpty()
+                .orElseGet(() -> allDetails.isEmpty()
                         ? null
-                        : details.get(0).timeAndMoneyDocumentNumber());
+                        : allDetails.get(0).timeAndMoneyDocumentNumber());
 
         return new TimeAndMoneyTransactionResponse(
                 pendingTransactionId,
                 timeAndMoneyDocumentNumber,
                 header.map(TimeAndMoneyTransactionHeaderRow::sourceAwardNumber)
+                        .filter(visible)
                         .orElse(null),
                 header.map(TimeAndMoneyTransactionHeaderRow::destinationAwardNumber)
+                        .filter(visible)
                         .orElse(null),
                 header.map(TimeAndMoneyTransactionHeaderRow::obligatedAmount)
                         .orElse(null),
@@ -1675,13 +1727,40 @@ public class AwardArchiveService {
             String timeAndMoneyDocumentNumber
     ) {
         recordAccess.requireAward(awardId);
-        requireAwardNumberForId(awardId);
+        String awardNumber = requireAwardNumberForId(awardId);
+
+        /*
+         * B4/H1: bound to this Award family exactly like
+         * findTimeAndMoneyTransaction - a document outside it is answered
+         * as not found, indistinguishable from a missing one.
+         */
+        if (timeAndMoneyDocumentNumber == null
+                || !repository.timeAndMoneyDocumentBelongsToAwardNumber(
+                        awardNumber, timeAndMoneyDocumentNumber)) {
+            throw timeAndMoneyDocumentNotFound(timeAndMoneyDocumentNumber);
+        }
 
         return repository.findTimeAndMoneyDocument(timeAndMoneyDocumentNumber)
-                .orElseThrow(() -> new NoSuchElementException(
-                        "Time and Money document not found: "
-                                + timeAndMoneyDocumentNumber
-                ));
+                .orElseThrow(() ->
+                        timeAndMoneyDocumentNotFound(timeAndMoneyDocumentNumber));
+    }
+
+    private static NoSuchElementException timeAndMoneyTransactionNotFound(
+            long pendingTransactionId
+    ) {
+        return new NoSuchElementException(
+                "Time and Money transaction not found: "
+                        + pendingTransactionId
+        );
+    }
+
+    private static NoSuchElementException timeAndMoneyDocumentNotFound(
+            String timeAndMoneyDocumentNumber
+    ) {
+        return new NoSuchElementException(
+                "Time and Money document not found: "
+                        + timeAndMoneyDocumentNumber
+        );
     }
 
     public AwardTermsResponse findTerms(long awardId) {
@@ -1891,9 +1970,34 @@ public class AwardArchiveService {
         List<AwardSapTransmissionChildRow> childRows =
                 repository.findTransmissionChildRows(transmissionIds);
 
+        /*
+         * B4/H3 (2026-11-17). A transmission sends a whole Award hierarchy
+         * to SAP, and archive.award_transmission_child holds one row per
+         * hierarchy child - routinely a DIFFERENT award_number family (see
+         * docs/architecture/SAP_AWARD_TRANSMISSION_ARCHIVE_DESIGN.md), with
+         * its award number, lead unit, document numbers and F&A basis. The
+         * gate above authorised only the transmitting Award.
+         *
+         * Children the caller cannot open are omitted, exactly as
+         * findHierarchy omits unauthorised relatives - no stub, no count.
+         * Memoised per request so a child repeated across transmissions is
+         * decided once. canSeeAwardNumber is true for everything when
+         * enforcement is off or the caller is Central, so both are
+         * unchanged.
+         */
+        Map<String, Boolean> childVisibility = new java.util.HashMap<>();
+        boolean unrestricted = recordAccess.unrestricted();
+
         Map<Long, List<AwardSapTransmissionChildResponse>>
                 childrenByTransmissionId = new LinkedHashMap<>();
         for (AwardSapTransmissionChildRow row : childRows) {
+            if (!unrestricted
+                    && (row.awardNumber() == null
+                            || !childVisibility.computeIfAbsent(
+                                    row.awardNumber(),
+                                    recordAccess::canSeeAwardNumber))) {
+                continue;
+            }
             childrenByTransmissionId
                     .computeIfAbsent(
                             row.transmissionId(),
@@ -1928,8 +2032,23 @@ public class AwardArchiveService {
                         row.sponsorCode(),
                         row.methodOfPaymentCode(),
                         row.documentNumber(),
-                        row.sentData(),
-                        row.returnedData(),
+                        /*
+                         * B4/H3: the raw SOAP request/response is built from
+                         * the root Award AND every selected hierarchy child
+                         * (one ZGMSPPROGRAMSTRUCTURE per child - see
+                         * SAP_AWARD_TRANSMISSION_ASSESSMENT.md), is archived
+                         * byte-for-byte, and is not enumerable by inspection
+                         * (DECISIONS.md: it has carried a live HTTP
+                         * Authorization header). Filtering children above
+                         * cannot reach inside it, and no field-aware parser
+                         * exists yet. Conservative choice: withheld entirely
+                         * from any caller who is not unrestricted. Central
+                         * and enforcement-off callers are unchanged. The
+                         * Award Report PDF calls this method, so it inherits
+                         * the same omission.
+                         */
+                        unrestricted ? row.sentData() : null,
+                        unrestricted ? row.returnedData() : null,
                         childrenByTransmissionId.getOrDefault(
                                 row.transmissionId(),
                                 List.of()

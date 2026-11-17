@@ -161,14 +161,130 @@ public class NegotiationArchiveRepository {
      *              reproduces the unscoped statement exactly.
      */
     public long countNegotiations(NegotiationSearchFilters filters, SqlFragment scope) {
+        return countNegotiations(filters, scope, null);
+    }
+
+    /**
+     * @param associationVisible B4/H2: a boolean SQL expression over alias
+     *        {@code n} that is true when the caller may see the record the
+     *        Negotiation is associated WITH, or {@code null} when the caller
+     *        is unrestricted - which renders the statement exactly as before.
+     *        See {@link #withAssociationVisibility}.
+     */
+    public long countNegotiations(
+            NegotiationSearchFilters filters,
+            SqlFragment scope,
+            SqlFragment associationVisible
+    ) {
         SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
-        Long count = bindScope(bind(jdbc.sql(
-                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE + safeScope.sql()), filters),
-                safeScope)
+        Long count = bindScope(bindScope(bind(jdbc.sql(withAssociationVisibility(
+                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE, associationVisible, true)
+                + safeScope.sql()), filters),
+                safeScope), associationVisible)
                 .query(Long.class)
                 .single();
 
         return count == null ? 0L : count;
+    }
+
+    /*
+     * B4/H2 (2026-11-17). Reaching a Negotiation (for example through its
+     * lead unit) does not authorise the Award or Proposal it is associated
+     * with (D7). findAssociatedRecord already hid that record, but the list
+     * still returned its identifier, the Title/PI/Sponsor/Lead Unit the V080
+     * rebuild resolved FROM it (attribute_source = 'AWARD'), and let free
+     * text and the associationId filter MATCH on its identifier - so a
+     * caller could probe award and proposal numbers one search at a time.
+     *
+     * Each of those is rewritten here, in SQL, so the count, the page and
+     * the ordering all describe one row set and nothing is filtered after
+     * LIMIT/OFFSET:
+     *
+     *   - the identifier is selected only when the association is visible;
+     *   - the resolved-attribute join keeps an Award-sourced row only when
+     *     the association is visible, so the attributes are both blank in
+     *     the response AND unavailable to every text filter and free-text
+     *     branch that reads alias a;
+     *   - the identifier free-text branch and the associationId filter
+     *     contribute a match only when the association is visible.
+     *
+     * The Negotiation row itself is still listed - its own scope decided
+     * that - only what came from the hidden record is withheld.
+     *
+     * Follow-up (QA review of #164): a hidden association is presented as
+     * NO ASSOCIATION throughout, matching findAssociatedRecord's
+     * NO_ASSOCIATION - the row's association type id/code/description read
+     * as the archive's own "NO"/"None" type, the associationType filter and
+     * free text on the type description see "None", and the identifier is
+     * null for a genuine "NO" association too (it is only the Negotiation's
+     * own document number), so neither the row nor the filters tell a
+     * hidden association apart from none. The semantic-summary statement
+     * (Global Search enrichment) gets the same attribute-join rewrite.
+     *
+     * Only the select list, SEARCH_FROM and SEARCH_WHERE are rewritten -
+     * callers append the scope predicate AFTERWARDS, because the scope
+     * itself must keep testing the REAL association type. The anchors are
+     * exact substrings; rewrite() fails loudly if one ever stops matching,
+     * rather than silently leaving a predicate unscoped.
+     */
+    private static final String ATTRIBUTE_JOIN = "ON a.negotiation_id = n.negotiation_id\n";
+    private static final String ASSOC_ID_FREE_TEXT =
+            "OR n.associated_document_id ILIKE '%' || :query || '%'";
+    private static final String ASSOC_ID_FILTER =
+            "OR n.associated_document_id = :associationId)";
+    private static final String TYPE_DESCRIPTION = "n.negotiation_association_type_description";
+
+    /**
+     * @param search true for the list/count statement, whose WHERE carries
+     *        the identifier and association-type predicates; false for a
+     *        statement that only reads the resolved attributes.
+     */
+    static String withAssociationVisibility(String sql, SqlFragment associationVisible, boolean search) {
+        if (associationVisible == null) {
+            return sql;
+        }
+        String visible = "(" + associationVisible.sql() + ")";
+        String hiddenTypeId = "(SELECT MIN(az_xn.negotiation_association_type_id)"
+                + " FROM archive.negotiation az_xn"
+                + " WHERE az_xn.negotiation_association_type_code = 'NO')";
+
+        // Placeholders first, so no expansion is ever rewritten a second time.
+        String rewritten = sql
+                .replace("n.negotiation_association_type_id,\n", "{AT_ID_SELECT},\n")
+                .replace("n.negotiation_association_type_code,\n", "{AT_CODE_SELECT},\n")
+                .replace(TYPE_DESCRIPTION + ",\n", "{AT_DESC_SELECT},\n")
+                .replace("n.associated_document_id,\n", "{AD_SELECT},\n");
+        rewritten = rewrite(rewritten, ATTRIBUTE_JOIN,
+                "ON a.negotiation_id = n.negotiation_id"
+                        + " AND (a.attribute_source <> 'AWARD' OR {VISIBLE})\n");
+        if (search) {
+            rewritten = rewrite(rewritten, ASSOC_ID_FREE_TEXT,
+                    "OR (n.associated_document_id ILIKE '%' || :query || '%' AND {VISIBLE})");
+            rewritten = rewrite(rewritten, ASSOC_ID_FILTER,
+                    "OR (n.associated_document_id = :associationId AND {VISIBLE}))");
+            rewritten = rewrite(rewritten, TYPE_DESCRIPTION, "{AT_DESC}");
+        }
+        String maskedDescription =
+                "CASE WHEN {VISIBLE} THEN " + TYPE_DESCRIPTION + " ELSE 'None' END";
+        return rewritten
+                .replace("{AT_ID_SELECT}", "CASE WHEN {VISIBLE} THEN n.negotiation_association_type_id"
+                        + " ELSE " + hiddenTypeId + " END AS negotiation_association_type_id")
+                .replace("{AT_CODE_SELECT}", "CASE WHEN {VISIBLE} THEN n.negotiation_association_type_code"
+                        + " ELSE 'NO' END AS negotiation_association_type_code")
+                .replace("{AT_DESC_SELECT}", maskedDescription + " AS negotiation_association_type_description")
+                .replace("{AD_SELECT}", "CASE WHEN n.negotiation_association_type_code = 'NO' THEN NULL"
+                        + " WHEN {VISIBLE} THEN n.associated_document_id END AS associated_document_id")
+                .replace("{AT_DESC}", "(" + maskedDescription + ")")
+                .replace("{VISIBLE}", visible);
+    }
+
+    private static String rewrite(String sql, String anchor, String replacement) {
+        if (!sql.contains(anchor)) {
+            throw new IllegalStateException(
+                    "Negotiation search SQL no longer contains the anchor the association "
+                            + "visibility rewrite depends on: " + anchor.strip());
+        }
+        return sql.replace(anchor, replacement);
     }
 
     private static JdbcClient.StatementSpec bindScope(
@@ -203,8 +319,23 @@ public class NegotiationArchiveRepository {
             int limit,
             int offset
     ) {
+        return findNegotiations(filters, scope, null, limit, offset);
+    }
+
+    /**
+     * @param associationVisible see {@link #countNegotiations(
+     *        NegotiationSearchFilters, SqlFragment, SqlFragment)}; must be
+     *        the same fragment the count was given.
+     */
+    public List<NegotiationSummaryResponse> findNegotiations(
+            NegotiationSearchFilters filters,
+            SqlFragment scope,
+            SqlFragment associationVisible,
+            int limit,
+            int offset
+    ) {
         SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
-        return bindScope(bind(jdbc.sql("""
+        return bindScope(bindScope(bind(jdbc.sql(withAssociationVisibility("""
                 SELECT
                     n.negotiation_id,
                     n.document_number,
@@ -230,7 +361,7 @@ public class NegotiationArchiveRepository {
                     a.lead_unit_number,
                     a.lead_unit_name,
                     a.attribute_source
-                """ + SEARCH_FROM + SEARCH_WHERE + safeScope.sql() + """
+                """ + SEARCH_FROM + SEARCH_WHERE, associationVisible, true) + safeScope.sql() + """
                 ORDER BY
                     CASE WHEN CAST(n.negotiation_id AS TEXT) = :query
                             THEN 0 ELSE 1 END,
@@ -239,7 +370,7 @@ public class NegotiationArchiveRepository {
                     n.negotiation_id DESC
                 LIMIT :limit
                 OFFSET :offset
-                """), filters), safeScope)
+                """), filters), safeScope), associationVisible)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(NegotiationSummaryResponse.class)
@@ -633,6 +764,25 @@ public class NegotiationArchiveRepository {
      * caller falls back to the document number rather than rendering an
      * empty heading.
      */
+    /**
+     * The archive's own association type id for "NO" (no association) -
+     * what a hidden association is presented as on the workspace row, so
+     * it matches the list statement's rewrite exactly. Read from the data,
+     * never assumed: there is no association-type lookup table.
+     */
+    public Optional<Long> findNoAssociationTypeId() {
+        return jdbc.sql("""
+                SELECT MIN(negotiation_association_type_id)
+                FROM archive.negotiation
+                WHERE negotiation_association_type_code = 'NO'
+                """)
+                .query(Long.class)
+                .list()
+                .stream()
+                .filter(java.util.Objects::nonNull)
+                .findFirst();
+    }
+
     public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
             List<String> documentNumbers
     ) {
@@ -643,12 +793,28 @@ public class NegotiationArchiveRepository {
             List<String> documentNumbers,
             SqlFragment scope
     ) {
+        return findSummariesForDocumentNumbers(documentNumbers, scope, null);
+    }
+
+    /**
+     * @param associationVisible B4/H2 follow-up: as for
+     *        {@link #countNegotiations(NegotiationSearchFilters, SqlFragment, SqlFragment)}.
+     *        The title here is read from the same resolved attributes, so an
+     *        Award-sourced title of a hidden association must not reach
+     *        Global Search's semantic/related enrichment either.
+     *        {@code null} when unrestricted.
+     */
+    public List<NegotiationSemanticSummaryRow> findSummariesForDocumentNumbers(
+            List<String> documentNumbers,
+            SqlFragment scope,
+            SqlFragment associationVisible
+    ) {
         SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
         if (documentNumbers.isEmpty()) {
             return List.of();
         }
 
-        return bindScope(jdbc.sql("""
+        return bindScope(bindScope(jdbc.sql(withAssociationVisibility("""
                 WITH ranked AS (
                     SELECT
                         n.document_number,
@@ -662,12 +828,13 @@ public class NegotiationArchiveRepository {
                     FROM archive.negotiation n
                     LEFT JOIN archive.negotiation_search_attribute a
                            ON a.negotiation_id = n.negotiation_id
-                    WHERE n.document_number IN (:documentNumbers)""" + safeScope.sql() + """
+                    WHERE n.document_number IN (:documentNumbers)""", associationVisible, false)
+                + safeScope.sql() + """
                 )
                 SELECT document_number, title, status, negotiator
                 FROM ranked
                 WHERE row_rank = 1
-                """), safeScope)
+                """), safeScope), associationVisible)
                 .param("documentNumbers", documentNumbers)
                 .query((resultSet, rowNumber) -> new NegotiationSemanticSummaryRow(
                         resultSet.getString("document_number"),
