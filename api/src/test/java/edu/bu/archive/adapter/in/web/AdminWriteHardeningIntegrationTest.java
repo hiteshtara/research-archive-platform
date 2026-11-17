@@ -360,6 +360,177 @@ class AdminWriteHardeningIntegrationTest {
                 403, "APPROVAL_REQUIRED");
     }
 
+    // ---- QA N-161-1 / N-161-2 and suspension of an administrator -------
+
+    @Test
+    void suspendingAnotherAdministratorIs403ApprovalRequired() throws Exception {
+        expectUnchanged(put("/api/v1/admin/identities/" + ADMIN_B + "/suspension")
+                        .contentType("application/json")
+                        .content("{\"suspended\":true,\"reason\":\"" + REASON + "\"}"),
+                403, "APPROVAL_REQUIRED");
+    }
+
+    @Test
+    void selfUnlinkIsRefused() throws Exception {
+        expectUnchanged(delete("/api/v1/admin/identities/" + ADMIN + "/links/" + linkOf(ADMIN))
+                .param("reason", REASON), 403, "SELF_ADMINISTRATION_REQUIRES_APPROVAL");
+    }
+
+    /**
+     * The QA reproduction: one administrator unlinks another and relinks
+     * that identity to an accomplice's Cognito subject. Before the fix the
+     * accomplice resolved to ADMIN_B with no relink_approval row at all.
+     */
+    @Test
+    void unlinkThenRelinkOfAnAdministratorIsRefused() throws Exception {
+        mvc().perform(delete("/api/v1/admin/identities/" + ADMIN_B + "/links/" + linkOf(ADMIN_B))
+                        .param("reason", "Cognito account compromised"))
+                .andExpect(status().isNoContent());
+
+        Map<String, String> before = snapshot();
+        assertThatThrownBy(() -> service.relinkIdentity(id(ADMIN), ISSUER, "ACCOMPLICE-SUB",
+                id(ADMIN_B), null, null, REASON))
+                .isInstanceOf(edu.bu.archive.application.authorization.admin
+                        .RelinkApprovalRequiredException.class);
+        assertThat(snapshot()).isEqualTo(before);
+        assertThat(new IdentityResolver(new JdbcIdentityLinkRepository(jdbc))
+                .resolve(new ValidatedCognitoIdentity(ISSUER, "ACCOMPLICE-SUB")))
+                .as("the accomplice resolves to nobody")
+                .isNotInstanceOf(edu.bu.archive.application.authorization.IdentityResolution.Mapped.class);
+        assertThat(count("relink_approval")).isZero();
+    }
+
+    @Test
+    void relinkingAnAdministratorWithoutApprovalIsRefused() {
+        jdbc.sql("""
+                UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = 'operator',
+                       revoked_at = now() WHERE institutional_identifier = :w
+                """).param("w", ADMIN_B).update();
+        Map<String, String> before = snapshot();
+        assertThatThrownBy(() -> service.relinkIdentity(id(ADMIN), ISSUER, "sub-new-b",
+                id(ADMIN_B), null, null, REASON))
+                .isInstanceOf(edu.bu.archive.application.authorization.admin
+                        .RelinkApprovalRequiredException.class)
+                .hasMessageContaining("ARCHIVE_ADMIN");
+        assertThat(snapshot()).isEqualTo(before);
+    }
+
+    @Test
+    void relinkCannotChangeTheKualiPersonId() {
+        jdbc.sql("""
+                INSERT INTO authz.identity_link (cognito_issuer, cognito_subject,
+                    institutional_identifier, kuali_person_id, method, status, verified_by,
+                    verified_at, revoked_by, revoked_at)
+                VALUES (:iss, 'sub-carol-old', :w, 'P-CAROL', 'ADMIN_VERIFIED', 'REVOKED',
+                        'operator', now(), 'operator', now())
+                """).param("iss", ISSUER).param("w", CAROL).update();
+
+        Map<String, String> before = snapshot();
+        assertThatThrownBy(() -> service.relinkIdentity(id(ADMIN), ISSUER, "sub-carol-new",
+                id(CAROL), new edu.bu.archive.application.authorization.KualiPersonId("VICTIM-PI"),
+                null, REASON))
+                .isInstanceOf(edu.bu.archive.application.authorization.admin
+                        .ApprovalRequiredException.class)
+                .hasMessageContaining("Kuali person id");
+        assertThat(snapshot()).isEqualTo(before);
+
+        // Non-vacuity: the same principal relinks (no grants, not an administrator).
+        service.relinkIdentity(id(ADMIN), ISSUER, "sub-carol-new", id(CAROL),
+                new edu.bu.archive.application.authorization.KualiPersonId("P-CAROL"), null, REASON);
+        assertThat(jdbc.sql("""
+                SELECT kuali_person_id FROM authz.identity_link
+                 WHERE institutional_identifier = :w AND status = 'ACTIVE'
+                """).param("w", CAROL).query(String.class).single()).isEqualTo("P-CAROL");
+    }
+
+    /**
+     * Approve and revoke of one PENDING relink request, released together.
+     * Whatever the interleaving, the row ends in one consistent state and
+     * every successful transition has exactly one audit row.
+     */
+    @Test
+    void approveVersusRevokeRaceLeavesAConsistentState() throws Exception {
+        jdbc.sql("""
+                UPDATE authz.identity_link SET status = 'REVOKED', revoked_by = 'operator',
+                       revoked_at = now() WHERE institutional_identifier = :w
+                """).param("w", BOB).update();
+        long approvalId = service.requestRelinkApproval(id(ADMIN), id(BOB), ISSUER, "sub-bob-2",
+                "Cognito pool replaced for Bob").approvalId();
+        int auditBefore = count("access_audit");
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Throwable> approve = pool.submit(() -> {
+                ready.countDown();
+                go.await(20, TimeUnit.SECONDS);
+                try {
+                    service.approveRelink(id(ADMIN_B), approvalId, "verified the replacement pool");
+                    return null;
+                } catch (Throwable failure) {
+                    return failure;
+                }
+            });
+            Future<Throwable> revoke = pool.submit(() -> {
+                ready.countDown();
+                go.await(20, TimeUnit.SECONDS);
+                try {
+                    service.revokeRelinkApproval(id(ADMIN), approvalId, "request withdrawn after review");
+                    return null;
+                } catch (Throwable failure) {
+                    return failure;
+                }
+            });
+            assertThat(ready.await(20, TimeUnit.SECONDS)).isTrue();
+            go.countDown();
+            Throwable approveOutcome = approve.get(60, TimeUnit.SECONDS);
+            Throwable revokeOutcome = revoke.get(60, TimeUnit.SECONDS);
+
+            var row = jdbc.sql("""
+                    SELECT status, approved_by IS NOT NULL AS approved,
+                           revoked_at IS NOT NULL AS revoked, consumed_at IS NOT NULL AS consumed
+                      FROM authz.relink_approval WHERE approval_id = :id
+                    """).param("id", approvalId)
+                    .query((rs, n) -> rs.getString("status") + "/" + rs.getBoolean("approved")
+                            + "/" + rs.getBoolean("revoked") + "/" + rs.getBoolean("consumed"))
+                    .single();
+            assertThat(row).as("approve=%s revoke=%s", approveOutcome, revokeOutcome)
+                    .isIn("REVOKED/true/true/false", "REVOKED/false/true/false",
+                            "APPROVED/true/false/false");
+            long successes = java.util.stream.Stream.of(approveOutcome, revokeOutcome)
+                    .filter(java.util.Objects::isNull).count();
+            assertThat(count("access_audit"))
+                    .as("one audit row per successful transition")
+                    .isEqualTo(auditBefore + (int) successes);
+            assertThat(row.startsWith("REVOKED") || revokeOutcome != null).isTrue();
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** The last-administrator guard still holds alongside the new refusals. */
+    @Test
+    void theLastAdministratorGuardStillHolds() throws Exception {
+        mvc().perform(delete("/api/v1/admin/administrators/" + ADMIN_B)
+                        .param("reason", "stepping down from the role"))
+                .andExpect(status().isNoContent());
+        expectUnchanged(delete("/api/v1/admin/administrators/" + ADMIN)
+                        .param("reason", "stepping down from the role"),
+                409, "LAST_ARCHIVE_ADMINISTRATOR");
+    }
+
+    @Test
+    void aBulkGrantWhoseOnlyEntryIsTheActorWritesNothing() {
+        Map<String, String> before = snapshot();
+        var report = service.grantAccessInBulk(id(ADMIN), List.of(id(ADMIN)),
+                new edu.bu.archive.application.authorization.admin.GrantSpecification(
+                        edu.bu.archive.application.authorization.GrantType.UNIT, "1234",
+                        false, null, null, REASON));
+        assertThat(report.failed()).isEqualTo(1);
+        assertThat(snapshot()).as("no grant and no batch summary row").isEqualTo(before);
+    }
+
     // ---- N2: unlink then link ------------------------------------------
 
     @Test
@@ -625,6 +796,13 @@ class AdminWriteHardeningIntegrationTest {
                 .param("g", grantee).param("d", descendants).param("r", reason)
                 .param("e", expires == null ? null : java.sql.Timestamp.from(expires))
                 .query(Long.class).single();
+    }
+
+    private long linkOf(String who) {
+        return jdbc.sql("""
+                SELECT identity_link_id FROM authz.identity_link
+                 WHERE institutional_identifier = :w AND status = 'ACTIVE'
+                """).param("w", who).query(Long.class).single();
     }
 
     private int activeGrantsFor(String grantee) {

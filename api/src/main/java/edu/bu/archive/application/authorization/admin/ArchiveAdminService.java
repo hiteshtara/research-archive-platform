@@ -474,6 +474,15 @@ public class ArchiveAdminService {
         long alreadyHeld = outcomes.stream().filter(o -> o.status() == BulkGrantStatus.ALREADY_HELD).count();
         long failed = outcomes.stream().filter(o -> o.status() == BulkGrantStatus.FAILED).count();
 
+        if (failed == outcomes.size()) {
+            /*
+             * Every grantee was refused (for example a batch whose only entry
+             * is the actor). Nothing changed, so nothing is audited: a
+             * refusal writes no audit row, for a batch as for a single grant.
+             * The report still tells the operator why each entry failed.
+             */
+            return new BulkGrantReport(batchRef, outcomes);
+        }
         audit.record(actor.value(), AdminAuditAction.ACCESS_GRANTED, null,
                 String.format("{\"batchRef\":\"%s\",\"requested\":%d,\"granted\":%d,"
                                 + "\"alreadyHeld\":%d,\"failed\":%d}",
@@ -721,6 +730,7 @@ public class ArchiveAdminService {
         // Re-linking transfers whatever grants this identity holds; the audit
         // trail must say why.
         reason = Reasons.require(reason);
+        refusePrincipalChangeOnRelink(subject, principal);
 
         /*
          * RE-CHECKED here, not taken from the request. Grants can be issued
@@ -730,21 +740,29 @@ public class ArchiveAdminService {
          * some now.
          */
         int inherited = identities.activeGrantCountFor(subject);
+        /*
+         * QA finding N-161-1: ARCHIVE_ADMIN follows the archive identity just
+         * as grants do. Without this, one administrator could unlink another
+         * administrator and relink that identity to any Cognito user, making
+         * them an administrator with no second approval.
+         */
+        boolean administrator = adminRoles.findActive(subject).isPresent();
         Long consumedApproval = null;
 
-        if (inherited > 0) {
+        if (inherited > 0 || administrator) {
             if (relinkApprovals == null) {
                 throw new IllegalStateException(
-                        "this archive identity holds " + inherited + " active grant(s), so a "
+                        "this archive identity holds active grants or ARCHIVE_ADMIN, so a "
                                 + "second ARCHIVE_ADMIN must approve the relink, and no "
                                 + "approval store is configured");
             }
             RelinkApproval approval = relinkApprovals
                     .findLive(subject, cognitoIssuer.trim(), cognitoSubject.trim())
                     .orElseThrow(() -> new RelinkApprovalRequiredException(
-                            "this archive identity holds active grants, which the new Cognito "
-                                    + "identity would inherit. A second, distinct ARCHIVE_ADMIN "
-                                    + "must approve this exact identity and target first."));
+                            "this archive identity holds active grants or ARCHIVE_ADMIN, which "
+                                    + "the new Cognito identity would inherit. A second, distinct "
+                                    + "ARCHIVE_ADMIN must approve this exact identity and target "
+                                    + "first."));
 
             if (!approval.isUsable()) {
                 throw new RelinkApprovalRequiredException(
@@ -782,8 +800,9 @@ public class ArchiveAdminService {
         audit.record(actor.value(), AdminAuditAction.IDENTITY_RELINKED, subject,
                 "link=" + link.id() + "; grants inherited by the new Cognito identity="
                         + inherited
+                        + (administrator ? "; ARCHIVE_ADMIN inherited" : "")
                         + (consumedApproval == null
-                                ? "; no second approval required (no active grants)"
+                                ? "; no second approval required (no active grants or ARCHIVE_ADMIN)"
                                 : "; approval=" + consumedApproval)
                         + "; " + reason.trim());
         return link;
@@ -900,6 +919,13 @@ public class ArchiveAdminService {
         requireAdministrator(actor);
         requireSubject(subject);
         String why = Reasons.require(reason);
+        if (actor.equals(subject)) {
+            // Like self-suspension: an administrator who unlinks themselves
+            // can no longer sign in as anyone, and cannot undo it.
+            throw new SelfAdministrationException(
+                    "an administrator cannot unlink their own identity; they would be locked "
+                            + "out. A second administrator must do this. Nothing was written.");
+        }
         identities.revokeLink(subject, linkId, actor.value());
         audit.record(actor.value(), AdminAuditAction.IDENTITY_UNLINKED, subject,
                 "link=" + linkId + "; " + why);
@@ -918,11 +944,11 @@ public class ArchiveAdminService {
      *       A suspended administrator no longer resolves, so self-suspension
      *       is a lockout - and for the last administrator one the
      *       application cannot undo;</li>
-     *   <li>restoring an identity that holds an active ARCHIVE_ADMIN
-     *       membership (decision D3, {@link ApprovalRequiredException}): that
-     *       would make its administrator privileges usable again, which needs
-     *       a second administrator's approval. Restoring anyone else stays a
-     *       single-administrator action.</li>
+     *   <li>suspending or restoring an identity that holds an active
+     *       ARCHIVE_ADMIN membership ({@link ApprovalRequiredException}).
+     *       Restoring would make its administrator privileges usable again
+     *       (decision D3); suspending could then not be undone. Suspending
+     *       or restoring anyone else stays a single-administrator action.</li>
      * </ul>
      */
     @Transactional
@@ -936,11 +962,22 @@ public class ArchiveAdminService {
                     "an administrator cannot change their own suspension; a suspended "
                             + "administrator cannot sign in to undo it. Nothing was written.");
         }
-        if (!suspended && adminRoles.findActive(subject).isPresent()) {
+        if (adminRoles.findActive(subject).isPresent()) {
+            /*
+             * Restore: decision D3. Suspend: refused too, because restoring
+             * an administrator needs approval, so one administrator
+             * suspending another would be irreversible in the application
+             * until the approval workflow exists.
+             */
             throw new ApprovalRequiredException(
-                    "restoring this identity would make its ARCHIVE_ADMIN privileges usable "
-                            + "again, which requires a second administrator's approval. The "
-                            + "approval workflow is not available yet. Nothing was written.");
+                    (suspended
+                            ? "suspending an ARCHIVE_ADMIN could not be undone without a second "
+                                    + "administrator's approval"
+                            : "restoring this identity would make its ARCHIVE_ADMIN privileges "
+                                    + "usable again, which requires a second administrator's "
+                                    + "approval")
+                            + ". The approval workflow is not available yet. Nothing was "
+                            + "written.");
         }
 
         identities.setSuspended(subject, suspended, actor.value(), why);
@@ -1005,6 +1042,39 @@ public class ArchiveAdminService {
             detail.append("; ").append(reason.trim());
         }
         return detail.toString();
+    }
+
+    /**
+     * QA finding N-161-2: a relink must not change the Kuali person id.
+     *
+     * <p>A V086 approval is bound to the identity and the proposed Cognito
+     * issuer and subject, but {@code authz.relink_approval} has no column for
+     * the principal, so it cannot bind one - and the principal is what
+     * CONTACT_DERIVATION resolves through. Letting the executor choose it
+     * would let them point an approved relink at someone else's records.
+     *
+     * <p>Adding the column is a migration, which this PR deliberately does
+     * not contain. Until an approval can bind it, a relink keeps exactly the
+     * principal of the identity's most recent link (null stays null).
+     * Changing a principal is a separate act that needs its own approved
+     * procedure. Relink exists for "same person, new Cognito subject", and
+     * the same person has the same principal.
+     */
+    private void refusePrincipalChangeOnRelink(InstitutionalIdentifier subject,
+                                               KualiPersonId principal) {
+        String previous = identities.findLinksFor(subject).stream()
+                .max(java.util.Comparator.comparingLong(IdentityLink::id))
+                .flatMap(IdentityLink::kualiPersonId)
+                .map(KualiPersonId::value)
+                .orElse(null);
+        String proposed = principal == null ? null : principal.value();
+        if (!java.util.Objects.equals(previous, proposed)) {
+            throw new ApprovalRequiredException(
+                    "a relink cannot change the Kuali person id: the relink approval does not "
+                            + "bind it, and contact-derived access resolves through it. Relink "
+                            + "with the identity's existing principal; changing the principal "
+                            + "needs a separate approved procedure. Nothing was written.");
+        }
     }
 
     /** Control 1: no self-granting. Bulk grants inherit it per grantee. */

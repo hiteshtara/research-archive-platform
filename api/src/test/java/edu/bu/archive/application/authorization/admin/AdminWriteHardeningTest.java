@@ -332,9 +332,17 @@ class AdminWriteHardeningTest {
         }
 
         @Test
+        void suspendingAnotherAdministratorIsRefusedBecauseRestoreWouldNeedApproval() {
+            assertThatThrownBy(() -> service.setSuspended(ADMIN, OTHER_ADMIN, true, REASON))
+                    .isInstanceOf(ApprovalRequiredException.class);
+            assertThat(identities.isSuspended(OTHER_ADMIN)).isFalse();
+            assertNothingWritten();
+        }
+
+        @Test
         void restoringAnAdministratorIsRefusedUntilApprovalExists() {
-            service.setSuspended(ADMIN, OTHER_ADMIN, true, "suspended pending review");
-            audit.clear();
+            // Seeded: suspending an administrator through the service is refused too.
+            identities.setSuspended(OTHER_ADMIN, true, "operator", "seeded suspension");
 
             assertThatThrownBy(() -> service.setSuspended(ADMIN, OTHER_ADMIN, false, REASON))
                     .isInstanceOf(ApprovalRequiredException.class);
@@ -348,6 +356,63 @@ class AdminWriteHardeningTest {
             service.setSuspended(ADMIN, ALICE, false, "review found nothing wrong");
             assertThat(identities.isSuspended(ALICE)).isFalse();
             assertThat(audit.events()).hasSize(2);
+        }
+    }
+
+    @Nested
+    @DisplayName("QA N-161-1 / N-161-2: unlink and relink")
+    class UnlinkAndRelink {
+
+        @Test
+        void selfUnlinkIsRefused() {
+            IdentityLink own = identities.link("iss", "sub-admin", ADMIN, null, null, "seed");
+            assertThatThrownBy(() -> service.unlinkIdentity(ADMIN, ADMIN, own.id(), REASON))
+                    .isInstanceOf(SelfAdministrationException.class);
+            assertThat(identities.findLinksFor(ADMIN)).allMatch(IdentityLink::isActive);
+            assertNothingWritten();
+        }
+
+        @Test
+        void relinkingAnAdministratorWithoutApprovalIsRefused() {
+            IdentityLink theirs = identities.link("iss", "sub-b", OTHER_ADMIN, null, null, "seed");
+            service.unlinkIdentity(ADMIN, OTHER_ADMIN, theirs.id(), "Cognito account compromised");
+            audit.clear();
+
+            // No grants, but ARCHIVE_ADMIN: the approval path is required. This
+            // service has no approval store, so it is refused outright.
+            assertThatThrownBy(() -> service.relinkIdentity(ADMIN, "iss", "ACCOMPLICE-SUB",
+                    OTHER_ADMIN, null, null, REASON))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("ARCHIVE_ADMIN");
+            assertThat(identities.findLinksFor(OTHER_ADMIN)).noneMatch(IdentityLink::isActive);
+            assertNothingWritten();
+        }
+
+        @Test
+        void relinkCannotChangeTheKualiPersonId() {
+            IdentityLink bobs = identities.link("iss", "sub-bob", BOB, null, null, "seed");
+            service.unlinkIdentity(ADMIN, BOB, bobs.id(), "Cognito pool replaced");
+            audit.clear();
+
+            assertThatThrownBy(() -> service.relinkIdentity(ADMIN, "iss", "sub-bob-2", BOB,
+                    new edu.bu.archive.application.authorization.KualiPersonId("VICTIM-PI"),
+                    null, REASON))
+                    .isInstanceOf(ApprovalRequiredException.class)
+                    .hasMessageContaining("Kuali person id");
+            assertThat(identities.findLinksFor(BOB)).noneMatch(IdentityLink::isActive);
+            assertNothingWritten();
+
+            // The same principal (null) is still a single-administrator relink.
+            service.relinkIdentity(ADMIN, "iss", "sub-bob-2", BOB, null, null, REASON);
+            assertThat(identities.findLinksFor(BOB)).anyMatch(IdentityLink::isActive);
+        }
+
+        @Test
+        void aBulkGrantWhoseOnlyEntryIsTheActorWritesNothing() {
+            var report = service.grantAccessInBulk(ADMIN, List.of(ADMIN), unit("1234", false, null));
+            assertThat(report.failed()).isEqualTo(1);
+            assertThat(grants.findForGrantee(ADMIN)).isEmpty();
+            assertNothingWritten();
         }
     }
 
