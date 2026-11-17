@@ -1,5 +1,15 @@
 # SEC-008 — archive activity audit
 
+> **D4 revised 2026-11-17: record-view and document-download auditing is
+> REQUIRED** (BU user story US-SEC-004: "1) Record views are logged. 2)
+> Document downloads are logged. 3) Security changes are logged."). Release
+> scope is Award, Proposal, Subaward and Negotiation; **IRB is out of release
+> scope** and has no activity call sites. Security changes (US-SEC-004.3) are
+> the separate `authz.access_audit` trail and are not covered here.
+>
+> **Activation in DEV still needs its own, separate approval.** See §8 for the
+> remaining steps. Nothing in this document enables anything.
+
 Status: **implemented in source, not deployed, collection OFF, privilege not
 granted.** Three separate gates stand between this code and a single audit row
 existing in any environment, and each is approved separately:
@@ -37,12 +47,12 @@ The six fields the requirement asks for, and nothing else:
 | Column | Note |
 |---|---|
 | `occurred_at` | partition key |
-| `actor` | the **institutional identifier** — the same key grants are held on, so a reassigned login name is not mistaken for the same person. Never a token, never a raw login name |
+| `actor` | the **institutional identifier** — the same key grants are held on, so a reassigned login name is not mistaken for the same person, resolved exactly as the administrative API resolves its actor (`RequestActivityContext`). An **authenticated caller with no resolvable link** (not provisioned, revoked, suspended, ambiguous) is recorded as `cognito-sub:<subject>` — the opaque Cognito subject, never the token, a login name or an email — so their activity is still attributable. `NULL` **only** for a genuinely unauthenticated request. Never a token, never a raw login name |
 | `action` | one of five, CHECK-constrained: `RECORD_VIEWED`, `RECORD_ACCESS_DENIED`, `ATTACHMENT_DOWNLOADED`, `EXPORT_GENERATED`, `SEARCH_PERFORMED` |
-| `resource_type` / `resource_key` | a **business** key (award number, proposal number), never a row id that means nothing outside one database |
+| `resource_type` / `resource_key` | the module (`AWARD`, `PROPOSAL`, `SUBAWARD`, `NEGOTIATION`) and its business key: award number, proposal number, `subaward_code`, negotiation id. A view addressed by row id also carries `detail.recordId` (the `award_id` / `proposal_id` / `subaward_id`). **Downloads use the same business key** as a view of that record, plus `detail.recordId` (the row id in the download path) and `detail.attachmentId` — ids only, never a file name, description or content. View and download rows for one record therefore share `resource_key` and, within one request, `correlation_id` |
 | `outcome` | `PERMITTED` / `DENIED` / `ERROR` |
 | `reason` | the engine's own vocabulary — an `AccessReason` or a denial code. Never prose |
-| `correlation_id` | ties the row to the API request and the application logs |
+| `correlation_id` | one id per HTTP request, shared by every row that request writes; reuses the Global Search timing `cid` when the request has one, otherwise a random UUID. Never derived from caller input |
 
 ### Privacy defaults, enforced by the type rather than by discipline
 
@@ -59,10 +69,35 @@ These are **defaults pending approval**, not an approved BU privacy position.
 If the business decides search terms must be captured, that is a deliberate
 change to the type, the column comment and this document.
 
+### Who may read the audit
+
+**There is no API read path, and this change adds none.** The API role
+`archive_api` holds `INSERT` on `authz.activity_audit` and nothing else — the
+grant script explicitly `REVOKE`s `SELECT`, and
+`ActivityAuditGrantIntegrationTest` asserts it. Reading the audit ("who read
+what") is an **operator / security-administrator action**, performed directly
+against the database as the table owner (`archive_admin`) or a dedicated
+read-only audit role created for the purpose — never through the archive UI or
+API. Who holds that access is itself a BU decision to record alongside the
+retention period.
+
 ## 3. Retention
 
-**Proposed: 90 days. This is a number for review, not an approved BU retention
-policy.**
+**90 days proposed baseline (online retention), pending BU records-retention
+approval; manual operator procedure only; no automatic deletion.** The owner
+approved 90 days as the proposed online baseline on 2026-11-17, subject to BU
+records-retention approval. Nothing purges, schedules or invokes deletion:
+no cron, EventBridge rule, `pg_cron`, ETL loader or CI job references the
+procedure (verified by repository search 2026-11-17).
+
+A tested, **non-executed** retention procedure exists:
+[`ops/activity-audit/activity_audit_retention.sql`](../../ops/activity-audit/activity_audit_retention.sql).
+It takes the period as a **required** parameter (no default, so no number can
+silently become policy), is a **dry run unless `execute=true`**, drops only
+whole monthly partitions whose range ends before `now() - period`, never
+touches the `DEFAULT` partition, and never disables the append-only trigger.
+Nothing schedules or calls it. `ActivityAuditRetentionProcedureIntegrationTest`
+runs it against V089 in a throwaway container.
 
 Monthly `RANGE` partitions, so the eventual decision is a `DROP PARTITION`
 rather than a `DELETE` over a hot table — and a partition drop does not fire
@@ -118,11 +153,28 @@ open:
 | Risk | a read happens with **no record that it did** | an audit outage becomes an **archive outage** |
 | Visible as | `ERROR` in the application log, request succeeds | `AUDIT_UNAVAILABLE` to the caller |
 
-**The routine-read setting has no default.**
-`ActivityAuditProperties.validate()` fails at startup if collection is enabled
-without an explicit choice, naming both options. A default there would be this
-code quietly making a compliance-versus-availability decision on the
-business's behalf.
+**FAIL_OPEN for routine views: proposed, pending BU approval; not a
+default.** The routine-read setting has no default. Until 2026-11-17 the code
+quietly defaulted it to `FAIL_OPEN` while this document said otherwise; owner
+direction removed that default. `ActivityAuditProperties.validate()` now fails
+at startup if collection is enabled without
+`app.authorization.activity-audit.routine-read-failure-policy`, naming both
+options (`ActivityAuditStartupTest#flagOnWithoutRoutinePolicyRefusesToStart`,
+`ActivityAuditorTest#enablingWithoutARoutinePolicyRefusesToStart`). Requiring
+it was chosen over defaulting to `FAIL_CLOSED` because a default in either
+direction would be the code taking the compliance-versus-availability decision
+on the business's behalf, and the cost is one property set at the single
+moment collection is switched on. With collection off nothing new is required
+(`ActivityAuditStartupTest#flagOffNeedsNothing`).
+
+Sensitive releases stay `FAIL_CLOSED` by default: with the audit store
+failing, a download or export answers `503 AUDIT_UNAVAILABLE` and releases no
+file (`ActivityAuditEndToEndIntegrationTest#aFailedAuditWriteRefusesDownloadsAndExports`,
+`ActivityAuditorTest$FailurePolicyBehaviour#failClosedRefusesTheRead`).
+
+Administrative security changes are a separate path and are unchanged by this
+work: their `authz.access_audit` row is written in the same transaction as the
+change (`AuthorizationSchemaAndAuditIntegrationTest$AuditTransactionality`).
 
 With collection **off**, both are moot and nothing is required.
 
@@ -142,11 +194,40 @@ throw, because it never chooses the path.
 
 | Event | Where it is raised | Status |
 |---|---|---|
-| `RECORD_VIEWED` | `RecordAuthorizationService.requireVersion` | **wired** |
-| `RECORD_ACCESS_DENIED` | the same place, on the refusal branch | **wired** |
-| `ATTACHMENT_DOWNLOADED` | `AttachmentAuthorizationService.requireAttachmentDownload`, called by the Award, Proposal, Subaward and Negotiation download endpoints | **wired** |
-| `EXPORT_GENERATED` | `AwardV1Controller.report` and `reportWithAttachments`, via `recordExport` | **wired** |
-| `SEARCH_PERFORMED` | `GlobalSearchService`, `DocumentSearchService`, `AttachmentSearchService`, `AwardEvidenceSearchService` | **wired** |
+| `RECORD_VIEWED` | `RecordAuthorizationService.audited` / `auditUnenforcedView`, reached only from the public `requireAward`, `requireAwardNumber`, `requireEveryAwardVersion`, `requireProposal`, `requireProposalNumber`, `requireEveryProposalVersion`, `requireSubaward`, `requireNegotiation` | wired with actor + correlation id (2026-11-17) |
+| `RECORD_ACCESS_DENIED` | the same place, on the refusal branch (including not-provisioned / identity refusals) | wired with actor + correlation id (2026-11-17) |
+| `ATTACHMENT_DOWNLOADED` | `AttachmentAuthorizationService.recordAttachmentDownload(type, recordId, attachmentId, opened)`, called by the Award, Proposal, Subaward and Negotiation download endpoints after the service resolved the download | wired with actor + attachment id (2026-11-17) |
+| `EXPORT_GENERATED` | `AwardV1Controller.report` and `reportWithAttachments`, via `recordExport` | wired with actor (2026-11-17) |
+| `SEARCH_PERFORMED` | `GlobalSearchService`, `DocumentSearchService`, `AttachmentSearchService`, `AwardEvidenceSearchService` | wired with actor (2026-11-17) |
+
+### Correction (2026-11-17): the earlier "wired" claims were not true
+
+This table previously marked every call site **wired**. That was true of the
+call sites and false of what they would have written. Proven against
+unmodified `main` (7101d75) by `ActivityAuditEndToEndIntegrationTest`, run with
+collection ON — 24 of 24 tests failed:
+
+1. **No actor, no correlation id, on any row.** `AuthorizationConfiguration`
+   built the recorder with `() -> Optional.empty()` and `() -> null`. The only
+   rows main could write (downloads, exports, searches) had
+   `actor = NULL, correlation_id = NULL`.
+2. **Record views and denials were never written at all**, even with
+   collection on: the `RecordAuthorizationService` bean used a constructor
+   that defaults to a *disabled* recorder.
+3. **Views were recorded only under enforcement** (the `require*` methods
+   returned before reaching the recording point when enforcement was off —
+   which is every environment), and **Subaward and Negotiation decisions were
+   never recorded** (they went through `canSee*`, which short-circuits for
+   Central and uses `INHERITED`, non-reportable decisions).
+4. **A download refused at the record level still wrote
+   `ATTACHMENT_DOWNLOADED / PERMITTED`**, because the release row was written
+   before the record-level check ran. Independent QA (2026-11-17) found the
+   same false row for another record's attachment id, a missing attachment and
+   a missing object - all of which 404 in the service after the row was
+   written. Fixed by recording only after the service has resolved the
+   download (below).
+
+All four are fixed; the same test file passes 24/24 on the fix.
 
 ### A known limitation: decision, not delivery
 
@@ -161,26 +242,53 @@ weaker guarantee wearing a stronger name. Every release row carries
 `detail.phase = "release_authorized"` so the limitation is visible in the data
 rather than only here.
 
-### Ordering: the audit comes before the file
+### Ordering: decide, resolve, audit, then stream
 
-For downloads and exports the recorder is called **before** the attachment is
-resolved and before the response body exists. Under the FAIL_CLOSED tier a
-failed audit write therefore throws out of the gate and **no byte is
-released** - which is the requirement, and the reason downloads have their own
-method rather than a flag on the listing gate. A listing must not be recorded
-as a download, and a download must not be served on a listing's weaker
+For a **download** the endpoint:
+
+1. applies the attachment-viewer group gate (first, before any repository
+   call);
+2. calls the archive service, which decides the record (recording that view
+   or refusal), confirms the attachment id **belongs to that record**,
+   confirms the archived object exists and opens it;
+3. writes the `ATTACHMENT_DOWNLOADED` row
+   (`AttachmentAuthorizationService.recordAttachmentDownload`);
+4. only then creates the response body that streams the bytes.
+
+So a `PERMITTED` release row exists only for a release that is about to
+happen: a refused record, a foreign attachment id, a missing attachment or a
+missing object each throws out of step 2 and leaves **no** download row. Under
+the FAIL_CLOSED tier a failed write in step 3 closes the opened object and
+answers `503 AUDIT_UNAVAILABLE`: **no byte is released**, because the body that
+would stream it does not exist yet.
+
+For an **export** the recorder is called after the report data (and so the
+record decision) is built and before the response body exists - the same
 guarantee.
+
+A listing must not be recorded as a download, and a download must not be
+served on a listing's weaker guarantee - which is why downloads have their own
+recording method rather than a flag on the listing gate.
 
 `AttachmentSearchService.searchAttachments` wraps its three record-type
 branches so the search is recorded once, around all of them - a new branch
 cannot be added without being audited.
 
-Record view and denial are raised at the one point every record decision
-passes through, so a new endpoint is audited by construction rather than by
-remembering to add a call. An `INHERITED` decision is deliberately **not**
-recorded as a view: it is an internal question asked on behalf of a Subaward or
-Negotiation, and recording it would report a view of an Award the caller never
-opened.
+Record view and denial are raised from the public `require*` entry points —
+the methods a service calls for the record the request is *about* — so a new
+endpoint that calls one is audited by construction. Each is recorded **once
+per request** (request-scoped de-duplication), whatever the number of checks a
+service makes. **Independent of enforcement**: with enforcement off and
+collection on, a view is recorded `PERMITTED` with reason `NOT_ENFORCED`.
+
+Not recorded as views, deliberately: the `INHERITED` Award checks made on
+behalf of a Subaward or Negotiation, and the `canSee*` questions asked about
+*related* records on someone else's page. Both would otherwise report a view
+of a record the caller never opened. A Subaward view records the Subaward; a
+Negotiation view records the Negotiation.
+
+With collection **off**, the recording points return before doing anything,
+and no extra query (business-key lookup, identity resolution) runs.
 
 `searchPerformed` takes a module and a result **count**. There is no parameter
 on any method that could carry a query string — the shape of the API is the
@@ -190,22 +298,34 @@ Every constructor that does not take a recorder defaults to
 `ArchiveActivityRecorder.disabled(clock)`, so wiring a call site changes
 nothing until collection is switched on.
 
+### Known characteristic: view volume (for retention sizing)
+
+A record view is recorded **once per record per HTTP request**, not once per
+page. A workspace page load issues a request per section (summary, versions,
+people, amounts, terms, attachments, ...) - roughly **20 requests for an Award
+workspace** - and each section request that gates on the record writes its own
+`RECORD_VIEWED` row, all with the same actor and key but different correlation
+ids. Expect on the order of 20 rows per workspace open. This is documented,
+not changed: collapsing it would need a page-level view signal the API does not
+have. BU retention sizing should use rows-per-page-open, not one row per view.
+
 ## 6. What is NOT built yet
 
-- **No retention job.** Operational, and it needs the retention period decided.
-  The process is documented in
+- **No scheduled retention job.** A tested procedure exists
+  (`ops/activity-audit/activity_audit_retention.sql`) but nothing runs it; it
+  needs the retention period decided. The process is documented in
   [`docs/runbooks/ACTIVITY_AUDIT_PARTITIONS.md`](../runbooks/ACTIVITY_AUDIT_PARTITIONS.md).
-- **No read side.** Nobody can query activity yet; who may read an audit of who
-  read what is its own access-control question.
+- **No API read side.** See "Who may read the audit" in §2.
+- **No IRB call sites.** IRB is out of release scope.
 
 ## 7. Tests
 
-`ActivityAuditorTest` — 17 tests: the never-grants-access invariant under both
+`ActivityAuditorTest` — 18 tests: the never-grants-access invariant under both
 policies, both failure behaviours, the startup failure when no policy is
 chosen, and the privacy constraints enforced by the type (including a
 reflection assertion that no search-term field exists).
 
-`ArchiveActivityRecorderTest` — 7 tests over the five call sites: every action
+`ArchiveActivityRecorderTest` — 13 tests over the five call sites (including that download and export rows can carry no file name, content or document text): every action
 is raised correctly, a denial never throws even with both tiers closed, the two
 tiers apply (a failed download audit refuses the release while a failed view
 audit does not), a search cannot carry its terms, and a disabled recorder is a
@@ -215,3 +335,51 @@ safe no-op everywhere.
 PostgreSQL: partitions route by month, the default partition catches the rest,
 the append-only trigger fires on UPDATE and DELETE, and both CHECK constraints
 reject unknown values.
+
+`ActivityAuditEndToEndIntegrationTest` — 36 tests (24 at the main-branch proof, plus related-list parent-only ×2, no-secrets-in-rows, FAIL_CLOSED-on-audit-outage, and foreign / missing attachment id ×4 modules each), real HTTP through the real
+controllers and wiring, V089 applied, collection ON, synthetic identities: for
+each of Award, Proposal, Subaward and Negotiation a permitted view writes
+exactly one `RECORD_VIEWED` row asserting all five fields (actor, action,
+target, timestamp, outcome) plus correlation id; a denied view writes
+`RECORD_ACCESS_DENIED`; with enforcement OFF a view is still recorded; a
+download writes `ATTACHMENT_DOWNLOADED` with actor, record id and attachment
+id; a refused download writes no release row; an Award report export writes
+`EXPORT_GENERATED` with the actor; an unlinked caller is attributed by Cognito
+subject; inherited Award checks are not recorded as Award views; and separate
+requests get separate correlation ids.
+
+`ActivityAuditDisabledIntegrationTest` — collection at its default (off):
+views, refusals, downloads and exports in every module write **nothing**,
+with enforcement on or off.
+
+`ActivityAuditRetentionProcedureIntegrationTest` — the retention procedure:
+dry run drops nothing, execute drops only expired whole months, the period is
+a parameter, the DEFAULT partition is untouched, append-only still holds, a
+non-positive period is refused.
+
+`RequestActivityContextTest` — actor resolution (institutional id; Cognito
+subject fallback; null only when unauthenticated; cached per request; never
+throws) and correlation ids (one per request; search timing cid reused).
+
+## 8. Remaining before US-SEC-004.1 / .2 are DONE in DEV
+
+Each step is approved separately; none is done by this change.
+
+1. **Approve and apply V089** — `git mv` it from
+   `database/migrations-pending-approval/` into `database/migrations/` in its
+   own PR, then apply via the loader's `--migrate-only` from an image that
+   descends from that commit.
+2. **Apply the privilege** — `database/roles/archive_api_activity_audit_grant.sql`
+   (INSERT only, explicit REVOKE SELECT), after the role script.
+3. **BU records-retention approval** of the 90-day proposed online baseline,
+   plus whether denials are kept longer, export-before-drop, and who may
+   authorise a drop and who may read the audit. Retention stays a manual
+   operator procedure; no automatic deletion.
+4. **BU approval of the routine-read failure policy** (`FAIL_OPEN` proposed;
+   it has no default and must be set explicitly when the flag is turned on).
+5. **Turn the flag on in DEV** — `app.authorization.activity-audit.enabled=true`
+   in the DEV task definition — separate approval.
+6. **Create next month's partition** before each month begins (runbook §4).
+7. Verify in DEV: a view and a download in each module produce rows with an
+   institutional-identifier actor (requires the caller to hold an
+   `authz.identity_link`; otherwise the actor is `cognito-sub:…`).

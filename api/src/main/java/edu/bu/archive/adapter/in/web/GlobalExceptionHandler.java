@@ -100,6 +100,30 @@ public class GlobalExceptionHandler {
      * (not left to Spring Security's default AccessDeniedHandler) so
      * the response body matches this API's own error-body shape.
      */
+    /**
+     * SEC-008 FAIL_CLOSED: the activity-audit write failed, so the read or
+     * release was refused rather than served unrecorded. 503 (the archive is
+     * temporarily unable to serve it), with a fixed code and message - never
+     * the underlying database error.
+     */
+    @ExceptionHandler(edu.bu.archive.application.authorization.audit.AuditUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleAuditUnavailable(
+            edu.bu.archive.application.authorization.audit.AuditUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(
+                        body(
+                                HttpStatus.SERVICE_UNAVAILABLE,
+                                edu.bu.archive.application.authorization.audit
+                                        .AuditUnavailableException.CODE,
+                                "Activity audit unavailable; the request was refused.",
+                                request
+                        )
+                );
+    }
+
     @ExceptionHandler(AttachmentAccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleAttachmentAccessDenied(
             AttachmentAccessDeniedException exception,

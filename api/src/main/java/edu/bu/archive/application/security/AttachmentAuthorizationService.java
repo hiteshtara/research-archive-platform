@@ -1,5 +1,6 @@
 package edu.bu.archive.application.security;
 
+import edu.bu.archive.application.authorization.RecordFactsRepository;
 import edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder;
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
 
@@ -72,32 +73,86 @@ public class AttachmentAuthorizationService {
      */
     @Autowired
     public AttachmentAuthorizationService(
-            org.springframework.beans.factory.ObjectProvider<ArchiveActivityRecorder> activity) {
+            org.springframework.beans.factory.ObjectProvider<ArchiveActivityRecorder> activity,
+            org.springframework.beans.factory.ObjectProvider<RecordFactsRepository> facts) {
         this.activity = activity.getIfAvailable(
                 () -> ArchiveActivityRecorder.disabled(Clock.systemUTC()));
+        this.facts = facts;
     }
 
     /**
-     * The gate for a DOWNLOAD, as opposed to a listing.
-     *
-     * <p>SEC-008: the audit row is written HERE, before the caller's
-     * attachment is resolved and long before a byte is streamed. Attachment
-     * downloads are FAIL_CLOSED when collection is enabled, so a failed audit
-     * write throws out of this method and the file is never released. That
-     * ordering is the requirement - "verify the required audit write succeeds
-     * before releasing the file" - and it is why this is a separate method
-     * rather than a flag on the listing gate: a listing must not be recorded
-     * as a download, and a download must not be served on a listing's weaker
-     * guarantee.
-     *
-     * <p>Authorization is checked FIRST. A caller who is refused never
-     * produces an ATTACHMENT_DOWNLOADED row, because nothing was downloaded;
-     * the refusal is recorded by the record-level path that denied it.
+     * Resolves a download row's business key, lazily and only while
+     * collection is on; absent in MVC slices.
      */
-    public void requireAttachmentDownload(Authentication authentication,
-                                          String resourceType, String resourceKey) {
-        requireAttachmentAccess(authentication);
-        activity.attachmentDownloaded(resourceType, resourceKey, null);
+    private org.springframework.beans.factory.ObjectProvider<RecordFactsRepository> facts;
+
+    /**
+     * Records that ONE attachment of ONE record is being released
+     * (US-SEC-004.2), called by the four download endpoints AFTER the archive
+     * service has resolved the download and BEFORE the response body exists.
+     *
+     * <p>Why after the service, not before it. By the time this runs the
+     * service has: decided the record (recording that view or refusal),
+     * confirmed the attachment id belongs to THAT record, confirmed the
+     * archived object exists and opened it. So a PERMITTED release row is
+     * written only for a release that is actually about to happen - never for
+     * a refused record, a foreign attachment id, a missing attachment or a
+     * missing object, each of which throws out of the service first and
+     * leaves no download row. (Writing it first, as before 2026-11-17, left a
+     * false "download" row for every one of those.)
+     *
+     * <p>FAIL_CLOSED is unchanged: the response body that streams the bytes
+     * has not been created yet. If the audit write fails this closes the
+     * opened object and rethrows {@code AuditUnavailableException}, so not a
+     * byte reaches the caller.
+     *
+     * <p>The row carries the record's BUSINESS key as {@code resource_key} -
+     * the same key a view of that record carries - plus {@code recordId} and
+     * {@code attachmentId} in {@code detail}. Ids only: never a file name,
+     * description or content.
+     *
+     * @param resourceType AWARD, PROPOSAL, SUBAWARD or NEGOTIATION
+     * @param recordId     the archive row id in the download path
+     * @param attachmentId the attachment id in the download path
+     * @param opened       the already-opened object, closed if the audit refuses
+     */
+    public void recordAttachmentDownload(String resourceType, long recordId, long attachmentId,
+                                         java.io.Closeable opened) {
+        if (!activity.enabled()) {
+            return;
+        }
+        try {
+            activity.attachmentDownloaded(resourceType, businessKey(resourceType, recordId),
+                    null, recordId, attachmentId);
+        } catch (RuntimeException refused) {
+            try {
+                if (opened != null) {
+                    opened.close();
+                }
+            } catch (java.io.IOException | RuntimeException closeFailure) {
+                refused.addSuppressed(closeFailure);
+            }
+            throw refused;
+        }
+    }
+
+    private String businessKey(String resourceType, long recordId) {
+        RecordFactsRepository repository = facts == null ? null : facts.getIfAvailable();
+        if (repository == null) {
+            return null;
+        }
+        try {
+            return switch (resourceType) {
+                case "AWARD" -> repository.awardNumberForId(recordId).orElse(null);
+                case "PROPOSAL" -> repository.proposalNumberForId(recordId).orElse(null);
+                case "SUBAWARD" -> repository.subawardCodeForId(recordId).orElse(null);
+                case "NEGOTIATION" -> String.valueOf(recordId);
+                default -> null;
+            };
+        } catch (RuntimeException lookupFailed) {
+            // The key is a label; detail.recordId still identifies the record.
+            return null;
+        }
     }
 
     /**

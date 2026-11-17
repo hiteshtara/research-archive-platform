@@ -195,4 +195,10 @@ public class JdbcRecordFactsRepository implements RecordFactsRepository {
                 .query(Long.class)
                 .list();
     }
+
+    @Override
+    public Optional<String> subawardCodeForId(long subawardId) {
+        return jdbc.sql("SELECT subaward_code FROM archive.subaward WHERE subaward_id = :id LIMIT 1")
+                .param("id", subawardId).query(String.class).optional();
+    }
 }

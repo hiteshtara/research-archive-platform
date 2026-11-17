@@ -29,21 +29,22 @@ public class ActivityAuditProperties {
             ActivityAuditor.FailurePolicy.FAIL_CLOSED;
 
     /**
-     * Record views and searches.
+     * Record views and searches. <strong>No default.</strong>
      *
-     * <p>{@code FAIL_OPEN} as a <strong>proposed release policy</strong>
-     * (engineering direction 2026-11-09): a routine read keeps working when
-     * the audit store hiccups, and the gap is reported through structured
-     * logging and the {@code archive.audit.gap} counter rather than silently
-     * absorbed. This is NOT final BU security-policy approval, and it is
-     * overridable per environment.
-     *
-     * <p>Explicitly setting it to null with collection enabled is still a
-     * startup failure - the tradeoff must be a choice, even when a default
-     * exists.
+     * <p>{@code FAIL_OPEN} is the PROPOSED policy (engineering direction
+     * 2026-11-09): a routine read keeps working when the audit store hiccups,
+     * and the gap is reported through structured logging and the
+     * {@code archive.audit.gap} counter. It is pending BU approval and is NOT
+     * a default: owner direction 2026-11-17 removed the earlier FAIL_OPEN
+     * default, so enabling collection without setting
+     * {@code app.authorization.activity-audit.routine-read-failure-policy}
+     * refuses to start. Requiring it (rather than defaulting to FAIL_CLOSED)
+     * keeps a compliance-versus-availability decision from being taken by a
+     * default in either direction, and costs one property at the single
+     * moment collection is switched on. With collection off nothing is
+     * required.
      */
-    private ActivityAuditor.FailurePolicy routineReadFailurePolicy =
-            ActivityAuditor.FailurePolicy.FAIL_OPEN;
+    private ActivityAuditor.FailurePolicy routineReadFailurePolicy;
 
     private int retentionDays = PROPOSED_RETENTION_DAYS;
 

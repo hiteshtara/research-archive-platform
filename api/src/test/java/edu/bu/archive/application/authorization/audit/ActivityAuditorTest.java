@@ -150,21 +150,28 @@ class ActivityAuditorTest {
     }
 
     @Test
-    @DisplayName("the proposed release policies are the defaults, and both are explicit")
-    void theProposedReleasePoliciesAreTheDefaults() {
+    @DisplayName("enabling collection without a routine-read policy refuses to start; FAIL_OPEN is not a default")
+    void enablingWithoutARoutinePolicyRefusesToStart() {
         /*
-         * Engineering direction 2026-11-09: FAIL_OPEN for routine reads (with
-         * logging and an audit-gap metric), FAIL_CLOSED for sensitive
-         * releases. Defaults now, rather than a startup failure, because the
-         * choice has been made - it is still not final BU security-policy
-         * approval, and both remain overridable per environment.
+         * Owner direction 2026-11-17: FAIL_OPEN for routine views is a
+         * PROPOSED policy pending BU approval, not a default. Sensitive
+         * releases (downloads, exports) stay FAIL_CLOSED by default.
          */
         var properties = new ActivityAuditProperties();
         properties.setEnabled(true);
-        assertThatCode(properties::validate).doesNotThrowAnyException();
-        assertThat(properties.getRoutineReadFailurePolicy()).isEqualTo(FailurePolicy.FAIL_OPEN);
+        assertThat(properties.getRoutineReadFailurePolicy()).isNull();
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("routine-read-failure-policy is not set")
+                .hasMessageContaining("FAIL_OPEN")
+                .hasMessageContaining("FAIL_CLOSED");
         assertThat(properties.getSensitiveReleaseFailurePolicy())
                 .isEqualTo(FailurePolicy.FAIL_CLOSED);
+
+        properties.setRoutineReadFailurePolicy(FailurePolicy.FAIL_OPEN);
+        assertThatCode(properties::validate)
+                .as("an explicit choice starts")
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -188,8 +195,8 @@ class ActivityAuditorTest {
         var properties = new ActivityAuditProperties();
         assertThat(properties.isEnabled()).isFalse();
         assertThat(properties.getRoutineReadFailurePolicy())
-                .as("the proposed release policy for routine reads")
-                .isEqualTo(FailurePolicy.FAIL_OPEN);
+                .as("no routine-read default; with collection off none is needed")
+                .isNull();
         assertThat(properties.getSensitiveReleaseFailurePolicy())
                 .as("attachment downloads and exports default to FAIL_CLOSED")
                 .isEqualTo(FailurePolicy.FAIL_CLOSED);

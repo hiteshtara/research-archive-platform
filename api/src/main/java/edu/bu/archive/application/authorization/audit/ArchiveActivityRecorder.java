@@ -39,20 +39,49 @@ public class ArchiveActivityRecorder {
     private final Clock clock;
     private final Supplier<Optional<String>> actor;
     private final Supplier<String> correlationId;
+    private final boolean enabled;
 
+    /**
+     * @param actor         the CURRENT request's actor - the resolved
+     *                      institutional identifier, or a
+     *                      {@code cognito-sub:} fallback for an authenticated
+     *                      caller with no resolvable link. Empty ONLY when
+     *                      the request is genuinely unauthenticated.
+     * @param correlationId the current request's correlation id
+     */
     public ArchiveActivityRecorder(ActivityAuditor auditor, Clock clock,
                                    Supplier<Optional<String>> actor,
                                    Supplier<String> correlationId) {
+        this(auditor, clock, actor, correlationId, true);
+    }
+
+    private ArchiveActivityRecorder(ActivityAuditor auditor, Clock clock,
+                                    Supplier<Optional<String>> actor,
+                                    Supplier<String> correlationId,
+                                    boolean enabled) {
         this.auditor = Objects.requireNonNull(auditor, "auditor");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.actor = Objects.requireNonNull(actor, "actor");
         this.correlationId = Objects.requireNonNull(correlationId, "correlationId");
+        this.enabled = enabled;
     }
 
     /** Collection off: every method becomes a no-op that cannot throw. */
     public static ArchiveActivityRecorder disabled(Clock clock) {
         return new ArchiveActivityRecorder(ActivityAuditor.disabled(), clock,
-                Optional::empty, () -> null);
+                Optional::empty, () -> null, false);
+    }
+
+    /**
+     * Whether collection is on.
+     *
+     * <p>Call sites consult this before doing any extra work FOR the audit
+     * (resolving a business key, say), so that with collection off - every
+     * deployed environment - no additional query runs and behaviour is
+     * byte-for-byte unchanged.
+     */
+    public boolean enabled() {
+        return enabled;
     }
 
     /**
@@ -62,8 +91,17 @@ public class ArchiveActivityRecorder {
      *         policy, and only when the audit write failed
      */
     public void recordViewed(String resourceType, String resourceKey, String reason) {
-        auditor.recordPermitted(event(ActivityAction.RECORD_VIEWED, resourceType, resourceKey,
-                ActivityOutcome.PERMITTED, reason));
+        recordViewed(resourceType, resourceKey, reason, null);
+    }
+
+    /**
+     * As {@link #recordViewed(String, String, String)}, also naming the
+     * archive row id the request addressed (an award_id, proposal_id,
+     * subaward_id or negotiation_id) when it differs from the business key.
+     */
+    public void recordViewed(String resourceType, String resourceKey, String reason, Long recordId) {
+        auditor.recordPermitted(withRecordId(event(ActivityAction.RECORD_VIEWED, resourceType,
+                resourceKey, ActivityOutcome.PERMITTED, reason), recordId));
     }
 
     /**
@@ -73,8 +111,24 @@ public class ArchiveActivityRecorder {
      *                   message that would confirm the record exists
      */
     public void recordAccessDenied(String resourceType, String resourceKey, String denialCode) {
-        auditor.recordDenied(event(ActivityAction.RECORD_ACCESS_DENIED, resourceType, resourceKey,
-                ActivityOutcome.DENIED, denialCode));
+        recordAccessDenied(resourceType, resourceKey, denialCode, null);
+    }
+
+    /** As {@link #recordAccessDenied(String, String, String)}, with the addressed row id. */
+    public void recordAccessDenied(String resourceType, String resourceKey, String denialCode,
+                                   Long recordId) {
+        ActivityAuditEvent event;
+        try {
+            event = withRecordId(event(ActivityAction.RECORD_ACCESS_DENIED, resourceType,
+                    resourceKey, ActivityOutcome.DENIED, denialCode), recordId);
+        } catch (RuntimeException failure) {
+            // Building the event (actor resolution) must not turn a denial
+            // into a different error either; record without an actor.
+            event = withRecordId(ActivityAuditEvent.of(clock.instant(), null,
+                    ActivityAction.RECORD_ACCESS_DENIED, resourceType, resourceKey,
+                    ActivityOutcome.DENIED, denialCode, null), recordId);
+        }
+        auditor.recordDenied(event);
     }
 
     /**
@@ -108,9 +162,32 @@ public class ArchiveActivityRecorder {
      * <p>See {@link #RELEASE_PHASE} for what this row does and does not prove.
      */
     public void attachmentDownloaded(String resourceType, String resourceKey, String reason) {
-        auditor.recordPermitted(event(ActivityAction.ATTACHMENT_DOWNLOADED, resourceType,
-                resourceKey, ActivityOutcome.PERMITTED, reason)
-                .withDetail("phase", RELEASE_PHASE));
+        attachmentDownloaded(resourceType, resourceKey, reason, null);
+    }
+
+    /**
+     * As {@link #attachmentDownloaded(String, String, String)}, naming WHICH
+     * attachment was released. Only its id - never its file name, its
+     * description or a byte of its content.
+     */
+    public void attachmentDownloaded(String resourceType, String resourceKey, String reason,
+                                     Long attachmentId) {
+        attachmentDownloaded(resourceType, resourceKey, reason, null, attachmentId);
+    }
+
+    /**
+     * As above, also naming the archive row id of the owning record, so a
+     * download row keyed by business key can be joined to the exact version.
+     */
+    public void attachmentDownloaded(String resourceType, String resourceKey, String reason,
+                                     Long recordId, Long attachmentId) {
+        ActivityAuditEvent event = withRecordId(event(ActivityAction.ATTACHMENT_DOWNLOADED,
+                resourceType, resourceKey, ActivityOutcome.PERMITTED, reason)
+                .withDetail("phase", RELEASE_PHASE), recordId);
+        if (attachmentId != null) {
+            event = event.withDetail("attachmentId", attachmentId);
+        }
+        auditor.recordPermitted(event);
     }
 
     /**
@@ -137,6 +214,10 @@ public class ArchiveActivityRecorder {
                 event(ActivityAction.SEARCH_PERFORMED, module, null,
                         ActivityOutcome.PERMITTED, null)
                         .withDetail("resultCount", Math.max(0, resultCount)));
+    }
+
+    private static ActivityAuditEvent withRecordId(ActivityAuditEvent event, Long recordId) {
+        return recordId == null ? event : event.withDetail("recordId", recordId);
     }
 
     private ActivityAuditEvent event(ActivityAction action, String resourceType,
