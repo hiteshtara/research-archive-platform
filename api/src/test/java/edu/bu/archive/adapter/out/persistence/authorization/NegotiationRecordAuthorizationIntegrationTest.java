@@ -98,6 +98,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
             DockerImageName.parse("pgvector/pgvector:pg17").asCompatibleSubstituteFor("postgres"));
 
     private static NegotiationArchiveRepository repository;
+    /** For the real DashboardService, which runs its own statement. */
+    private static JdbcClient jdbcClient;
 
     @BeforeAll
     static void applyMigrationsAndSeed() throws Exception {
@@ -224,7 +226,8 @@ class NegotiationRecordAuthorizationIntegrationTest {
                     """);
         }
 
-        repository = new NegotiationArchiveRepository(JdbcClient.create(dataSource));
+        jdbcClient = JdbcClient.create(dataSource);
+        repository = new NegotiationArchiveRepository(jdbcClient);
     }
 
     // --- Enforcement disabled ---------------------------------------------
@@ -651,6 +654,105 @@ class NegotiationRecordAuthorizationIntegrationTest {
                         .isEqualTo(listed.contains(id));
             }
         }
+    }
+
+    // --- Dashboard count ---------------------------------------------------
+
+    @Test
+    void theDashboardNegotiationCountIsScopedAndAgreesWithTheSearch() {
+        /*
+         * The dashboard runs ONE statement carrying all four module
+         * predicates; the Negotiation one is prefixed apart from the others.
+         * A real database is the only proof that the prefixed predicate is
+         * valid SQL inside the scalar subquery - and that the number a
+         * department user sees on the dashboard is the number their own
+         * Negotiation search would report, not the archive-wide nine.
+         */
+        assertThat(dashboard(NegotiationRecordAccess.PERMIT_ALL).negotiations()).isEqualTo(9);
+        assertThat(dashboard(dashboardScope(CENTRAL)).negotiations()).isEqualTo(9);
+        assertThat(dashboard(dashboardScope(units("7777"))).negotiations()).isEqualTo(4);
+        assertThat(dashboard(dashboardScope(units("9999"))).negotiations()).isZero();
+        assertThat(dashboard(dashboardScope(
+                new AccessScope(false, Set.of(), Optional.of(STRANGER), Set.of()))).negotiations()).isZero();
+
+        // Parity: the same scope, rendered for the dashboard's alias, counts
+        // exactly what the Negotiation search reports for that caller.
+        assertThat(dashboard(dashboardScope(units("7777"))).negotiations())
+                .isEqualTo(search(departmentScope("7777")).totalElements());
+        assertThat(dashboard(dashboardScope(units("1234"))).negotiations())
+                .isEqualTo(search(departmentScope("1234")).totalElements());
+        assertThat(dashboard(dashboardScope(units("7777", "1234"))).negotiations())
+                .isEqualTo(search(departmentScope("7777", "1234")).totalElements());
+        assertThat(dashboard(dashboardScope(
+                new AccessScope(false, Set.of(), Optional.of(FARRER), Set.of()))).negotiations())
+                .isEqualTo(search(contactScope(FARRER)).totalElements());
+    }
+
+    private static final AccessScope CENTRAL = new AccessScope(true, Set.of(), Optional.empty(), Set.of());
+
+    private static AccessScope units(String... units) {
+        return new AccessScope(false,
+                Stream.of(units).map(u -> new UnitGrant(u, false))
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                Optional.empty(), Set.of());
+    }
+
+    /**
+     * Unlike {@link #scoped}, renders the predicate for whatever alias the
+     * caller asks for. The dashboard aliases the table {@code neg}, the
+     * search {@code n}; a fixed fragment would test the fixture, not the
+     * dashboard.
+     */
+    private static NegotiationRecordAccess dashboardScope(AccessScope scope) {
+        Set<String> expanded = scope.units().stream().map(UnitGrant::unitNumber)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return new BaseAccess() {
+            @Override public SqlFragment negotiationScopeSql(String alias) {
+                return new RecordScopeSqlBuilder(
+                        policy(AuthorizationPolicy.DepartmentMatch.EXACT_LEAD_UNIT), IoSqlStrategy.NONE)
+                        .build(new AccessOutcome.Scoped(scope), RecordModule.NEGOTIATION, alias, expanded);
+            }
+
+            @Override public boolean unrestricted() {
+                return scope.central();
+            }
+        };
+    }
+
+    /** The real DashboardService, every module other than Negotiation left unrestricted. */
+    private static edu.bu.archive.adapter.in.web.dto.DashboardDto dashboard(NegotiationRecordAccess access) {
+        return new edu.bu.archive.application.service.DashboardService(
+                jdbcClient,
+                provider(edu.bu.archive.application.authorization.AwardRecordAccess.PERMIT_ALL),
+                provider(edu.bu.archive.application.authorization.SubawardRecordAccess.PERMIT_ALL),
+                provider(access),
+                provider(edu.bu.archive.application.authorization.ProposalRecordAccess.PERMIT_ALL),
+                null)
+                .counts();
+    }
+
+    private static <T> org.springframework.beans.factory.ObjectProvider<T> provider(T value) {
+        return new org.springframework.beans.factory.ObjectProvider<T>() {
+            @Override public T getObject() {
+                return value;
+            }
+
+            @Override public T getObject(Object... args) {
+                return value;
+            }
+
+            @Override public T getIfAvailable() {
+                return value;
+            }
+
+            @Override public T getIfUnique() {
+                return value;
+            }
+
+            @Override public Stream<T> stream() {
+                return value == null ? Stream.empty() : Stream.of(value);
+            }
+        };
     }
 
     // --- helpers -------------------------------------------------------------
