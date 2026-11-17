@@ -68,6 +68,7 @@ import edu.bu.archive.config.ActivityAuditFixture.Module;
         "app.authorization.activity-audit.sensitive-release-failure-policy=FAIL_CLOSED"
 })
 @AutoConfigureMockMvc
+@org.springframework.context.annotation.Import(DeferredAsyncExecutorConfiguration.class)
 @ActiveProfiles("local")
 @Testcontainers
 @Tag("database")
@@ -93,6 +94,9 @@ class ActivityAuditEndToEndIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private DeferredAsyncExecutorConfiguration.DeferredAsyncExecutor asyncExecutor;
 
     @Autowired
     private JdbcClient jdbc;
@@ -251,8 +255,8 @@ class ActivityAuditEndToEndIntegrationTest {
 
         for (Map.Entry<String, String> endpoint : listedMarker.entrySet()) {
             jdbc.sql("TRUNCATE authz.activity_audit").update();
-            var response = mockMvc.perform(get(endpoint.getKey())
-                    .with(ActivityAuditFixture.linkedUser())).andReturn().getResponse();
+            var response = exchange(get(endpoint.getKey())
+                    .with(ActivityAuditFixture.linkedUser()));
             assertThat(response.getStatus()).as(endpoint.getKey()).isEqualTo(200);
             assertThat(response.getContentAsString())
                     .as("%s really listed a related record", endpoint.getKey())
@@ -270,6 +274,66 @@ class ActivityAuditEndToEndIntegrationTest {
         }
     }
 
+    /**
+     * Production thread-safety evidence. Concurrent requests share the
+     * recorder, auditor, JDBC port and RequestActivityContext; only the
+     * per-request caches (actor, correlation id, de-duplication set) live on
+     * each request. If any of that state leaked across threads, rows would be
+     * lost, duplicated, mis-attributed or share a correlation id.
+     */
+    @Test
+    @DisplayName("concurrent requests each record exactly their own row - none lost, none shared")
+    void concurrentRequestsRecordTheirOwnRowsWithNoneLost() throws Exception {
+        enforcement(true);
+        int threads = 8;
+        int perThread = 25;
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        try {
+            var start = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<Integer>> statuses = new java.util.ArrayList<>();
+            for (int t = 0; t < threads; t++) {
+                Module module = Module.values()[t % Module.values().length];
+                statuses.add(pool.submit(() -> {
+                    start.await();
+                    int ok = 0;
+                    for (int i = 0; i < perThread; i++) {
+                        if (exchange(get(module.view(module.permittedId))
+                                .with(ActivityAuditFixture.linkedUser())).getStatus() == 200) {
+                            ok++;
+                        }
+                    }
+                    return ok;
+                }));
+            }
+            start.countDown();
+            int served = 0;
+            for (var status : statuses) {
+                served += status.get(120, java.util.concurrent.TimeUnit.SECONDS);
+            }
+            assertThat(served).isEqualTo(threads * perThread);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        List<Row> views = rows("RECORD_VIEWED");
+        assertThat(views).as("one row per request, none lost or duplicated")
+                .hasSize(threads * perThread);
+        assertThat(views).extracting(Row::correlationId)
+                .as("every request has its own correlation id")
+                .doesNotContainNull()
+                .doesNotHaveDuplicates();
+        assertThat(views).extracting(Row::actor)
+                .containsOnly(ActivityAuditFixture.INSTITUTIONAL_ID);
+        for (Module module : Module.values()) {
+            long expected = (long) perThread * java.util.stream.IntStream.range(0, threads)
+                    .filter(t -> Module.values()[t % Module.values().length] == module).count();
+            assertThat(views).filteredOn(row -> row.resourceType().equals(module.name()))
+                    .as("%s rows", module)
+                    .hasSize((int) expected)
+                    .extracting(Row::resourceKey).containsOnly(module.permittedKey);
+        }
+    }
+
     // ── US-SEC-004.2: document downloads ───────────────────────────────────
 
     @ParameterizedTest(name = "{0}")
@@ -279,9 +343,12 @@ class ActivityAuditEndToEndIntegrationTest {
         enforcement(true);
         Instant before = Instant.now().minusSeconds(1);
 
-        var response = mockMvc.perform(get(module.download(module.permittedId, ATTACHMENT_ID))
-                .with(ActivityAuditFixture.linkedUser())).andReturn();
-        assertThat(response.getResponse().getStatus()).as("the file was really released").isEqualTo(200);
+        var response = exchange(get(module.download(module.permittedId, ATTACHMENT_ID))
+                .with(ActivityAuditFixture.linkedUser()));
+        assertThat(response.getStatus()).as("the file was really released").isEqualTo(200);
+        assertThat(response.getContentAsString())
+                .as("the stored file's bytes, streamed in full")
+                .isEqualTo(ActivityAuditFixture.SECRET_CONTENT);
 
         List<Row> downloads = rows("ATTACHMENT_DOWNLOADED");
         assertThat(downloads)
@@ -317,9 +384,9 @@ class ActivityAuditEndToEndIntegrationTest {
     void aForeignAttachmentIdWritesNoDownloadRow(Module module) throws Exception {
         enforcement(true);
 
-        var response = mockMvc.perform(get(module.download(module.permittedId,
+        var response = exchange(get(module.download(module.permittedId,
                         ActivityAuditFixture.FOREIGN_ATTACHMENT_ID))
-                .with(ActivityAuditFixture.linkedUser())).andReturn().getResponse();
+                .with(ActivityAuditFixture.linkedUser()));
 
         assertThat(response.getStatus()).isEqualTo(404);
         assertThat(rows("ATTACHMENT_DOWNLOADED"))
@@ -335,9 +402,9 @@ class ActivityAuditEndToEndIntegrationTest {
     void aMissingAttachmentIdWritesNoDownloadRow(Module module) throws Exception {
         enforcement(true);
 
-        var response = mockMvc.perform(get(module.download(module.permittedId,
+        var response = exchange(get(module.download(module.permittedId,
                         ActivityAuditFixture.MISSING_ATTACHMENT_ID))
-                .with(ActivityAuditFixture.linkedUser())).andReturn().getResponse();
+                .with(ActivityAuditFixture.linkedUser()));
 
         assertThat(response.getStatus()).isEqualTo(404);
         assertThat(rows("ATTACHMENT_DOWNLOADED")).as("%s: nothing was released", module).isEmpty();
@@ -399,8 +466,7 @@ class ActivityAuditEndToEndIntegrationTest {
             for (String release : List.of(
                     Module.AWARD.download(awardId, ATTACHMENT_ID),
                     "/api/v1/awards/%d/report.pdf".formatted(awardId))) {
-                var response = mockMvc.perform(get(release).with(ActivityAuditFixture.linkedUser()))
-                        .andReturn().getResponse();
+                var response = exchange(get(release).with(ActivityAuditFixture.linkedUser()));
                 assertThat(response.getStatus()).as(release).isEqualTo(503);
                 assertThat(response.getContentAsString()).contains("AUDIT_UNAVAILABLE")
                         .doesNotContain("simulated audit store outage")
@@ -413,8 +479,8 @@ class ActivityAuditEndToEndIntegrationTest {
 
             // A routine view under the FAIL_OPEN setting this context
             // configures explicitly is still served.
-            assertThat(mockMvc.perform(get(Module.AWARD.view(awardId))
-                    .with(ActivityAuditFixture.linkedUser())).andReturn().getResponse().getStatus())
+            assertThat(exchange(get(Module.AWARD.view(awardId))
+                    .with(ActivityAuditFixture.linkedUser())).getStatus())
                     .isEqualTo(200);
         } finally {
             jdbc.sql("DROP TRIGGER tr_test_break_activity_audit ON authz.activity_audit").update();
@@ -437,9 +503,9 @@ class ActivityAuditEndToEndIntegrationTest {
                 "/api/v1/awards/%d/report.pdf".formatted(awardId),
                 "/api/v1/awards/%d/attachments".formatted(awardId),
                 "/api/global-search?query=" + ActivityAuditFixture.SECRET_SEARCH_TERM)) {
-            mockMvc.perform(get(path)
+            exchange(get(path)
                     .header("Authorization", authorization)
-                    .with(ActivityAuditFixture.linkedUser())).andReturn();
+                    .with(ActivityAuditFixture.linkedUser()));
         }
 
         List<Row> written = rows(null);
@@ -474,7 +540,7 @@ class ActivityAuditEndToEndIntegrationTest {
     private void perform(String path, RequestPostProcessor user) throws Exception {
         // The status is not asserted: an attachment with no stored file 404s
         // AFTER the audit decision, which is the point under test.
-        mockMvc.perform(get(path).with(user)).andReturn();
+        exchange(get(path).with(user));
     }
 
     private List<Row> rows(String action) {
@@ -508,5 +574,21 @@ class ActivityAuditEndToEndIntegrationTest {
             authorization.setContactDerivation(AuthorizationPolicy.ContactDerivation.EXPLICIT_GRANT);
             authorization.setMaxSignInAge(Duration.ofHours(8));
         }
+    }
+
+    /**
+     * One request, run strictly sequentially: the dispatch, then (for a
+     * StreamingResponseBody download or report) the queued body on this
+     * thread, then the async dispatch. See DeferredAsyncExecutorConfiguration.
+     */
+    private org.springframework.mock.web.MockHttpServletResponse exchange(
+            org.springframework.test.web.servlet.RequestBuilder request) throws Exception {
+        org.springframework.test.web.servlet.MvcResult result = mockMvc.perform(request).andReturn();
+        if (result.getRequest().isAsyncStarted()) {
+            asyncExecutor.runPending();
+            return mockMvc.perform(org.springframework.test.web.servlet.request
+                    .MockMvcRequestBuilders.asyncDispatch(result)).andReturn().getResponse();
+        }
+        return result.getResponse();
     }
 }

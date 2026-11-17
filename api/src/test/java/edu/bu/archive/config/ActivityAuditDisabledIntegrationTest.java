@@ -36,6 +36,7 @@ import edu.bu.archive.config.ActivityAuditFixture.Module;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@org.springframework.context.annotation.Import(DeferredAsyncExecutorConfiguration.class)
 @ActiveProfiles("local")
 @Testcontainers
 @Tag("database")
@@ -61,6 +62,9 @@ class ActivityAuditDisabledIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private DeferredAsyncExecutorConfiguration.DeferredAsyncExecutor asyncExecutor;
 
     @Autowired
     private JdbcClient jdbc;
@@ -90,14 +94,30 @@ class ActivityAuditDisabledIntegrationTest {
                     module.view(module.permittedId),
                     module.view(module.deniedId),
                     module.download(module.permittedId, 4242L)}) {
-                mockMvc.perform(get(path).with(ActivityAuditFixture.linkedUser())).andReturn();
+                exchange(get(path).with(ActivityAuditFixture.linkedUser()));
             }
         }
-        mockMvc.perform(get("/api/v1/awards/%d/report.pdf".formatted(Module.AWARD.permittedId))
-                .with(ActivityAuditFixture.linkedUser())).andReturn();
+        exchange(get("/api/v1/awards/%d/report.pdf".formatted(Module.AWARD.permittedId))
+                .with(ActivityAuditFixture.linkedUser()));
 
         assertThat(jdbc.sql("SELECT count(*) FROM authz.activity_audit").query(Long.class).single())
                 .as("with app.authorization.activity-audit.enabled unset, nothing is recorded")
                 .isZero();
+    }
+
+    /**
+     * One request, run strictly sequentially: the dispatch, then (for a
+     * StreamingResponseBody download or report) the queued body on this
+     * thread, then the async dispatch. See DeferredAsyncExecutorConfiguration.
+     */
+    private org.springframework.mock.web.MockHttpServletResponse exchange(
+            org.springframework.test.web.servlet.RequestBuilder request) throws Exception {
+        org.springframework.test.web.servlet.MvcResult result = mockMvc.perform(request).andReturn();
+        if (result.getRequest().isAsyncStarted()) {
+            asyncExecutor.runPending();
+            return mockMvc.perform(org.springframework.test.web.servlet.request
+                    .MockMvcRequestBuilders.asyncDispatch(result)).andReturn().getResponse();
+        }
+        return result.getResponse();
     }
 }
