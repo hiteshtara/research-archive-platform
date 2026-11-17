@@ -49,9 +49,9 @@ class NegotiationArchiveServiceTest {
         NegotiationSearchFilters filters =
                 NegotiationSearchFilters.ofQuery("award");
 
-        when(repository.countNegotiations(filters, SqlFragment.NONE))
+        when(repository.countNegotiations(filters, SqlFragment.NONE, null))
                 .thenReturn(205L);
-        when(repository.findNegotiations(filters, SqlFragment.NONE, 100, 0))
+        when(repository.findNegotiations(filters, SqlFragment.NONE, null, 100, 0))
                 .thenReturn(List.of(summary));
 
         PageResponse<NegotiationSummaryResponse> result = service.findPage(
@@ -67,7 +67,7 @@ class NegotiationArchiveServiceTest {
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(result.first()).isTrue();
         assertThat(result.last()).isFalse();
-        verify(repository).findNegotiations(filters, SqlFragment.NONE, 100, 0);
+        verify(repository).findNegotiations(filters, SqlFragment.NONE, null, 100, 0);
     }
 
     @Test

@@ -161,14 +161,95 @@ public class NegotiationArchiveRepository {
      *              reproduces the unscoped statement exactly.
      */
     public long countNegotiations(NegotiationSearchFilters filters, SqlFragment scope) {
+        return countNegotiations(filters, scope, null);
+    }
+
+    /**
+     * @param associationVisible B4/H2: a boolean SQL expression over alias
+     *        {@code n} that is true when the caller may see the record the
+     *        Negotiation is associated WITH, or {@code null} when the caller
+     *        is unrestricted - which renders the statement exactly as before.
+     *        See {@link #withAssociationVisibility}.
+     */
+    public long countNegotiations(
+            NegotiationSearchFilters filters,
+            SqlFragment scope,
+            SqlFragment associationVisible
+    ) {
         SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
-        Long count = bindScope(bind(jdbc.sql(
-                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE + safeScope.sql()), filters),
-                safeScope)
+        Long count = bindScope(bindScope(bind(jdbc.sql(withAssociationVisibility(
+                "SELECT COUNT(*) " + SEARCH_FROM + SEARCH_WHERE + safeScope.sql(),
+                associationVisible)), filters),
+                safeScope), associationVisible)
                 .query(Long.class)
                 .single();
 
         return count == null ? 0L : count;
+    }
+
+    /*
+     * B4/H2 (2026-11-17). Reaching a Negotiation (for example through its
+     * lead unit) does not authorise the Award or Proposal it is associated
+     * with (D7). findAssociatedRecord already hid that record, but the list
+     * still returned its identifier, the Title/PI/Sponsor/Lead Unit the V080
+     * rebuild resolved FROM it (attribute_source = 'AWARD'), and let free
+     * text and the associationId filter MATCH on its identifier - so a
+     * caller could probe award and proposal numbers one search at a time.
+     *
+     * Each of those is rewritten here, in SQL, so the count, the page and
+     * the ordering all describe one row set and nothing is filtered after
+     * LIMIT/OFFSET:
+     *
+     *   - the identifier is selected only when the association is visible;
+     *   - the resolved-attribute join keeps an Award-sourced row only when
+     *     the association is visible, so the attributes are both blank in
+     *     the response AND unavailable to every text filter and free-text
+     *     branch that reads alias a;
+     *   - the identifier free-text branch and the associationId filter
+     *     contribute a match only when the association is visible.
+     *
+     * The Negotiation row itself is still listed - its own scope decided
+     * that - only what came from the hidden record is withheld.
+     *
+     * The anchors below are exact substrings of SEARCH_FROM, SEARCH_WHERE
+     * and the select list; rewrite() fails loudly if one ever stops
+     * matching, rather than silently leaving a predicate unscoped.
+     */
+    private static final String ASSOC_ID_SELECT = "n.associated_document_id,\n";
+    private static final String ATTRIBUTE_JOIN = "ON a.negotiation_id = n.negotiation_id\n";
+    private static final String ASSOC_ID_FREE_TEXT =
+            "OR n.associated_document_id ILIKE '%' || :query || '%'";
+    private static final String ASSOC_ID_FILTER =
+            "OR n.associated_document_id = :associationId)";
+
+    static String withAssociationVisibility(String sql, SqlFragment associationVisible) {
+        if (associationVisible == null) {
+            return sql;
+        }
+        String visible = "(" + associationVisible.sql() + ")";
+        String rewritten = sql;
+        if (rewritten.contains(ASSOC_ID_SELECT)) {
+            rewritten = rewritten.replace(ASSOC_ID_SELECT,
+                    "CASE WHEN " + visible + " THEN n.associated_document_id END"
+                            + " AS associated_document_id,\n");
+        }
+        rewritten = rewrite(rewritten, ATTRIBUTE_JOIN,
+                "ON a.negotiation_id = n.negotiation_id"
+                        + " AND (a.attribute_source <> 'AWARD' OR " + visible + ")\n");
+        rewritten = rewrite(rewritten, ASSOC_ID_FREE_TEXT,
+                "OR (n.associated_document_id ILIKE '%' || :query || '%' AND " + visible + ")");
+        rewritten = rewrite(rewritten, ASSOC_ID_FILTER,
+                "OR (n.associated_document_id = :associationId AND " + visible + "))");
+        return rewritten;
+    }
+
+    private static String rewrite(String sql, String anchor, String replacement) {
+        if (!sql.contains(anchor)) {
+            throw new IllegalStateException(
+                    "Negotiation search SQL no longer contains the anchor the association "
+                            + "visibility rewrite depends on: " + anchor.strip());
+        }
+        return sql.replace(anchor, replacement);
     }
 
     private static JdbcClient.StatementSpec bindScope(
@@ -203,8 +284,23 @@ public class NegotiationArchiveRepository {
             int limit,
             int offset
     ) {
+        return findNegotiations(filters, scope, null, limit, offset);
+    }
+
+    /**
+     * @param associationVisible see {@link #countNegotiations(
+     *        NegotiationSearchFilters, SqlFragment, SqlFragment)}; must be
+     *        the same fragment the count was given.
+     */
+    public List<NegotiationSummaryResponse> findNegotiations(
+            NegotiationSearchFilters filters,
+            SqlFragment scope,
+            SqlFragment associationVisible,
+            int limit,
+            int offset
+    ) {
         SqlFragment safeScope = scope == null ? SqlFragment.NONE : scope;
-        return bindScope(bind(jdbc.sql("""
+        return bindScope(bindScope(bind(jdbc.sql(withAssociationVisibility("""
                 SELECT
                     n.negotiation_id,
                     n.document_number,
@@ -239,7 +335,7 @@ public class NegotiationArchiveRepository {
                     n.negotiation_id DESC
                 LIMIT :limit
                 OFFSET :offset
-                """), filters), safeScope)
+                """, associationVisible)), filters), safeScope), associationVisible)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(NegotiationSummaryResponse.class)

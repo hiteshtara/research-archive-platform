@@ -2828,6 +2828,91 @@ public class AwardArchiveRepository {
                 .list();
     }
 
+    /**
+     * Whether a Time and Money pending transaction belongs to this Award
+     * family - defect B4/H1 (2026-11-17).
+     *
+     * <p>The transaction and document lookups below are keyed by the
+     * transaction id / document number ALONE, so without this check any
+     * caller who could open one Award could read every Time and Money
+     * transaction in the archive through it. "Belongs" is defined exactly as
+     * the Time and Money History tab lists transactions
+     * ({@link #findTimeAndMoneyHistory}): an {@code archive.award_amount_info}
+     * row of some version of this {@code award_number} carries the
+     * transaction id. Every link the UI renders therefore still resolves,
+     * and nothing outside the family can.
+     */
+    public boolean timeAndMoneyTransactionBelongsToAwardNumber(
+            String awardNumber,
+            long pendingTransactionId
+    ) {
+        Boolean belongs = jdbc.sql("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM archive.award_amount_info amount
+                    INNER JOIN archive.award_version av
+                        ON av.award_id = amount.award_id
+                    WHERE av.award_number = :awardNumber
+                      AND amount.transaction_id = :pendingTransactionId
+                )
+                """)
+                .param("awardNumber", awardNumber)
+                .param("pendingTransactionId", pendingTransactionId)
+                .query(Boolean.class)
+                .single();
+        return Boolean.TRUE.equals(belongs);
+    }
+
+    /**
+     * Whether a Time and Money document belongs to this Award family -
+     * defect B4/H1. "Belongs" is the union of every place this Award's own
+     * Time and Money tabs take a document number from:
+     * <ul>
+     *   <li>the Actions tab ({@link #findTimeAndMoneyActions}):
+     *       {@code archive.award_amount_transaction} rows keyed by
+     *       {@code award_number};</li>
+     *   <li>the History tab and the transaction dialog's document chip:
+     *       {@code archive.award_amount_info.tnm_document_number} on a
+     *       version of this {@code award_number};</li>
+     *   <li>the document's own {@code root_award_number}.</li>
+     * </ul>
+     * Each branch names this {@code award_number} explicitly; none matches
+     * a document number by itself.
+     */
+    public boolean timeAndMoneyDocumentBelongsToAwardNumber(
+            String awardNumber,
+            String timeAndMoneyDocumentNumber
+    ) {
+        Boolean belongs = jdbc.sql("""
+                SELECT
+                    EXISTS (
+                        SELECT 1
+                        FROM archive.award_amount_transaction aat
+                        WHERE aat.award_number = :awardNumber
+                          AND aat.document_number = :documentNumber
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM archive.award_amount_info amount
+                        INNER JOIN archive.award_version av
+                            ON av.award_id = amount.award_id
+                        WHERE av.award_number = :awardNumber
+                          AND amount.tnm_document_number = :documentNumber
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM archive.time_and_money_document tmd
+                        WHERE tmd.root_award_number = :awardNumber
+                          AND tmd.document_number = :documentNumber
+                    )
+                """)
+                .param("awardNumber", awardNumber)
+                .param("documentNumber", timeAndMoneyDocumentNumber)
+                .query(Boolean.class)
+                .single();
+        return Boolean.TRUE.equals(belongs);
+    }
+
     public Optional<TimeAndMoneyTransactionHeaderRow> findTimeAndMoneyTransactionHeader(
             long pendingTransactionId
     ) {
