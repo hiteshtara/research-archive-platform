@@ -184,8 +184,15 @@ class ArchiveActivityRecorderTest {
     }
 
     @Test
-    @DisplayName("an unknown actor is recorded as absent, not invented")
+    @DisplayName("an unauthenticated request is recorded with no actor, not an invented one")
     void anUnknownActorIsNull() {
+        /*
+         * The supplier is empty ONLY for a genuinely unauthenticated request:
+         * RequestActivityContext returns the institutional identifier for a
+         * linked caller and "cognito-sub:<subject>" for an authenticated but
+         * unlinked one (see RequestActivityContextTest). The recorder itself
+         * still never invents an actor.
+         */
         var port = new RecordingPort();
         new ArchiveActivityRecorder(
                 new ActivityAuditor(port, FailurePolicy.FAIL_OPEN, FailurePolicy.FAIL_OPEN),
@@ -193,7 +200,88 @@ class ArchiveActivityRecorderTest {
                 .recordAccessDenied("AWARD", "SYN-AWD-B", "ACCESS_NOT_PROVISIONED");
 
         assertThat(port.written.get(0).actor())
-                .as("a refusal before an identity resolved has no actor, and must not get one")
+                .as("an unauthenticated refusal has no actor, and must not get one")
                 .isNull();
+    }
+
+    @Test
+    @DisplayName("a download row names the attachment by id and can carry nothing else")
+    void aDownloadCannotCarryFileNameOrContent() throws Exception {
+        var port = new RecordingPort();
+        recorder(port, FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_OPEN)
+                .attachmentDownloaded("AWARD", "5002", null, 4242L);
+
+        ActivityAuditEvent event = port.written.get(0);
+        assertThat(event.detail()).containsOnlyKeys("phase", "attachmentId");
+        assertThat(event.detail()).containsEntry("attachmentId", 4242L);
+
+        /*
+         * The API shape is the control, as for searches: the download method
+         * takes the resource type, a key, a reason code and a numeric id.
+         * There is no parameter for a file name, a description, bytes or a
+         * stream, so content cannot reach the row through it.
+         */
+        var download = ArchiveActivityRecorder.class.getMethod("attachmentDownloaded",
+                String.class, String.class, String.class, Long.class);
+        assertThat(download.getParameterTypes())
+                .containsExactly(String.class, String.class, String.class, Long.class);
+        for (var method : ArchiveActivityRecorder.class.getDeclaredMethods()) {
+            if (!java.lang.reflect.Modifier.isPublic(method.getModifiers())) {
+                continue;
+            }
+            for (Class<?> type : method.getParameterTypes()) {
+                assertThat(type)
+                        .as("%s must take no content-shaped parameter", method.getName())
+                        .isNotIn(byte[].class, java.io.InputStream.class, java.util.Map.class,
+                                java.util.Collection.class, Object.class);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("an export row carries only the release phase - no document text")
+    void anExportCannotCarryDocumentText() {
+        var port = new RecordingPort();
+        recorder(port, FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_OPEN)
+                .exportGenerated("AWARD", "SYN-AWD-A", null);
+
+        assertThat(port.written.get(0).detail()).containsOnlyKeys("phase");
+        assertThat(ActivityAuditEvent.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .doesNotContain("content", "body", "text", "fileName", "searchTerms", "query");
+    }
+
+    @Test
+    @DisplayName("a view row can name the archive row id it addressed")
+    void aViewCanCarryItsRecordId() {
+        var port = new RecordingPort();
+        var recorder = recorder(port, FailurePolicy.FAIL_OPEN, FailurePolicy.FAIL_OPEN);
+        recorder.recordViewed("AWARD", "SYN-AWD-A", "DEPARTMENT", 5002L);
+        recorder.recordAccessDenied("SUBAWARD", "SYN-SUB-B", "NO_VISIBLE_FUNDING_AWARD", 9005L);
+
+        assertThat(port.written).extracting(event -> event.detail().get("recordId"))
+                .containsExactly(5002L, 9005L);
+    }
+
+    @Test
+    @DisplayName("enabled() is false only for the disabled recorder")
+    void enabledReflectsCollection() {
+        assertThat(ArchiveActivityRecorder.disabled(CLOCK).enabled()).isFalse();
+        assertThat(recorder(new RecordingPort(), FailurePolicy.FAIL_OPEN, FailurePolicy.FAIL_OPEN)
+                .enabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("an actor supplier that throws cannot turn a denial into another error")
+    void aFailingActorCannotBreakADenial() {
+        var port = new RecordingPort();
+        var recorder = new ArchiveActivityRecorder(
+                new ActivityAuditor(port, FailurePolicy.FAIL_CLOSED, FailurePolicy.FAIL_CLOSED),
+                CLOCK, () -> { throw new IllegalStateException("identity store down"); }, () -> "c");
+
+        assertThatCode(() -> recorder.recordAccessDenied("AWARD", "SYN-AWD-B", "OUT_OF_SCOPE"))
+                .doesNotThrowAnyException();
+        assertThat(port.written).singleElement()
+                .extracting(ActivityAuditEvent::outcome).isEqualTo(ActivityOutcome.DENIED);
     }
 }

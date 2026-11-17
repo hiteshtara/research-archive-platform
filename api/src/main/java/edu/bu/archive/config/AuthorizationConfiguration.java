@@ -105,7 +105,10 @@ public class AuthorizationConfiguration {
                     com.fasterxml.jackson.databind.ObjectMapper> json,
             org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry>
                     meterRegistry,
-            AuthorizationProperties authorization) {
+            AuthorizationProperties authorization,
+            ObjectProvider<CurrentIdentityProvider> identities,
+            ObjectProvider<IdentityResolver> identityResolver,
+            ObjectProvider<edu.bu.archive.application.service.SearchTimingLog> searchTiming) {
 
         /*
          * Resolved BEFORE the datasource is touched. With collection off -
@@ -133,10 +136,21 @@ public class AuthorizationConfiguration {
                 properties.getRoutineReadFailurePolicy(),
                 metrics);
 
+        /*
+         * WHO and WHICH REQUEST (US-SEC-004). These were once wired as
+         * "() -> Optional.empty()" and "() -> null", so every row that could
+         * ever have been written carried no actor and no correlation id -
+         * an activity audit that cannot say who did anything. Resolved here,
+         * after the early return above, so collection off still touches no
+         * identity store and no datasource.
+         */
+        var timing = searchTiming.getIfAvailable();
+        var context = new edu.bu.archive.application.authorization.audit.RequestActivityContext(
+                identities.getObject(), identityResolver.getObject(),
+                timing == null ? java.util.Optional::empty : timing::currentRequestCorrelationId);
+
         return new edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder(
-                auditor, Clock.systemUTC(),
-                () -> java.util.Optional.empty(),
-                () -> null);
+                auditor, Clock.systemUTC(), context::actor, context::correlationId);
     }
 
     @Bean
@@ -186,10 +200,18 @@ public class AuthorizationConfiguration {
             RecordFactsRepository facts,
             JdbcUnitHierarchy units,
             IoSqlStrategy ioSql,
-            IdentityEnrollment enrollment
+            IdentityEnrollment enrollment,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity
     ) {
+        /*
+         * The recorder is passed explicitly. The nine-argument constructor
+         * this used to call defaults to a DISABLED recorder, so record views
+         * and refusals were never recorded even with collection switched on.
+         * With collection off the recorder IS the disabled one, so this
+         * changes nothing in any deployed environment.
+         */
         return new RecordAuthorizationService(properties, identities, identityResolver, scopeResolver,
-                facts, units, units, ioSql, enrollment);
+                facts, units, units, ioSql, enrollment, Clock.systemUTC(), activity);
     }
 
     @Bean

@@ -198,7 +198,7 @@ public class SubawardArchiveController {
     ) {
         // SEC-008: audited before the attachment is resolved or streamed.
         attachmentAuthorizationService.requireAttachmentDownload(
-                authentication, "SUBAWARD", String.valueOf(subawardId));
+                authentication, "SUBAWARD", subawardId, attachmentId);
         SubawardAttachmentDownload download =
                 service.downloadAttachment(subawardId, attachmentId);
         StreamingResponseBody body = output -> {

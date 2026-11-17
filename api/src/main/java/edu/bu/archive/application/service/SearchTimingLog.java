@@ -99,6 +99,16 @@ public class SearchTimingLog {
     }
 
     /**
+     * The id {@link #beginRequest} assigned to the request on this thread, if
+     * any. Unlike {@link #correlationId()} this never mints one: it lets the
+     * SEC-008 activity audit reuse the search request's id where one exists,
+     * and fall back to its own otherwise.
+     */
+    public java.util.Optional<String> currentRequestCorrelationId() {
+        return java.util.Optional.ofNullable(currentCorrelationId.get());
+    }
+
+    /**
      * The current request's id, or a fresh one when there is no request
      * scope - a scheduled or test call still gets coherent output
      * rather than blank ids.

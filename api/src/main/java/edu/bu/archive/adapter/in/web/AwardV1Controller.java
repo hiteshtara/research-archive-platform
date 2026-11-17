@@ -853,7 +853,7 @@ public class AwardV1Controller {
     ) {
         // SEC-008: audited before the attachment is resolved or streamed.
         attachmentAuthorizationService.requireAttachmentDownload(
-                authentication, "AWARD", String.valueOf(awardId));
+                authentication, "AWARD", awardId, attachmentId);
         AwardAttachmentDownload download =
                 service.downloadAttachment(awardId, attachmentId);
 

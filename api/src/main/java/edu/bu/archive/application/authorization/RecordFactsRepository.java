@@ -33,6 +33,18 @@ public interface RecordFactsRepository {
     List<Long> subawardFamilyFundingAwardIds(long subawardId);
 
     /**
+     * The Subaward's business key ({@code subaward_code}) for a version row,
+     * or empty when no such Subaward exists.
+     *
+     * <p>Used ONLY to label SEC-008 activity rows, and only while collection
+     * is on. Defaults to empty so a fixture that never enables collection
+     * need not implement it.
+     */
+    default Optional<String> subawardCodeForId(long subawardId) {
+        return Optional.empty();
+    }
+
+    /**
      * The authorization basis for one Negotiation: its recorded lead unit,
      * and its association ONLY where the association type explicitly names
      * one. Never resolves associated_document_id by string match alone -

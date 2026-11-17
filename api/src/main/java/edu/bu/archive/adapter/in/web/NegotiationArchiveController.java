@@ -212,7 +212,7 @@ public class NegotiationArchiveController {
     ) {
         // SEC-008: audited before the attachment is resolved or streamed.
         attachmentAuthorizationService.requireAttachmentDownload(
-                authentication, "NEGOTIATION", String.valueOf(negotiationId));
+                authentication, "NEGOTIATION", negotiationId, attachmentId);
         NegotiationAttachmentDownload download =
                 service.downloadAttachment(negotiationId, attachmentId);
 

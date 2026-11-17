@@ -1,5 +1,6 @@
 package edu.bu.archive.application.security;
 
+import edu.bu.archive.application.authorization.RecordAuthorizationService;
 import edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder;
 import edu.bu.archive.exception.AttachmentAccessDeniedException;
 
@@ -72,9 +73,58 @@ public class AttachmentAuthorizationService {
      */
     @Autowired
     public AttachmentAuthorizationService(
-            org.springframework.beans.factory.ObjectProvider<ArchiveActivityRecorder> activity) {
+            org.springframework.beans.factory.ObjectProvider<ArchiveActivityRecorder> activity,
+            org.springframework.beans.factory.ObjectProvider<RecordAuthorizationService> records) {
         this.activity = activity.getIfAvailable(
                 () -> ArchiveActivityRecorder.disabled(Clock.systemUTC()));
+        this.records = records;
+    }
+
+    /** Resolved lazily and only while collection is on; absent in MVC slices. */
+    private org.springframework.beans.factory.ObjectProvider<RecordAuthorizationService> records;
+
+    /**
+     * A DOWNLOAD of one attachment of one record (US-SEC-004.2).
+     *
+     * <p>Order, and why:
+     * <ol>
+     *   <li>the attachment-viewer group gate, exactly as before;
+     *   <li>with collection on, the RECORD-level decision for the owning
+     *       record. Without this the download row was written before the
+     *       record-level check ran, so a caller refused the record still left
+     *       an {@code ATTACHMENT_DOWNLOADED / PERMITTED} row behind - a release
+     *       that never happened. The service repeats the same check; it is
+     *       recorded once per request either way;
+     *   <li>the audit row, carrying the attachment id, still BEFORE the file
+     *       is resolved or a byte is streamed, so FAIL_CLOSED can refuse the
+     *       release.
+     * </ol>
+     *
+     * <p>With collection off step 2 is skipped and this is identical to the
+     * three-argument form.
+     *
+     * @param resourceType AWARD, PROPOSAL, SUBAWARD or NEGOTIATION
+     * @param recordId     the archive row id in the download path
+     * @param attachmentId the attachment id in the download path; only the
+     *                     id is recorded, never a file name or content
+     */
+    public void requireAttachmentDownload(Authentication authentication, String resourceType,
+                                          long recordId, long attachmentId) {
+        requireAttachmentAccess(authentication);
+        if (activity.enabled()) {
+            RecordAuthorizationService gate = records == null ? null : records.getIfAvailable();
+            if (gate != null) {
+                switch (resourceType) {
+                    case "AWARD" -> gate.requireAward(recordId);
+                    case "PROPOSAL" -> gate.requireProposal(recordId);
+                    case "SUBAWARD" -> gate.requireSubaward(recordId);
+                    case "NEGOTIATION" -> gate.requireNegotiation(recordId);
+                    default -> throw new IllegalArgumentException(
+                            "unknown attachment resource type " + resourceType);
+                }
+            }
+        }
+        activity.attachmentDownloaded(resourceType, String.valueOf(recordId), null, attachmentId);
     }
 
     /**
