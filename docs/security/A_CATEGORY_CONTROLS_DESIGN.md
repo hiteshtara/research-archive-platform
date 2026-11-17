@@ -1,8 +1,14 @@
 # A-category administrative security controls: design for approval
 
-Status: **PROPOSED, not implemented.** Written 2026-11-17 against `main` at
-`7101d75`. Nothing in this document has been applied to DEV.
-Administrator writes, record-level enforcement and V089 all stay off.
+Status: **DESIGN APPROVED to proceed, not implemented.** Written 2026-11-17
+against `main` at `7101d75`. Business decisions recorded 2026-11-17 (section
+12). Nothing in this document has been applied to DEV. Administrator writes,
+record-level enforcement, V089 and V090 all stay off and unapplied.
+
+**Release condition (decided):** administrator writes are **not** enabled
+after PR 1, nor after any single PR. Enabling them needs three things: the
+complete security test suite passing, a controlled DEV acceptance review,
+and a separate explicit approval.
 
 Source inputs: PR #155 (coverage matrix), the V086 relink-approval model,
 and the code at the line numbers cited below. All code findings below were
@@ -139,7 +145,8 @@ CREATE TABLE authz.privilege_approval (
     status               VARCHAR(10) NOT NULL DEFAULT 'PENDING'
         CHECK (status IN ('PENDING','APPROVED','CONSUMED','REVOKED')),
     CONSTRAINT ck_pa_action CHECK (action IN
-        ('ADMIN_ASSIGN','SELF_GRANT','SELF_WIDEN','LINK_PRIVILEGED','CENTRAL_GRANT')),
+        ('ADMIN_ASSIGN','ADMIN_RESTORE','SELF_GRANT','SELF_WIDEN',
+         'LINK_PRIVILEGED','CENTRAL_GRANT')),
     -- V086's two-person rule, plus: the beneficiary can never approve.
     CONSTRAINT ck_pa_two_people   CHECK (approved_by IS NULL OR approved_by <> requested_by),
     CONSTRAINT ck_pa_not_subject  CHECK (approved_by IS NULL OR approved_by <> subject_identifier),
@@ -160,8 +167,42 @@ CREATE UNIQUE INDEX ux_privilege_approval_live ON authz.privilege_approval
 | `SELF_GRANT` | `grantAccess` where subject = actor | **Required** (control 1) |
 | `SELF_WIDEN` | widening `modifyAccess` on own grant | **Required** (control 2) |
 | `LINK_PRIVILEGED` | `linkIdentity` on an identity holding active grants **or** ARCHIVE_ADMIN | **Required**: closes N2. Relink keeps V086 |
-| `CENTRAL_GRANT` | any CENTRAL grant, to anyone | **Business decision needed.** It conflicts with D-ADM-2 (one administrator suffices). Recommended yes, because CENTRAL is unrestricted access to every record |
-| Restoring a suspended administrator | `setSuspended(false)` on an ARCHIVE_ADMIN | Optional. Recommended as `ADMIN_ASSIGN`-equivalent |
+| `CENTRAL_GRANT` | any CENTRAL grant, to anyone | **Required. Decided 2026-11-17**, superseding D-ADM-2 for CENTRAL only |
+| `ADMIN_RESTORE` | `setSuspended(false)` on an identity with an **active** ARCHIVE_ADMIN membership, which would make its administrator privileges usable again | **Required. Decided 2026-11-17.** Restoring a non-administrator stays a single-administrator action, with a reason |
+
+### 3.2a Immutability after approval (required 2026-11-17)
+
+An approval must authorise exactly what the approver saw. Once a row
+exists, its bound fields cannot change. These are:
+- `action`, `subject_identifier` and every specification column
+- `target_grant_id`
+- `requested_by`, `requested_at`, `reason`, `valid_until`
+
+The only permitted transitions are the status columns:
+- PENDING → APPROVED
+- APPROVED → CONSUMED
+- PENDING/APPROVED → REVOKED
+
+Each transition sets only its own timestamp and actor columns.
+
+This is enforced **in the database**: a `BEFORE UPDATE` trigger on
+`authz.privilege_approval` raises if any bound column differs between `OLD`
+and `NEW`, or if the status transition is not one of the four above. The
+repository exposes no method that updates a bound column. Java can't be
+trusted alone for this, because the risk being closed is a request edited
+between approval and execution. A change means revoking the request and
+submitting a new one.
+
+### 3.2b Expiry (decided 2026-11-17)
+
+`valid_until = requested_at + 72 hours`, measured from the **request**.
+Past it, the approval can be neither approved nor executed: both the
+approve and the consume `UPDATE` carry `AND valid_until > now()`. An
+expired request stays as history and must be resubmitted as a new row.
+Expired rows still in PENDING or APPROVED would block a resubmission under
+the live unique index. So the request path first marks the caller's own
+expired live row REVOKED with `revoked_by = 'EXPIRED'`, in the same
+transaction, and audits it.
 
 ### 3.3 Ordering, enforced at every step
 
@@ -182,9 +223,14 @@ CREATE UNIQUE INDEX ux_privilege_approval_live ON authz.privilege_approval
 4. **Revoke:** either party, or any administrator, while the approval is
    PENDING or APPROVED. A revoked approval authorises nothing.
 
-`valid_until` defaults to 72 hours. V086 has no expiry; it is added here
-because an approval made last month should not authorise an escalation
-today.
+`valid_until` is 72 hours from the request (3.2b). V086 has no expiry; it is
+added here because an approval made last month should not authorise an
+escalation today.
+
+**Approver eligibility, checked at approval and again at execution:** the
+approver must hold an *active* ARCHIVE_ADMIN membership, must not be
+suspended, and must not be the requester or the beneficiary. The last two
+are also database CHECKs. Losing eligibility in between voids the approval.
 
 ### 3.4 Consistency with V086
 
@@ -208,8 +254,34 @@ approver side.
 - So the current definition depends on the order of those two events, and
   no record says which came first.
 
-**Treat it as unverified until re-read.** One read-only check, from
-CloudShell or the approved read path, no writes:
+### 4.1 Verified 2026-11-17, read-only, from CloudWatch only
+
+Evidence comes from the loader's own CloudWatch log group
+(`/ecs/research-archive-platform-dev-loader`). No database connection was
+opened, no credential was retrieved, and no task was launched.
+
+| Fact | Evidence |
+|---|---|
+| V087 applied | `Applying migration V087: one active grant per scope` → `Migration V087 completed`, **2026-11-02T17:54:26Z**, run `7e638b66-195c-48e2-8e99-4746d40639e7` |
+| The 2026-11-09 "V087-shaped index" observation was taken **before** V088 | `SEC_009_READ_ONLY_EVIDENCE.md` committed `1985b77` at 18:53:54Z; V088 ran four hours later |
+| V088 applied | `Applying migration V088: parent award grants` → `Migration V088 completed` → `Migrations applied` → `Migration and schema validation complete`, **2026-11-09T22:47:55Z**, run `9aa3baa4-bcd4-49b3-841f-b93412440d7b`. V088's `DROP INDEX` + `CREATE UNIQUE INDEX … COALESCE(award_number,'')` are unconditional statements in that file, and its duplicate-refusing `DO` block did not raise |
+| Nothing has run since | That V088 run is the only `Applying migration` event from 2026-11-09 to 2026-11-17. **V089 has never been applied** |
+| The V088 column exists | API revision 104's `JdbcAccessGrantRepository` SELECTs `award_number`. `GET /api/v1/admin/identities/ARP-FK7QY195-QW5HV7G0` returned 200 in the browser on 2026-11-17 |
+
+**Conclusion:** both migrations are recorded as applied, in order, and
+nothing has run since. The ledger says the index is in its V088 shape.
+
+**What is not proven:** the catalog has not been read since V088. Out-of-band
+DDL would not show in these logs. The only remaining existing route that
+needs no credential handling by an operator is an ECS one-off task that runs
+SQL inside the container. The 2026-11-02 preflights used that route, as
+`archive_admin` under a read-only session guard. Launching one is held for
+separate approval, because it executes ad-hoc SQL as the owner role on
+shared DEV.
+
+### 4.2 The catalog read, when approved
+
+Read-only, no writes:
 
 ```sql
 SELECT indexdef FROM pg_indexes
@@ -249,8 +321,26 @@ cannot be switched on over a schema that cannot hold the invariants.
 ## 6. Control: mandatory reason on every change
 
 **Server (authoritative).** A `Reasons.require(reason)` helper in the
-service: non-blank after trim, at least 10 characters, at most 500. It is
-applied to all ten mutating service methods:
+service. Decided 2026-11-17: at least 10 characters, validated server-side,
+with blank and placeholder reasons rejected. The rule after normalisation
+(trim, collapse internal whitespace):
+
+1. 10 to 500 characters
+2. at least **two words containing letters**, so "1234567890" and "----------" fail
+3. not a single repeated character or a repeated short token
+   ("aaaaaaaaaa", "test test test")
+4. not, case-insensitively and ignoring punctuation, a placeholder:
+   `test`, `testing`, `n/a`, `na`, `none`, `null`, `reason`, `no reason`,
+   `asdf`, `qwerty`, `xxx`, `tbd`, `todo`, `placeholder`, `see above`,
+   `as discussed`, `per request`, `lorem ipsum`, and these repeated or
+   combined with each other
+
+The denylist is a deterrent, not a guarantee: a determined administrator can
+still write a meaningless sentence. The reason is shown to the approver and
+kept in the audit trail, and that is the real control. The list lives in one
+place, used by both the server and the UI helper, so they cannot drift.
+
+It is applied to all ten mutating service methods:
 - `grantAccess`
 - `modifyAccess`
 - `revokeAccess`
@@ -331,6 +421,21 @@ pattern). Every test is written to fail against current `main` first.
 - Server: each of the ten write methods with blank, 9-character and 501-character reasons → 400, nothing written
 - N3: revoke keeps the original grant `reason` and stores `revocation_reason`
 
+### 7.5a Audit completeness (required 2026-11-17)
+A table-driven integration test over **every** mutating service method
+and every approval transition (request, approve, revoke, consume, expiry):
+- **success** → exactly one new `access_audit` row, in the same transaction,
+  naming the actor, subject and action, and the approval ID where one was consumed
+- **refusal** (any reason) → zero new audit rows and zero changed domain rows
+- a new mutating method added later without a row in this table fails the
+  test (it enumerates `ArchiveAdminService`'s public methods by reflection
+  against an allow-list of read-only ones)
+
+### 7.5b Approval immutability (3.2a)
+- Direct SQL `UPDATE` of each bound column on a PENDING row and on an APPROVED row → trigger raises
+- Illegal status transitions (CONSUMED → APPROVED, REVOKED → APPROVED, PENDING → CONSUMED) → trigger raises
+- Approve, then attempt to execute a request differing from the approved one → refused, approval still APPROVED
+
 ### 7.6 Reactivation (control 8), integration with the **real** evaluator
 Using Award fixtures, as `AwardRecordAuthorizationIntegrationTest` does:
 1. UNIT grant → Award in that unit visible
@@ -396,18 +501,69 @@ so they still return 409 in DEV until writes are deliberately enabled.
 
 **Total: about 10–14 engineer-days.**
 
-PR 1 closes every A-category hole by *refusing* the dangerous action. PR 2
-turns those refusals into approvable workflows. Writes could safely be
-enabled after PR 1, with promotion and self-access limited to the operator
-CLI until PR 2 merges.
+PR 1 closes every A-category hole by *refusing* the dangerous action. Until
+PR 2, it refuses CENTRAL grants, administrator assignment, administrator
+restoration, self-grant, self-widening and privileged linking outright. PR 2
+turns those refusals into approvable workflows. Each PR is reviewable on its
+own: PR 1 needs no migration, PR 2 owns V090, PR 3 is UI only.
 
-## 11. Decisions needed
+**Writes stay off after every PR** (release condition at the top). Enabling
+them is a separate decision that follows the full suite and a controlled DEV
+acceptance review.
 
-1. **CENTRAL_GRANT approval.** Should every CENTRAL grant need a second
-   administrator? This overrides D-ADM-2 for that one type. Recommended: yes.
-2. **Approval validity window.** Proposed 72 hours.
-3. **Approval of administrator restoration.** Should restoring a suspended
-   administrator need approval? Recommended: yes.
-4. **Minimum reason length.** Proposed 10 characters.
-5. **Run the section 4 read-only check now?** Can it run independently of
-   implementation?
+## 11. Unresolved architectural decisions
+
+1. **How the second administrator is created.** DEV has exactly one
+   administrator. With `ADMIN_ASSIGN` requiring a second, distinct active
+   administrator to approve, **no approval can ever be satisfied in DEV**, and
+   the same applies to every environment's first rollout. Options:
+   - (a) A one-time operator path, like bootstrap, that seats the second
+     administrator. It records the operator and refuses once two or more
+     active administrators exist. **Recommended.**
+   - (b) Allow approval by "operator + administrator" while fewer than two
+     administrators exist.
+   - (c) Seat two administrators at bootstrap.
+
+   This must be decided before PR 2. Otherwise PR 2 makes promotion
+   permanently impossible.
+2. **Break-glass when no eligible approver exists.** For example, the other
+   administrator is suspended or has left. The same answer as decision 1
+   probably fits, but it must be stated, because self-suspension is now
+   refused and approvals cannot be self-approved.
+3. **Whether the operator CLIs go through the approval gates.** The
+   provisioning CLIs call `ArchiveAdminService`, so the gates apply to them
+   automatically. That would make the CLI unable to seat a CENTRAL grant
+   or an administrator without an approval row. Confirm that is wanted.
+   The alternative is an explicit, audited operator override.
+4. **Who may execute an approved action.** The design follows V086: any
+   active administrator may execute, because the decision was made by two
+   people and is bound exactly. The stricter option is requester-only.
+5. **Reason denylist ownership.** Who maintains the placeholder list
+   (6), and whether a ticket or reference number should be required for
+   CENTRAL and administrator actions.
+6. **Direct catalog verification of the V088 index** (4.2) via an ECS
+   one-off task as `archive_admin` with a read-only session guard. Awaiting
+   approval to launch.
+
+## 12. Decisions recorded 2026-11-17
+
+| # | Decision |
+|---|---|
+| D1 | Every CENTRAL grant requires independent approval by a second active administrator |
+| D2 | Approval requests expire 72 hours after the request. Expired requests cannot be approved or executed, and must be resubmitted |
+| D3 | Restoring a suspended identity requires independent approval when it reactivates administrator privileges |
+| D4 | Every administrative write needs a meaningful reason of at least 10 characters, validated server-side. Blank and placeholder reasons are rejected |
+| D5 | Delivery in three independently reviewable PRs: (1) close holes + regression tests, (2) approval workflow + V090, (3) approval UI |
+| D6 | Administrator writes are not enabled after PR 1. Enabling them follows the full security suite and a controlled DEV acceptance review |
+
+Also required (all are covered above):
+- identity-in-URL ownership validation (N1)
+- closing remove-and-relink (N2)
+- preserving the grant reason on revoke (N3)
+- retaining the Parent Award number (N4)
+- no self-grant, unauthorised widening or self-suspension
+- no promotion without approval
+- an approver who is a different, active, non-beneficiary administrator
+- single-use, transactionally consumed, concurrency-safe approvals
+- approval immutability (3.2a)
+- an audit record for every successful change (7.5a)
