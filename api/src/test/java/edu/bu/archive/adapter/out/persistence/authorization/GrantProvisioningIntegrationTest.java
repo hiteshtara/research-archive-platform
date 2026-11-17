@@ -186,14 +186,14 @@ class GrantProvisioningIntegrationTest {
         @Test
         void aRevocationIsAudited() {
             GrantOutcome granted = command().run(req().confirmed(true).build());
-            service.revokeAccess(new InstitutionalIdentifier(ADMIN), granted.grantId(), "no longer needed");
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(GRANTEE), granted.grantId(), "no longer needed");
             assertThat(auditActions()).containsExactly("ACCESS_GRANTED", "ACCESS_REVOKED");
         }
 
         @Test
         void aModificationIsAudited() {
             GrantOutcome granted = command().run(req().confirmed(true).build());
-            service.modifyAccess(new InstitutionalIdentifier(ADMIN), granted.grantId(), null, true, "widen to descendants");
+            service.modifyAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(GRANTEE), granted.grantId(), null, true, "widen to descendants");
             assertThat(auditActions()).containsExactly("ACCESS_GRANTED", "ACCESS_MODIFIED");
         }
     }
@@ -317,6 +317,24 @@ class GrantProvisioningIntegrationTest {
         void aScopeArgumentOnACentralGrantIsRefused() {
             assertRefused(req().type("CENTRAL").unit("1250000000").confirmed(true).build(),
                     "CENTRAL grants take no scope");
+        }
+
+        @Test
+        void aCentralGrantIsRefusedUntilTheApprovalWorkflowExists() {
+            // Decision D1, enforced in ArchiveAdminService and reported here first.
+            assertRefused(req().type("CENTRAL").unit(null).confirmed(true).build(),
+                    "independent approval");
+        }
+
+        @Test
+        void aSelfGrantIsRefused() {
+            assertRefused(req().grantee(ADMIN).confirmed(true).build(),
+                    "cannot grant archive access to themselves");
+        }
+
+        @Test
+        void aPlaceholderReasonIsRefused() {
+            assertRefused(req().reason("n/a").confirmed(true).build(), "--reason is not acceptable");
         }
 
         @Test
@@ -479,7 +497,7 @@ class GrantProvisioningIntegrationTest {
                 .containsExactly("ACCESS_GRANTED");
 
         // The documented way forward, which still works.
-        service.modifyAccess(new InstitutionalIdentifier(ADMIN), first.grantId(),
+        service.modifyAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(GRANTEE), first.grantId(),
                 null, true, "widen to descendants");
         assertThat(auditActions()).containsExactly("ACCESS_GRANTED", "ACCESS_MODIFIED");
         assertThat(activeGrantsFor(GRANTEE)).isEqualTo(1);
@@ -998,7 +1016,7 @@ class GrantProvisioningIntegrationTest {
             assertThat(command().run(req().confirmed(true).build()).result())
                     .isEqualTo(GrantOutcome.Result.REFUSED);
 
-            service.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId,
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(GRANTEE), grantId,
                     "closing the pilot properly");
 
             assertThat(command().run(req().confirmed(true).build()).result())
@@ -1015,7 +1033,7 @@ class GrantProvisioningIntegrationTest {
              */
             long grantId = issue();
             expire(grantId);
-            service.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId, "closing");
+            service.revokeAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(GRANTEE), grantId, "closing the pilot");
 
             assertThat(jdbc.sql("""
                             SELECT count(*) FROM authz.access_grant WHERE grant_id = :id
@@ -1223,6 +1241,7 @@ class GrantProvisioningIntegrationTest {
         Req awardNumber(String v) { this.awardNumber = v; return this; }
         Req descendants(boolean v) { this.descendants = v; return this; }
         Req approval(String v) { this.approval = v; return this; }
+        Req reason(String v) { this.reason = v; return this; }
         Req dryRun(boolean v) { this.dryRun = v; return this; }
         Req confirmed(boolean v) { this.confirmed = v; return this; }
         Req expiresAt(String v) { this.expiresAt = v; return this; }

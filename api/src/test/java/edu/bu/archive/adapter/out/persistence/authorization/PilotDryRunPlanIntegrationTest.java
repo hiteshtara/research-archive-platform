@@ -231,9 +231,24 @@ class PilotDryRunPlanIntegrationTest {
                 grant.problems().forEach(line -> report.add("  FAIL   " + line));
                 report.add("  " + grant.message());
 
-                assertThat(grant.result())
-                        .as("role %d's grant dry run must pass", role.number())
-                        .isEqualTo(GrantOutcome.Result.DRY_RUN_OK);
+                if ("CENTRAL".equals(role.grantType())) {
+                    /*
+                     * Decision D1: a CENTRAL grant needs a second
+                     * administrator's approval, and the approval workflow is
+                     * not available yet, so the utility refuses it even as a
+                     * dry run. Role 1 is blocked until that workflow lands.
+                     */
+                    assertThat(grant.result())
+                            .as("role %d's CENTRAL grant is refused until approval exists",
+                                    role.number())
+                            .isEqualTo(GrantOutcome.Result.REFUSED);
+                    assertThat(String.join(" ", grant.problems()))
+                            .contains("independent approval");
+                } else {
+                    assertThat(grant.result())
+                            .as("role %d's grant dry run must pass", role.number())
+                            .isEqualTo(GrantOutcome.Result.DRY_RUN_OK);
+                }
             }
             report.add("");
         }

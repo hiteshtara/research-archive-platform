@@ -308,7 +308,7 @@ class AdministrationReadOnlyIntegrationTest {
 
         mvc().perform(post("/api/v1/admin/identities/" + ORDINARY_INST + "/grants")
                         .contentType("application/json")
-                        .content("{\"type\":\"IO\",\"ioValue\":\"9500099999\"}"))
+                        .content("{\"type\":\"IO\",\"ioValue\":\"9500099999\",\"reason\":\"sponsor account review\"}"))
                 .andExpect(status().isCreated());
 
         assertThat(count("authz.access_grant")).isEqualTo(grantsBefore + 1);

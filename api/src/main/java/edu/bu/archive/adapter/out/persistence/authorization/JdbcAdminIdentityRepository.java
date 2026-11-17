@@ -201,22 +201,36 @@ public class JdbcAdminIdentityRepository implements AdminIdentityRepository {
     }
 
     @Override
+    public Optional<InstitutionalIdentifier> findActiveLinkOwner(long linkId) {
+        return jdbc.sql("""
+                        SELECT institutional_identifier FROM authz.identity_link
+                         WHERE identity_link_id = :id AND status = 'ACTIVE'
+                        """)
+                .param("id", linkId)
+                .query(String.class)
+                .optional()
+                .map(InstitutionalIdentifier::new);
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public InstitutionalIdentifier revokeLink(long linkId, String revokedBy) {
-        String identity = jdbc.sql("""
+    public void revokeLink(InstitutionalIdentifier owner, long linkId, String revokedBy) {
+        int updated = jdbc.sql("""
                         UPDATE authz.identity_link
                            SET status = 'REVOKED',
                                revoked_by = :revokedBy,
                                revoked_at = CURRENT_TIMESTAMP
                          WHERE identity_link_id = :id AND status = 'ACTIVE'
-                        RETURNING institutional_identifier
+                           AND institutional_identifier = :owner
                         """)
                 .param("revokedBy", revokedBy)
                 .param("id", linkId)
-                .query(String.class)
-                .optional()
-                .orElseThrow(() -> new NoSuchElementException("no active identity link " + linkId));
-        return new InstitutionalIdentifier(identity);
+                .param("owner", owner.value())
+                .update();
+        if (updated == 0) {
+            // Same message whether the id is unknown, revoked, or someone else's.
+            throw new NoSuchElementException("no active identity link " + linkId);
+        }
     }
 
     @Override

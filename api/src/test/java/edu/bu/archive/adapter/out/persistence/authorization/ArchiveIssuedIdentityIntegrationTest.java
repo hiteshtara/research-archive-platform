@@ -149,8 +149,10 @@ class ArchiveIssuedIdentityIntegrationTest {
         // rule is meaningless with one.
         inTransaction.executeWithoutResult(s ->
                 service.bootstrapFirstAdministrator(ADMIN_ONE, "operator", "test"));
-        inTransaction.executeWithoutResult(s ->
-                service.assignAdministrator(ADMIN_ONE, ADMIN_TWO, "second administrator"));
+        // Seeded through the store: appointment through the service is refused
+        // until the approval workflow exists (decision D1).
+        inTransaction.executeWithoutResult(s -> new JdbcAdminRoleRepository(jdbc)
+                .assign(ADMIN_TWO, ADMIN_ONE.value(), "second administrator"));
     }
 
     @Nested
@@ -256,7 +258,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier archiveId = ArchivePrincipalId.mint();
             var first = link("cognito-person-a", archiveId);
             grantCentralTo(archiveId);
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(first).orElseThrow(), first, "operator"));
 
             assertThatThrownBy(() -> link("cognito-person-b", archiveId))
                     .isInstanceOf(IllegalStateException.class)
@@ -273,7 +275,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier archiveId = ArchivePrincipalId.mint();
             var first = link("cognito-old-pool", archiveId);
             grantCentralTo(archiveId);
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(first).orElseThrow(), first, "operator"));
 
             assertThatCode(() -> inTransaction.executeWithoutResult(s -> identities.relink(
                     ISSUER, "cognito-new-pool", archiveId, null, "display-only", "operator")))
@@ -366,7 +368,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             var link = link("cognito-person-a", a);
             grantCentralTo(a);
 
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(link, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(link).orElseThrow(), link, "operator"));
 
             assertThat(resolver.resolve(cognito("cognito-person-a")))
                     .isInstanceOf(IdentityResolution.Revoked.class);
@@ -450,7 +452,7 @@ class ArchiveIssuedIdentityIntegrationTest {
         void relinkingAnIdentityWithNoGrantsKeepsTheSingleAdministratorProcedure() {
             InstitutionalIdentifier id = ArchivePrincipalId.mint();
             long first = link("cognito-old", id);
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(first).orElseThrow(), first, "operator"));
 
             assertThatCode(() -> inTransaction.executeWithoutResult(s ->
                     service.relinkIdentity(ADMIN_ONE, ISSUER, "cognito-new", id,
@@ -465,7 +467,7 @@ class ArchiveIssuedIdentityIntegrationTest {
 
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
-            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId));
+            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool"));
 
             assertThatCode(() -> inTransaction.executeWithoutResult(s ->
                     service.relinkIdentity(ADMIN_ONE, ISSUER, "cognito-new", id,
@@ -484,7 +486,7 @@ class ArchiveIssuedIdentityIntegrationTest {
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
 
             assertThatThrownBy(() -> inTransaction.executeWithoutResult(s ->
-                    service.approveRelink(ADMIN_ONE, approvalId)))
+                    service.approveRelink(ADMIN_ONE, approvalId, "second administrator verified the replacement pool")))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("cannot also approve");
         }
@@ -512,10 +514,10 @@ class ArchiveIssuedIdentityIntegrationTest {
             link("cognito-admin-two", ADMIN_TWO);
 
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
-                    ADMIN_ONE, id, ISSUER, "cognito-admin-two", "suspicious").approvalId());
+                    ADMIN_ONE, id, ISSUER, "cognito-admin-two", "suspicious relink request").approvalId());
 
             assertThatThrownBy(() -> inTransaction.executeWithoutResult(s ->
-                    service.approveRelink(ADMIN_TWO, approvalId)))
+                    service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool")))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("both sides of the decision");
         }
@@ -527,17 +529,17 @@ class ArchiveIssuedIdentityIntegrationTest {
 
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
-            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId));
+            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool"));
 
             // A different TARGET for the same identity.
             assertThatThrownBy(() -> inTransaction.executeWithoutResult(s ->
                     service.relinkIdentity(ADMIN_ONE, ISSUER, "cognito-somewhere-else", id,
-                            null, null, "nope")))
+                            null, null, "not the approved target")))
                     .isInstanceOf(RelinkApprovalRequiredException.class);
             // A different IDENTITY with the same target.
             assertThatThrownBy(() -> inTransaction.executeWithoutResult(s ->
                     service.relinkIdentity(ADMIN_ONE, ISSUER, "cognito-new", other,
-                            null, null, "nope")))
+                            null, null, "not the approved target")))
                     .isInstanceOf(RelinkApprovalRequiredException.class);
         }
 
@@ -546,7 +548,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier id = linkedAndGrantedThenRevoked();
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
-            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId));
+            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool"));
             inTransaction.executeWithoutResult(s -> service.relinkIdentity(
                     ADMIN_ONE, ISSUER, "cognito-new", id, null, null, "pool replaced"));
 
@@ -554,11 +556,11 @@ class ArchiveIssuedIdentityIntegrationTest {
                     SELECT identity_link_id FROM authz.identity_link
                     WHERE institutional_identifier = :id AND status='ACTIVE'
                     """).param("id", id.value()).query(Long.class).single();
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(newest, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(newest).orElseThrow(), newest, "operator"));
 
             assertThatThrownBy(() -> inTransaction.executeWithoutResult(s ->
                     service.relinkIdentity(ADMIN_ONE, ISSUER, "cognito-new", id,
-                            null, null, "again")))
+                            null, null, "trying the relink again")))
                     .isInstanceOf(RelinkApprovalRequiredException.class);
         }
 
@@ -567,9 +569,9 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier id = linkedAndGrantedThenRevoked();
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
-            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId));
+            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool"));
             inTransaction.executeWithoutResult(s ->
-                    service.revokeRelinkApproval(ADMIN_TWO, approvalId));
+                    service.revokeRelinkApproval(ADMIN_TWO, approvalId, "request withdrawn after review"));
 
             assertThatThrownBy(() -> inTransaction.executeWithoutResult(s ->
                     service.relinkIdentity(ADMIN_ONE, ISSUER, "cognito-new", id,
@@ -589,7 +591,7 @@ class ArchiveIssuedIdentityIntegrationTest {
              */
             InstitutionalIdentifier id = ArchivePrincipalId.mint();
             long first = link("cognito-old", id);
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(first).orElseThrow(), first, "operator"));
 
             grantCentralTo(id);
 
@@ -604,7 +606,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier id = linkedAndGrantedThenRevoked();
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
-            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId));
+            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool"));
 
             int threads = 4;
             var barrier = new java.util.concurrent.CyclicBarrier(threads);
@@ -615,7 +617,7 @@ class ArchiveIssuedIdentityIntegrationTest {
                             barrier.await(10, java.util.concurrent.TimeUnit.SECONDS);
                             try {
                                 inTransaction.executeWithoutResult(s -> service.relinkIdentity(
-                                        ADMIN_ONE, ISSUER, "cognito-new", id, null, null, "race"));
+                                        ADMIN_ONE, ISSUER, "cognito-new", id, null, null, "concurrent relink attempt"));
                                 return "OK";
                             } catch (RuntimeException refused) {
                                 return "REFUSED";
@@ -641,7 +643,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier id = linkedAndGrantedThenRevoked();
             long approvalId = inTransaction.execute(s -> service.requestRelinkApproval(
                     ADMIN_ONE, id, ISSUER, "cognito-new", "pool replaced").approvalId());
-            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId));
+            inTransaction.executeWithoutResult(s -> service.approveRelink(ADMIN_TWO, approvalId, "second administrator verified the replacement pool"));
             inTransaction.executeWithoutResult(s -> service.relinkIdentity(
                     ADMIN_ONE, ISSUER, "cognito-new", id, null, null, "pool replaced"));
 
@@ -662,16 +664,18 @@ class ArchiveIssuedIdentityIntegrationTest {
         @Test
         void theFirstAdministratorBootstrapIsUnaffected() {
             // Bootstrap links a freshly minted identity with no history and
-            // no grants, so it never reaches the approval path.
+            // no grants, so it never reaches the relink approval path. It
+            // goes through the one-transaction operator bootstrap: the old
+            // two-step bootstrap-then-linkIdentity is now refused by the N2
+            // control, because linkIdentity on an unlinked ARCHIVE_ADMIN
+            // needs a second administrator.
             jdbc.sql("DELETE FROM authz.admin_role_member").update();
             jdbc.sql("TRUNCATE authz.access_audit").update();
             InstitutionalIdentifier fresh = ArchivePrincipalId.mint();
 
-            assertThatCode(() -> inTransaction.executeWithoutResult(s -> {
-                service.bootstrapFirstAdministrator(fresh, "operator", "bootstrap");
-                service.linkIdentity(fresh, ISSUER, "cognito-first-admin", fresh,
-                        null, null, "bootstrap");
-            })).doesNotThrowAnyException();
+            assertThatCode(() -> service.bootstrapFirstAdministratorWithIdentity(
+                    fresh, "operator", "bootstrap", ISSUER, "cognito-first-admin",
+                    null, null)).doesNotThrowAnyException();
 
             assertThat(jdbc.sql("SELECT COUNT(*) FROM authz.relink_approval")
                     .query(Integer.class).single())
@@ -687,7 +691,7 @@ class ArchiveIssuedIdentityIntegrationTest {
             InstitutionalIdentifier id = ArchivePrincipalId.mint();
             long first = link(oldSubject, id);
             grantCentralTo(id);
-            inTransaction.executeWithoutResult(s -> identities.revokeLink(first, "operator"));
+            inTransaction.executeWithoutResult(s -> identities.revokeLink(identities.findActiveLinkOwner(first).orElseThrow(), first, "operator"));
             return id;
         }
     }

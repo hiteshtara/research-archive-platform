@@ -142,7 +142,8 @@ class AdminAuthorizationControllerTest {
             mvc.perform(post("/api/v1/admin/identities/inst-subject/grants")
                             .contentType("application/json").content("{\"type\":\"CENTRAL\"}"))
                     .andExpect(status().isForbidden());
-            mvc.perform(delete("/api/v1/admin/identities/inst-subject/grants/1"))
+            mvc.perform(delete("/api/v1/admin/identities/inst-subject/grants/1")
+                            .param("reason", "access no longer needed"))
                     .andExpect(status().isForbidden());
             mvc.perform(put("/api/v1/admin/identities/inst-subject/suspension")
                             .contentType("application/json").content("{\"suspended\":true}"))
@@ -151,7 +152,8 @@ class AdminAuthorizationControllerTest {
                             .contentType("application/json")
                             .content("{\"institutionalIdentifier\":\"inst-x\"}"))
                     .andExpect(status().isForbidden());
-            mvc.perform(delete("/api/v1/admin/administrators/inst-admin"))
+            mvc.perform(delete("/api/v1/admin/administrators/inst-admin")
+                            .param("reason", "stepping down from the role"))
                     .andExpect(status().isForbidden());
             // The three identity-link paths. Added after a review found the
             // parameterised list covered 9 of the 12 endpoints: these were
@@ -160,7 +162,8 @@ class AdminAuthorizationControllerTest {
                             .contentType("application/json")
                             .content("{\"cognitoIssuer\":\"https://issuer\",\"cognitoSubject\":\"sub\"}"))
                     .andExpect(status().isForbidden());
-            mvc.perform(delete("/api/v1/admin/identities/inst-subject/links/1"))
+            mvc.perform(delete("/api/v1/admin/identities/inst-subject/links/1")
+                            .param("reason", "wrong person was linked"))
                     .andExpect(status().isForbidden());
             mvc.perform(patch("/api/v1/admin/identities/inst-subject/grants/1")
                             .contentType("application/json")
@@ -206,7 +209,8 @@ class AdminAuthorizationControllerTest {
         void grantingReturns201AndLabelsAnIoGrantAsSapAccount() throws Exception {
             mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")
                             .contentType("application/json")
-                            .content("{\"type\":\"IO\",\"ioValue\":\"9500012345\"}"))
+                            .content("{\"type\":\"IO\",\"ioValue\":\"9500012345\","
+                                    + "\"reason\":\"sponsor account review\"}"))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.type").value("IO"))
                     .andExpect(jsonPath("$.label").value("SAP Account 9500012345"))
@@ -225,7 +229,8 @@ class AdminAuthorizationControllerTest {
 
         @Test
         void revokingAGrantThatDoesNotExistIs404() throws Exception {
-            mvc().perform(delete("/api/v1/admin/identities/inst-subject/grants/999"))
+            mvc().perform(delete("/api/v1/admin/identities/inst-subject/grants/999")
+                            .param("reason", "access no longer needed"))
                     .andExpect(status().isNotFound());
         }
 
@@ -250,7 +255,8 @@ class AdminAuthorizationControllerTest {
 
         @Test
         void revokingTheLastAdministratorIs409() throws Exception {
-            mvc().perform(delete("/api/v1/admin/administrators/" + ADMIN.value()))
+            mvc().perform(delete("/api/v1/admin/administrators/" + ADMIN.value())
+                            .param("reason", "stepping down from the role"))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("LAST_ARCHIVE_ADMINISTRATOR"));
         }
@@ -347,10 +353,13 @@ class AdminAuthorizationControllerTest {
         MockMvc mvc = mvc();
 
         mvc.perform(get("/api/v1/admin/administrators")).andExpect(status().isOk());
+        // Appointment is refused until the approval workflow exists (decision D1).
         mvc.perform(post("/api/v1/admin/administrators")
                         .contentType("application/json")
-                        .content("{\"institutionalIdentifier\":\"inst-second\"}"))
-                .andExpect(status().isCreated());
+                        .content("{\"institutionalIdentifier\":\"inst-second\","
+                                + "\"reason\":\"second administrator for cover\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("APPROVAL_REQUIRED"));
 
         assertThat(grants.findForGrantee(ADMIN))
                 .as("administering access must never grant the administrator access")
@@ -413,7 +422,7 @@ class AdminAuthorizationControllerTest {
             mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")
                             .contentType("application/json")
                             .content("{\"type\":\"UNIT\",\"unitNumber\":\"1242040000\","
-                                    + "\"includeDescendants\":false,\"reason\":\"duplicate\"}"))
+                                    + "\"includeDescendants\":false,\"reason\":\"duplicate grant request\"}"))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("DUPLICATE_ACTIVE_GRANT"))
                     .andExpect(jsonPath("$.message").value(
@@ -433,7 +442,8 @@ class AdminAuthorizationControllerTest {
             assertThatThrownBy(() ->
                     mvc().perform(post("/api/v1/admin/identities/inst-subject/grants")
                             .contentType("application/json")
-                            .content("{\"type\":\"CENTRAL\",\"reason\":\"other index\"}")))
+                            .content("{\"type\":\"UNIT\",\"unitNumber\":\"1242040000\","
+                                    + "\"reason\":\"other index violated\"}")))
                     .as("an unrelated unique violation must NOT be translated")
                     .hasCauseInstanceOf(DuplicateKeyException.class);
 

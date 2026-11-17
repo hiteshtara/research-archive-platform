@@ -90,9 +90,18 @@ public final class InMemoryAdminIdentityRepository implements AdminIdentityRepos
     }
 
     @Override
-    public InstitutionalIdentifier revokeLink(long linkId, String revokedBy) {
-        var existing = links.stream()
+    public java.util.Optional<InstitutionalIdentifier> findActiveLinkOwner(long linkId) {
+        return links.stream()
                 .filter(link -> link.id() == linkId && link.isActive())
+                .map(IdentityLink::institutionalIdentifier)
+                .findFirst();
+    }
+
+    @Override
+    public void revokeLink(InstitutionalIdentifier owner, long linkId, String revokedBy) {
+        links.stream()
+                .filter(link -> link.id() == linkId && link.isActive()
+                        && link.institutionalIdentifier().value().equals(owner.value()))
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException("no active identity link " + linkId));
         links.replaceAll(link -> link.id() == linkId
@@ -100,7 +109,6 @@ public final class InMemoryAdminIdentityRepository implements AdminIdentityRepos
                         link.kualiPersonId(), link.loginName(), IdentityLinkStatus.REVOKED,
                         link.verifiedAt())
                 : link);
-        return existing.institutionalIdentifier();
     }
 
     @Override

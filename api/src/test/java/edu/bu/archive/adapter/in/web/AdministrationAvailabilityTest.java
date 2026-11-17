@@ -237,7 +237,7 @@ class AdministrationAvailabilityTest {
 
             mvc().perform(post("/api/v1/admin/identities/inst-ordinary/grants")
                             .contentType("application/json")
-                            .content("{\"type\":\"IO\",\"ioValue\":\"9500012345\"}"))
+                            .content("{\"type\":\"IO\",\"ioValue\":\"9500012345\",\"reason\":\"sponsor account review\"}"))
                     .andExpect(status().isCreated());
 
             // And record enforcement is still off, so the grant changes

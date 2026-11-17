@@ -434,7 +434,8 @@ class SecurityAcceptancePackIntegrationTest {
                     .as("permitted while the grant is live")
                     .isTrue();
 
-            admin.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId, "acceptance pack");
+            admin.revokeAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(user), grantId,
+                    "acceptance pack");
 
             assertThat(canSee(user, AWARD_AT_PARENT))
                     .as("revocation is a status change and must take effect immediately")
@@ -821,6 +822,20 @@ class SecurityAcceptancePackIntegrationTest {
     private static long grant(String grantee, GrantType type, String unit,
             boolean descendants, String io, String awardNumber) {
 
+        if (type == GrantType.CENTRAL) {
+            /*
+             * Decision D1: ArchiveAdminService refuses every CENTRAL grant
+             * until the approval workflow exists. These cases are about what
+             * a CENTRAL grant DOES once issued, so it is seeded through the
+             * grant store - the same row the approved path will write.
+             */
+            var spec = new GrantSpecification(type, unit, descendants, io, awardNumber, null,
+                    "acceptance pack CENTRAL fixture");
+            return new org.springframework.transaction.support.TransactionTemplate(txManager)
+                    .execute(status -> grants.create(new InstitutionalIdentifier(grantee), spec,
+                            ADMIN))
+                    .id();
+        }
         return admin.grantAccess(
                 new InstitutionalIdentifier(ADMIN),
                 new InstitutionalIdentifier(grantee),

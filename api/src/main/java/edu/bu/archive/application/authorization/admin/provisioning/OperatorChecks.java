@@ -115,6 +115,14 @@ public final class OperatorChecks {
         }
         if (trim(reason) == null) {
             problems.add("--reason is required");
+        } else {
+            try {
+                edu.bu.archive.application.authorization.admin.Reasons.require(reason);
+            } catch (edu.bu.archive.application.authorization.admin.ReasonRequiredException e) {
+                // The same rule ArchiveAdminService applies (decision D4), stated
+                // before anything is attempted rather than after.
+                problems.add("--reason is not acceptable: " + e.getMessage());
+            }
         }
         if (trim(approvalReference) == null) {
             problems.add("--approval-reference is required, so the audit row points at the approval");

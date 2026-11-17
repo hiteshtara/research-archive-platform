@@ -5,7 +5,10 @@ import edu.bu.archive.application.authorization.AccessNotProvisionedProblem;
 import edu.bu.archive.application.authorization.IdentityAccessDeniedException;
 import edu.bu.archive.application.authorization.PartialFamilyAccessException;
 import edu.bu.archive.application.authorization.ReauthenticationRequiredException;
+import edu.bu.archive.application.authorization.admin.ApprovalRequiredException;
 import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
+import edu.bu.archive.application.authorization.admin.ReasonRequiredException;
+import edu.bu.archive.application.authorization.admin.SelfAdministrationException;
 import edu.bu.archive.application.authorization.admin.LastArchiveAdministratorException;
 import edu.bu.archive.application.authorization.admin.AdministrationWritesDisabledException;
 import edu.bu.archive.application.authorization.admin.NotAnArchiveAdministratorException;
@@ -18,6 +21,7 @@ import jakarta.validation.ConstraintViolationException;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -226,6 +230,100 @@ public class GlobalExceptionHandler {
                                 HttpStatus.FORBIDDEN,
                                 PartialFamilyAccessException.CODE,
                                 "This response needs access to every version of the Award.",
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 400 with its own code, so a client can tell "say why" apart from any
+     * other malformed request. ReasonRequiredException extends
+     * IllegalArgumentException; Spring picks this, the more specific handler.
+     */
+    /*
+     * A required query parameter is absent. Still 400, as Spring's default
+     * answer was, but in this API's error-body shape - and an absent
+     * administrative "reason" carries the same REASON_REQUIRED code as a
+     * blank one, so a client does not have to handle two answers to one
+     * mistake.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Map<String, Object>> handleMissingParameter(
+            MissingServletRequestParameterException exception,
+            HttpServletRequest request
+    ) {
+        boolean reason = "reason".equals(exception.getParameterName());
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        body(
+                                HttpStatus.BAD_REQUEST,
+                                reason ? ReasonRequiredException.CODE : "VALIDATION_ERROR",
+                                reason
+                                        ? "a reason is required for every administrative change"
+                                        : exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    @ExceptionHandler(ReasonRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleReasonRequired(
+            ReasonRequiredException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .badRequest()
+                .body(
+                        body(
+                                HttpStatus.BAD_REQUEST,
+                                ReasonRequiredException.CODE,
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 403: the caller is an administrator, but this act is one they may not
+     * perform on their own access - self-grant, self-widening,
+     * self-suspension. Distinct from APPROVAL_REQUIRED so the UI can say
+     * "another administrator must do this" rather than "this needs approval".
+     */
+    @ExceptionHandler(SelfAdministrationException.class)
+    public ResponseEntity<Map<String, Object>> handleSelfAdministration(
+            SelfAdministrationException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                SelfAdministrationException.CODE,
+                                exception.getMessage(),
+                                request
+                        )
+                );
+    }
+
+    /*
+     * 403, not 409: unlike the relink approval, no approval can be supplied
+     * yet - the workflow does not exist - so retrying will not succeed. The
+     * act needs a second administrator, which this caller alone is not.
+     */
+    @ExceptionHandler(ApprovalRequiredException.class)
+    public ResponseEntity<Map<String, Object>> handleApprovalRequired(
+            ApprovalRequiredException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(
+                        body(
+                                HttpStatus.FORBIDDEN,
+                                ApprovalRequiredException.CODE,
+                                exception.getMessage(),
                                 request
                         )
                 );

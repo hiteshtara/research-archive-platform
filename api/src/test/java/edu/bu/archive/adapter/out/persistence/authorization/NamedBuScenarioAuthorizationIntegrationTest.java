@@ -194,6 +194,7 @@ class NamedBuScenarioAuthorizationIntegrationTest {
     private static JdbcClient jdbc;
     private static PlatformTransactionManager txManager;
     private static ArchiveAdminService admin;
+    private static AccessGrantRepository grantStore;
     private static AuthorizationProperties properties;
     private static RecordAuthorizationService access;
     private static AwardArchiveService awards;
@@ -229,6 +230,7 @@ class NamedBuScenarioAuthorizationIntegrationTest {
         seedArchive();
 
         AccessGrantRepository grants = proxy(new JdbcAccessGrantRepository(jdbc), AccessGrantRepository.class);
+        grantStore = grants;
         admin = proxyClass(new ArchiveAdminService(
                 proxy(new JdbcAdminRoleRepository(jdbc), AdminRoleRepository.class),
                 proxy(new JdbcAdminAuditSink(jdbc), AdminAuditSink.class),
@@ -496,7 +498,8 @@ class NamedBuScenarioAuthorizationIntegrationTest {
 
             asVoid(user, () -> assertThatCode(() -> awards.findFamily(AWARD_C)).doesNotThrowAnyException());
 
-            admin.revokeAccess(new InstitutionalIdentifier(ADMIN), grantId, "named scenario: OAV revocation");
+            admin.revokeAccess(new InstitutionalIdentifier(ADMIN), new InstitutionalIdentifier(user),
+                    grantId, "named scenario: OAV revocation");
 
             assertThatThrownBy(() -> as(user, () -> awards.search("", AwardSearchFilters.none(), 0, 50)))
                     .as("with no live grant left the caller is unprovisioned, not shown an empty archive")
@@ -740,6 +743,19 @@ class NamedBuScenarioAuthorizationIntegrationTest {
     }
 
     private static long grant(String grantee, GrantSpecification specification) {
+        if (specification.type() == GrantType.CENTRAL) {
+            /*
+             * Decision D1 (#161): ArchiveAdminService refuses every CENTRAL
+             * grant until the approval workflow exists. These scenarios are
+             * about what a CENTRAL grant DOES once issued, so it is seeded
+             * through the grant store - the same row the approved path will
+             * write.
+             */
+            return new org.springframework.transaction.support.TransactionTemplate(txManager)
+                    .execute(status -> grantStore.create(
+                            new InstitutionalIdentifier(grantee), specification, ADMIN))
+                    .id();
+        }
         return admin.grantAccess(new InstitutionalIdentifier(ADMIN),
                 new InstitutionalIdentifier(grantee), specification).id();
     }

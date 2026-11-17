@@ -57,6 +57,21 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
                 .optional();
     }
 
+    /**
+     * {@code FOR UPDATE} under MANDATORY propagation, the same pattern as
+     * {@link JdbcAdminRoleRepository#revokeWithLastAdministratorGuard}: the
+     * lock must live as long as the caller's transaction, so the widening
+     * decision, the update and the audit row all see one committed value.
+     */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<AccessGrant> lockActive(long grantId) {
+        return jdbc.sql(SELECT_COLUMNS + " WHERE grant_id = :id AND revoked_at IS NULL FOR UPDATE")
+                .param("id", grantId)
+                .query(JdbcAccessGrantRepository::mapGrant)
+                .optional();
+    }
+
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public AccessGrant create(InstitutionalIdentifier grantee, GrantSpecification specification,
@@ -117,16 +132,20 @@ public class JdbcAccessGrantRepository implements AccessGrantRepository {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void revoke(long grantId, String revokedBy, String reason) {
+    public void revoke(long grantId, String revokedBy) {
+        /*
+         * reason is NOT touched (finding N3). It used to be overwritten with
+         * COALESCE(:reason, reason), which replaced why the grant was made
+         * with why it was revoked. The revocation reason lives in the
+         * ACCESS_REVOKED audit row.
+         */
         int updated = jdbc.sql("""
                         UPDATE authz.access_grant
                            SET revoked_at = CURRENT_TIMESTAMP,
-                               revoked_by = :revokedBy,
-                               reason = COALESCE(:reason, reason)
+                               revoked_by = :revokedBy
                          WHERE grant_id = :id AND revoked_at IS NULL
                         """)
                 .param("revokedBy", revokedBy)
-                .param("reason", reason)
                 .param("id", grantId)
                 .update();
 
