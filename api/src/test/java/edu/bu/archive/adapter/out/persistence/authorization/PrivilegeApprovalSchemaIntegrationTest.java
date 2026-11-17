@@ -48,6 +48,10 @@ class PrivilegeApprovalSchemaIntegrationTest {
     @BeforeEach
     void reset() {
         db.reset();
+        // The trigger checks the approver is an active administrator (QA M1),
+        // so the approvers these rows name must exist.
+        db.seedAdministrator("SYN-B");
+        db.seedAdministrator("SYN-C");
     }
 
     /** A PENDING ADMIN_ASSIGN row: requester SYN-A, subject SYN-S. */
@@ -77,6 +81,9 @@ class PrivilegeApprovalSchemaIntegrationTest {
     @Test
     @DisplayName("direct SQL approval by the requester hits ck_pa_two_people")
     void requesterApprovalHitsTheCheck() {
+        // An eligible administrator, so the trigger's eligibility rule passes
+        // and it is the CHECK itself that refuses.
+        db.seedAdministrator("SYN-A");
         long id = pending();
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'APPROVED', "
                 + "approved_by = 'SYN-A', approved_at = now(), "
@@ -88,6 +95,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
     @Test
     @DisplayName("direct SQL approval by the beneficiary hits ck_pa_not_subject")
     void beneficiaryApprovalHitsTheCheck() {
+        db.seedAdministrator("SYN-S");
         long id = pending();
         assertThatThrownBy(() -> sql("UPDATE authz.privilege_approval SET status = 'APPROVED', "
                 + "approved_by = 'SYN-S', approved_at = now(), "
@@ -303,7 +311,7 @@ class PrivilegeApprovalSchemaIntegrationTest {
                     (action, subject_identifier, requested_by, reason, requested_at, valid_until)
                 VALUES ('ADMIN_ASSIGN', 'SYN-S', 'SYN-A', 'a request from the future',
                         now() + interval '1 day', now())
-                """)).hasMessageContaining("cannot be in the future");
+                """)).hasMessageContaining("requested_at is set by the database");
     }
 
     @Test

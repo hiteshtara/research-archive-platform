@@ -186,6 +186,18 @@ public final class SecondAdministratorBootstrapCommand {
             if (identities.isSuspended(subject)) {
                 problems.add("This archive identity is suspended.");
             }
+            /*
+             * QA (LOW): show what the seated person will already be able to
+             * see. Holding ARCHIVE_ADMIN confers no data access, but grants
+             * already attached to this identity become usable by whoever the
+             * link below signs in as, so the operator and the ticket should
+             * see them before --execute.
+             */
+            int grants = identities.activeGrantCountFor(subject);
+            checks.add(grants == 0
+                    ? "OK     the identity holds no active archive grants"
+                    : "WARN   the identity ALREADY holds " + grants + " active archive grant(s); "
+                            + "they become usable by the linked sign-in. Confirm against the ticket.");
         }
     }
 

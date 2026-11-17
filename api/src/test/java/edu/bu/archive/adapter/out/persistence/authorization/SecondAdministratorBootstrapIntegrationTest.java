@@ -243,6 +243,23 @@ class SecondAdministratorBootstrapIntegrationTest {
     }
 
     @Test
+    @DisplayName("QA LOW: the dry run lists grants the seated identity already holds")
+    void dryRunListsExistingGrants() {
+        seedExistingAdministrator();
+        BootstrapOutcome clean = command().run(request(NEW_ADMIN, NEW_SUB, OPERATOR, REASON, CHANGE, false));
+        assertThat(clean.checks()).anyMatch(line -> line.contains("holds no active archive grants"));
+
+        db.seedGrant(NEW_ADMIN, "SYN-U-100");
+        db.seedGrant(NEW_ADMIN, "SYN-U-200");
+        BootstrapOutcome withGrants = command().run(
+                request(NEW_ADMIN, NEW_SUB, OPERATOR, REASON, CHANGE, false));
+        assertThat(withGrants.result()).isEqualTo(BootstrapOutcome.Result.DRY_RUN_OK);
+        assertThat(withGrants.checks()).anyMatch(line -> line.startsWith("WARN")
+                && line.contains("ALREADY holds 2 active archive grant(s)"));
+        assertThat(administrators()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("execute seats exactly one admin, its link and two audit rows, atomically")
     void executeSeatsTheSecondAdministrator() {
         seedExistingAdministrator();

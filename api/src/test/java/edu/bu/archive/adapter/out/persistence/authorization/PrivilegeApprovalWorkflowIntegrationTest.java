@@ -225,6 +225,32 @@ class PrivilegeApprovalWorkflowIntegrationTest {
     }
 
     @Test
+    @DisplayName("QA M2: an approver cannot approve linking their OWN Cognito identity (service)")
+    void anApproverCannotApproveLinkingTheirOwnCognitoIdentity() {
+        // ADMIN_B signs in as SUB_1. A request to link SUB_1 to USER_Y would
+        // put ADMIN_B on both sides: approving it hands their own sign-in
+        // whatever USER_Y holds. V086's approveRelink refuses this; so must this.
+        db.jdbc.sql("""
+                INSERT INTO authz.identity_link
+                    (cognito_issuer, cognito_subject, institutional_identifier, method, status,
+                     verified_by, verified_at)
+                VALUES (:issuer, :sub, :id, 'ADMIN_VERIFIED', 'ACTIVE', 'test-fixture', now())
+                """).param("issuer", ISSUER).param("sub", SUB_1).param("id", ADMIN_B.value()).update();
+        PrivilegeApproval request = requested(PrivilegeAction.LINK_PRIVILEGED, ADMIN_A, USER_Y,
+                ApprovalBinding.forLink(ISSUER, SUB_1));
+        int before = db.auditRows();
+
+        assertRefused(() -> service.approve(ADMIN_B, request.approvalId(), APPROVAL_REASON),
+                Refusal.APPROVER_IS_LINK_TARGET);
+        assertThat(db.status(request.approvalId())).isEqualTo("PENDING");
+        assertThat(db.auditRows()).isEqualTo(before);
+
+        // A third administrator with no stake in that sign-in may approve it.
+        assertThat(service.approve(ADMIN_C, request.approvalId(), APPROVAL_REASON).status())
+                .isEqualTo(PrivilegeApproval.Status.APPROVED);
+    }
+
+    @Test
     @DisplayName("a non-administrator cannot request an approval")
     void nonAdministratorCannotRequest() {
         assertRefused(() -> requested(PrivilegeAction.CENTRAL_GRANT, NOT_ADMIN, USER_Y, central()),

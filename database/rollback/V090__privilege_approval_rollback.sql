@@ -36,6 +36,7 @@ $$;
 -- No CASCADE, so an unexpected dependency fails loudly.
 DROP TABLE IF EXISTS authz.privilege_approval;
 DROP FUNCTION IF EXISTS authz.privilege_approval_guard();
+DROP FUNCTION IF EXISTS authz.privilege_approver_eligible(TEXT);
 
 DO $$
 BEGIN

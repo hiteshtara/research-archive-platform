@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import edu.bu.archive.application.authorization.IdentityLink;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.admin.AdminAuditAction;
 import edu.bu.archive.application.authorization.admin.AdminAuditSink;
@@ -120,6 +121,13 @@ public class PrivilegeApprovalService {
                     "the administrator who would gain this privilege cannot approve it. "
                             + "Nothing was written.");
         }
+        if (existing.action() == PrivilegeAction.LINK_PRIVILEGED
+                && approverSignsInAs(approver, existing.binding())) {
+            // Ported from ArchiveAdminService.approveRelink (V086), QA M2.
+            throw new PrivilegeApprovalException(Refusal.APPROVER_IS_LINK_TARGET,
+                    "the approver cannot approve linking their own Cognito identity; that would "
+                            + "put one person on both sides of the decision. Nothing was written.");
+        }
         if (!isEligibleAdministrator(approver)) {
             throw new PrivilegeApprovalException(Refusal.APPROVER_INELIGIBLE,
                     "only an active, unsuspended ARCHIVE_ADMIN can approve. Nothing was written.");
@@ -138,7 +146,15 @@ public class PrivilegeApprovalService {
         return load(approvalId);
     }
 
-    /** Withdraw a live approval. Either party, or any active administrator. */
+    /**
+     * Withdraw a live approval. Either party, or any active administrator.
+     *
+     * <p>Accepted risk (QA LOW, design 3.3 step 4): any active administrator
+     * can revoke any live approval. Revocation only ever REMOVES authority -
+     * it cannot grant anything - and every revocation is audited with the
+     * actor and a reason, so the worst case is a visible denial of service
+     * that a second request repairs.
+     */
     @Transactional
     public void revoke(InstitutionalIdentifier actor, long approvalId, String reason) {
         Objects.requireNonNull(actor, "actor");
@@ -292,6 +308,14 @@ public class PrivilegeApprovalService {
             throw new PrivilegeApprovalException(Refusal.NOT_ADMINISTRATOR,
                     "only an active, unsuspended ARCHIVE_ADMIN can " + what + ".");
         }
+    }
+
+    /** True when the approver holds an ACTIVE link to the very sign-in being linked. */
+    private boolean approverSignsInAs(InstitutionalIdentifier approver, ApprovalBinding binding) {
+        return identities.findLinksFor(approver).stream()
+                .filter(IdentityLink::isActive)
+                .anyMatch(link -> link.cognitoIdentity().issuer().equals(binding.cognitoIssuer())
+                        && link.cognitoIdentity().subject().equals(binding.cognitoSubject()));
     }
 
     /** Active ARCHIVE_ADMIN membership and not suspended (section 3.3). */

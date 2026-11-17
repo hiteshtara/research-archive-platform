@@ -28,6 +28,14 @@
 --                    PENDING/APPROVED->REVOKED; nothing else (same trigger)
 --   * 72h expiry:    valid_until = requested_at + 72 hours, set by the
 --                    trigger and pinned by a CHECK (section 3.2b, D2)
+--   * the database owns the clock: requested_at, approved_at, consumed_at
+--                    and revoked_at are set to now() by the trigger and a
+--                    caller-supplied value is refused; approve and consume
+--                    require valid_until > now() (QA M1)
+--   * approver eligibility: approved_by must be an ACTIVE, unsuspended
+--                    ARCHIVE_ADMIN at approval AND at consumption
+--   * own sign-in:   a LINK_PRIVILEGED approver must not hold an active link
+--                    to the bound Cognito identity (QA M2, the V086 rule)
 --   * one live request per target (ux_privilege_approval_live)
 --   * append-only:   rows are never deleted (same trigger; archive_api also
 --                    holds no DELETE privilege - see
@@ -202,6 +210,18 @@ CREATE INDEX IF NOT EXISTS ix_privilege_approval_live_status
 -- edited between approval and execution, and whoever could do that could
 -- also skip a Java check. A change means revoking and resubmitting.
 -- ─────────────────────────────────────────────────────────────────────
+-- Approver eligibility (design 3.3), in the database as well as in Java:
+-- an ACTIVE ARCHIVE_ADMIN membership and no suspension. Runs with the
+-- caller's privileges; archive_api already holds SELECT on authz.
+CREATE OR REPLACE FUNCTION authz.privilege_approver_eligible(approver TEXT) RETURNS boolean
+    LANGUAGE sql STABLE AS $$
+    SELECT approver IS NOT NULL
+       AND EXISTS (SELECT 1 FROM authz.admin_role_member m
+                    WHERE m.institutional_identifier = approver AND m.status = 'ACTIVE')
+       AND NOT EXISTS (SELECT 1 FROM authz.person_status s
+                        WHERE s.institutional_identifier = approver AND s.suspended)
+$$;
+
 CREATE OR REPLACE FUNCTION authz.privilege_approval_guard() RETURNS trigger
     LANGUAGE plpgsql AS $$
 BEGIN
@@ -220,12 +240,17 @@ BEGIN
             RAISE EXCEPTION 'a privilege approval must be created PENDING, with no approval, '
                             'consumption or revocation recorded';
         END IF;
-        IF NEW.requested_at IS NULL THEN
-            NEW.requested_at := CURRENT_TIMESTAMP;
-        ELSIF NEW.requested_at > CURRENT_TIMESTAMP THEN
-            -- A future-dated request would stretch its own 72-hour window.
-            RAISE EXCEPTION 'requested_at cannot be in the future';
+        -- The DATABASE owns the clock (QA M1). A caller-chosen requested_at
+        -- moves the whole 72-hour window: backdated, an expired approval
+        -- looks live to every CHECK; future-dated, the window stretches.
+        -- The column default supplies CURRENT_TIMESTAMP; anything else is
+        -- refused rather than silently replaced, so a caller that tries
+        -- learns it cannot.
+        IF NEW.requested_at IS NOT NULL AND NEW.requested_at <> CURRENT_TIMESTAMP THEN
+            RAISE EXCEPTION 'requested_at is set by the database; a caller-supplied value '
+                            'is refused (approval timeline must not be backdated or postdated)';
         END IF;
+        NEW.requested_at := CURRENT_TIMESTAMP;
         NEW.valid_until := NEW.requested_at + INTERVAL '72 hours';
         RETURN NEW;
     END IF;
@@ -259,6 +284,30 @@ BEGIN
             RAISE EXCEPTION 'approving privilege approval % may set only the approval columns',
                 OLD.approval_id;
         END IF;
+        IF NEW.approved_at IS NOT NULL AND NEW.approved_at <> CURRENT_TIMESTAMP THEN
+            RAISE EXCEPTION 'approved_at is set by the database; a caller-supplied value is '
+                            'refused (approval %)', OLD.approval_id;
+        END IF;
+        NEW.approved_at := CURRENT_TIMESTAMP;
+        IF OLD.valid_until <= CURRENT_TIMESTAMP THEN
+            RAISE EXCEPTION 'privilege approval % expired at % and cannot be approved',
+                OLD.approval_id, OLD.valid_until;
+        END IF;
+        IF NOT authz.privilege_approver_eligible(NEW.approved_by) THEN
+            RAISE EXCEPTION 'the approver of privilege approval % must be an active, unsuspended '
+                            'ARCHIVE_ADMIN', OLD.approval_id;
+        END IF;
+        -- QA M2, the V086 rule: approving the link of your OWN sign-in puts
+        -- one person on both sides of the decision.
+        IF OLD.action = 'LINK_PRIVILEGED' AND EXISTS (
+                SELECT 1 FROM authz.identity_link l
+                 WHERE l.institutional_identifier = NEW.approved_by
+                   AND l.status = 'ACTIVE'
+                   AND l.cognito_issuer = OLD.cognito_issuer
+                   AND l.cognito_subject = OLD.cognito_subject) THEN
+            RAISE EXCEPTION 'the approver of privilege approval % cannot approve linking their '
+                            'own Cognito identity', OLD.approval_id;
+        END IF;
     ELSIF OLD.status = 'APPROVED' AND NEW.status = 'CONSUMED' THEN
         IF NEW.approved_by     IS DISTINCT FROM OLD.approved_by
            OR NEW.approved_at     IS DISTINCT FROM OLD.approved_at
@@ -268,6 +317,20 @@ BEGIN
             RAISE EXCEPTION 'consuming privilege approval % may set only the consumption columns',
                 OLD.approval_id;
         END IF;
+        IF NEW.consumed_at IS NOT NULL AND NEW.consumed_at <> CURRENT_TIMESTAMP THEN
+            RAISE EXCEPTION 'consumed_at is set by the database; a caller-supplied value is '
+                            'refused (approval %)', OLD.approval_id;
+        END IF;
+        NEW.consumed_at := CURRENT_TIMESTAMP;
+        IF OLD.valid_until <= CURRENT_TIMESTAMP THEN
+            RAISE EXCEPTION 'privilege approval % expired at % and cannot be used',
+                OLD.approval_id, OLD.valid_until;
+        END IF;
+        -- Eligibility is re-checked at execution: losing it voids the approval.
+        IF NOT authz.privilege_approver_eligible(OLD.approved_by) THEN
+            RAISE EXCEPTION 'the approver of privilege approval % is no longer an active, '
+                            'unsuspended ARCHIVE_ADMIN', OLD.approval_id;
+        END IF;
     ELSIF OLD.status IN ('PENDING', 'APPROVED') AND NEW.status = 'REVOKED' THEN
         IF NEW.approved_by     IS DISTINCT FROM OLD.approved_by
            OR NEW.approved_at     IS DISTINCT FROM OLD.approved_at
@@ -276,6 +339,11 @@ BEGIN
             RAISE EXCEPTION 'revoking privilege approval % may set only the revocation columns',
                 OLD.approval_id;
         END IF;
+        IF NEW.revoked_at IS NOT NULL AND NEW.revoked_at <> CURRENT_TIMESTAMP THEN
+            RAISE EXCEPTION 'revoked_at is set by the database; a caller-supplied value is '
+                            'refused (approval %)', OLD.approval_id;
+        END IF;
+        NEW.revoked_at := CURRENT_TIMESTAMP;
     ELSE
         RAISE EXCEPTION 'illegal privilege approval transition % -> % (approval %)',
             OLD.status, NEW.status, OLD.approval_id;

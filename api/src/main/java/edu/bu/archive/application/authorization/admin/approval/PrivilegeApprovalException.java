@@ -33,6 +33,11 @@ public class PrivilegeApprovalException extends RuntimeException {
         REQUESTER_CANNOT_APPROVE,
         /** The beneficiary cannot approve their own escalation. */
         BENEFICIARY_CANNOT_APPROVE,
+        /**
+         * LINK_PRIVILEGED: the approver's own active Cognito identity is the
+         * one being linked, which would put them on both sides (V086 rule).
+         */
+        APPROVER_IS_LINK_TARGET,
         /** A live request for the same target already exists. */
         DUPLICATE_LIVE_REQUEST,
         /** The actor may not revoke this approval. */
