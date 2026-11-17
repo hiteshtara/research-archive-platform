@@ -1,5 +1,6 @@
 package edu.bu.archive.adapter.out.persistence;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -113,9 +114,19 @@ public class DocumentSearchRepository {
               AND (:businessRecordNumber = '' OR business_record_number ILIKE :businessRecordNumberPattern)
               AND (:title = '' OR title ILIKE :titlePattern)
               AND (:status = '' OR status ILIKE :statusPattern)
+              AND (:includeIrb OR module <> 'IRB')
             """;
 
     private final JdbcClient jdbc;
+
+    /*
+     * IRB is out of release scope. With app.irb.api.enabled=false the IRB
+     * branch of the fixed union is filtered out by a bound parameter (the
+     * SQL text is unchanged), so no IRB row, count or /irb link is served.
+     * Default true: today's behaviour. See docs/security/IRB_RELEASE_EXCLUSION.md.
+     */
+    @Value("${app.irb.api.enabled:true}")
+    private boolean includeIrb = true;
 
     public DocumentSearchRepository(JdbcClient jdbc) {
         this.jdbc = jdbc;
@@ -163,6 +174,7 @@ public class DocumentSearchRepository {
                 .param("titlePattern", titlePattern)
                 .param("status", status)
                 .param("statusPattern", statusPattern)
+                .param("includeIrb", includeIrb)
                 .param("limit", limit)
                 .param("offset", offset)
                 .query(DocumentSearchRow.class)
@@ -194,6 +206,7 @@ public class DocumentSearchRepository {
                 .param("titlePattern", titlePattern)
                 .param("status", status)
                 .param("statusPattern", statusPattern)
+                .param("includeIrb", includeIrb)
                 .query(Long.class)
                 .single();
 

@@ -2,6 +2,8 @@ package edu.bu.archive.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -87,5 +89,24 @@ class IrbApiDefaultRegistrationIntegrationTest {
                         .param("email", IrbApiExclusionFixtures.SEEDED_PI_EMAIL))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.historicalStudyCount").value(1));
+    }
+
+    @Test
+    void sharedSurfacesStillServeIrbUnchanged() throws Exception {
+        // Enforcement off and flag at its default: today's behaviour.
+        mockMvc.perform(get("/api/documents/search").param("module", "IRB"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].documentNumber")
+                        .value(IrbApiExclusionFixtures.SEEDED_IRB_DOCUMENT));
+        mockMvc.perform(get("/api/dashboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.irb").value(1))
+                .andExpect(jsonPath("$.documents").value(2));
+        mockMvc.perform(get("/api/global-search")
+                        .param("query", IrbApiExclusionFixtures.SEEDED_IRB_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.failedModules", empty()))
+                .andExpect(jsonPath("$.results[*].module", hasItem("IRB")));
     }
 }

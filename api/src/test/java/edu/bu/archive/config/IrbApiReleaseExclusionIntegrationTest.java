@@ -143,23 +143,43 @@ class IrbApiReleaseExclusionIntegrationTest {
     }
 
     @Test
-    void dashboardStillAnswersWithItsIrbFiguresUnchanged() throws Exception {
-        // Enforcement is off (default), so the Dashboard's own IRB branch runs
-        // exactly as before; the API flag does not touch it.
-        mockMvc.perform(get("/api/dashboard"))
+    void documentSearchServesNoIrbRows() throws Exception {
+        // Same flag: the IRB branch of the document union is filtered out, so
+        // no IRB row, count or /irb link is served. The Award row sharing the
+        // DOC-IRBEXCL prefix proves the search itself still works.
+        mockMvc.perform(get("/api/documents/search").param("documentNumber", "DOC-IRBEXCL"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.irb").value(1));
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[*].module", not(hasItem("IRB"))))
+                .andExpect(jsonPath("$.content[0].module").value("AWARD"));
+        mockMvc.perform(get("/api/documents/search").param("module", "IRB"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 
     @Test
-    void globalSearchStillAnswersWithItsIrbLegUnchanged() throws Exception {
-        // GlobalSearchService reads IRB through GlobalSearchRepository, not the
-        // IRB controllers, so the seeded protocol is still found.
+    void dashboardStillAnswersWithItsIrbFiguresOmitted() throws Exception {
+        // Omitted, not zero: the DTO is NON_NULL, as under enforcement (D9).
+        mockMvc.perform(get("/api/dashboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.awards").value(1))
+                .andExpect(jsonPath("$.irb").doesNotExist())
+                .andExpect(jsonPath("$.submissions").doesNotExist())
+                .andExpect(jsonPath("$.fundingRecords").doesNotExist())
+                .andExpect(jsonPath("$.timelineEvents").doesNotExist())
+                // the IRB document branch is dropped from the tally too
+                .andExpect(jsonPath("$.documents").value(1));
+    }
+
+    @Test
+    void globalSearchStillAnswersWithNoIrbRows() throws Exception {
+        // The token matches only the seeded IRB protocol; the IRB leg does not
+        // run, so nothing is found and nothing is reported as failed.
         mockMvc.perform(get("/api/global-search")
                         .param("query", IrbApiExclusionFixtures.SEEDED_IRB_TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.failedModules", empty()))
-                .andExpect(jsonPath("$.results[*].module", hasItem("IRB")))
-                .andExpect(jsonPath("$.failedModules", not(hasItem("IRB"))));
+                .andExpect(jsonPath("$.results[*].module", not(hasItem("IRB"))))
+                .andExpect(jsonPath("$.totalResults").value(0));
     }
 }

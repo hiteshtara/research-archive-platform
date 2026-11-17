@@ -70,8 +70,10 @@ app:
       # out of release scope and these routes have no record authorization,
       # so the RELEASE configuration sets APP_IRB_API_ENABLED=false and the
       # controllers are not registered at all. Default true: local and DEV
-      # behave exactly as before. Global Search and Dashboard IRB handling is
-      # NOT controlled by this flag. See docs/security/IRB_RELEASE_EXCLUSION.md.
+      # behave exactly as before. When false it ALSO removes IRB from document
+      # search and Global Search and omits the Dashboard IRB figures. Not set
+      # in any deployed config yet; activation needs separate approval. See
+      # docs/security/IRB_RELEASE_EXCLUSION.md.
       enabled: ${APP_IRB_API_ENABLED:true}
 
   ai:

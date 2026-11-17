@@ -29,6 +29,8 @@ final class IrbApiExclusionFixtures {
     static final String SEEDED_PI_EMAIL = "irb.exclusion.seed@example.edu";
     static final long SEEDED_PROTOCOL_ID = 990001L;
     static final long SEEDED_AWARD_ID = 880001L;
+    /** Document number of the seeded IRB version; the Award uses DOC-IRBEXCL-AWD. */
+    static final String SEEDED_IRB_DOCUMENT = "DOC-IRBEXCL-1";
 
     /**
      * Route prefixes that belong to the IRB-only API. Any handler registered
@@ -90,9 +92,10 @@ final class IrbApiExclusionFixtures {
             statement.execute("""
                     INSERT INTO archive.irb_protocol_version
                         (protocol_id, protocol_base, protocol_number, sequence_number,
-                         title, protocol_type, protocol_status, pi_id, pi_email)
+                         title, protocol_type, protocol_status, pi_id, pi_email, document_number)
                     VALUES (%d, 'IRBEXCL1', 'IRBEXCL1-01', 1,
-                            'ZQIRBEXCLUSIONSEED study', 'Exempt', 'Approved', 'U0000001', '%s')
+                            'ZQIRBEXCLUSIONSEED study', 'Exempt', 'Approved', 'U0000001', '%s',
+                            'DOC-IRBEXCL-1')
                     """.formatted(SEEDED_PROTOCOL_ID, SEEDED_PI_EMAIL));
             // One Award, so the related-record endpoints (PR #159) have a
             // parent to answer for.
@@ -102,7 +105,7 @@ final class IrbApiExclusionFixtures {
                         sponsor_code, sponsor_name, lead_unit_number, lead_unit_name,
                         is_primary_current, workflow_document_number
                     ) VALUES (%d, 'IRBEXCL-00001', 1, 'IRB exclusion award', 'Active',
-                              '0200', 'NIH', '7777', 'CHEMISTRY', TRUE, 'DOC-IRBEXCL-1')
+                              '0200', 'NIH', '7777', 'CHEMISTRY', TRUE, 'DOC-IRBEXCL-AWD')
                     """.formatted(SEEDED_AWARD_ID));
             return recordId;
         }
