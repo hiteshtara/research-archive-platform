@@ -6,7 +6,9 @@
 -- than an improvised DROP TABLE. See docs/runbooks/ACTIVITY_AUDIT_PARTITIONS.md.
 --
 -- THE RETENTION PERIOD IS A BUSINESS DECISION AND IS NOT APPROVED.
--- 90 days is a PROPOSAL for review (docs/security/SEC_008_ACTIVITY_AUDIT.md).
+-- 90 days is the proposed ONLINE baseline, pending BU records-retention
+-- approval (docs/security/SEC_008_ACTIVITY_AUDIT.md). Manual operator
+-- procedure only; no automatic deletion.
 -- The period is a required parameter here precisely so that no default can
 -- silently become the policy.
 --

@@ -83,8 +83,12 @@ retention period.
 
 ## 3. Retention
 
-**Proposed: 90 days. This is a number for review, not an approved BU retention
-policy — it needs BU confirmation.**
+**90 days proposed baseline (online retention), pending BU records-retention
+approval; manual operator procedure only; no automatic deletion.** The owner
+approved 90 days as the proposed online baseline on 2026-11-17, subject to BU
+records-retention approval. Nothing purges, schedules or invokes deletion:
+no cron, EventBridge rule, `pg_cron`, ETL loader or CI job references the
+procedure (verified by repository search 2026-11-17).
 
 A tested, **non-executed** retention procedure exists:
 [`ops/activity-audit/activity_audit_retention.sql`](../../ops/activity-audit/activity_audit_retention.sql).
@@ -149,11 +153,28 @@ open:
 | Risk | a read happens with **no record that it did** | an audit outage becomes an **archive outage** |
 | Visible as | `ERROR` in the application log, request succeeds | `AUDIT_UNAVAILABLE` to the caller |
 
-**The routine-read setting has no default.**
-`ActivityAuditProperties.validate()` fails at startup if collection is enabled
-without an explicit choice, naming both options. A default there would be this
-code quietly making a compliance-versus-availability decision on the
-business's behalf.
+**FAIL_OPEN for routine views: proposed, pending BU approval; not a
+default.** The routine-read setting has no default. Until 2026-11-17 the code
+quietly defaulted it to `FAIL_OPEN` while this document said otherwise; owner
+direction removed that default. `ActivityAuditProperties.validate()` now fails
+at startup if collection is enabled without
+`app.authorization.activity-audit.routine-read-failure-policy`, naming both
+options (`ActivityAuditStartupTest#flagOnWithoutRoutinePolicyRefusesToStart`,
+`ActivityAuditorTest#enablingWithoutARoutinePolicyRefusesToStart`). Requiring
+it was chosen over defaulting to `FAIL_CLOSED` because a default in either
+direction would be the code taking the compliance-versus-availability decision
+on the business's behalf, and the cost is one property set at the single
+moment collection is switched on. With collection off nothing new is required
+(`ActivityAuditStartupTest#flagOffNeedsNothing`).
+
+Sensitive releases stay `FAIL_CLOSED` by default: with the audit store
+failing, a download or export answers `503 AUDIT_UNAVAILABLE` and releases no
+file (`ActivityAuditEndToEndIntegrationTest#aFailedAuditWriteRefusesDownloadsAndExports`,
+`ActivityAuditorTest$FailurePolicyBehaviour#failClosedRefusesTheRead`).
+
+Administrative security changes are a separate path and are unchanged by this
+work: their `authz.access_audit` row is written in the same transaction as the
+change (`AuthorizationSchemaAndAuditIntegrationTest$AuditTransactionality`).
 
 With collection **off**, both are moot and nothing is required.
 
@@ -288,7 +309,7 @@ PostgreSQL: partitions route by month, the default partition catches the rest,
 the append-only trigger fires on UPDATE and DELETE, and both CHECK constraints
 reject unknown values.
 
-`ActivityAuditEndToEndIntegrationTest` — 24 tests, real HTTP through the real
+`ActivityAuditEndToEndIntegrationTest` — 28 tests (24 at the main-branch proof, plus related-list parent-only ×2, no-secrets-in-rows and FAIL_CLOSED-on-audit-outage), real HTTP through the real
 controllers and wiring, V089 applied, collection ON, synthetic identities: for
 each of Award, Proposal, Subaward and Negotiation a permitted view writes
 exactly one `RECORD_VIEWED` row asserting all five fields (actor, action,
@@ -323,10 +344,12 @@ Each step is approved separately; none is done by this change.
    descends from that commit.
 2. **Apply the privilege** — `database/roles/archive_api_activity_audit_grant.sql`
    (INSERT only, explicit REVOKE SELECT), after the role script.
-3. **Decide the retention period** (90 days proposed, needs BU confirmation),
-   whether denials are kept longer, export-before-drop, and who may authorise a
-   drop and who may read the audit.
-4. **Confirm the routine-read failure policy** (`FAIL_OPEN` proposed).
+3. **BU records-retention approval** of the 90-day proposed online baseline,
+   plus whether denials are kept longer, export-before-drop, and who may
+   authorise a drop and who may read the audit. Retention stays a manual
+   operator procedure; no automatic deletion.
+4. **BU approval of the routine-read failure policy** (`FAIL_OPEN` proposed;
+   it has no default and must be set explicitly when the flag is turned on).
 5. **Turn the flag on in DEV** — `app.authorization.activity-audit.enabled=true`
    in the DEV task definition — separate approval.
 6. **Create next month's partition** before each month begins (runbook §4).

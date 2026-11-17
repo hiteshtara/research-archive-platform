@@ -97,9 +97,11 @@ parent does not apply — the rows are being relocated, not removed, and the
 
 ## 6. Retention — PROPOSED, NOT APPROVED
 
-**Proposed: 90 days.** This is a number for review. It is **not** an approved
-BU retention policy, and **automatic deletion is not implemented or
-scheduled.**
+**90 days proposed baseline, pending BU records-retention approval; manual
+operator procedure only; no automatic deletion.** The owner approved 90 days
+as the proposed online baseline (2026-11-17), subject to BU records-retention
+approval. Automatic deletion is not implemented, scheduled or invoked by
+anything.
 
 A tested, non-scheduled procedure does this for every expired month:
 `ops/activity-audit/activity_audit_retention.sql`. The period is a required
