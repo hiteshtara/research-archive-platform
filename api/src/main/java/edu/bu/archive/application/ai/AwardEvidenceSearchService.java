@@ -4,10 +4,15 @@ import edu.bu.archive.adapter.in.web.dto.ai.AwardEvidenceResultResponse;
 import edu.bu.archive.adapter.in.web.dto.ai.AwardEvidenceSearchResponse;
 import edu.bu.archive.adapter.out.persistence.AwardEvidenceRetrievalRepository;
 import edu.bu.archive.adapter.out.persistence.AwardEvidenceRow;
+import edu.bu.archive.adapter.out.persistence.RelatedEvidenceScope;
+import edu.bu.archive.application.authorization.AuthorizationProperties;
+import edu.bu.archive.application.authorization.AwardRecordAccess;
+import edu.bu.archive.application.authorization.RecordModule;
 import edu.bu.archive.application.award.AwardArchiveService;
 import edu.bu.archive.application.port.out.EmbeddingProvider;
 import edu.bu.archive.config.SemanticSearchProperties;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -91,6 +96,12 @@ public class AwardEvidenceSearchService {
     private final EmbeddingProvider embeddingProvider;
     private final SensitiveFieldRedactor redactor;
     private final SemanticSearchProperties properties;
+    /**
+     * QA H5: decides which RELATED_PROPOSAL / RELATED_NEGOTIATION /
+     * RELATED_SUBAWARD evidence rows the caller may receive, using each
+     * related module's own rule (RecordAccess.relatedScopeSql).
+     */
+    private final AwardRecordAccess recordAccess;
 
     /** Collection off: what every existing caller and test gets. */
     public AwardEvidenceSearchService(
@@ -104,7 +115,7 @@ public class AwardEvidenceSearchService {
              edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder.disabled(java.time.Clock.systemUTC()));
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
+    /** No record authorization (PERMIT_ALL): what the pre-H5 callers get. */
     public AwardEvidenceSearchService(
             AwardArchiveService awardArchiveService,
             AwardEvidenceRetrievalRepository repository,
@@ -113,6 +124,19 @@ public class AwardEvidenceSearchService {
             SemanticSearchProperties properties
     ,
             edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity) {
+        this(awardArchiveService, repository, embeddingProvider, redactor, properties, activity,
+             AwardRecordAccess.PERMIT_ALL);
+    }
+
+    /** Direct-injection form, for tests and callers that already hold the port. */
+    public AwardEvidenceSearchService(
+            AwardArchiveService awardArchiveService,
+            AwardEvidenceRetrievalRepository repository,
+            EmbeddingProvider embeddingProvider,
+            SensitiveFieldRedactor redactor,
+            SemanticSearchProperties properties,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity,
+            AwardRecordAccess recordAccess) {
         this.activity = activity;
 
         this.awardArchiveService = awardArchiveService;
@@ -120,6 +144,28 @@ public class AwardEvidenceSearchService {
         this.embeddingProvider = embeddingProvider;
         this.redactor = redactor;
         this.properties = properties;
+        this.recordAccess = recordAccess == null ? AwardRecordAccess.PERMIT_ALL : recordAccess;
+    }
+
+    /**
+     * @param recordAccessProvider absent (a slice test, or a context without
+     *        the Phase 1 authorization beans) means PERMIT_ALL - refused at
+     *        startup when enforcement is enabled, exactly as
+     *        AwardArchiveService refuses it.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public AwardEvidenceSearchService(
+            AwardArchiveService awardArchiveService,
+            AwardEvidenceRetrievalRepository repository,
+            EmbeddingProvider embeddingProvider,
+            SensitiveFieldRedactor redactor,
+            SemanticSearchProperties properties,
+            edu.bu.archive.application.authorization.audit.ArchiveActivityRecorder activity,
+            ObjectProvider<AwardRecordAccess> recordAccessProvider,
+            ObjectProvider<AuthorizationProperties> authorizationProperties) {
+        this(awardArchiveService, repository, embeddingProvider, redactor, properties, activity,
+             recordAccessProvider == null ? null : recordAccessProvider.getIfAvailable());
+        AwardRecordAccess.requireEnforceableWiring(this.recordAccess, authorizationProperties);
     }
 
     public AwardEvidenceSearchResponse search(
@@ -148,13 +194,28 @@ public class AwardEvidenceSearchService {
             // convention.
             float[] queryEmbedding = embeddingProvider.embed(query);
 
-            List<AwardEvidenceRow> rows = repository.findNearestEvidence(
-                    normalizedAwardNumber,
-                    documentTypes,
-                    queryEmbedding,
-                    properties.getEvidenceMaxDistance(),
-                    topK
-            );
+            // QA H5: the parent gate above authorises the AWARD only. Each
+            // RELATED_* row must pass its own module's rule, applied inside
+            // the nearest-neighbour SQL so ranking, the threshold and topK
+            // only ever see authorized rows. Unrestricted (enforcement off,
+            // Central) keeps the original call and statement unchanged.
+            RelatedEvidenceScope relatedScope = relatedEvidenceScope();
+            List<AwardEvidenceRow> rows = relatedScope.isUnrestricted()
+                    ? repository.findNearestEvidence(
+                            normalizedAwardNumber,
+                            documentTypes,
+                            queryEmbedding,
+                            properties.getEvidenceMaxDistance(),
+                            topK
+                    )
+                    : repository.findNearestEvidence(
+                            normalizedAwardNumber,
+                            documentTypes,
+                            queryEmbedding,
+                            properties.getEvidenceMaxDistance(),
+                            topK,
+                            relatedScope
+                    );
 
             List<AwardEvidenceResultResponse> results = rows.stream()
                     .map(this::toResult)
@@ -174,6 +235,17 @@ public class AwardEvidenceSearchService {
                     correlationId, exception
             );
         }
+    }
+
+    private RelatedEvidenceScope relatedEvidenceScope() {
+        return new RelatedEvidenceScope(
+                recordAccess.relatedScopeSql(
+                        RecordModule.PROPOSAL, RelatedEvidenceScope.PROPOSAL_ALIAS),
+                recordAccess.relatedScopeSql(
+                        RecordModule.NEGOTIATION, RelatedEvidenceScope.NEGOTIATION_ALIAS),
+                recordAccess.relatedScopeSql(
+                        RecordModule.SUBAWARD, RelatedEvidenceScope.SUBAWARD_ALIAS)
+        );
     }
 
     private List<String> resolveDocumentTypes(
