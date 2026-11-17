@@ -108,6 +108,11 @@ import json, os
 live = {e["name"] for e in json.load(open(os.environ["LIVE_FILE"]))}
 d = json.load(open(os.environ["TASKDEF"]))
 ours = {e["name"] for e in d["containerDefinitions"][0]["environment"]}
+# APP_AUTHORIZATION_* is authorization POLICY. The API carries it; a utility
+# must not (OperatorTaskDefinitionTest.noAuthorizationSettingIsOverridden), so
+# the two guards agree only if policy is exempt from "missing". The utilities
+# do not need it: ArchiveAdminService is an unconditional bean.
+live = {n for n in live if not n.startswith("APP_AUTHORIZATION_")}
 print(",".join(sorted(live - ours)))
 ENDOFPY
 )"
