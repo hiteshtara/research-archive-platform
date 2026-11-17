@@ -428,8 +428,8 @@ class IdentityLinkProvisioningIntegrationTest {
             IdentityLinkOutcome created = command().run(req().confirmed(true).build());
             service.grantAccess(new InstitutionalIdentifier(ADMIN),
                     new InstitutionalIdentifier(SUBJECT),
-                    new GrantSpecification(GrantType.CENTRAL, null, false, null, null, null,
-                            "fixture"));
+                    new GrantSpecification(GrantType.UNIT, "1234", false, null, null, null,
+                            "fixture grant for the unlink case"));
 
             command().run(unlinkReq(created.linkId()).confirmed(true).build());
 

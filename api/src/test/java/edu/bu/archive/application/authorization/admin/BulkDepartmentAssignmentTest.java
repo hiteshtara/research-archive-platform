@@ -178,8 +178,18 @@ class BulkDepartmentAssignmentTest {
          * grantAccess and so cannot be narrower than it. Asserted so a later
          * change that special-cases UNIT here is visible.
          */
-        var central = new GrantSpecification(GrantType.CENTRAL, null, false, null, null, "central");
-        var report = service.grantAccessInBulk(ADMIN, List.of(A, B), central);
+        var io = new GrantSpecification(GrantType.IO, null, false, "9500012345", null,
+                "sponsor account review");
+        var report = service.grantAccessInBulk(ADMIN, List.of(A, B), io);
         assertThat(report.granted()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("and it is no wider: a CENTRAL bulk grant is refused before anything is written")
+    void aCentralBulkGrantIsRefusedLikeTheSinglePath() {
+        var central = new GrantSpecification(GrantType.CENTRAL, null, false, null, null,
+                "central office rollout");
+        assertThatThrownBy(() -> service.grantAccessInBulk(ADMIN, List.of(A, B), central))
+                .isInstanceOf(ApprovalRequiredException.class);
     }
 }

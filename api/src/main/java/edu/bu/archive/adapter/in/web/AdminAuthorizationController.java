@@ -131,10 +131,10 @@ public class AdminAuthorizationController {
     public ResponseEntity<Void> unlink(
             @PathVariable("identifier") String identifier,
             @PathVariable("linkId") long linkId,
-            @RequestParam(value = "reason", required = false) String reason) {
+            @RequestParam(value = "reason") String reason) {
         requireAdministrationWrites();
 
-        admin.unlinkIdentity(actor(), linkId, reason);
+        admin.unlinkIdentity(actor(), subject(identifier), linkId, reason);
         return ResponseEntity.noContent().build();
     }
 
@@ -163,6 +163,7 @@ public class AdminAuthorizationController {
                 request.unitNumber(),
                 request.includeDescendants(),
                 request.ioValue(),
+                request.awardNumber(),
                 request.expiresAt(),
                 request.reason());
 
@@ -179,7 +180,7 @@ public class AdminAuthorizationController {
         requireAdministrationWrites();
 
         return AdminGrantResponse.from(
-                admin.modifyAccess(actor(), grantId, request.expiresAt(),
+                admin.modifyAccess(actor(), subject(identifier), grantId, request.expiresAt(),
                         request.includeDescendants(), request.reason()),
                 now());
     }
@@ -188,10 +189,10 @@ public class AdminAuthorizationController {
     public ResponseEntity<Void> revokeGrant(
             @PathVariable("identifier") String identifier,
             @PathVariable("grantId") long grantId,
-            @RequestParam(value = "reason", required = false) String reason) {
+            @RequestParam(value = "reason") String reason) {
         requireAdministrationWrites();
 
-        admin.revokeAccess(actor(), grantId, reason);
+        admin.revokeAccess(actor(), subject(identifier), grantId, reason);
         return ResponseEntity.noContent().build();
     }
 
@@ -234,7 +235,7 @@ public class AdminAuthorizationController {
     @DeleteMapping("/administrators/{identifier}")
     public ResponseEntity<Void> revokeAdministrator(
             @PathVariable("identifier") String identifier,
-            @RequestParam(value = "reason", required = false) String reason) {
+            @RequestParam(value = "reason") String reason) {
         requireAdministrationWrites();
 
         admin.revokeAdministrator(actor(), subject(identifier), reason);
@@ -316,7 +317,7 @@ public class AdminAuthorizationController {
         } catch (IllegalArgumentException unknown) {
             throw new IllegalArgumentException(
                     "unknown grant type '" + value + "'; expected one of CENTRAL, UNIT, IO, "
-                            + "CONTACT_DERIVATION (IO is shown as 'SAP Account')");
+                            + "CONTACT_DERIVATION, PARENT_AWARD (IO is shown as 'SAP Account')");
         }
     }
 

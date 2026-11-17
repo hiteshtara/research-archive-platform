@@ -159,7 +159,17 @@ public final class IdentityLinkCommand {
         }
 
         try {
-            admin.unlinkIdentity(actor, linkId, "operator=" + request.operator().trim()
+            /*
+             * The service binds an unlink to the identity that owns the link
+             * (finding N1). This utility names the link by id alone, so the
+             * owner is looked up here; an unknown or already-revoked id
+             * fails the same way it always did, and is reported below.
+             */
+            final long id = linkId;
+            InstitutionalIdentifier owner = identities.findActiveLinkOwner(id)
+                    .orElseThrow(() -> new java.util.NoSuchElementException(
+                            "no active identity link " + id));
+            admin.unlinkIdentity(actor, owner, linkId, "operator=" + request.operator().trim()
                     + "; approval=" + request.approvalReference().trim()
                     + "; " + request.reason().trim());
         } catch (RuntimeException e) {
@@ -276,6 +286,17 @@ public final class IdentityLinkCommand {
                     "operator=" + request.operator().trim()
                             + "; approval=" + request.approvalReference().trim()
                             + "; " + request.reason().trim());
+        } catch (edu.bu.archive.application.authorization.admin.ApprovalRequiredException e) {
+            /*
+             * Finding N2: this archive identity has no active link but holds
+             * grants or ARCHIVE_ADMIN, so linking a new Cognito identity would
+             * hand them over. That needs a second administrator; the re-link
+             * path is the one that records that decision.
+             */
+            problems.add(e.getMessage());
+            return new IdentityLinkOutcome(IdentityLinkOutcome.Result.REFUSED, checks, problems,
+                    "Refusing to link: a second administrator's approval is required. "
+                            + "Nothing was written.", null);
         } catch (IllegalStateException e) {
             /*
              * One of the two partial unique indexes on authz.identity_link

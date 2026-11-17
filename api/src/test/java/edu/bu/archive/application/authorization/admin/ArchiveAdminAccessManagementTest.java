@@ -50,7 +50,7 @@ class ArchiveAdminAccessManagementTest {
         identities = new InMemoryAdminIdentityRepository();
         service = new ArchiveAdminService(adminRoles, audit, grants, identities,
                 new InMemoryAdminAuditRepository());
-        service.bootstrapFirstAdministrator(ADMIN, "operator@bu.edu", "test");
+        service.bootstrapFirstAdministrator(ADMIN, "operator@bu.edu", "test fixture bootstrap");
         audit.clear();
     }
 
@@ -70,23 +70,25 @@ class ArchiveAdminAccessManagementTest {
         }
 
         @Test
-        void assigningTheAdminRoleCreatesNoGrant() {
-            service.assignAdministrator(ADMIN, SUBJECT, "second administrator");
+        void assigningTheAdminRoleIsRefusedUntilApprovalExistsAndCreatesNoGrant() {
+            assertThatThrownBy(() ->
+                    service.assignAdministrator(ADMIN, SUBJECT, "second administrator"))
+                    .isInstanceOf(ApprovalRequiredException.class);
 
+            assertThat(adminRoles.findActive(SUBJECT)).isEmpty();
             assertThat(grants.findForGrantee(SUBJECT))
                     .as("the role must never imply a data grant")
                     .isEmpty();
+            assertThat(audit.events()).isEmpty();
         }
 
         @Test
-        void grantingAccessToOneselfIsPossibleButExplicitAndAudited() {
-            service.grantAccess(ADMIN, ADMIN, central("needed for support"));
+        void grantingAccessToOneselfIsRefusedAndWritesNothing() {
+            assertThatThrownBy(() -> service.grantAccess(ADMIN, ADMIN, unitGrant()))
+                    .isInstanceOf(SelfAdministrationException.class);
 
-            assertThat(grants.findForGrantee(ADMIN)).hasSize(1);
-            assertThat(audit.events())
-                    .singleElement()
-                    .satisfies(entry -> assertThat(entry.action())
-                            .isEqualTo(AdminAuditAction.ACCESS_GRANTED));
+            assertThat(grants.findForGrantee(ADMIN)).isEmpty();
+            assertThat(audit.events()).isEmpty();
         }
     }
 
@@ -96,7 +98,7 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void anOrdinaryIdentityCannotGrant() {
-            assertThatThrownBy(() -> service.grantAccess(OUTSIDER, SUBJECT, central(null)))
+            assertThatThrownBy(() -> service.grantAccess(OUTSIDER, SUBJECT, unitGrant()))
                     .isInstanceOf(NotAnArchiveAdministratorException.class);
             assertThat(grants.findForGrantee(SUBJECT)).isEmpty();
             assertThat(audit.events()).isEmpty();
@@ -104,14 +106,14 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void anOrdinaryIdentityCannotRevokeSuspendLinkOrRead() {
-            AccessGrant existing = service.grantAccess(ADMIN, SUBJECT, central(null));
+            AccessGrant existing = service.grantAccess(ADMIN, SUBJECT, unitGrant());
             audit.clear();
 
-            assertThatThrownBy(() -> service.revokeAccess(OUTSIDER, existing.id(), null))
+            assertThatThrownBy(() -> service.revokeAccess(OUTSIDER, SUBJECT, existing.id(), "removing access now"))
                     .isInstanceOf(NotAnArchiveAdministratorException.class);
-            assertThatThrownBy(() -> service.setSuspended(OUTSIDER, SUBJECT, true, null))
+            assertThatThrownBy(() -> service.setSuspended(OUTSIDER, SUBJECT, true, "suspending this person"))
                     .isInstanceOf(NotAnArchiveAdministratorException.class);
-            assertThatThrownBy(() -> service.linkIdentity(OUTSIDER, "iss", "sub", SUBJECT, null, null, null))
+            assertThatThrownBy(() -> service.linkIdentity(OUTSIDER, "iss", "sub", SUBJECT, null, null, "verified in person"))
                     .isInstanceOf(NotAnArchiveAdministratorException.class);
             assertThatThrownBy(() -> service.describeIdentity(OUTSIDER, SUBJECT))
                     .isInstanceOf(NotAnArchiveAdministratorException.class);
@@ -132,7 +134,7 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void grantsDoNotExpireUnlessAnExpiryIsSet() {
-            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, central(null));
+            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, unitGrant());
 
             assertThat(granted.expiresAt())
                     .as("D-ADM-3: no automatic expiry")
@@ -142,9 +144,9 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void revokingIsAStatusChangeNotADelete() {
-            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, central(null));
+            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, unitGrant());
 
-            service.revokeAccess(ADMIN, granted.id(), "left the department");
+            service.revokeAccess(ADMIN, SUBJECT, granted.id(), "left the department");
 
             assertThat(grants.findForGrantee(SUBJECT))
                     .as("the row is the evidence the access existed")
@@ -154,10 +156,11 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void revokingTwiceIsRefusedRatherThanSilentlySucceeding() {
-            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, central(null));
-            service.revokeAccess(ADMIN, granted.id(), null);
+            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, unitGrant());
+            service.revokeAccess(ADMIN, SUBJECT, granted.id(), "left the department");
 
-            assertThatThrownBy(() -> service.revokeAccess(ADMIN, granted.id(), null))
+            assertThatThrownBy(() ->
+                    service.revokeAccess(ADMIN, SUBJECT, granted.id(), "left the department"))
                     .isInstanceOf(java.util.NoSuchElementException.class);
         }
 
@@ -196,10 +199,10 @@ class ArchiveAdminAccessManagementTest {
         @Test
         void unlinkingRemovesResolutionWithoutTouchingGrants() {
             var link = service.linkIdentity(ADMIN, "https://cognito/pool", "cognito-sub-2",
-                    SUBJECT, null, null, null);
-            service.grantAccess(ADMIN, SUBJECT, central(null));
+                    SUBJECT, null, null, "verified in person");
+            service.grantAccess(ADMIN, SUBJECT, unitGrant());
 
-            service.unlinkIdentity(ADMIN, link.id(), "left BU");
+            service.unlinkIdentity(ADMIN, SUBJECT, link.id(), "left BU in October");
 
             IdentityOverview overview = service.describeIdentity(ADMIN, SUBJECT);
             assertThat(overview.links()).noneMatch(l -> l.isActive());
@@ -213,7 +216,7 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void suspensionOverridesEveryGrantWithoutRevokingThem() {
-            service.grantAccess(ADMIN, SUBJECT, central(null));
+            service.grantAccess(ADMIN, SUBJECT, unitGrant());
 
             service.setSuspended(ADMIN, SUBJECT, true, "under review");
 
@@ -227,10 +230,10 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void restoringClearsSuspension() {
-            service.grantAccess(ADMIN, SUBJECT, central(null));
+            service.grantAccess(ADMIN, SUBJECT, unitGrant());
             service.setSuspended(ADMIN, SUBJECT, true, "under review");
 
-            service.setSuspended(ADMIN, SUBJECT, false, "cleared");
+            service.setSuspended(ADMIN, SUBJECT, false, "review cleared them");
 
             assertThat(service.describeIdentity(ADMIN, SUBJECT).hasNoArchiveAccess()).isFalse();
         }
@@ -242,15 +245,19 @@ class ArchiveAdminAccessManagementTest {
 
         @Test
         void eachMutationWritesExactlyOneAuditRowWithTheRightAction() {
-            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, central(null));
-            service.modifyAccess(ADMIN, granted.id(), Instant.parse("2030-01-01T00:00:00Z"), false, null);
-            service.revokeAccess(ADMIN, granted.id(), null);
-            var link = service.linkIdentity(ADMIN, "iss", "sub", SUBJECT, null, null, null);
-            service.unlinkIdentity(ADMIN, link.id(), null);
-            service.setSuspended(ADMIN, SUBJECT, true, null);
-            service.setSuspended(ADMIN, SUBJECT, false, null);
-            service.assignAdministrator(ADMIN, SUBJECT, null);
-            service.revokeAdministrator(ADMIN, SUBJECT, null);
+            AccessGrant granted = service.grantAccess(ADMIN, SUBJECT, unitGrant());
+            service.modifyAccess(ADMIN, SUBJECT, granted.id(),
+                    Instant.parse("2030-01-01T00:00:00Z"), false, "time-boxed for the audit");
+            service.revokeAccess(ADMIN, SUBJECT, granted.id(), "audit finished early");
+            var link = service.linkIdentity(ADMIN, "iss", "sub", OUTSIDER, null, null,
+                    "verified in person");
+            service.unlinkIdentity(ADMIN, OUTSIDER, link.id(), "wrong person linked");
+            service.setSuspended(ADMIN, SUBJECT, true, "under investigation");
+            service.setSuspended(ADMIN, SUBJECT, false, "investigation closed");
+            // Appointment is refused until PR 2, so the second administrator
+            // is seeded through the repository to exercise revocation.
+            adminRoles.assign(SUBJECT, ADMIN.value(), "seeded second administrator");
+            service.revokeAdministrator(ADMIN, SUBJECT, "stepping down from the role");
 
             assertThat(audit.events())
                     .extracting(RecordingAdminAuditSink.Event::action)
@@ -262,7 +269,6 @@ class ArchiveAdminAccessManagementTest {
                             AdminAuditAction.IDENTITY_UNLINKED,
                             AdminAuditAction.IDENTITY_SUSPENDED,
                             AdminAuditAction.IDENTITY_RESTORED,
-                            AdminAuditAction.ADMIN_ROLE_ASSIGNED,
                             AdminAuditAction.ADMIN_ROLE_REVOKED);
         }
 
@@ -303,14 +309,15 @@ class ArchiveAdminAccessManagementTest {
 
     @Test
     void auditHistoryIsReadableByAnAdministrator() {
-        service.grantAccess(ADMIN, SUBJECT, central(null));
+        service.grantAccess(ADMIN, SUBJECT, unitGrant());
 
         List<AuditEntry> history = service.auditHistory(ADMIN, AuditQuery.forSubject(SUBJECT.value()));
 
         assertThat(history).isNotNull();
     }
 
-    private static GrantSpecification central(String reason) {
-        return new GrantSpecification(GrantType.CENTRAL, null, false, null, null, reason);
+    private static GrantSpecification unitGrant() {
+        return new GrantSpecification(GrantType.UNIT, "1234", false, null, null,
+                "approved by the department chair");
     }
 }

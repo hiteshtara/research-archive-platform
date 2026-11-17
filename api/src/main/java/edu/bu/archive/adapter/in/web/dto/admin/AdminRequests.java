@@ -16,8 +16,11 @@ public final class AdminRequests {
     }
 
     /**
-     * @param type CENTRAL, UNIT, IO or CONTACT_DERIVATION. IO is shown as
-     *             "SAP Account" in the UI; the wire value stays IO.
+     * @param type CENTRAL, UNIT, IO, CONTACT_DERIVATION or PARENT_AWARD. IO is
+     *             shown as "SAP Account" in the UI; the wire value stays IO.
+     * @param awardNumber PARENT_AWARD only: the Award the grant is rooted at.
+     *             Before finding N4 this was not read, so a PARENT_AWARD grant
+     *             could not be created over HTTP at all.
      * @param expiresAt null means no automatic expiry (approved decision D-ADM-3)
      */
     public record CreateGrant(
@@ -25,6 +28,7 @@ public final class AdminRequests {
             String unitNumber,
             boolean includeDescendants,
             String ioValue,
+            String awardNumber,
             Instant expiresAt,
             String reason) {
     }

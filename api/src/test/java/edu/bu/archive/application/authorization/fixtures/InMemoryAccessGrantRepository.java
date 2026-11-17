@@ -47,7 +47,7 @@ public final class InMemoryAccessGrantRepository implements AccessGrantRepositor
     public void revoke(long grantId, Instant at) {
         grants.replaceAll(g -> g.id() == grantId
                 ? new AccessGrant(g.id(), g.grantee(), g.type(), g.unitNumber(), g.includeDescendants(),
-                        g.ioValue(), g.validFrom(), g.expiresAt(), at)
+                        g.ioValue(), g.validFrom(), g.expiresAt(), at, g.awardNumber())
                 : g);
     }
 
@@ -72,7 +72,8 @@ public final class InMemoryAccessGrantRepository implements AccessGrantRepositor
 
         var created = new AccessGrant(ids.incrementAndGet(), grantee, specification.type(),
                 specification.unitNumber(), specification.includeDescendants(),
-                specification.ioValue(), Instant.EPOCH, specification.expiresAt(), null);
+                specification.ioValue(), Instant.EPOCH, specification.expiresAt(), null,
+                specification.awardNumber());
         grants.add(created);
         return created;
     }
@@ -84,13 +85,19 @@ public final class InMemoryAccessGrantRepository implements AccessGrantRepositor
                 .orElseThrow(() -> new NoSuchElementException("no active grant " + grantId));
         var modified = new AccessGrant(existing.id(), existing.grantee(), existing.type(),
                 existing.unitNumber(), includeDescendants, existing.ioValue(),
-                existing.validFrom(), expiresAt, null);
+                existing.validFrom(), expiresAt, null, existing.awardNumber());
         grants.replaceAll(g -> g.id() == grantId ? modified : g);
         return modified;
     }
 
     @Override
-    public void revoke(long grantId, String revokedBy, String reason) {
+    public Optional<AccessGrant> lockActive(long grantId) {
+        // No concurrency in memory; the locking itself is proved against PostgreSQL.
+        return findById(grantId).filter(g -> g.revokedAt() == null);
+    }
+
+    @Override
+    public void revoke(long grantId, String revokedBy) {
         findById(grantId)
                 .filter(g -> g.revokedAt() == null)
                 .orElseThrow(() -> new NoSuchElementException("no active grant " + grantId));

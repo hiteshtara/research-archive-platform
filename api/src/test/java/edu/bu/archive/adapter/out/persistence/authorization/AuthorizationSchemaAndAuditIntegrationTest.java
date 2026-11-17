@@ -382,12 +382,14 @@ class AuthorizationSchemaAndAuditIntegrationTest {
         void anAdministrativeChangeAndItsAuditRowCommitTogether() {
             seedAdministrator();
 
+            // Suspension, not appointment: appointment is refused until the
+            // approval workflow exists (decision D1), so it writes nothing at all.
             requiresNew.executeWithoutResult(status ->
-                    service.assignAdministrator(ADMIN, SUBJECT, "granted in one transaction"));
+                    service.setSuspended(ADMIN, SUBJECT, true, "suspended in one transaction"));
 
-            assertThat(service.isAdministrator(SUBJECT)).isTrue();
+            assertThat(isSuspended(SUBJECT)).isTrue();
             assertThat(auditActions())
-                    .containsExactly(AdminAuditAction.ADMIN_ROLE_ASSIGNED.name());
+                    .containsExactly(AdminAuditAction.IDENTITY_SUSPENDED.name());
         }
 
         /**
@@ -400,12 +402,12 @@ class AuthorizationSchemaAndAuditIntegrationTest {
             seedAdministrator();
 
             assertThatThrownBy(() -> requiresNew.executeWithoutResult(status -> {
-                service.assignAdministrator(ADMIN, SUBJECT, "about to fail");
+                service.setSuspended(ADMIN, SUBJECT, true, "about to fail on purpose");
                 throw new IllegalStateException("simulated failure after the audit write");
             })).isInstanceOf(IllegalStateException.class);
 
-            assertThat(service.isAdministrator(SUBJECT))
-                    .as("the membership must not survive a rolled-back transaction")
+            assertThat(isSuspended(SUBJECT))
+                    .as("the suspension must not survive a rolled-back transaction")
                     .isFalse();
             assertThat(auditActions())
                     .as("the audit row must not survive either")
@@ -415,12 +417,14 @@ class AuthorizationSchemaAndAuditIntegrationTest {
         @Test
         void aRevokeAndItsAuditRowRollBackTogether() {
             seedAdministrator();
+            // Seeded through the store: appointment through the service is
+            // refused until the approval workflow exists (decision D1).
             requiresNew.executeWithoutResult(status ->
-                    service.assignAdministrator(ADMIN, SUBJECT, "second administrator"));
+                    adminRoles.assign(SUBJECT, ADMIN.value(), "seeded second administrator"));
             clearAudit();
 
             assertThatThrownBy(() -> requiresNew.executeWithoutResult(status -> {
-                service.revokeAdministrator(ADMIN, SUBJECT, "about to fail");
+                service.revokeAdministrator(ADMIN, SUBJECT, "about to fail on purpose");
                 throw new IllegalStateException("simulated failure");
             })).isInstanceOf(IllegalStateException.class);
 
@@ -451,14 +455,14 @@ class AuthorizationSchemaAndAuditIntegrationTest {
          * were ever lost.
          */
         @Test
-        void theMembershipWriteRefusesToRunOutsideATransaction() {
+        void theSuspensionWriteRefusesToRunOutsideATransaction() {
             seedAdministrator();
 
-            assertThatThrownBy(() ->
-                    serviceWithoutItsOwnTransaction.assignAdministrator(ADMIN, SUBJECT, "no transaction"))
+            assertThatThrownBy(() -> serviceWithoutItsOwnTransaction.setSuspended(
+                    ADMIN, SUBJECT, true, "no transaction around this"))
                     .isInstanceOf(IllegalTransactionStateException.class);
 
-            assertThat(service.isAdministrator(SUBJECT)).isFalse();
+            assertThat(isSuspended(SUBJECT)).isFalse();
             assertThat(auditActions()).isEmpty();
         }
 
@@ -521,6 +525,16 @@ class AuthorizationSchemaAndAuditIntegrationTest {
         }
     }
 
+    private static boolean isSuspended(InstitutionalIdentifier identity) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM authz.person_status
+                                        WHERE institutional_identifier = :id AND suspended)
+                        """)
+                .param("id", identity.value())
+                .query(Boolean.class)
+                .single();
+    }
+
     private static List<String> auditActions() {
         return jdbc.sql("SELECT action FROM authz.access_audit ORDER BY audit_id")
                 .query(String.class)
@@ -580,9 +594,9 @@ class AuthorizationSchemaAndAuditIntegrationTest {
 
         @Test
         void revokingSetsRevokedAtAndRevokedByRatherThanDeleting() {
-            var granted = service.grantAccess(ADMIN, SUBJECT, central());
+            var granted = service.grantAccess(ADMIN, SUBJECT, ioGrant());
 
-            service.revokeAccess(ADMIN, granted.id(), "left BU");
+            service.revokeAccess(ADMIN, SUBJECT, granted.id(), "left BU in October");
 
             var row = jdbc.sql("""
                             SELECT revoked_by, revoked_at IS NOT NULL AS revoked
@@ -616,7 +630,7 @@ class AuthorizationSchemaAndAuditIntegrationTest {
         @Test
         void suspensionUpsertsRatherThanFailingOnASecondCall() {
             service.setSuspended(ADMIN, SUBJECT, true, "under review");
-            service.setSuspended(ADMIN, SUBJECT, false, "cleared");
+            service.setSuspended(ADMIN, SUBJECT, false, "review cleared them");
 
             assertThat(jdbc.sql("""
                             SELECT suspended FROM authz.person_status
@@ -632,10 +646,11 @@ class AuthorizationSchemaAndAuditIntegrationTest {
 
         @Test
         void aSecondActiveLinkForOneCognitoIdentityIsRefused() {
-            service.linkIdentity(ADMIN, "https://issuer", "cognito-1", SUBJECT, null, null, null);
+            service.linkIdentity(ADMIN, "https://issuer", "cognito-1", SUBJECT, null, null,
+                    "verified in person");
 
             assertThatThrownBy(() -> service.linkIdentity(
-                    ADMIN, "https://issuer", "cognito-1", SUBJECT, null, null, null))
+                    ADMIN, "https://issuer", "cognito-1", SUBJECT, null, null, "verified in person"))
                     .isInstanceOf(IllegalStateException.class);
         }
 
@@ -645,7 +660,7 @@ class AuthorizationSchemaAndAuditIntegrationTest {
 
             // Revoking a grant that does not exist fails after the role check,
             // so nothing - neither the change nor an audit row - may survive.
-            assertThatThrownBy(() -> service.revokeAccess(ADMIN, 999_999L, "nope"))
+            assertThatThrownBy(() -> service.revokeAccess(ADMIN, SUBJECT, 999_999L, "no such grant exists here"))
                     .isInstanceOf(java.util.NoSuchElementException.class);
 
             assertThat(auditCount()).isEqualTo(before);
@@ -656,10 +671,10 @@ class AuthorizationSchemaAndAuditIntegrationTest {
                     .query(Long.class).single();
         }
 
-        private edu.bu.archive.application.authorization.admin.GrantSpecification central() {
+        private edu.bu.archive.application.authorization.admin.GrantSpecification ioGrant() {
             return new edu.bu.archive.application.authorization.admin.GrantSpecification(
-                    edu.bu.archive.application.authorization.GrantType.CENTRAL,
-                    null, false, null, null, null);
+                    edu.bu.archive.application.authorization.GrantType.IO,
+                    null, false, "9500012345", null, "sponsor account review");
         }
     }
 

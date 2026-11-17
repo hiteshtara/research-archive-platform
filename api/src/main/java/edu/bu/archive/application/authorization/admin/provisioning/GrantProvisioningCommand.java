@@ -17,7 +17,10 @@ import edu.bu.archive.application.authorization.IdentityLink;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.admin.AdminIdentityRepository;
 import edu.bu.archive.application.authorization.admin.AdminRoleRepository;
+import edu.bu.archive.application.authorization.admin.ApprovalRequiredException;
 import edu.bu.archive.application.authorization.admin.DuplicateActiveGrantException;
+import edu.bu.archive.application.authorization.admin.ReasonRequiredException;
+import edu.bu.archive.application.authorization.admin.SelfAdministrationException;
 import edu.bu.archive.application.authorization.admin.ArchiveAdminService;
 import edu.bu.archive.application.authorization.admin.GrantSpecification;
 
@@ -144,7 +147,7 @@ public final class GrantProvisioningCommand {
                     grantId);
         }
 
-        admin.revokeAccess(actor, grantId,
+        admin.revokeAccess(actor, target.grantee(), grantId,
                 "operator=" + request.operator().trim()
                         + "; approval=" + request.approvalReference().trim()
                         + "; " + request.reason().trim());
@@ -242,6 +245,17 @@ public final class GrantProvisioningCommand {
                             "operator=" + request.operator().trim()
                                     + "; approval=" + request.approvalReference().trim()
                                     + "; " + request.reason().trim()));
+        } catch (ApprovalRequiredException | SelfAdministrationException
+                | ReasonRequiredException e) {
+            /*
+             * The service's A-category refusals. The checks above should
+             * already have reported each of these, so reaching here means
+             * they disagree with the service; the service wins, and nothing
+             * was written.
+             */
+            problems.add(e.getMessage());
+            return new GrantOutcome(GrantOutcome.Result.REFUSED, checks, problems,
+                    "Refusing to provision: " + e.getMessage(), null);
         } catch (DuplicateActiveGrantException e) {
             /*
              * V087's ux_access_grant_active_scope fired. The duplicate check
@@ -429,6 +443,19 @@ public final class GrantProvisioningCommand {
                 } else {
                     checks.add("OK     " + type + " takes no scope argument");
                 }
+                if (type == GrantType.CENTRAL) {
+                    /*
+                     * Decision D1: every CENTRAL grant needs independent
+                     * approval by a second administrator. The approval
+                     * workflow does not exist yet, so ArchiveAdminService
+                     * refuses CENTRAL outright - for this utility as much as
+                     * for the HTTP API. Said here so a dry run tells the
+                     * operator rather than the write.
+                     */
+                    problems.add("CENTRAL grants require independent approval by a second "
+                            + "administrator (decision D1), and the approval workflow is not "
+                            + "available yet. This utility cannot issue one.");
+                }
             }
             /*
              * Unreachable today - every GrantType has an arm above. It is here
@@ -478,8 +505,14 @@ public final class GrantProvisioningCommand {
          * it is a separate, deliberate act that has to be said out loud.
          */
         if (grantee.equals(actor)) {
-            checks.add("NOTE   the grantee IS the acting administrator. ARCHIVE_ADMIN confers "
-                    + "no data access, so this grant is what would give them records.");
+            /*
+             * Was a NOTE. Control 1 of the A-category design: an administrator
+             * may not grant themselves archive access. ArchiveAdminService
+             * refuses it; this says so before anything is attempted.
+             */
+            problems.add("the grantee IS the acting administrator. An administrator cannot "
+                    + "grant archive access to themselves; a second administrator must "
+                    + "issue it.");
         }
 
         List<AccessGrant> existing = grants.findForGrantee(grantee);

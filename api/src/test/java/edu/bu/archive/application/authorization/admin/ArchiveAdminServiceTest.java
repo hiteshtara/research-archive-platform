@@ -51,6 +51,14 @@ class ArchiveAdminServiceTest {
         service = new ArchiveAdminService(adminRoles, audit, grants, identities, auditHistory);
     }
 
+    /**
+     * A second administrator, seeded through the store. Appointment through
+     * the service is refused until the approval workflow exists (decision D1).
+     */
+    private void seedSecondAdministrator() {
+        adminRoles.assign(ADMIN_B, ADMIN_A.value(), "seeded second administrator");
+    }
+
     /** Bring the first administrator into existence the only way allowed. */
     private void bootstrapAdminA() {
         service.bootstrapFirstAdministrator(ADMIN_A, "operator@bu.edu", "phase 1 test");
@@ -97,17 +105,18 @@ class ArchiveAdminServiceTest {
     class AssignAndRevoke {
 
         @Test
-        void anAdministratorMayAssignAnother_andBothHoldItAtOnce() {
+        void appointingAnotherAdministratorIsRefusedUntilApprovalExists() {
             bootstrapAdminA();
 
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "second admin");
+            // Decision D1: appointment needs a second administrator's approval.
+            assertThatThrownBy(() ->
+                    service.assignAdministrator(ADMIN_A, ADMIN_B, "second administrator"))
+                    .isInstanceOf(ApprovalRequiredException.class);
 
-            assertThat(service.isAdministrator(ADMIN_A)).isTrue();
-            assertThat(service.isAdministrator(ADMIN_B)).isTrue();
-            assertThat(service.listAdministrators(ADMIN_A)).hasSize(2);
+            assertThat(service.isAdministrator(ADMIN_B)).isFalse();
+            assertThat(service.listAdministrators(ADMIN_A)).hasSize(1);
             assertThat(audit.actions()).containsExactly(
-                    AdminAuditAction.ADMIN_ROLE_BOOTSTRAPPED,
-                    AdminAuditAction.ADMIN_ROLE_ASSIGNED);
+                    AdminAuditAction.ADMIN_ROLE_BOOTSTRAPPED);
         }
 
         @Test
@@ -127,7 +136,7 @@ class ArchiveAdminServiceTest {
         @Test
         void aNonAdministratorCannotRevoke() {
             bootstrapAdminA();
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "second admin");
+            seedSecondAdministrator();
 
             assertThatThrownBy(() ->
                     service.revokeAdministrator(ORDINARY, ADMIN_B, "not allowed"))
@@ -139,21 +148,20 @@ class ArchiveAdminServiceTest {
         @Test
         void revokingAnAdministratorAuditsItAndTakesEffectImmediately() {
             bootstrapAdminA();
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "second admin");
+            seedSecondAdministrator();
 
             service.revokeAdministrator(ADMIN_A, ADMIN_B, "left the team");
 
             assertThat(service.isAdministrator(ADMIN_B)).isFalse();
             assertThat(audit.actions()).containsExactly(
                     AdminAuditAction.ADMIN_ROLE_BOOTSTRAPPED,
-                    AdminAuditAction.ADMIN_ROLE_ASSIGNED,
                     AdminAuditAction.ADMIN_ROLE_REVOKED);
         }
 
         @Test
         void theRevokedAdministratorCanNoLongerAdminister() {
             bootstrapAdminA();
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "second admin");
+            seedSecondAdministrator();
             service.revokeAdministrator(ADMIN_A, ADMIN_B, "left the team");
 
             assertThatThrownBy(() ->
@@ -176,7 +184,7 @@ class ArchiveAdminServiceTest {
         @Test
         void anAdministratorMayStepDownOnceAnotherExists() {
             bootstrapAdminA();
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "successor");
+            seedSecondAdministrator();
 
             service.revokeAdministrator(ADMIN_A, ADMIN_A, "stepping down");
 
@@ -186,12 +194,12 @@ class ArchiveAdminServiceTest {
         }
 
         @Test
-        void assigningTwiceIsRefused() {
+        void assigningTwiceIsRefusedByTheStore() {
             bootstrapAdminA();
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "first");
+            seedSecondAdministrator();
 
             assertThatThrownBy(() ->
-                    service.assignAdministrator(ADMIN_A, ADMIN_B, "again"))
+                    adminRoles.assign(ADMIN_B, ADMIN_A.value(), "assigned a second time"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("already holds");
         }
@@ -210,7 +218,7 @@ class ArchiveAdminServiceTest {
             InMemoryAccessGrantRepository grants = new InMemoryAccessGrantRepository();
 
             bootstrapAdminA();
-            service.assignAdministrator(ADMIN_A, ADMIN_B, "second admin");
+            seedSecondAdministrator();
 
             assertThat(service.isAdministrator(ADMIN_A)).isTrue();
             assertThat(service.isAdministrator(ADMIN_B)).isTrue();

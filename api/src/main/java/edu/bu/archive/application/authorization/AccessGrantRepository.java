@@ -34,6 +34,20 @@ public interface AccessGrantRepository {
                        String grantedBy);
 
     /**
+     * Lock an ACTIVE (unrevoked) grant for the rest of the caller's
+     * transaction and return it as committed.
+     *
+     * <p>{@code SELECT ... FOR UPDATE}, called inside the caller's
+     * transaction (MANDATORY propagation). A concurrent modify of the same
+     * grant blocks until this transaction ends and then reads the committed
+     * value, so a "does this widen the grant?" decision can never be taken
+     * against a value another transaction is changing.
+     *
+     * @return empty when no unrevoked grant has that id
+     */
+    Optional<AccessGrant> lockActive(long grantId);
+
+    /**
      * Change the parts of a grant that may change: its expiry and, for UNIT
      * grants, whether it includes sub-units. Type, unit and IO value are
      * immutable - changing those is a revoke plus a new grant, so the history
@@ -46,7 +60,12 @@ public interface AccessGrantRepository {
     /**
      * Revoke a grant. A status change, never a delete.
      *
+     * <p>Takes no reason, deliberately: the grant's own {@code reason} is why
+     * it was GRANTED and must survive revocation (finding N3). Why it was
+     * revoked is recorded in the ACCESS_REVOKED audit row the service writes
+     * in the same transaction.
+     *
      * @throws java.util.NoSuchElementException if no active grant has that id
      */
-    void revoke(long grantId, String revokedBy, String reason);
+    void revoke(long grantId, String revokedBy);
 }

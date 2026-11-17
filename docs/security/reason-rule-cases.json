@@ -1,0 +1,337 @@
+[
+  {
+    "input": "Department chair approved access for the audit",
+    "valid": true,
+    "why": "a real reason"
+  },
+  {
+    "input": "Left BU on 2026-11-01",
+    "valid": true,
+    "why": "a real reason with a date"
+  },
+  {
+    "input": "  Left   the\tdepartment \n ",
+    "valid": true,
+    "why": "whitespace is trimmed and collapsed before the rule applies"
+  },
+  {
+    "input": "",
+    "valid": false,
+    "why": "blank"
+  },
+  {
+    "input": "   ",
+    "valid": false,
+    "why": "blank"
+  },
+  {
+    "input": "\n\t",
+    "valid": false,
+    "why": "blank"
+  },
+  {
+    "input": "Left dept",
+    "valid": false,
+    "why": "9 characters: below the 10-character minimum"
+  },
+  {
+    "input": "Left depts",
+    "valid": true,
+    "why": "10 characters: exactly the minimum"
+  },
+  {
+    "input": "Left      dept",
+    "valid": false,
+    "why": "collapses to 9 characters; padding cannot reach the minimum"
+  },
+  {
+    "input": "Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chairx",
+    "valid": true,
+    "why": "500 characters: exactly the maximum"
+  },
+  {
+    "input": "Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair Access approved by chair x",
+    "valid": false,
+    "why": "501 characters: above the 500-character maximum"
+  },
+  {
+    "input": "test",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "TEST.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "testing",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "TESTING.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "n/a",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "N/A.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "na",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "NA.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "none",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "NONE.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "null",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "NULL.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "reason",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "REASON.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "no reason",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "NO REASON.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "asdf",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "ASDF.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "qwerty",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "QWERTY.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "xxx",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "XXX.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "tbd",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "TBD.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "todo",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "TODO.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "placeholder",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "PLACEHOLDER.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "see above",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "SEE ABOVE.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "as discussed",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "AS DISCUSSED.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "per request",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "PER REQUEST.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "lorem ipsum",
+    "valid": false,
+    "why": "placeholder"
+  },
+  {
+    "input": "LOREM IPSUM.",
+    "valid": false,
+    "why": "placeholder, upper case with punctuation"
+  },
+  {
+    "input": "N / A",
+    "valid": false,
+    "why": "placeholder 'n a'"
+  },
+  {
+    "input": "  See   above!! ",
+    "valid": false,
+    "why": "placeholder with whitespace and punctuation"
+  },
+  {
+    "input": "test test test",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "testing, testing, testing",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "TBD - TODO",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "n/a; none; null",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "see above as discussed",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "Lorem ipsum lorem ipsum",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "no reason, per request",
+    "valid": false,
+    "why": "placeholders repeated or combined"
+  },
+  {
+    "input": "Testing the new unit grant for audit",
+    "valid": true,
+    "why": "a sentence that merely contains a placeholder word"
+  },
+  {
+    "input": "Per request of the department chair",
+    "valid": true,
+    "why": "a sentence that merely contains a placeholder phrase"
+  },
+  {
+    "input": "aaaaaaaaaaaa",
+    "valid": false,
+    "why": "one character repeated"
+  },
+  {
+    "input": "a a a a a a a",
+    "valid": false,
+    "why": "one character repeated"
+  },
+  {
+    "input": "zzzzzzzzzzzzzzz!",
+    "valid": false,
+    "why": "one character repeated"
+  },
+  {
+    "input": "access access access",
+    "valid": false,
+    "why": "one word repeated"
+  },
+  {
+    "input": "Grant, grant. GRANT!",
+    "valid": false,
+    "why": "one word repeated"
+  },
+  {
+    "input": "Reorganisation",
+    "valid": false,
+    "why": "a single word"
+  },
+  {
+    "input": "INC21002534 12345",
+    "valid": false,
+    "why": "numbers alone are not words"
+  },
+  {
+    "input": "... !!! ???",
+    "valid": false,
+    "why": "punctuation alone is not words"
+  },
+  {
+    "input": "Per INC21002534",
+    "valid": true,
+    "why": "two words, one containing letters and digits"
+  }
+]

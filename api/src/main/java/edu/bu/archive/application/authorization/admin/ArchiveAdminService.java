@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import edu.bu.archive.application.authorization.AccessGrant;
 import edu.bu.archive.application.authorization.AccessGrantRepository;
+import edu.bu.archive.application.authorization.GrantType;
 import edu.bu.archive.application.authorization.IdentityLink;
 import edu.bu.archive.application.authorization.InstitutionalIdentifier;
 import edu.bu.archive.application.authorization.KualiPersonId;
@@ -83,9 +84,15 @@ public class ArchiveAdminService {
     /**
      * Assign ARCHIVE_ADMIN to another identity.
      *
-     * <p>Only an existing active administrator may do this, so the role cannot
-     * be self-granted. The first administrator arrives through
-     * {@link #bootstrapFirstAdministrator} instead.
+     * <p><strong>Refused until the approval workflow exists</strong> (decision
+     * D1, A-category design section 3.2). Appointing an administrator needs a
+     * second, distinct administrator's approval, and one administrator acting
+     * alone is exactly what that rule exists to stop. The refusal is here, in
+     * the service, so the HTTP API and every operator utility are gated alike.
+     * The first administrator still arrives through the operator bootstrap
+     * ({@link #bootstrapFirstAdministratorWithIdentity}), which is separate.
+     *
+     * @throws ApprovalRequiredException always, once the caller and reason are valid
      */
     @Transactional
     public AdminRoleMember assignAdministrator(
@@ -93,10 +100,12 @@ public class ArchiveAdminService {
 
         requireAdministrator(actor);
         requireSubject(subject);
+        Reasons.require(reason);
 
-        AdminRoleMember assigned = adminRoles.assign(subject, actor.value(), reason);
-        audit.record(actor.value(), AdminAuditAction.ADMIN_ROLE_ASSIGNED, subject, reason);
-        return assigned;
+        throw new ApprovalRequiredException(
+                "appointing an ARCHIVE_ADMIN requires independent approval by a second, "
+                        + "distinct administrator, and the approval workflow is not available "
+                        + "yet. Nothing was written.");
     }
 
     /**
@@ -116,9 +125,10 @@ public class ArchiveAdminService {
 
         requireAdministrator(actor);
         requireSubject(subject);
+        String why = Reasons.require(reason);
 
-        adminRoles.revokeWithLastAdministratorGuard(subject, actor.value(), reason);
-        audit.record(actor.value(), AdminAuditAction.ADMIN_ROLE_REVOKED, subject, reason);
+        adminRoles.revokeWithLastAdministratorGuard(subject, actor.value(), why);
+        audit.record(actor.value(), AdminAuditAction.ADMIN_ROLE_REVOKED, subject, why);
     }
 
     /**
@@ -317,8 +327,16 @@ public class ArchiveAdminService {
      * Grant archive access.
      *
      * <p>Approved decision D-ADM-2: no second approver is required, so this
-     * commits on one administrator's action. D-ADM-3: the grant does not
-     * expire unless {@link GrantSpecification#expiresAt()} says so.
+     * commits on one administrator's action - except where the A-category
+     * controls say otherwise. Refused, before anything is written:
+     * <ul>
+     *   <li>a grant to the actor themselves ({@link SelfAdministrationException});</li>
+     *   <li>any CENTRAL grant (decision D1, {@link ApprovalRequiredException}),
+     *       until the approval workflow exists;</li>
+     *   <li>a missing or placeholder reason ({@link ReasonRequiredException}).</li>
+     * </ul>
+     * D-ADM-3: the grant does not expire unless
+     * {@link GrantSpecification#expiresAt()} says so.
      */
     @Transactional
     public AccessGrant grantAccess(
@@ -330,6 +348,10 @@ public class ArchiveAdminService {
         if (specification == null) {
             throw new IllegalArgumentException("grant specification is required");
         }
+        String why = Reasons.require(specification.reason());
+        refuseSelfGrant(actor, subject);
+        refuseCentralWithoutApproval(specification);
+        specification = withReason(specification, why);
 
         /*
          * V087's ux_access_grant_active_scope is what actually holds "at most
@@ -414,6 +436,16 @@ public class ArchiveAdminService {
         if (specification == null) {
             throw new IllegalArgumentException("grant specification is required");
         }
+        /*
+         * Checked once, up front, so a batch that every grantee would fail for
+         * the same reason writes nothing at all - not even the summary row.
+         * grantAccess repeats both checks per grantee; that is the control,
+         * this is only the early answer. A self-grant is the one refusal that
+         * depends on the grantee, so it stays per-grantee and becomes a
+         * FAILED outcome.
+         */
+        Reasons.require(specification.reason());
+        refuseCentralWithoutApproval(specification);
 
         /*
          * De-duplicated before anything is written. The same identifier twice
@@ -494,17 +526,79 @@ public class ArchiveAdminService {
         }
     }
 
-    /** Change a grant's expiry, or whether a UNIT grant includes sub-units. */
+    /**
+     * Change a grant's expiry, or whether a UNIT grant includes sub-units.
+     *
+     * <ul>
+     *   <li><strong>Bound to the subject</strong> (finding N1): the grant must
+     *       belong to {@code subject}, the identity named in the request
+     *       path. A grant that exists but belongs to someone else is reported
+     *       exactly as a missing one, so grant ids cannot be probed across
+     *       identities.</li>
+     *   <li><strong>Locked</strong> (finding N5): the grant row is read with
+     *       {@code SELECT ... FOR UPDATE} in this transaction, so whether the
+     *       change widens the grant is judged against the committed value,
+     *       never one another transaction is changing.</li>
+     *   <li><strong>Widening your own grant is refused</strong>: sub-units
+     *       {@code false -> true}, a later expiry, or removing the expiry.
+     *       Narrowing your own grant is allowed. Widening someone else's is
+     *       allowed (decision D-ADM-2), with a reason, and the audit row
+     *       records the before and after values.</li>
+     *   <li><strong>An expiry in the past is refused</strong>: ending access
+     *       now is what revocation is for.</li>
+     * </ul>
+     */
     @Transactional
     public AccessGrant modifyAccess(
-            InstitutionalIdentifier actor, long grantId, Instant expiresAt,
-            boolean includeDescendants, String reason) {
+            InstitutionalIdentifier actor, InstitutionalIdentifier subject, long grantId,
+            Instant expiresAt, boolean includeDescendants, String reason) {
 
         requireAdministrator(actor);
+        requireSubject(subject);
+        String why = Reasons.require(reason);
+        if (expiresAt != null && !expiresAt.isAfter(Instant.now())) {
+            throw new IllegalArgumentException(
+                    "the new expiry is not in the future; to end access now, revoke the grant");
+        }
+
+        AccessGrant before = grants.lockActive(grantId)
+                .filter(grant -> grant.grantee().equals(subject))
+                .orElseThrow(() -> new NoSuchElementException("no active grant " + grantId));
+
+        if (actor.equals(subject) && widens(before, expiresAt, includeDescendants)) {
+            throw new SelfAdministrationException(
+                    "an administrator cannot widen their own grant (sub-units added, expiry "
+                            + "extended or removed); a second administrator must make this "
+                            + "change. Narrowing your own grant is allowed. Nothing was written.");
+        }
+
         AccessGrant modified = grants.modify(grantId, expiresAt, includeDescendants);
         audit.record(actor.value(), AdminAuditAction.ACCESS_MODIFIED, modified.grantee(),
-                describe(modified, reason));
+                describe(modified, null)
+                        + "; before=" + state(before.includeDescendants(), before.expiresAt())
+                        + "; after=" + state(modified.includeDescendants(), modified.expiresAt())
+                        + "; " + why);
         return modified;
+    }
+
+    /**
+     * True when the change gives the grantee more than they hold now:
+     * sub-units {@code false -> true}, a later expiry, or any expiry removed.
+     */
+    public static boolean widens(AccessGrant current, Instant newExpiresAt,
+                                 boolean newIncludeDescendants) {
+        if (newIncludeDescendants && !current.includeDescendants()) {
+            return true;
+        }
+        if (newExpiresAt == null) {
+            return current.expiresAt() != null;
+        }
+        return current.expiresAt() != null && newExpiresAt.isAfter(current.expiresAt());
+    }
+
+    private static String state(boolean includeDescendants, Instant expiresAt) {
+        return "{includeDescendants=" + includeDescendants
+                + ", expires=" + (expiresAt == null ? "never" : expiresAt.toString()) + "}";
     }
 
     /**
@@ -514,16 +608,27 @@ public class ArchiveAdminService {
      * request from this store, never from a Cognito group claim or a cache, so
      * the revoked user loses access immediately even though their JWT stays
      * valid for up to an hour.
+     *
+     * <p>Self-revocation is allowed: reducing your own access is not escalation.
      */
     @Transactional
-    public void revokeAccess(InstitutionalIdentifier actor, long grantId, String reason) {
+    public void revokeAccess(InstitutionalIdentifier actor, InstitutionalIdentifier subject,
+                             long grantId, String reason) {
         requireAdministrator(actor);
+        requireSubject(subject);
+        String why = Reasons.require(reason);
+        /*
+         * Bound to the subject (finding N1). Another identity's grant answers
+         * exactly as a missing one, so ids cannot be probed.
+         */
         AccessGrant existing = grants.findById(grantId)
+                .filter(grant -> grant.grantee().equals(subject))
                 .orElseThrow(() -> new NoSuchElementException("no grant " + grantId));
 
-        grants.revoke(grantId, actor.value(), reason);
+        // The grant's own reason is left alone (N3); the revocation reason is audited.
+        grants.revoke(grantId, actor.value());
         audit.record(actor.value(), AdminAuditAction.ACCESS_REVOKED, existing.grantee(),
-                describe(existing, reason));
+                describe(existing, why));
     }
 
     // ---------------------------------------------------------------------
@@ -538,6 +643,10 @@ public class ArchiveAdminService {
      * {@code ACTV_IND} is not consulted. Most people on archived records are
      * inactive in KRIM, and that must not stop an administrator verifying a
      * legitimate user.
+     *
+     * <p>Refused with {@link ApprovalRequiredException} for an identity that
+     * already holds active grants or ARCHIVE_ADMIN and has no active link
+     * (finding N2).
      */
     @Transactional
     public IdentityLink linkIdentity(
@@ -545,8 +654,44 @@ public class ArchiveAdminService {
             InstitutionalIdentifier subject, KualiPersonId principal, String loginName,
             String reason) {
 
+        requireAdministrator(actor);
+        requireSubject(subject);
+        String why = Reasons.require(reason);
+        refusePrivilegedLinkWithoutApproval(subject);
         return linkInTransaction(
-                actor, cognitoIssuer, cognitoSubject, subject, principal, loginName, reason);
+                actor, cognitoIssuer, cognitoSubject, subject, principal, loginName, why);
+    }
+
+    /**
+     * Finding N2: unlink-then-link must not bypass the V086 two-person rule.
+     *
+     * <p>{@link #relinkIdentity} needs a second administrator when the
+     * identity holds active grants. Without this check one administrator
+     * could unlink, then link a new Cognito subject here, and the grants (or
+     * ARCHIVE_ADMIN) would follow the identity to whoever signs in as it.
+     * So an identity with no active link that holds active grants or an
+     * active ARCHIVE_ADMIN membership cannot be linked by one administrator.
+     * Until the approval workflow exists that is a refusal; relink keeps its
+     * V086 path unchanged.
+     *
+     * <p>It also covers an administrator linking a second Cognito identity
+     * to themselves, because the actor always holds ARCHIVE_ADMIN.
+     */
+    private void refusePrivilegedLinkWithoutApproval(InstitutionalIdentifier subject) {
+        boolean hasActiveLink = identities.findLinksFor(subject).stream()
+                .anyMatch(IdentityLink::isActive);
+        if (hasActiveLink) {
+            // The repository refuses a second active link with its own message.
+            return;
+        }
+        if (identities.activeGrantCountFor(subject) > 0
+                || adminRoles.findActive(subject).isPresent()) {
+            throw new ApprovalRequiredException(
+                    "this archive identity holds active grants or ARCHIVE_ADMIN, which a new "
+                            + "Cognito identity would inherit. Linking it needs a second "
+                            + "administrator's approval: use the re-link path. Nothing was "
+                            + "written.");
+        }
     }
 
     /**
@@ -573,11 +718,9 @@ public class ArchiveAdminService {
             throw new IllegalArgumentException(
                     "the Cognito issuer and subject identify who signed in; both are required");
         }
-        if (reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException(
-                    "re-linking transfers whatever grants this identity holds; a reason is "
-                            + "required so the audit trail says why");
-        }
+        // Re-linking transfers whatever grants this identity holds; the audit
+        // trail must say why.
+        reason = Reasons.require(reason);
 
         /*
          * RE-CHECKED here, not taken from the request. Grants can be issued
@@ -657,9 +800,7 @@ public class ArchiveAdminService {
 
         requireAdministrator(actor);
         requireSubject(subject);
-        if (reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException("a reason is required");
-        }
+        reason = Reasons.require(reason);
         requireApprovalStore();
 
         int grants = identities.activeGrantCountFor(subject);
@@ -681,8 +822,10 @@ public class ArchiveAdminService {
      * on their own behalf.
      */
     @Transactional
-    public RelinkApproval approveRelink(InstitutionalIdentifier actor, long approvalId) {
+    public RelinkApproval approveRelink(InstitutionalIdentifier actor, long approvalId,
+                                        String reason) {
         requireAdministrator(actor);
+        String why = Reasons.require(reason);
         requireApprovalStore();
 
         RelinkApproval approval = relinkApprovals.findById(approvalId)
@@ -712,14 +855,17 @@ public class ArchiveAdminService {
 
         RelinkApproval approved = relinkApprovals.approve(approvalId, actor.value());
         audit.record(actor.value(), AdminAuditAction.RELINK_APPROVAL_GRANTED, approval.identity(),
-                "approval=" + approvalId + "; requested by " + approval.requestedBy());
+                "approval=" + approvalId + "; requested by " + approval.requestedBy()
+                        + "; " + why);
         return approved;
     }
 
     /** Withdraw a relink request or approval. A revoked one authorises nothing. */
     @Transactional
-    public void revokeRelinkApproval(InstitutionalIdentifier actor, long approvalId) {
+    public void revokeRelinkApproval(InstitutionalIdentifier actor, long approvalId,
+                                     String reason) {
         requireAdministrator(actor);
+        String why = Reasons.require(reason);
         requireApprovalStore();
 
         RelinkApproval approval = relinkApprovals.findById(approvalId)
@@ -727,7 +873,7 @@ public class ArchiveAdminService {
                         "no relink approval " + approvalId));
         relinkApprovals.revoke(approvalId, actor.value());
         audit.record(actor.value(), AdminAuditAction.RELINK_APPROVAL_REVOKED,
-                approval.identity(), "approval=" + approvalId);
+                approval.identity(), "approval=" + approvalId + "; " + why);
     }
 
     private void requireApprovalStore() {
@@ -742,13 +888,21 @@ public class ArchiveAdminService {
         return identities.activeGrantCountFor(subject);
     }
 
-    /** Revoke an identity link. The person can no longer resolve to anyone. */
+    /**
+     * Revoke an identity link. The person can no longer resolve to anyone.
+     *
+     * <p>Bound to the subject (finding N1): a link that belongs to a
+     * different identity is reported exactly as a missing one.
+     */
     @Transactional
-    public void unlinkIdentity(InstitutionalIdentifier actor, long linkId, String reason) {
+    public void unlinkIdentity(InstitutionalIdentifier actor, InstitutionalIdentifier subject,
+                               long linkId, String reason) {
         requireAdministrator(actor);
-        InstitutionalIdentifier subject = identities.revokeLink(linkId, actor.value());
+        requireSubject(subject);
+        String why = Reasons.require(reason);
+        identities.revokeLink(subject, linkId, actor.value());
         audit.record(actor.value(), AdminAuditAction.IDENTITY_UNLINKED, subject,
-                "link=" + linkId + (reason == null ? "" : "; " + reason));
+                "link=" + linkId + "; " + why);
     }
 
     /**
@@ -757,17 +911,42 @@ public class ArchiveAdminService {
      * <p>Suspension overrides every grant without touching any of them, so
      * restoring is one action rather than re-granting. Use it for "stop this
      * person now, decide about their grants later".
+     *
+     * <p>Refused, before anything is written:
+     * <ul>
+     *   <li>suspending or restoring yourself ({@link SelfAdministrationException}).
+     *       A suspended administrator no longer resolves, so self-suspension
+     *       is a lockout - and for the last administrator one the
+     *       application cannot undo;</li>
+     *   <li>restoring an identity that holds an active ARCHIVE_ADMIN
+     *       membership (decision D3, {@link ApprovalRequiredException}): that
+     *       would make its administrator privileges usable again, which needs
+     *       a second administrator's approval. Restoring anyone else stays a
+     *       single-administrator action.</li>
+     * </ul>
      */
     @Transactional
     public void setSuspended(InstitutionalIdentifier actor, InstitutionalIdentifier subject,
                              boolean suspended, String reason) {
         requireAdministrator(actor);
         requireSubject(subject);
+        String why = Reasons.require(reason);
+        if (actor.equals(subject)) {
+            throw new SelfAdministrationException(
+                    "an administrator cannot change their own suspension; a suspended "
+                            + "administrator cannot sign in to undo it. Nothing was written.");
+        }
+        if (!suspended && adminRoles.findActive(subject).isPresent()) {
+            throw new ApprovalRequiredException(
+                    "restoring this identity would make its ARCHIVE_ADMIN privileges usable "
+                            + "again, which requires a second administrator's approval. The "
+                            + "approval workflow is not available yet. Nothing was written.");
+        }
 
-        identities.setSuspended(subject, suspended, actor.value(), reason);
+        identities.setSuspended(subject, suspended, actor.value(), why);
         audit.record(actor.value(),
                 suspended ? AdminAuditAction.IDENTITY_SUSPENDED : AdminAuditAction.IDENTITY_RESTORED,
-                subject, reason);
+                subject, why);
     }
 
     // ---------------------------------------------------------------------
@@ -826,6 +1005,32 @@ public class ArchiveAdminService {
             detail.append("; ").append(reason.trim());
         }
         return detail.toString();
+    }
+
+    /** Control 1: no self-granting. Bulk grants inherit it per grantee. */
+    private static void refuseSelfGrant(InstitutionalIdentifier actor,
+                                        InstitutionalIdentifier subject) {
+        if (actor.equals(subject)) {
+            throw new SelfAdministrationException(
+                    "an administrator cannot grant archive access to themselves; a second "
+                            + "administrator must. Nothing was written.");
+        }
+    }
+
+    /** Decision D1: every CENTRAL grant needs independent approval. */
+    private static void refuseCentralWithoutApproval(GrantSpecification specification) {
+        if (specification.type() == GrantType.CENTRAL) {
+            throw new ApprovalRequiredException(
+                    "a CENTRAL grant (every record, every unit) requires independent approval "
+                            + "by a second administrator, and the approval workflow is not "
+                            + "available yet. Nothing was written.");
+        }
+    }
+
+    private static GrantSpecification withReason(GrantSpecification specification, String reason) {
+        return new GrantSpecification(specification.type(), specification.unitNumber(),
+                specification.includeDescendants(), specification.ioValue(),
+                specification.awardNumber(), specification.expiresAt(), reason);
     }
 
     private void requireAdministrator(InstitutionalIdentifier actor) {

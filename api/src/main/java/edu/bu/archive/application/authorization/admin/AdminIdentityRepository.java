@@ -76,13 +76,22 @@ public interface AdminIdentityRepository {
     boolean hasEverBeenLinked(InstitutionalIdentifier identity);
 
     /**
-     * Revoke a link. Status change, never a delete: the row is the evidence
-     * that the access existed.
-     *
-     * @return the institutional identity the link belonged to
-     * @throws java.util.NoSuchElementException if no active link has that id
+     * The archive identity an ACTIVE link belongs to, if there is one. For
+     * the operator CLI, which names a link by id alone.
      */
-    InstitutionalIdentifier revokeLink(long linkId, String revokedBy);
+    java.util.Optional<InstitutionalIdentifier> findActiveLinkOwner(long linkId);
+
+    /**
+     * Revoke a link that belongs to {@code owner}. Status change, never a
+     * delete: the row is the evidence that the access existed.
+     *
+     * <p>Bound to the owner (finding N1): a link id that exists but belongs
+     * to a different identity is reported exactly as one that does not
+     * exist, so ids cannot be probed across identities.
+     *
+     * @throws java.util.NoSuchElementException if {@code owner} has no active link with that id
+     */
+    void revokeLink(InstitutionalIdentifier owner, long linkId, String revokedBy);
 
     /** Current suspension state; false when no row exists. */
     boolean isSuspended(InstitutionalIdentifier identity);
