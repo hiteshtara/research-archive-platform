@@ -101,6 +101,12 @@ parent does not apply — the rows are being relocated, not removed, and the
 BU retention policy, and **automatic deletion is not implemented or
 scheduled.**
 
+A tested, non-scheduled procedure does this for every expired month:
+`ops/activity-audit/activity_audit_retention.sql`. The period is a required
+`-v retention_days=N` (no default); it is a dry run unless `-v execute=true`;
+it never touches the DEFAULT partition. Run it as the table owner, never as
+`archive_api`.
+
 When approved, retention is one statement per expired month:
 
 ```sql
