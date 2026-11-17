@@ -64,6 +64,16 @@ app:
     # explicitly per-environment (dev only, for now) via Terraform.
     enabled: ${APP_EXPLORER_ENABLED:false}
 
+  irb:
+    api:
+      # IRB-only HTTP endpoints (/api/irb/** and /api/investigators). IRB is
+      # out of release scope and these routes have no record authorization,
+      # so the RELEASE configuration sets APP_IRB_API_ENABLED=false and the
+      # controllers are not registered at all. Default true: local and DEV
+      # behave exactly as before. Global Search and Dashboard IRB handling is
+      # NOT controlled by this flag. See docs/security/IRB_RELEASE_EXCLUSION.md.
+      enabled: ${APP_IRB_API_ENABLED:true}
+
   ai:
     enabled: ${APP_AI_ENABLED:${AI_ENABLED:false}}
     stub-enabled: ${APP_AI_STUB_ENABLED:${AI_STUB_ENABLED:false}}
