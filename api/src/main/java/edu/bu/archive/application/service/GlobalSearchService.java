@@ -249,7 +249,19 @@ public class GlobalSearchService {
      * <p>With enforcement OFF - today's deployed configuration - this is
      * false and IRB search behaves exactly as it always has.
      */
+    /*
+     * IRB is out of release scope: with app.irb.api.enabled=false IRB is
+     * excluded here exactly as it is under enforcement, whatever the
+     * enforcement setting. Default true: today's behaviour. See
+     * docs/security/IRB_RELEASE_EXCLUSION.md.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.irb.api.enabled:true}")
+    private boolean irbApiEnabled = true;
+
     private boolean irbExcludedFromSharedSearch() {
+        if (!irbApiEnabled) {
+            return true;
+        }
         if (authorizationProperties == null) {
             return false;
         }
