@@ -69,29 +69,65 @@ created and no group is modified.**
 | 13 | CONTACT_DERIVATION but **no** PERSON_ID | any | deny | `mapped.kualiPersonId()` empty → contact path never added | 404 |
 | 14 | `ARP-TEST-IO`, IO `9500234095` | award_id `2` | allow | `AwardAccountNumberIoResolver`, exact trimmed match | 200 |
 | 15 | same | any Proposal / Subaward / Negotiation | deny | resolver returns `Set.of()` for non-AWARD modules | 404 |
-| 16 | `ARP-TEST-NONE`, no grant | any | deny | `AccessOutcome.NotProvisioned / NO_ACTIVE_GRANTS` | 404 |
-| 17 | grant revoked | previously visible record | deny | `grant.isActiveAt(now)` filters it | 404 |
-| 18 | identity suspended | any | deny | `AccessOutcome.Denied / SUSPENDED_IDENTITY` | 404 |
-| 19 | no identity link | any | deny | `NotProvisioned / NO_IDENTITY_LINK` | 404 |
-| 20 | **`ARP-FK7QY195-QW5HV7G0`** (the real ADMIN), no data grants | any | deny | ADMIN confers no scope; 0 `access_grant` rows | 404 |
+| 16 | `ARP-TEST-NONE`, no grant | any | deny | `AccessOutcome.NotProvisioned / NO_ACTIVE_GRANTS` → `AccessNotProvisionedException` | **403** `ACCESS_NOT_PROVISIONED` |
+| 17 | grant revoked | previously visible record | deny | `grant.isActiveAt(now)` filters it | 404 if other grants remain; **403** if it was the only one |
+| 18 | identity suspended | any | deny | `AccessOutcome.Denied / SUSPENDED_IDENTITY` → `IdentityAccessDeniedException` | **403** `ACCESS_DENIED` |
+| 19 | no identity link | any | deny | `NotProvisioned / NO_IDENTITY_LINK` → `AccessNotProvisionedException` | **403** `ACCESS_NOT_PROVISIONED` |
+| 20 | **`ARP-FK7QY195-QW5HV7G0`** (the real ADMIN), no data grants | any | deny | ADMIN confers no scope; 0 `access_grant` rows → `NotProvisioned` | **403** `ACCESS_NOT_PROVISIONED` |
 | 21 | `ARP-TEST-PARENT`, PARENT_AWARD **`100380-00001`** | `100380-00001` | allow | the granted Award always reaches itself, even with no hierarchy row | 200 |
 | 22 | same, with `parent-award-depth` ≥ 1 | `100380-00005` (a child) | allow | `award_hierarchy` walk, `parent_award_number` → `award_number` | 200 |
 | 23 | same | `100330-00002` (**another family**) | **deny** | the walk compares `root_award_number` on every hop | **404** |
 | 24 | same, with `parent-award-depth` = 0 | `100380-00005` | **deny** | depth 0 is the granted Award alone | **404** |
 
-### Denied versus missing
+### Denied versus missing — two shapes, not one
 
-Cases 3, 8, 11, 15–20 must be **indistinguishable** from a record that does
-not exist. Test them as a pair — same status, same body, no timing or
-header difference — not separately. The service throws
-`NoSuchElementException`, which `GlobalExceptionHandler` answers 404.
+Corrected 2026-11-11 against the implementation. There are **two** denials and
+the earlier text collapsed them into one, which is why cases 16–20 were
+documented as 404s they do not produce.
+
+**Record-level denial — 404.** Cases 3, 8, 11, 15, 17 (while other grants
+remain), 21–24: the caller *is* provisioned, the record is simply not in
+scope. The scope predicate removes the row, the service throws
+`NoSuchElementException`, and `GlobalExceptionHandler` answers 404. These must
+be **indistinguishable** from a record that does not exist — test them as a
+pair against a genuinely absent record: same status, same body, no timing or
+header difference.
+
+**Caller-level denial — 403.** Cases 16, 18, 19, 20: the statement is about the
+*account*, not about any record, so no record is disclosed by naming it, and
+naming it is what lets the UI tell the user what to do.
+`RecordAuthorizationService.requireProvisioned()` runs **before** any record is
+read and throws:
+
+| Outcome | Exception | Status | Code |
+|---|---|---|---|
+| `NotProvisioned` (no link, or no active grant) | `AccessNotProvisionedException` | 403 | `ACCESS_NOT_PROVISIONED` |
+| `Denied` (suspended, ambiguous, revoked, evaluation failure) | `IdentityAccessDeniedException` | 403 | `ACCESS_DENIED` |
+| `Denied(REAUTHENTICATION_REQUIRED)` (sign-in older than `max-sign-in-age`) | `ReauthenticationRequiredException` | **401** | — |
+
+The 401 is worth noting separately: because the freshness check precedes
+enrollment, a token carrying **no `auth_time` claim at all** fails it
+(`signInFresh(null, …)` returns `false`) and yields 401, not 403.
+
+**Why this strengthens an enforcement gate.** The three statuses are
+diagnostic, so a paired probe distinguishes four states rather than two:
+
+| In-scope record | Out-of-scope record | Means |
+|---|---|---|
+| 200 | **404** | enforcement on, grant seen — the intended state |
+| 200 | 200 | enforcement **off** |
+| 403 | 403 | enforcement on, but the grant is **not** being seen |
+| 401 | 401 | sign-in too old, or no `auth_time` — says nothing about scope |
+
+A 200/404 pair therefore also proves the caller is provisioned, since an
+unprovisioned caller would answer 403 to both.
 
 ### Global Search and Dashboard
 
 | Check | Expected |
 |---|---|
 | Global Search as case 2 | only in-scope modules contribute; totals drop from the unrestricted 105 |
-| Global Search as case 16 | 0 results, **200 not 404** — an empty result set is not a denial |
+| Global Search as case 16 | **200 with every module in `failedModules`** — each leg's `requireProvisioned()` throws and `joinOrRecordFailure` catches it per leg. Not 403, and not "0 results". Note the UI then shows "could not be searched just now … try again shortly", which misdescribes a permissions problem as a transient outage — recorded as a UX defect, not a leak (nothing is disclosed) |
 | Dashboard as case 2 | all four module counts scoped; **page and count must agree** (same WHERE) |
 | Dashboard IRB fields | absent, not zero — D9 removes them for every caller once enforcement is on |
 | Attachment metadata | inherits the Award/Proposal decision; see the gap below |
