@@ -312,7 +312,17 @@ public class ProposalArchiveV1Service {
     public List<ProposalFundedAwardResponse> findFundedAwards(long proposalId) {
         recordAccess.requireProposal(proposalId);
         String proposalNumber = requireProposalNumberForId(proposalId);
-        return repository.findFundedAwardRows(proposalNumber);
+        /*
+         * B1 (2026-11-17): the gate above authorises the PROPOSAL, not the
+         * Awards it lists. Each funded Award must pass the AWARD rule for
+         * the current version it displays and links to; unauthorized ones
+         * are omitted in SQL - no stub, no count. NONE when unrestricted.
+         */
+        return repository.findFundedAwardRows(
+                proposalNumber,
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.AWARD,
+                        "current_award"));
     }
 
     public List<ProposalCustomDataResponse> findCustomData(long proposalId) {

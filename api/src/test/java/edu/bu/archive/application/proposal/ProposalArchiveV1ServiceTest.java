@@ -258,7 +258,8 @@ class ProposalArchiveV1ServiceTest {
                         "200268-00001", "Title", "Closed", 2, 1, 5, true,
                         148155L, 605555L, 148183L
                 );
-        when(repository.findFundedAwardRows("205"))
+        when(repository.findFundedAwardRows("205",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(fundedAward));
 
         List<ProposalFundedAwardResponse> result =
@@ -283,7 +284,8 @@ class ProposalArchiveV1ServiceTest {
         ProposalFundedAwardResponse third = new ProposalFundedAwardResponse(
                 "100300-00001", "Third", "Active", 1, 1, 1, true, 30L, 30L, 930L
         );
-        when(repository.findFundedAwardRows("01109910"))
+        when(repository.findFundedAwardRows("01109910",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(first, second, third));
 
         List<ProposalFundedAwardResponse> result =
@@ -310,7 +312,8 @@ class ProposalArchiveV1ServiceTest {
                 "201498-00001", "Title", "Active", 1, 1, 1, true,
                 462515L, 462515L, 511830L
         );
-        when(repository.findFundedAwardRows("2975"))
+        when(repository.findFundedAwardRows("2975",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(older, newer));
 
         List<ProposalFundedAwardResponse> result =
@@ -330,7 +333,8 @@ class ProposalArchiveV1ServiceTest {
                 "200268-00001", "Title", "Closed", 2, 1, 5, false,
                 148155L, 605555L, 148183L
         );
-        when(repository.findFundedAwardRows("205"))
+        when(repository.findFundedAwardRows("205",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(inactive));
 
         List<ProposalFundedAwardResponse> result =

@@ -268,7 +268,20 @@ public class AwardArchiveService {
     ) {
         recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
-        return repository.findFundingProposalRows(awardNumber);
+        /*
+         * B1 (2026-11-17): the parent gate above authorises the AWARD, not
+         * the Proposals it lists. Each Funding Proposal row must pass the
+         * PROPOSAL rule itself, decided on the version the row displays and
+         * navigates to (active_proposal) - the same version canSeeProposal
+         * decides for navigableActiveProposalId. Unauthorized relations are
+         * omitted in SQL: no stub, no count. NONE when unrestricted, so the
+         * statement is unchanged with enforcement off and for Central.
+         */
+        return repository.findFundingProposalRows(
+                awardNumber,
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.PROPOSAL,
+                        "active_proposal"));
     }
 
     /*
@@ -283,7 +296,16 @@ public class AwardArchiveService {
     ) {
         recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
-        return repository.findFundingSubawardRows(awardNumber);
+        /*
+         * B1: each funded Subaward must pass the SUBAWARD rule (inherited
+         * from ANY of its family's funding Awards, PARENT_AWARD excluded per
+         * SEC-005) - not merely the fact that this Award is visible.
+         */
+        return repository.findFundingSubawardRows(
+                awardNumber,
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.SUBAWARD,
+                        "linked_subaward"));
     }
 
     /*
@@ -298,7 +320,18 @@ public class AwardArchiveService {
     ) {
         recordAccess.requireAward(awardId);
         String awardNumber = requireAwardNumberForId(awardId);
-        return repository.findAssociatedNegotiationRows(awardNumber);
+        /*
+         * B1: each Negotiation must pass the NEGOTIATION hybrid rule (lead
+         * unit, or inheritance from the CURRENT Award version / latest
+         * Proposal version, PARENT_AWARD excluded) - the parent gate here may
+         * have been satisfied by a superseded version or a PARENT_AWARD
+         * grant, neither of which reaches the Negotiation.
+         */
+        return repository.findAssociatedNegotiationRows(
+                awardNumber,
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.NEGOTIATION,
+                        "n"));
     }
 
     public PageResponse<AwardSequenceSummaryResponse> findSequencePage(
@@ -594,8 +627,21 @@ public class AwardArchiveService {
         }
 
         return repository.findCurrentProposals(
-                normalizedAwardNumber
+                normalizedAwardNumber,
+                currentProposalScope()
         );
+    }
+
+    /*
+     * B1: the legacy /api/awards/{n}/proposals list (and the counts in
+     * /funding derived from it) returns the exact linked proposal_id, so
+     * each row must pass the PROPOSAL rule for that exact version -
+     * canSeeProposal(proposalId). Omitted rows are not counted either.
+     */
+    private edu.bu.archive.application.authorization.SqlFragment currentProposalScope() {
+        return recordAccess.relatedScopeSql(
+                edu.bu.archive.application.authorization.RecordModule.PROPOSAL,
+                "related_proposal");
     }
 
     public edu.bu.archive.adapter.in.web.dto.award
@@ -622,7 +668,8 @@ public class AwardArchiveService {
                         .AwardProposalResponse
                 > proposals =
                 repository.findCurrentProposals(
-                        normalizedAwardNumber
+                        normalizedAwardNumber,
+                        currentProposalScope()
                 );
 
         long activeProposalCount =

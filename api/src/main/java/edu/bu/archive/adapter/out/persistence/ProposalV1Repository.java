@@ -10,6 +10,7 @@ import edu.bu.archive.adapter.in.web.dto.proposal.ProposalSummaryResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalUnitContactResponse;
 import edu.bu.archive.adapter.in.web.dto.proposal.ProposalVersionSummaryResponse;
 
+import edu.bu.archive.application.authorization.SqlFragment;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -358,7 +359,21 @@ public class ProposalV1Repository {
     public List<ProposalFundedAwardResponse> findFundedAwardRows(
             String proposalNumber
     ) {
-        return jdbc.sql("""
+        return findFundedAwardRows(proposalNumber, SqlFragment.NONE);
+    }
+
+    /**
+     * @param awardScope the AWARD predicate bound to {@code current_award}
+     *        (defect B1) - the version this row displays and navigates to,
+     *        and the version canSeeAwardNumber decides.
+     *        {@link SqlFragment#NONE} reproduces the unscoped statement.
+     */
+    public List<ProposalFundedAwardResponse> findFundedAwardRows(
+            String proposalNumber,
+            SqlFragment awardScope
+    ) {
+        SqlFragment scope = awardScope == null ? SqlFragment.NONE : awardScope;
+        JdbcClient.StatementSpec statement = jdbc.sql("""
                 SELECT
                     pa.award_number,
                     current_award.title AS award_title,
@@ -379,11 +394,16 @@ public class ProposalV1Repository {
                     ON current_award.award_number = pa.award_number
                     AND current_award.is_primary_current = TRUE
                 WHERE pv.proposal_number = :proposalNumber
+                """ + scope.sql() + """
                 ORDER BY
                     pa.active DESC,
                     pa.award_number,
                     pa.proposal_id
-                """)
+                """);
+        for (var parameter : scope.params().entrySet()) {
+            statement = statement.param(parameter.getKey(), parameter.getValue());
+        }
+        return statement
                 .param("proposalNumber", proposalNumber)
                 .query(ProposalFundedAwardResponse.class)
                 .list();

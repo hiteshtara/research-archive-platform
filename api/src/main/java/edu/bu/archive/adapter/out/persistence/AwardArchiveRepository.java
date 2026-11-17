@@ -452,7 +452,30 @@ public class AwardArchiveRepository {
             > findCurrentProposals(
                     String awardNumber
             ) {
-        return jdbc.sql("""
+        return findCurrentProposals(awardNumber, SqlFragment.NONE);
+    }
+
+    /**
+     * @param proposalScope the PROPOSAL predicate for the alias
+     *        {@code related_proposal}, decided on the EXACT linked
+     *        proposal_id this row returns (defect B1). Rendered as an EXISTS
+     *        only when non-empty, so {@link SqlFragment#NONE} leaves the
+     *        statement text unchanged. A link to a Proposal not yet archived
+     *        cannot satisfy it and is omitted for a scoped caller.
+     */
+    public List<
+            edu.bu.archive.adapter.in.web.dto.award
+                    .AwardProposalResponse
+            > findCurrentProposals(
+                    String awardNumber,
+                    SqlFragment proposalScope
+            ) {
+        SqlFragment scope = proposalScope == null ? SqlFragment.NONE : proposalScope;
+        String related = scope.sql().isBlank() ? "" :
+                " AND EXISTS (SELECT 1 FROM archive.proposal_version related_proposal"
+                        + " WHERE related_proposal.proposal_id = proposal.proposal_id"
+                        + scope.sql() + ") ";
+        return bindScope(jdbc.sql("""
                 SELECT
                     proposal.award_funding_proposal_id,
                     proposal.award_id,
@@ -465,6 +488,7 @@ public class AwardArchiveRepository {
                 INNER JOIN archive.award_version award
                     ON award.award_id = proposal.award_id
                 WHERE award.award_number = :awardNumber
+                """ + related + """
                 ORDER BY
                     CASE
                         WHEN UPPER(
@@ -475,7 +499,7 @@ public class AwardArchiveRepository {
                     END,
                     proposal.proposal_id,
                     proposal.award_funding_proposal_id
-                """)
+                """), scope)
                 .param("awardNumber", awardNumber)
                 .query(
                         edu.bu.archive.adapter.in.web.dto.award
@@ -519,7 +543,22 @@ public class AwardArchiveRepository {
     public List<AwardFundingProposalResponse> findFundingProposalRows(
             String awardNumber
     ) {
-        return jdbc.sql("""
+        return findFundingProposalRows(awardNumber, SqlFragment.NONE);
+    }
+
+    /**
+     * @param proposalScope the PROPOSAL predicate bound to
+     *        {@code active_proposal} (defect B1). {@link SqlFragment#NONE}
+     *        reproduces the unscoped statement exactly. A scoped caller never
+     *        receives a row whose active Proposal is unresolved: the
+     *        predicate cannot be satisfied by a NULL row, so it fails closed.
+     */
+    public List<AwardFundingProposalResponse> findFundingProposalRows(
+            String awardNumber,
+            SqlFragment proposalScope
+    ) {
+        SqlFragment scope = proposalScope == null ? SqlFragment.NONE : proposalScope;
+        return bindScope(jdbc.sql("""
                 SELECT
                     proposal.award_funding_proposal_id,
                     proposal.award_id,
@@ -548,6 +587,7 @@ public class AwardArchiveRepository {
                         = linked_proposal.proposal_number
                     AND active_proposal.proposal_sequence_status = 'ACTIVE'
                 WHERE award.award_number = :awardNumber
+                """ + scope.sql() + """
                 ORDER BY
                     CASE
                         WHEN UPPER(TRIM(proposal.active_flag))
@@ -557,7 +597,7 @@ public class AwardArchiveRepository {
                     END,
                     linked_proposal.proposal_number,
                     proposal.proposal_id
-                """)
+                """), scope)
                 .param("awardNumber", awardNumber)
                 .query(AwardFundingProposalResponse.class)
                 .list();
@@ -587,7 +627,22 @@ public class AwardArchiveRepository {
     public List<AwardFundingSubawardResponse> findFundingSubawardRows(
             String awardNumber
     ) {
-        return jdbc.sql("""
+        return findFundingSubawardRows(awardNumber, SqlFragment.NONE);
+    }
+
+    /**
+     * @param subawardScope the SUBAWARD predicate bound to
+     *        {@code linked_subaward} (defect B1); family-level, so binding it
+     *        to the linked version decides the same family the navigation
+     *        target belongs to. {@link SqlFragment#NONE} reproduces the
+     *        unscoped statement exactly.
+     */
+    public List<AwardFundingSubawardResponse> findFundingSubawardRows(
+            String awardNumber,
+            SqlFragment subawardScope
+    ) {
+        SqlFragment scope = subawardScope == null ? SqlFragment.NONE : subawardScope;
+        return bindScope(jdbc.sql("""
                 SELECT
                     linked_subaward.subaward_code,
                     current_subaward.organization_id,
@@ -611,9 +666,10 @@ public class AwardArchiveRepository {
                     WHERE sa.subaward_id = current_subaward.subaward_id
                 ) amt ON TRUE
                 WHERE funding.award_number = :awardNumber
+                """ + scope.sql() + """
                 ORDER BY linked_subaward.subaward_code,
                     funding.subaward_funding_source_id
-                """)
+                """), scope)
                 .param("awardNumber", awardNumber)
                 .query(AwardFundingSubawardResponse.class)
                 .list();
@@ -635,21 +691,35 @@ public class AwardArchiveRepository {
     public List<AwardAssociatedNegotiationResponse> findAssociatedNegotiationRows(
             String awardNumber
     ) {
-        return jdbc.sql("""
+        return findAssociatedNegotiationRows(awardNumber, SqlFragment.NONE);
+    }
+
+    /**
+     * @param negotiationScope the NEGOTIATION predicate bound to {@code n}
+     *        (defect B1). {@link SqlFragment#NONE} reproduces the unscoped
+     *        result exactly.
+     */
+    public List<AwardAssociatedNegotiationResponse> findAssociatedNegotiationRows(
+            String awardNumber,
+            SqlFragment negotiationScope
+    ) {
+        SqlFragment scope = negotiationScope == null ? SqlFragment.NONE : negotiationScope;
+        return bindScope(jdbc.sql("""
                 SELECT
-                    negotiation_id,
-                    document_number,
-                    negotiation_status_description,
-                    negotiation_agreement_type_description,
-                    negotiator_full_name,
-                    negotiation_start_date,
-                    negotiation_end_date
-                FROM archive.negotiation
-                WHERE negotiation_association_type_code = 'AWD'
-                    AND associated_document_id = :awardNumber
-                ORDER BY negotiation_start_date DESC NULLS LAST,
-                    negotiation_id DESC
-                """)
+                    n.negotiation_id,
+                    n.document_number,
+                    n.negotiation_status_description,
+                    n.negotiation_agreement_type_description,
+                    n.negotiator_full_name,
+                    n.negotiation_start_date,
+                    n.negotiation_end_date
+                FROM archive.negotiation n
+                WHERE n.negotiation_association_type_code = 'AWD'
+                    AND n.associated_document_id = :awardNumber
+                """ + scope.sql() + """
+                ORDER BY n.negotiation_start_date DESC NULLS LAST,
+                    n.negotiation_id DESC
+                """), scope)
                 .param("awardNumber", awardNumber)
                 .query(AwardAssociatedNegotiationResponse.class)
                 .list();

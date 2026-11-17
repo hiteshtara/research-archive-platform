@@ -254,6 +254,18 @@ public class RecordAuthorizationService
     /**
      * {@inheritDoc}
      *
+     * <p>Exactly {@link #scopeSql(RecordModule, String)}: NONE when
+     * enforcement is off or the caller is Central, the module's predicate
+     * otherwise. There is deliberately no second rule for related rows.
+     */
+    @Override
+    public SqlFragment relatedScopeSql(RecordModule module, String alias) {
+        return scopeSql(module, alias);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
      * <p>Delegates to {@link #scopeSql(RecordModule, String)} for
      * {@link RecordModule#AWARD}; the Award service depends on the narrow
      * {@link AwardRecordAccess} port rather than on this whole class.

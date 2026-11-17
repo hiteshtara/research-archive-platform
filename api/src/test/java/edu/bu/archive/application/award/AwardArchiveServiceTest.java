@@ -95,7 +95,8 @@ class AwardArchiveServiceTest {
                 "205", "Title", "Funded", "125761", "PI", "Sponsor",
                 BigDecimal.TEN, 1, 2, true, 212L, 2986L
         );
-        when(repository.findFundingProposalRows("200268-00001"))
+        when(repository.findFundingProposalRows("200268-00001",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(link));
 
         List<AwardFundingProposalResponse> result =
@@ -126,7 +127,8 @@ class AwardArchiveServiceTest {
                 "01100003", "Third", "Funded", "113", "PI3", "Sponsor",
                 BigDecimal.TEN, 1, 1, true, 30L, 30L
         );
-        when(repository.findFundingProposalRows("100072-00001"))
+        when(repository.findFundingProposalRows("100072-00001",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(first, second, third));
 
         List<AwardFundingProposalResponse> result =
@@ -144,7 +146,8 @@ class AwardArchiveServiceTest {
                 "205", "Title", "Funded", "125761", "PI", "Sponsor",
                 BigDecimal.TEN, 1, 2, false, 212L, 2986L
         );
-        when(repository.findFundingProposalRows("200268-00001"))
+        when(repository.findFundingProposalRows("200268-00001",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(inactive));
 
         List<AwardFundingProposalResponse> result =
@@ -174,7 +177,8 @@ class AwardArchiveServiceTest {
                 null, null, null, null, null, null,
                 null, null, null, true, 9199L, null
         );
-        when(repository.findFundingProposalRows("202034-00001"))
+        when(repository.findFundingProposalRows("202034-00001",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(unresolved));
 
         List<AwardFundingProposalResponse> result =
@@ -214,7 +218,8 @@ class AwardArchiveServiceTest {
                         "Data Use Agreement", "WILLIAM P SEGARRA",
                         LocalDate.of(2024, 4, 9), LocalDate.of(2024, 4, 15)
                 );
-        when(repository.findAssociatedNegotiationRows("104949-00002"))
+        when(repository.findAssociatedNegotiationRows("104949-00002",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(negotiation));
 
         List<AwardAssociatedNegotiationResponse> result =
@@ -242,7 +247,8 @@ class AwardArchiveServiceTest {
                         "Data Use Agreement", "WILLIAM P SEGARRA",
                         LocalDate.of(2024, 4, 9), LocalDate.of(2024, 4, 15)
                 );
-        when(repository.findAssociatedNegotiationRows("104949-00002"))
+        when(repository.findAssociatedNegotiationRows("104949-00002",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of(abandoned, fullyExecuted));
 
         List<AwardAssociatedNegotiationResponse> result =
@@ -257,7 +263,8 @@ class AwardArchiveServiceTest {
         // Award-linked negotiations - a real, valid state, not an error.
         when(repository.findAwardNumberForId(3038430L))
                 .thenReturn(Optional.of("101929-00001"));
-        when(repository.findAssociatedNegotiationRows("101929-00001"))
+        when(repository.findAssociatedNegotiationRows("101929-00001",
+                edu.bu.archive.application.authorization.SqlFragment.NONE))
                 .thenReturn(List.of());
 
         List<AwardAssociatedNegotiationResponse> result =

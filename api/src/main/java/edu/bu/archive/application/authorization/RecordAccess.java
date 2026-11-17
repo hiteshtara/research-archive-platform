@@ -34,6 +34,30 @@ public interface RecordAccess {
     boolean unrestricted();
 
     /**
+     * The scope predicate of a RELATED module, for a row alias in a query
+     * owned by another module - e.g. the Proposal predicate applied to the
+     * Funding Proposals listed on an Award.
+     *
+     * <p>Why this exists (defect B1, 2026-11-17). Related-record endpoints
+     * gated only the PARENT record and then returned every related row,
+     * disclosing the title, PI, sponsor, amounts and negotiator of related
+     * records the caller could not open. A related row must instead pass
+     * its OWN module's rule, rendered by the same
+     * {@link RecordScopeSqlBuilder} that scopes that module's lists, so the
+     * related list and the related record's workspace cannot disagree.
+     * Unauthorized relations are omitted in SQL - no stub row, no count.
+     *
+     * <p>The default fails closed for a restricted caller and renders
+     * nothing when unrestricted, which keeps every permissive fallback
+     * ({@code PERMIT_ALL}) byte-identical to the unscoped statement.
+     * {@link RecordAuthorizationService} overrides it with the real
+     * predicate.
+     */
+    default SqlFragment relatedScopeSql(RecordModule module, String alias) {
+        return unrestricted() ? SqlFragment.NONE : SqlFragment.DENY_ALL;
+    }
+
+    /**
      * Refuses to start when record authorization is ENABLED but the only
      * available implementation for a module is its permissive fallback.
      *

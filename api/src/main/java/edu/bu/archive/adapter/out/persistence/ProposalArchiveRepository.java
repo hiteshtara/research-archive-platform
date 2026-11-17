@@ -593,7 +593,27 @@ public class ProposalArchiveRepository {
     public List<ProposalAwardResponse> findAwards(
             String proposalNumber
     ) {
-        return jdbc.sql("""
+        return findAwards(proposalNumber, SqlFragment.NONE);
+    }
+
+    /**
+     * @param awardScope the AWARD predicate for the alias
+     *        {@code related_award}, decided on the CURRENT version of each
+     *        listed award_number - the version canSeeAwardNumber decides
+     *        (defect B1). Rendered only when non-empty, so
+     *        {@link SqlFragment#NONE} leaves the statement text unchanged.
+     */
+    public List<ProposalAwardResponse> findAwards(
+            String proposalNumber,
+            SqlFragment awardScope
+    ) {
+        SqlFragment scope = awardScope == null ? SqlFragment.NONE : awardScope;
+        String related = scope.sql().isBlank() ? "" :
+                " AND EXISTS (SELECT 1 FROM archive.award_version related_award"
+                        + " WHERE related_award.award_number = ranked_awards.award_number"
+                        + " AND related_award.is_primary_current = TRUE"
+                        + scope.sql() + ") ";
+        return bindScope(jdbc.sql("""
                 WITH ranked_awards AS (
                     SELECT
                         relationship.proposal_id,
@@ -616,11 +636,12 @@ public class ProposalArchiveRepository {
                     award_number
                 FROM ranked_awards
                 WHERE row_rank = 1
+                """ + related + """
                 ORDER BY
                     award_number NULLS LAST,
                     award_id NULLS LAST,
                     proposal_id
-                """)
+                """), scope)
                 .param("proposalNumber", proposalNumber)
                 .query(ProposalAwardResponse.class)
                 .list();
