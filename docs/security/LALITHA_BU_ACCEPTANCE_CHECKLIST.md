@@ -278,9 +278,23 @@ These checks are done **with the administrator**. The administrator does the ste
 
 Engineering is fixing these separately. If you hit one, mark it **FAIL** and put the issue number from this list in Notes, so it is not reported twice.
 
-1. **Related-record lists are not filtered yet.** An Award's linked Proposals, Subawards and Negotiations, and a Proposal's funded Awards, may show records the user cannot open. This affects US-DEP-005 #1, US-SEC-003 and US-CEN-003 #2 for restricted accounts.
-2. **IRB records and the investigator list are not limited by department.** This affects any check that browses IRB or the investigator list as T-DEPT, T-PI or T-OAV.
-3. **The activity audit does not yet record *who* acted.** This affects US-SEC-004 #1 and #2.
+_Status as of 2026-11-17._
+
+**Fixed, retest these:**
+
+- **Related-record lists.** Fixed on `main` in PR #159 (merge `e0561ab`). An Award's linked Proposals, Subawards and Negotiations, and a Proposal's funded Awards, now show only records the user may open. Retest US-DEP-005 #1, US-SEC-003 and US-CEN-003 #2 for restricted accounts once enforcement is enabled for the test window. If a restricted record still appears in one of these lists, mark **FAIL** and quote "#159".
+
+**Still open, expect FAIL until fixed:**
+
+1. **H1: Time-and-Money details belong to other awards.** On an Award you can open, a Time-and-Money transaction or document link can be changed to show another award's transaction or document. Fix in progress. This affects US-SEC-003 #1 and US-DEP-001 #1/#2 for restricted accounts.
+2. **H2: Negotiation lists reveal the associated record.** The Negotiation list and detail can show the associated Award or Proposal number, title, PI and sponsor, even when the user cannot open that record. Searching by an award number can also reveal that a negotiation exists. Fix in progress. This affects US-DEP-005 #1/#2 and US-SEC-003 #2.
+3. **H3: SAP transmissions show other awards.** An Award's SAP transmission section, and the Award Report PDF, can list other awards in the transmitted hierarchy. Fix in progress. This affects US-DEP-001 #2 and US-DEP-005 #1.
+4. **The activity audit does not yet record *who* acted.** It is also not switched on in DEV. This affects US-SEC-004 #1 and #2. The fix is in PR #160, and activation needs separate approval.
+
+**Out of scope for this release, do not test:**
+
+- **IRB records and the investigator list.** IRB is excluded from the release (owner decision, 2026-11-17). Mark IRB-only checks **N/A (out of scope)**, not PASS.
+- **H4: Archive Explorer.** It has been switched off in DEV (2026-11-17), because it is not in the release and has no record-level authorization. The Explorer menu item and pages no longer appear. If you see them, mark **FAIL**.
 
 ## Sign-off
 
