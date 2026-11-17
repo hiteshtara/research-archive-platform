@@ -29,6 +29,7 @@ const ROSTER = [{
 }];
 
 beforeEach(() => {
+  vi.clearAllMocks();
   listAdministrators.mockResolvedValue(ROSTER);
   assignAdministrator.mockResolvedValue({});
   revokeAdministrator.mockResolvedValue(undefined);
@@ -115,9 +116,62 @@ describe("AdministratorsPage with writes enabled", () => {
     expect((appoint as HTMLButtonElement).disabled).toBe(true); // empty form
 
     await user.type(screen.getByLabelText(/institutional identifier/i), "ARP-NEW");
-    await user.type(screen.getByLabelText(/^reason$/i), "because");
+    await user.type(screen.getByLabelText(/^reason/i), "Appointed to cover the security review");
     await waitFor(() =>
       expect((screen.getByRole("button", { name: "Appoint" }) as HTMLButtonElement).disabled)
         .toBe(false));
+  });
+
+  test("Appoint stays disabled while the reason breaks the reason rule", async () => {
+    getCapabilities.mockResolvedValue(serverSays.activeAdministratorWritesOn);
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderWithProviders(<AdministratorsPage />);
+    await screen.findByText("ARP-TEST-ADMIN");
+
+    await user.type(screen.getByLabelText(/institutional identifier/i), "ARP-NEW");
+    const reason = screen.getByLabelText(/^reason/i);
+    for (const bad of ["because", "N/A", "test test test", "aaaaaaaaaaaa"]) {
+      await user.clear(reason);
+      await user.type(reason, bad);
+      expect((screen.getByRole("button", { name: "Appoint" }) as HTMLButtonElement).disabled)
+        .toBe(true);
+    }
+    // The rule is stated inline under the field.
+    expect(screen.getByText("A reason cannot be one character repeated.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Appoint" }));
+    expect(assignAdministrator).not.toHaveBeenCalled();
+  });
+
+  test("Remove takes its reason in-page, never through window.prompt", async () => {
+    getCapabilities.mockResolvedValue(serverSays.activeAdministratorWritesOn);
+    listAdministrators.mockResolvedValue([
+      ...ROSTER,
+      { ...ROSTER[0], adminMemberId: 2, institutionalIdentifier: "ARP-SECOND-ADMIN" },
+    ]);
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderWithProviders(<AdministratorsPage />);
+    await screen.findByText("ARP-SECOND-ADMIN");
+
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[1]);
+    const panel = screen.getByRole("group", { name: /remove ARP-SECOND-ADMIN/i });
+    const confirm = within(panel).getByRole("button", { name: "Confirm removal" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(within(panel).getByLabelText(/^reason/i), "n/a");
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    await user.clear(within(panel).getByLabelText(/^reason/i));
+    await user.type(
+      within(panel).getByLabelText(/^reason/i),
+      "  Left the   research office  ",
+    );
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    await user.click(confirm);
+
+    expect(window.prompt).not.toHaveBeenCalled();
+    expect(revokeAdministrator).toHaveBeenCalledWith(
+      "ARP-SECOND-ADMIN",
+      "Left the research office",
+    );
   });
 });

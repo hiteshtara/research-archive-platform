@@ -16,6 +16,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import { ReadOnlyBanner } from "../../features/securityAdmin/ReadOnlyBanner";
+import {
+  ReasonConfirmPanel,
+  ReasonField,
+} from "../../features/securityAdmin/ReasonConfirmPanel";
+import { normalizeReason, reasonProblem } from "../../features/securityAdmin/reasonRule.mjs";
 import { useAdminWritesAllowed } from "../../features/securityAdmin/useAdminWritesAllowed";
 
 import {
@@ -47,15 +52,23 @@ import {
 export function AdminIdentityWorkspacePage() {
   const { identifier = "" } = useParams();
   const queryClient = useQueryClient();
+  /*
+   * No access type is preselected. The form used to start on CENTRAL - access
+   * to every record in every unit - so the broadest grant was one click away
+   * from a form nobody had read.
+   */
   const [form, setForm] = useState({
-    type: "CENTRAL",
+    type: "",
     unitNumber: "",
     includeDescendants: false,
     ioValue: "",
     expiresAt: "",
     reason: "",
   });
-  const [problems, setProblems] = useState<string[]>([]);
+  /** Which in-page confirmation is open: a grant id to revoke, or suspension. */
+  const [confirming, setConfirming] = useState<
+    { kind: "revoke"; grantId: number } | { kind: "suspension" } | null
+  >(null);
 
   const identity = useQuery({
     queryKey: ["admin", "identity", identifier],
@@ -74,7 +87,7 @@ export function AdminIdentityWorkspacePage() {
         includeDescendants: form.includeDescendants,
         ioValue: form.ioValue || null,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
-        reason: form.reason || null,
+        reason: normalizeReason(form.reason),
       }),
     onSuccess: refresh,
   });
@@ -82,42 +95,43 @@ export function AdminIdentityWorkspacePage() {
   const revoke = useMutation({
     mutationFn: (input: { grantId: number; reason: string }) =>
       revokeGrant(identifier, input.grantId, input.reason),
-    onSuccess: refresh,
+    onSuccess: () => {
+      setConfirming(null);
+      return refresh();
+    },
   });
 
   const suspend = useMutation({
     mutationFn: (input: { suspended: boolean; reason: string }) =>
       setSuspension(identifier, input.suspended, input.reason),
-    onSuccess: refresh,
+    onSuccess: () => {
+      setConfirming(null);
+      return refresh();
+    },
   });
 
   const data = identity.data;
   const banner = data ? accessBanner(data) : null;
 
-  function submitGrant() {
-    const found = validateGrantForm(form);
-    setProblems(found);
-    if (found.length === 0) {
-      grant.mutate();
-    }
-  }
-
   /*
    * Every mutation control on this page is gated on what the SERVER reports.
-   * askReason() is also gated, so a disabled control cannot even open a
-   * prompt - the window.prompt would otherwise block the page before the
-   * request was refused.
+   * Destructive actions open an in-page reason panel rather than a browser
+   * prompt: a prompt could not enforce the reason rule, blocked the page, and
+   * could not be tested. The opening buttons are disabled while writes are
+   * off, so the panel cannot even be reached then.
    */
   const writesAllowed = useAdminWritesAllowed();
 
-  function askReason(action: string): string | null {
-    if (!writesAllowed) {
-      return null;
-    }
-    // Destructive actions require a typed reason: an unexplained audit row is
-    // a poor audit row, and the reason column exists on every table involved.
-    const reason = window.prompt(`Reason for ${action}:`);
-    return reason && reason.trim() ? reason.trim() : null;
+  // Live validation: Grant access stays disabled until the form is valid.
+  const problems = validateGrantForm(form);
+  const reasonMessage = reasonProblem(form.reason);
+  // The reason's problem is shown inline under its field, not in this list.
+  const otherProblems = problems.filter((problem) => problem !== reasonMessage);
+  const grantValid = problems.length === 0;
+
+  function submitGrant() {
+    if (!writesAllowed || !grantValid) return;
+    grant.mutate();
   }
 
   return (
@@ -174,12 +188,23 @@ export function AdminIdentityWorkspacePage() {
                   disabled={!writesAllowed || revoke.isPending}
                   onClick={() => {
                     if (!writesAllowed) return;
-                    const reason = askReason("revoking this grant");
-                    if (reason) revoke.mutate({ grantId: item.grantId, reason });
+                    setConfirming({ kind: "revoke", grantId: item.grantId });
                   }}
                 >
                   Revoke
                 </Button>
+              )}
+              {item.active
+                && confirming?.kind === "revoke"
+                && confirming.grantId === item.grantId && (
+                <ReasonConfirmPanel
+                  title="Revoke this grant"
+                  confirmLabel="Confirm revoke"
+                  writesAllowed={writesAllowed}
+                  pending={revoke.isPending}
+                  onCancel={() => setConfirming(null)}
+                  onConfirm={(reason) => revoke.mutate({ grantId: item.grantId, reason })}
+                />
               )}
             </Box>
           ))}
@@ -188,10 +213,10 @@ export function AdminIdentityWorkspacePage() {
 
       <Box>
         <Typography variant="h6">Grant access</Typography>
-        {problems.length > 0 && (
-          <Alert severity="warning" sx={{ mt: 1 }}>
+        {form.type !== "" && otherProblems.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 1 }} data-testid="grant-form-problems">
             <ul style={{ margin: 0, paddingInlineStart: "1.2em" }}>
-              {problems.map((problem) => (
+              {otherProblems.map((problem) => (
                 <li key={problem}>{problem}</li>
               ))}
             </ul>
@@ -202,8 +227,23 @@ export function AdminIdentityWorkspacePage() {
             select
             size="small"
             label="Type"
+            required
             value={form.type}
             onChange={(event) => setForm({ ...form, type: event.target.value })}
+            slotProps={{
+              inputLabel: { shrink: true },
+              select: {
+                displayEmpty: true,
+                renderValue: (value) =>
+                  value ? (
+                    grantTypeLabel(String(value))
+                  ) : (
+                    <Typography component="span" color="text.secondary">
+                      Choose access type…
+                    </Typography>
+                  ),
+              },
+            }}
           >
             {GRANT_TYPES.map((type: string) => (
               <MenuItem key={type} value={type}>
@@ -211,6 +251,13 @@ export function AdminIdentityWorkspacePage() {
               </MenuItem>
             ))}
           </TextField>
+
+          {form.type === "CENTRAL" && (
+            <Alert severity="warning" data-testid="central-grant-warning">
+              Central access grants access to every record in every unit. It
+              requires a second administrator&apos;s approval.
+            </Alert>
+          )}
 
           {form.type === "UNIT" && (
             <>
@@ -253,11 +300,9 @@ export function AdminIdentityWorkspacePage() {
             value={form.expiresAt}
             onChange={(event) => setForm({ ...form, expiresAt: event.target.value })}
           />
-          <TextField
-            size="small"
-            label="Reason"
+          <ReasonField
             value={form.reason}
-            onChange={(event) => setForm({ ...form, reason: event.target.value })}
+            onChange={(reason) => setForm({ ...form, reason })}
           />
           <Button
             variant="contained"
@@ -265,7 +310,7 @@ export function AdminIdentityWorkspacePage() {
               if (!writesAllowed) return;
               submitGrant();
             }}
-            disabled={!writesAllowed || grant.isPending}
+            disabled={!writesAllowed || !grantValid || grant.isPending}
           >
             Grant access
           </Button>
@@ -288,12 +333,22 @@ export function AdminIdentityWorkspacePage() {
           disabled={!writesAllowed || suspend.isPending}
           onClick={() => {
             if (!writesAllowed) return;
-            const reason = askReason(data?.suspended ? "restoring access" : "suspending access");
-            if (reason) suspend.mutate({ suspended: !data?.suspended, reason });
+            setConfirming({ kind: "suspension" });
           }}
         >
           {data?.suspended ? "Restore access" : "Suspend access"}
         </Button>
+        {confirming?.kind === "suspension" && (
+          <ReasonConfirmPanel
+            title={data?.suspended ? "Restore access" : "Suspend access"}
+            confirmLabel={data?.suspended ? "Confirm restore" : "Confirm suspension"}
+            destructive={!data?.suspended}
+            writesAllowed={writesAllowed}
+            pending={suspend.isPending}
+            onCancel={() => setConfirming(null)}
+            onConfirm={(reason) => suspend.mutate({ suspended: !data?.suspended, reason })}
+          />
+        )}
       </Box>
 
       <Divider />
