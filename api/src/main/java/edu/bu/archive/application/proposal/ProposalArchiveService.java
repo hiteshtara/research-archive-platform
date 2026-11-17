@@ -178,8 +178,13 @@ public class ProposalArchiveService {
         String normalizedProposalNumber =
                 requireExistingProposal(proposalNumber);
 
+        // B1: each listed Award must pass the AWARD rule itself (current
+        // version); the gate above authorises only the Proposal.
         return repository.findAwards(
-                normalizedProposalNumber
+                normalizedProposalNumber,
+                recordAccess.relatedScopeSql(
+                        edu.bu.archive.application.authorization.RecordModule.AWARD,
+                        "related_award")
         );
     }
 
