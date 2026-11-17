@@ -21,6 +21,11 @@ import {
   revokeAdministratorDisabledReason,
 } from "../../features/admin/adminPresentation.mjs";
 import { ReadOnlyBanner } from "../../features/securityAdmin/ReadOnlyBanner";
+import {
+  ReasonConfirmPanel,
+  ReasonField,
+} from "../../features/securityAdmin/ReasonConfirmPanel";
+import { isValidReason, normalizeReason } from "../../features/securityAdmin/reasonRule.mjs";
 import { useAdminWritesAllowed } from "../../features/securityAdmin/useAdminWritesAllowed";
 
 /**
@@ -35,6 +40,8 @@ export function AdministratorsPage() {
   const queryClient = useQueryClient();
   const [identifier, setIdentifier] = useState("");
   const [reason, setReason] = useState("");
+  /** The administrator whose removal is being confirmed in-page, if any. */
+  const [removing, setRemoving] = useState<string | null>(null);
 
   const administrators = useQuery({
     queryKey: ["admin", "administrators"],
@@ -45,7 +52,7 @@ export function AdministratorsPage() {
     queryClient.invalidateQueries({ queryKey: ["admin", "administrators"] });
 
   const assign = useMutation({
-    mutationFn: () => assignAdministrator(identifier.trim(), reason.trim()),
+    mutationFn: () => assignAdministrator(identifier.trim(), normalizeReason(reason)),
     onSuccess: () => {
       setIdentifier("");
       setReason("");
@@ -56,7 +63,10 @@ export function AdministratorsPage() {
   const revoke = useMutation({
     mutationFn: (input: { identifier: string; reason: string }) =>
       revokeAdministrator(input.identifier, input.reason),
-    onSuccess: refresh,
+    onSuccess: () => {
+      setRemoving(null);
+      return refresh();
+    },
   });
 
   const active = administrators.data ?? [];
@@ -92,52 +102,62 @@ export function AdministratorsPage() {
 
       <Stack spacing={1}>
         {active.map((member) => (
-          <Stack
-            key={member.adminMemberId}
-            direction="row"
-            spacing={2}
-            sx={{
-              alignItems: "center",
-              border: 1,
-              borderColor: "divider",
-              borderRadius: 1,
-              p: 2,
-            }}
-          >
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="subtitle2">{member.institutionalIdentifier}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Appointed {formatDate(member.grantedAt)} by {member.grantedBy}
-                {member.reason ? ` — ${member.reason}` : ""}
-              </Typography>
-            </Box>
-            <Tooltip
-              title={
-                !writesAllowed
-                  ? "Read-only mode: administrator changes are disabled in this environment"
-                  : revokeAdministratorDisabledReason(active.length) ?? ""
-              }
+          <Box key={member.adminMemberId}>
+            <Stack
+              direction="row"
+              spacing={2}
+              sx={{
+                alignItems: "center",
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 1,
+                p: 2,
+              }}
             >
-              <span>
-                <Button
-                  size="small"
-                  color="error"
-                  disabled={!canRevoke || revoke.isPending}
-                  onClick={() => {
-                    const why = window.prompt("Reason for removing this administrator:");
-                    if (why && why.trim()) {
-                      revoke.mutate({
-                        identifier: member.institutionalIdentifier,
-                        reason: why.trim(),
-                      });
-                    }
-                  }}
-                >
-                  Remove
-                </Button>
-              </span>
-            </Tooltip>
-          </Stack>
+              <Box sx={{ flexGrow: 1 }}>
+                <Typography variant="subtitle2">{member.institutionalIdentifier}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Appointed {formatDate(member.grantedAt)} by {member.grantedBy}
+                  {member.reason ? ` — ${member.reason}` : ""}
+                </Typography>
+              </Box>
+              <Tooltip
+                title={
+                  !writesAllowed
+                    ? "Read-only mode: administrator changes are disabled in this environment"
+                    : revokeAdministratorDisabledReason(active.length) ?? ""
+                }
+              >
+                <span>
+                  <Button
+                    size="small"
+                    color="error"
+                    disabled={!canRevoke || revoke.isPending}
+                    onClick={() => {
+                      // No browser prompt: the reason is taken in-page, where
+                      // the reason rule can be enforced.
+                      if (!canRevoke) return;
+                      setRemoving(member.institutionalIdentifier);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </span>
+              </Tooltip>
+            </Stack>
+            {removing === member.institutionalIdentifier && (
+              <ReasonConfirmPanel
+                title={`Remove ${member.institutionalIdentifier} as an administrator`}
+                confirmLabel="Confirm removal"
+                writesAllowed={canRevoke}
+                pending={revoke.isPending}
+                onCancel={() => setRemoving(null)}
+                onConfirm={(why) =>
+                  revoke.mutate({ identifier: member.institutionalIdentifier, reason: why })
+                }
+              />
+            )}
+          </Box>
         ))}
       </Stack>
 
@@ -158,13 +178,7 @@ export function AdministratorsPage() {
             disabled={!writesAllowed}
             onChange={(event) => setIdentifier(event.target.value)}
           />
-          <TextField
-            size="small"
-            label="Reason"
-            value={reason}
-            disabled={!writesAllowed}
-            onChange={(event) => setReason(event.target.value)}
-          />
+          <ReasonField value={reason} disabled={!writesAllowed} onChange={setReason} />
           <Tooltip
             title={
               writesAllowed
@@ -178,13 +192,13 @@ export function AdministratorsPage() {
                 disabled={
                   !writesAllowed
                     || !identifier.trim()
-                    || !reason.trim()
+                    || !isValidReason(reason)
                     || assign.isPending
                 }
                 onClick={() => {
                   // Belt and braces: the button is already disabled, and a
                   // synthetic click must still not reach the API.
-                  if (!writesAllowed) return;
+                  if (!writesAllowed || !isValidReason(reason)) return;
                   assign.mutate();
                 }}
               >

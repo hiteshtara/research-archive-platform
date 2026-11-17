@@ -14,6 +14,9 @@ import {
   validateGrantForm,
 } from "./adminPresentation.mjs";
 
+/** A reason that satisfies the reason rule, so each grant test isolates one problem. */
+const VALID_REASON = "Department chair approved access for the audit";
+
 /** An identity that has been verified and linked by an administrator. */
 const ACTIVE_LINK = { status: "ACTIVE" };
 
@@ -128,36 +131,65 @@ test("the last administrator cannot be revoked from the UI", () => {
 });
 
 test("a unit grant without a unit number is refused before it is sent", () => {
-  assert.deepEqual(validateGrantForm({ type: "UNIT", unitNumber: "  " }), [
+  assert.deepEqual(validateGrantForm({ type: "UNIT", unitNumber: "  ", reason: VALID_REASON }), [
     "A unit grant needs a unit number.",
   ]);
 });
 
 test("an SAP account grant without an account number is refused before it is sent", () => {
-  assert.deepEqual(validateGrantForm({ type: "IO", ioValue: "" }), [
+  assert.deepEqual(validateGrantForm({ type: "IO", ioValue: "", reason: VALID_REASON }), [
     "An SAP account grant needs an account number.",
   ]);
 });
 
 test("only a unit grant may include sub-units", () => {
-  assert.deepEqual(validateGrantForm({ type: "CENTRAL", includeDescendants: true }), [
-    "Only a unit grant can include sub-units.",
-  ]);
   assert.deepEqual(
-    validateGrantForm({ type: "IO", ioValue: "9500012345", includeDescendants: true }),
+    validateGrantForm({ type: "CENTRAL", includeDescendants: true, reason: VALID_REASON }),
+    ["Only a unit grant can include sub-units."],
+  );
+  assert.deepEqual(
+    validateGrantForm({
+      type: "IO",
+      ioValue: "9500012345",
+      includeDescendants: true,
+      reason: VALID_REASON,
+    }),
     ["Only a unit grant can include sub-units."],
   );
 });
 
 test("a valid grant form produces no problems", () => {
-  assert.deepEqual(validateGrantForm({ type: "CENTRAL" }), []);
-  assert.deepEqual(validateGrantForm({ type: "UNIT", unitNumber: "1234", includeDescendants: true }), []);
-  assert.deepEqual(validateGrantForm({ type: "IO", ioValue: "9500012345" }), []);
+  assert.deepEqual(validateGrantForm({ type: "CENTRAL", reason: VALID_REASON }), []);
+  assert.deepEqual(
+    validateGrantForm({
+      type: "UNIT",
+      unitNumber: "1234",
+      includeDescendants: true,
+      reason: VALID_REASON,
+    }),
+    [],
+  );
+  assert.deepEqual(validateGrantForm({ type: "IO", ioValue: "9500012345", reason: VALID_REASON }), []);
 });
 
 test("an unparseable expiry is caught before it is sent", () => {
-  assert.deepEqual(validateGrantForm({ type: "CENTRAL", expiresAt: "not a date" }), [
-    "The expiry date is not a valid date.",
+  assert.deepEqual(
+    validateGrantForm({ type: "CENTRAL", expiresAt: "not a date", reason: VALID_REASON }),
+    ["The expiry date is not a valid date."],
+  );
+});
+
+test("a grant form with no access type selected is refused", () => {
+  // The form starts with no type: nothing - least of all CENTRAL - is preselected.
+  assert.deepEqual(validateGrantForm({ type: "", reason: VALID_REASON }), ["Choose a grant type."]);
+  assert.deepEqual(validateGrantForm({ type: "", reason: "" }), ["Choose a grant type."]);
+});
+
+test("a grant form without a valid reason is refused", () => {
+  assert.deepEqual(validateGrantForm({ type: "CENTRAL" }), ["A reason is required."]);
+  assert.deepEqual(validateGrantForm({ type: "CENTRAL", reason: "   " }), ["A reason is required."]);
+  assert.deepEqual(validateGrantForm({ type: "CENTRAL", reason: "N/A" }), [
+    "Describe the actual reason; placeholder text is not accepted.",
   ]);
 });
 

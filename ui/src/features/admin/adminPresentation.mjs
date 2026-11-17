@@ -12,6 +12,8 @@
  *   - an SAP account grant reaches Awards only.
  */
 
+import { reasonProblem } from "../securityAdmin/reasonRule.mjs";
+
 /** Grant types as the API stores them. IO is shown as "SAP Account". */
 export const GRANT_TYPES = ["CENTRAL", "UNIT", "IO", "CONTACT_DERIVATION"];
 
@@ -180,7 +182,8 @@ export function auditActionLabel(action) {
 /**
  * Validate a grant form before sending it, so the server's CHECK constraints
  * are never the first thing a user hears from. Returns an array of messages;
- * empty means valid.
+ * empty means valid. An empty type - the form's starting state, since no
+ * access type is preselected - is refused, and a reason is always required.
  */
 export function validateGrantForm(form) {
   const problems = [];
@@ -199,6 +202,12 @@ export function validateGrantForm(form) {
   }
   if (form.expiresAt && Number.isNaN(new Date(form.expiresAt).getTime())) {
     problems.push("The expiry date is not a valid date.");
+  }
+  // Every grant writes an audit row; the reason is the only part of it that
+  // explains intent, so it is required here as on every other write.
+  const reason = reasonProblem(form.reason);
+  if (reason) {
+    problems.push(reason);
   }
   return problems;
 }
