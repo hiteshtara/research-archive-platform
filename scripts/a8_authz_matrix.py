@@ -151,9 +151,12 @@ def jget(base, t, path):
 
 # ------------------------------------------------------------------ fixtures
 def discover(base, t):
-    s, caps = jget(base, t, "/api/v1/me/capabilities")
-    if not caps or caps.get("enforcementEnabled") is not False:
-        sys.exit("refusing: baseline needs enforcement OFF (and a JSON API response)")
+    # /api/v1/me/capabilities reports enforcementEnabled=false for EVERY non-administrator
+    # (CapabilitiesService returns denied()), so it cannot tell the modes apart. The unscoped
+    # dashboard can: with enforcement OFF the baseline account sees the whole archive.
+    s, dash = jget(base, t, "/api/dashboard")
+    if s != 200 or not dash or int(dash.get("awards", -1)) < 10000:
+        sys.exit(f"refusing: baseline needs enforcement OFF (dashboard {s}, awards {dash and dash.get('awards')})")
     fx = {"captured_at": dt.datetime.now(dt.timezone.utc).isoformat(), "base": base, "awards": {}}
     for k, r in FIXED.items():
         s, a = jget(base, t, f"/api/v1/awards/by-number/{r['award_number']}")
@@ -231,11 +234,19 @@ def plan(fx):
         return out
 
     for role in ROLES:
-        add(role, "caps", "/api/v1/me/capabilities", "window guard")
+        # Window guard. S4 proves enforcement is ON (403 ACCESS_NOT_PROVISIONED on the dashboard);
+        # S1/S3 prove administrator writes are unavailable. capabilities.enforcementEnabled is
+        # always false for a non-administrator, so it is not used as the guard.
+        if role == "NONE":
+            add(role, "caps", "/api/dashboard", "window guard: enforcement on")
+        else:
+            add(role, "caps", "/api/v1/me/capabilities", "window guard: writes unavailable")
         for path, why in EXCLUDED:
             add(role, "excluded", path, why)
         for path in ADMIN_PATHS:
-            add(role, "none" if role == "NONE" else "admin", path, "admin API, non-administrator")
+            # The admin API refuses every non-administrator with its own 403 before any provisioning
+            # check, so S4 is judged as a non-administrator here, not as ACCESS_NOT_PROVISIONED.
+            add(role, "admin", path, "admin API, non-administrator")
         for path in DISABLED_PATHS:
             add(role, "disabled", path, "out of A8 scope: Explorer off / IRB excluded (recorded, not judged)")
 
@@ -349,7 +360,18 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
     is_json = "json" in (ctype or "").lower()
     out_t = [t for k in OUT_SCOPE[role] for t in tok.get(k, [])]
     in_t = [t for k in IN_SCOPE[role] for t in tok.get(k, [])]
-    hits = present(text, out_t)
+    # Error bodies echo the request URI in "path". An identifier the CALLER typed into the URL is
+    # not disclosure, so the echoed path is removed before looking for out-of-scope identifiers.
+    # (Found live on 2026-11-18: two false LEAKs on /by-number/{C} and /{C}/hierarchy.)
+    try:
+        echoed = json.loads(text).get("path") if is_json and text[:1] == "{" else None
+    except Exception:
+        echoed = None
+    if echoed:
+        text_scan = text.replace(json.dumps(echoed)[1:-1], "").replace(echoed, "")
+    else:
+        text_scan = text
+    hits = present(text_scan, out_t)
     hard = [h for h in hits if h not in ambiguous.get(role, set())]
     soft = [h for h in hits if h in ambiguous.get(role, set())]
     if kind == "excluded":
@@ -363,8 +385,11 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
         return "NOT TESTED", [f"feature disabled/out of scope (status {status})"]
     if kind == "caps":
         compact = text.replace(" ", "")
-        ok = status == 200 and '"enforcementEnabled":true' in compact and '"administrationWritesAvailable":false' in compact
-        return ("PASS" if ok else "FAIL"), ([] if ok else ["enforcement not on, or writes available"])
+        if probe["path"].endswith("/api/dashboard"):
+            ok = status == 403 and '"ACCESS_NOT_PROVISIONED"' in text
+            return ("PASS" if ok else "FAIL"), ([] if ok else [f"enforcement not on: No-Grant dashboard {status}"])
+        ok = status == 200 and '"administrationWritesAvailable":false' in compact
+        return ("PASS" if ok else "FAIL"), ([] if ok else ["administrator writes available"])
     if not is_json and kind != "allow":
         if status in (403, 404):
             return "FAIL", [f"denial not a JSON API response (content-type {ctype!r})"]
@@ -405,7 +430,11 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
             return "NOT TESTED", [f"baseline {bs}: no data to hide, denial not provable"]
         if status not in (403, 404):
             return "FAIL", [f"status {status}, expected 403/404"]
-        return ("REVIEW" if soft else "PASS"), ([f"ambiguous identifiers {soft}"] if soft else [])
+        notes = [f"ambiguous identifiers {soft}"] if soft else []
+        if status == 404 and '"Record not found"' in text:
+            # A hidden record says "Record not found"; a non-existent one says "<Type> not found: <id>".
+            notes.append("FINDING existence-oracle: hidden-record 404 message differs from a true not-found")
+        return ("REVIEW" if soft else "PASS"), notes
     if kind == "allow":
         if bs != 200:
             return "NOT TESTED", [f"baseline {bs} (no data, gated or disabled): allow not provable"]
@@ -469,7 +498,7 @@ def do_baseline(base, fixture_path):
     st = {}
     for r in rows.values():
         st[r["status"]] = st.get(r["status"], 0) + 1
-    print(f"baseline: {len(rows)} distinct requests, status mix {dict(sorted(st.items()))}")
+    print(f"baseline: {len(rows)} distinct requests, status mix {dict(sorted(st.items(), key=lambda kv: str(kv[0])))}")
     print("fixtures:", {k: v["award_number"] for k, v in fx["awards"].items()},
           "neg_in", fx.get("neg_in"), "neg_out", fx.get("neg_out"), "sub_out", fx.get("sub_out"),
           "prop_in", fx.get("prop_in_number"), "prop_out", fx.get("prop_out_number"))
@@ -548,8 +577,10 @@ def self_test():
         (P("OAV", "list"), base200, 200, j, '{"c":["209407-00002","code 3259"]}', "PASS"),  # short code is not a marker
         (P("NONE", "none"), base200, 403, j, '{"code":"ACCESS_NOT_PROVISIONED"}', "PASS"),
         (P("NONE", "none"), base200, 200, j, '{"content":[]}', "FAIL"),
-        (P("DEPT", "caps"), None, 200, j, '{"enforcementEnabled":true,"administrationWritesAvailable":false}', "PASS"),
-        (P("DEPT", "caps"), None, 200, j, '{"enforcementEnabled":false,"administrationWritesAvailable":false}', "FAIL"),
+        (P("DEPT", "caps"), None, 200, j, '{"enforcementEnabled":false,"administrationWritesAvailable":false}', "PASS"),
+        (P("DEPT", "caps"), None, 200, j, '{"administrationWritesAvailable":true}', "FAIL"),
+        ({"role": "NONE", "kind": "caps", "path": "/api/dashboard", "method": "GET"}, None, 403, j, '{"code":"ACCESS_NOT_PROVISIONED"}', "PASS"),
+        ({"role": "NONE", "kind": "caps", "path": "/api/dashboard", "method": "GET"}, None, 200, j, '{"awards":40926}', "FAIL"),
         (P("DEPT", "refused"), base200, 403, j, '{"code":"ACCESS_DENIED"}', "PASS"),
         (P("OAV", "refused"), base200, 200, j, '{"content":[]}', "FAIL"),
         (P("DEPT", "refused"), base200, 403, j, '{"code":"ACCESS_DENIED","x":"209407-00002"}', "LEAK"),
@@ -558,6 +589,10 @@ def self_test():
         (P("DEPT", "allow"), {"status": None, "skipped_baseline": "x"}, 200, "application/pdf", "%PDF", "PASS"),
         (P("DEPT", "deny"), {"status": None, "skipped_baseline": "x"}, 404, j, '{"code":"NOT_FOUND"}', "PASS"),
         (P("DEPT", "deny"), {"status": None, "skipped_baseline": "x"}, 200, "application/pdf", "%PDF", "FAIL"),
+        ({"role": "DEPT", "kind": "deny", "path": "/api/v1/awards/by-number/209407-00002", "method": "GET"}, base200, 404, j,
+         '{"code":"NOT_FOUND","message":"Record not found","path":"/api/v1/awards/by-number/209407-00002"}', "PASS"),
+        ({"role": "DEPT", "kind": "deny", "path": "/api/v1/awards/by-number/209407-00002", "method": "GET"}, base200, 404, j,
+         '{"code":"NOT_FOUND","message":"209407-00002 exists","path":"/api/v1/awards/by-number/209407-00002"}', "LEAK"),
         (P("DEPT", "admin"), None, 403, j, '{}', "PASS"),
         (P("DEPT", "admin"), None, 200, j, '{}', "FAIL"),
     ]

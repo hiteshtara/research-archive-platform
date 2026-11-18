@@ -51,8 +51,10 @@ def probes(fx: dict, include_pi: bool) -> list[dict]:
     hidden_b = [b["award_number"]] + ([b["title"]] if b.get("title") else [])
 
     for role in ROLES:  # capabilities: same switches for everyone
+        # enforcementEnabled is always false for a non-administrator (CapabilitiesService.denied()),
+        # so only the writes switch is asserted here; enforcement is proven by S4's 403 below.
         add(role, "/api/v1/me/capabilities", {200}, "window guard", "-",
-            must=['"enforcementEnabled":true', '"administrationWritesAvailable":false'])
+            must=['"administrationWritesAvailable":false'])
 
     # Department user, UNIT 2573180018 (A and B in scope; C out)
     add("DEPT", f"/api/v1/awards/search?q={a['award_number']}", {200}, "US-DEP-001 #1", "-", must=[a["award_number"]])
@@ -236,7 +238,7 @@ def self_test() -> int:
         (none_search, 403, j, '{"code":"ACCESS_NOT_PROVISIONED"}', True),
         (none_search, 200, j, '{"content":[]}', False),                         # silent empty archive
         (caps, 200, j, '{"enforcementEnabled":true,"administrationWritesAvailable":false}', True),
-        (caps, 200, j, '{"enforcementEnabled":false,"administrationWritesAvailable":false}', False),
+        (caps, 200, j, '{"enforcementEnabled":false,"administrationWritesAvailable":true}', False),
     ]
     bad = 0
     for probe, s, ct, body, expect_pass in cases:
