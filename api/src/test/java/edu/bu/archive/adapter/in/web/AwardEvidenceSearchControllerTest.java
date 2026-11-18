@@ -150,6 +150,40 @@ class AwardEvidenceSearchControllerTest {
                 .andExpect(jsonPath("$.correlationId").value(correlationId.toString()));
     }
 
+    // --- F3: an access refusal keeps its own HTTP status (A8, 2026-11-18) ---
+    // Independent QA noted that only the service-level unwrap was tested, and
+    // that the fall-through from AiExceptionHandler to GlobalExceptionHandler was
+    // inferred. These pin the status the caller actually receives.
+
+    @Test
+    void anUnprovisionedCallerGets403NotProvisionedNot503() throws Exception {
+        when(service.search(eq("204713-00001"), anyString(), anyList(), any()))
+                .thenThrow(new edu.bu.archive.application.authorization.AccessNotProvisionedException());
+
+        mockMvc.perform(
+                        post("/api/ai/awards/204713-00001/evidence-search")
+                                .contentType("application/json")
+                                .content(requestBody("query"))
+                                .with(jwt())
+                )
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_NOT_PROVISIONED"));
+    }
+
+    @Test
+    void aStaleSignInGets401NotA503() throws Exception {
+        when(service.search(eq("204713-00001"), anyString(), anyList(), any()))
+                .thenThrow(new edu.bu.archive.application.authorization.ReauthenticationRequiredException());
+
+        mockMvc.perform(
+                        post("/api/ai/awards/204713-00001/evidence-search")
+                                .contentType("application/json")
+                                .content(requestBody("query"))
+                                .with(jwt())
+                )
+                .andExpect(status().isUnauthorized());
+    }
+
     // --- Invalid evidence type ---
 
     @Test

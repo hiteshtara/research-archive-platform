@@ -260,7 +260,8 @@ export function searchErrorMessage(error, genericMessage) {
     state === ACCESS_STATES.NOT_PROVISIONED
   ) {
     const notice = accessNotice(error);
-    return `${notice.title}. ${notice.body}`;
+    // Include the next step when the notice has one (QA: say who to contact).
+    return [`${notice.title}.`, notice.body, notice.action].filter(Boolean).join(" ");
   }
   return genericMessage;
 }

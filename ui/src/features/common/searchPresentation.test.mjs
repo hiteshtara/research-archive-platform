@@ -599,6 +599,7 @@ test("an unprovisioned caller (403 ACCESS_NOT_PROVISIONED) is told access is not
   const message = searchErrorMessage({ status: 403, code: "ACCESS_NOT_PROVISIONED" }, GENERIC);
   assert.notEqual(message, GENERIC);
   assert.match(message, /not been set up|provisioned/i);
+  assert.match(message, /administrators/i, "tells the user who can grant access");
 });
 
 test("a generic 403 keeps the page's own message (it also means cross-module refusal)", () => {
