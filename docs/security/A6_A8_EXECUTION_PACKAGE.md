@@ -51,6 +51,13 @@ original design was the synthetic PI.
 The numbering keeps the identifiers of `A6_SYNTHETIC_IDENTITIES.md`. S2 (PI)
 is not created.
 
+**Sign-in name (found at execution, 2026-11-18).** The DEV pool has
+`UsernameAttributes=[email]`, so the short names above cannot be Cognito
+usernames. Each account was created with its `@example.invalid` address as its
+only sign-in name; Cognito assigned an internal username equal to the `sub`.
+Every Cognito command in this package therefore uses the email address. The
+short names remain the labels used in this document and in the secrets' paths.
+
 None of the three is:
 - in a Cognito group;
 - an administrator;
@@ -184,13 +191,17 @@ At window close, in this order. Each step is a dry run first, then
 # 1. revoke each grant: a status change; the row and both audit rows survive
 #    dev-grant-admin:6 with: --revoke-grant-id=<id> + common arguments (the grantee is read from the grant)
 # 2. unlink each identity: a status change. Unlinking does NOT revoke, hence step 1 first
-#    dev-link-identity:2 with: --unlink-link-id=<id> --subject-identifier=ARP-SYNTHA60-0000000N + common arguments
-# 3. disable the Cognito users
-aws cognito-idp admin-disable-user --user-pool-id us-east-1_VJ4ekQ27c --username rap-synth-a6-dept
-aws cognito-idp admin-disable-user --user-pool-id us-east-1_VJ4ekQ27c --username rap-synth-a6-oav
-aws cognito-idp admin-disable-user --user-pool-id us-east-1_VJ4ekQ27c --username rap-synth-a6-none
-# 4. schedule the three secrets for deletion (default recovery window)
-aws secretsmanager delete-secret --secret-id rap/dev/synthetic/a6/<role>
+#    dev-link-identity:2 with: --unlink-link-id=<id> + common arguments ONLY
+#    (the tool refuses --subject-identifier/--cognito-subject on an unlink)
+#    link ids: 5 (S1 dept), 7 (S3 oav), 6 (S4 none)
+# 3. disable the Cognito users (the pool signs in by email, see 2.1)
+aws cognito-idp admin-disable-user --user-pool-id us-east-1_VJ4ekQ27c --username rap-synth-a6-dept@example.invalid
+aws cognito-idp admin-disable-user --user-pool-id us-east-1_VJ4ekQ27c --username rap-synth-a6-oav@example.invalid
+aws cognito-idp admin-disable-user --user-pool-id us-east-1_VJ4ekQ27c --username rap-synth-a6-none@example.invalid
+# 4. schedule the three secrets for deletion (default 30-day recovery window)
+aws secretsmanager delete-secret --secret-id rap/dev/synthetic/a6/dept
+aws secretsmanager delete-secret --secret-id rap/dev/synthetic/a6/oav
+aws secretsmanager delete-secret --secret-id rap/dev/synthetic/a6/none
 ```
 
 - **Deleting the Cognito users** is a separate, later step with its own
@@ -339,3 +350,112 @@ Roll back to `:106` immediately if any of these happens:
 | A8 | revision 107 and the window, date ________, start ____ (2h cap) | ☐ |
 | L1 / L2 | Lalitha's session mode | ☐ |
 | Close-out | revoke, unlink, disable, schedule secret deletion | ☐ |
+
+Status 2026-11-18: A6-0b, PR #170, A6-1, A6-1b and A6-2 approved and
+**done** (§5). A6-3 approved on condition: created only once the A8 window is
+scheduled, expiring 24 hours after the planned window end.
+
+## 5. A6 execution record (2026-11-18)
+
+Operator: hitesh (executed by Claude Code). Approval reference
+`OWNER-APPROVAL-2026-11-18-A6`. AWS account 770203350335. Production
+untouched. Enforcement, administrator writes, auditing, IRB exclusion OFF;
+V089/V090 unapplied; the API service stayed on `:106` throughout.
+
+### 5.1 PR #170
+
+Merged at exact head `cd67d36bdf0d143cf056147b74004801aad5d266` (CI run
+44196515849 green, six files) as merge commit
+`c339e94984e5f51c1a94acd9eb96232d1f7526d7`, 14:32:54Z.
+
+### 5.2 A6-0b, read-only IO check: PASS
+
+One-off task `438d5f9e27f546f7b661ba5a83628726` on loader `:237` (the nightly
+sync's revision; no new image or revision), connection bound read-only at
+connect and verified (`default_transaction_read_only=on`,
+`transaction_read_only=on`). Matched on `TRIM(award_version.account_number)`,
+the column `AwardAccountNumberIoSql` uses.
+
+| Award | Version rows | Carry `9500312705` | Other account |
+|---|---|---|---|
+| C `209407-00002` (1330420000) | 14 | 9 (5 blank, no other value) | none |
+| B `211144-00007` (2573180018) | 2 | 0 | one, ending 7253 |
+| A `212128-00002` (2573180018) | 1 | 0 | one, ending 6722 |
+
+`9500312705` belongs to exactly one award number (C), 9 rows, never unit
+2573180018. Under `FAMILY_WIDE` the IO predicate is wrapped per
+`award_number` (`RecordScopeSqlBuilder.familyWrap`), so S3 reaches all 14 of
+C's versions. The §2.3 matrix stands.
+
+### 5.3 A6-1, Cognito users and secrets
+
+| Role | Sign-in (email) | Cognito username = `sub` | State | Groups | Secret |
+|---|---|---|---|---|---|
+| S1 dept | `rap-synth-a6-dept@example.invalid` | `a4f894d8-a031-700d-4e33-b135f205398c` | CONFIRMED, enabled | none | `rap/dev/synthetic/a6/dept` (`…dept-m0cRHs`) |
+| S3 oav | `rap-synth-a6-oav@example.invalid` | `54584488-9051-7088-04de-bb7027375924` | CONFIRMED, enabled | none | `rap/dev/synthetic/a6/oav` (`…oav-oD31OS`) |
+| S4 none | `rap-synth-a6-none@example.invalid` | `242884e8-10a1-70af-55c4-b14efea21923` | CONFIRMED, enabled | none | `rap/dev/synthetic/a6/none` (`…none-8cT1rn`) |
+
+`MessageAction=SUPPRESS`; nothing was sent. Passwords: 32 random characters,
+generated in memory, set permanent, stored only in the secret (JSON
+`username`, `password`, `userPoolId`, `sub`), never printed or logged. Secrets
+are tagged `purpose=rap-a6-synthetic`, `cleanup=after-a8-window-1`.
+
+### 5.4 A6-1b, operator task definitions
+
+`scripts/verify-grant-admin-taskdef.sh` passed for both files at `c339e94`,
+then registered:
+- `research-archive-platform-dev-grant-admin:6`
+- `research-archive-platform-dev-link-identity:2`
+
+Both on image `sha256:c85be89a…5b90` (the rev-106 API image), profiles
+`aws,grant-admin` / `aws,link-identity`, zero `APP_AUTHORIZATION_*`
+variables. The running API service was not changed.
+
+### 5.5 A6-2, identity links
+
+Dry runs first (`DRY_RUN_OK`, every check passed, including "acting
+administrator holds an ACTIVE membership" and "archive identity has never
+been linked"), then `--confirm` (`APPLIED`). Actor `ARP-FK7QY195-QW5HV7G0`,
+the only ACTIVE ARCHIVE_ADMIN (member id 3).
+
+A first dry-run attempt was refused before any check could pass
+(`--cognito-region is required`): the shell passed the three Cognito options
+as one argument. The tool reported "Nothing was written"; the run was
+repeated with the options separated.
+
+| Link id | Archive identifier | Method | Status | Kuali person | Audit row |
+|---|---|---|---|---|---|
+| 5 | `ARP-SYNTHA60-00000001` (S1) | ADMIN_VERIFIED | ACTIVE | **null** | 6 |
+| 7 | `ARP-SYNTHA60-00000003` (S3) | ADMIN_VERIFIED | ACTIVE | **null** | 8 |
+| 6 | `ARP-SYNTHA60-00000004` (S4) | ADMIN_VERIFIED | ACTIVE | **null** | 7 |
+
+Verified afterwards by a read-only query (loader task
+`68c483fd2e054f289b853aed148024e0`): each link's `cognito_subject` is the
+matching synthetic `sub`; no synthetic `sub` is linked to any other identity;
+`login_name` null; zero grants, administrator rows or person-status rows for
+`ARP-SYNTHA60-*`. Totals after: 4 links (4 ACTIVE), 1 grant (pre-existing,
+not synthetic, untouched).
+
+### 5.6 Not done (by the owner's condition)
+
+**A6-3 grants are not created.** They are created only after the A8 window is
+scheduled, with `--expires-at` = planned window end + 24 hours:
+- S1: `--grantee=ARP-SYNTHA60-00000001 --type=UNIT --unit-number=2573180018`
+  (no `--include-descendants`);
+- S3: `--grantee=ARP-SYNTHA60-00000003 --type=IO --io-value=9500312705`;
+- S4: none.
+
+### 5.7 Resource register and cleanup
+
+| Resource | Identifier | Expiry | Cleanup |
+|---|---|---|---|
+| Cognito user S1 | `a4f894d8-…398c` / dept email | none (Cognito) | `admin-disable-user`, later delete with approval |
+| Cognito user S3 | `54584488-…5924` / oav email | none | same |
+| Cognito user S4 | `242884e8-…1923` / none email | none | same |
+| Secret ×3 | `rap/dev/synthetic/a6/{dept,oav,none}` | none | `delete-secret` (30-day recovery) |
+| Identity link 5, 7, 6 | `authz.identity_link` | none | `dev-link-identity:2 --unlink-link-id=<id> --confirm` (status change, row kept) |
+| Audit rows 6–8 | `authz.access_audit` | permanent | none: history is kept |
+| Task definitions | `dev-grant-admin:6`, `dev-link-identity:2` | n/a | keep; superseded by the next sync |
+
+Until A8, the links confer no access: enforcement is off, and they hold no
+grants.
