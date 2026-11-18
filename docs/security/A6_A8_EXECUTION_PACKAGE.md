@@ -847,3 +847,74 @@ so after removal DEV's plan from `main` is unchanged.
 The 11:50 deadline no longer applies, because shared DEV is not changed.
 **Cleanup of grants, links, group, users and secrets runs on every exit path**,
 including cancellation.
+
+## 9. Isolated A8 execution record (2026-11-18, 17:22–18:37Z)
+
+Owner approvals: C1–C4 and the same-day run. Timebox 3 h, cleanup deadline
+20:20Z (3:20 PM ET). Operator present throughout. Shared DEV stayed on `:106`
+with enforcement OFF the whole time.
+
+| Step | Result |
+|---|---|
+| Pre-checks | IP 108.12.232.44 (FiOS); Cisco VPN Disconnected; `:106` 1/1; listener default only |
+| Grants | 4 = S1 UNIT 2573180018 (no descendants); 3 = S3 IO 9500312705; expiry 2026-11-19T20:20Z (session end + 24 h); S4 none; owner grant 2 unchanged |
+| Group | S1/S3/S4 added to `ArchiveAttachmentViewer`; pre-window members kept |
+| Baseline (shared) | 233 distinct requests; dashboard 40,926 |
+| C1–C3 | `-a8:1` registered (diff vs `:106`: the six settings only); TG `rap-dev-api-a8-tg`; task `e0096577…` on image `c85be89a…` |
+| Health | The ALB does not health-check an unreferenced TG, so the rule was created inert first (host `a8-inert.invalid` + IP): healthy in 20 s |
+| C4 + isolation (×3) | AWS-source probes: 40/0, 40/0, 40/0 (shared/private). No-Grant dashboard 403 private, 40,926 shared |
+| Matrix (final, via inert host) | **666: 630 PASS, 25 FAIL, 0 LEAK, 11 NOT TESTED** |
+| Cross-check | 25: 22 PASS, 1 NOT TESTED (no PI account). 2 flagged results proven to be the echoed `query` (0 results) |
+| Owner manual CGS (browser-automated on the owner's own BU session) | **13 PASS, 1 FAIL (D3), 2 NOT TESTED (D15, D16)** |
+| DB writes | none: `authz` and `archive` counters equal before and after; audit rows are only the 2 grants and 2 revocations |
+| Cleanup | 18:31–18:37Z: rule deleted, task stopped, TG deleted, grants revoked, group restored, users disabled and globally signed out, all verified. Taskdef, links and secrets retained (inert) for the QA plan |
+
+**Aborts.** Two, each with the rule deleted immediately. Both were false LEAKs:
+- the `path` field of 404 bodies;
+- the `query` field of Global Search.
+
+Each was proven by field-level reproduction through the inert route before resuming.
+
+**Test-design corrections made live:**
+- `capabilities.enforcementEnabled` is always false for a non-administrator, so the guard is now S4's dashboard 403.
+- Top-level `path` and `query` echoes are excluded from the leak scan.
+- S4 admin probes are judged as admin refusals.
+- `--no-pi` handling in the cross-check.
+- A baseline print bug.
+
+**Findings (workbook Release Blockers rows 47–52):**
+1. **F1, IO → Subaward inheritance.** Contradicts the documented boundary; FAIL pending BU decision.
+2. **F2, No-Grant Global Search.** Returns 200 with no results, not 403.
+3. **F3, No-Grant AI Evidence Search.** Returns 503, not 403.
+4. **F4, existence oracle (LOW).** Hidden and missing Awards give different 404 messages.
+5. **F5, search pages.** Show a generic error on 401 reauthentication; this is the owner's D3, whose session was 111 h old against the 12 h maximum.
+6. **F6, usability.** U1: Documents says "could not be reached". U2: IRB is silently omitted. U3: a Negotiation says "Unable to load".
+
+**Manual checklist:**
+
+| Check | Result |
+|---|---|
+| D1 | PASS |
+| D2 | PASS: Awards 2, Proposals 1, Hist. Awards 6, Hist. Proposals 3, Negotiations 0, Subawards 0, Documents 9 |
+| D3 | FAIL (F5); retest after a fresh sign-in PASS |
+| D4 | PASS |
+| D5 | PASS: 5 history rows, identical to shared |
+| D6 | PASS: 2 SAP transmissions |
+| D7 | PASS: funding proposal hidden; private 0 vs shared 1 |
+| D8 | PASS |
+| D9 | PASS: "Award not found." |
+| D10 | PASS |
+| D11 | PASS: API 404; UI U3 |
+| D12 | PASS |
+| D13 | PASS |
+| D14 | PASS: API 403 both times; UI U1 |
+| D15 | NOT TESTED: owner not in the attachment group |
+| D16 | NOT TESTED: "IRB" matches no IRB rows even on shared, so it does not discriminate |
+
+**BU acceptance.** BU stays at 25/47 until the owner directs a change.
+- **Recommended for DONE on this live evidence:** US-DEP-001 #1 and #2, US-DEP-005 #1 and #2.
+- **Not recommended yet:**
+  - US-SEC-003 #1/#2 and US-OAV-001 #2 (F1);
+  - US-PI-001 (no PI account tested);
+  - US-SEC-002 #3 (access after revocation not exercised live);
+  - US-SEC-004 (auditing off).

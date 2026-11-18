@@ -98,15 +98,33 @@ ADMIN_PATHS = ["/api/v1/admin/identities?q=ARP", "/api/v1/admin/administrators",
 
 
 # ------------------------------------------------------------------ http
+# Optional isolation-by-host mode (2026-11-18): with A8_HOST_HEADER set, requests go to the DEV ALB's own
+# DNS name carrying that Host header, which matches only the private-task rule (and only from the
+# operator's IP). TLS hostname checking is relaxed ONLY in that mode and ONLY for the DEV ALB name,
+# because the ALB certificate names api-dev.*, not the ALB.
+_A8_HOST = os.environ.get("A8_HOST_HEADER", "")
+_ALB = "rap-dev-api-alb-727962412.us-east-1.elb.amazonaws.com"
+def _ctx(url):
+    if _A8_HOST and _ALB in url:
+        import ssl
+        c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE
+        return c
+    if _A8_HOST:
+        raise SystemExit("refusing: A8_HOST_HEADER is set but the base URL is not the DEV ALB")
+    return None
+
+
 def http(base, token, method, path, body=None, timeout=90):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method)
     req.add_header("Authorization", f"Bearer {token}")
+    if _A8_HOST:
+        req.add_header("Host", _A8_HOST)
     req.add_header("Accept", "application/json, application/pdf")
     if data:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ctx(req.full_url)) as r:
             return r.status, r.headers.get("Content-Type", ""), r.read(MAX_BODY)
     except urllib.error.HTTPError as e:
         return e.code, e.headers.get("Content-Type", ""), e.read(MAX_BODY)
@@ -364,13 +382,12 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
     # not disclosure, so the echoed path is removed before looking for out-of-scope identifiers.
     # (Found live on 2026-11-18: two false LEAKs on /by-number/{C} and /{C}/hierarchy.)
     try:
-        echoed = json.loads(text).get("path") if is_json and text[:1] == "{" else None
+        _j = json.loads(text) if is_json and text[:1] == "{" else None
     except Exception:
-        echoed = None
-    if echoed:
-        text_scan = text.replace(json.dumps(echoed)[1:-1], "").replace(echoed, "")
-    else:
-        text_scan = text
+        _j = None
+    # Drop ONLY the top-level echo fields ("path" from error bodies, "query" from Global Search; both
+    # found live as false LEAKs) and scan everything else - the same value inside results still counts.
+    text_scan = json.dumps({k: v for k, v in _j.items() if k not in ("path", "query")}) if isinstance(_j, dict) else text
     hits = present(text_scan, out_t)
     hard = [h for h in hits if h not in ambiguous.get(role, set())]
     soft = [h for h in hits if h in ambiguous.get(role, set())]
@@ -593,6 +610,10 @@ def self_test():
          '{"code":"NOT_FOUND","message":"Record not found","path":"/api/v1/awards/by-number/209407-00002"}', "PASS"),
         ({"role": "DEPT", "kind": "deny", "path": "/api/v1/awards/by-number/209407-00002", "method": "GET"}, base200, 404, j,
          '{"code":"NOT_FOUND","message":"209407-00002 exists","path":"/api/v1/awards/by-number/209407-00002"}', "LEAK"),
+        ({"role": "OAV", "kind": "list", "path": "/api/global-search?query=212128-00002", "method": "GET"}, base200, 200, j,
+         '{"query":"212128-00002","totalResults":0,"results":["209407-00002 in scope"]}', "PASS"),
+        ({"role": "OAV", "kind": "list", "path": "/api/global-search?query=212128-00002", "method": "GET"}, base200, 200, j,
+         '{"query":"212128-00002","results":[{"awardNumber":"212128-00002"}]}', "LEAK"),
         (P("DEPT", "admin"), None, 403, j, '{}', "PASS"),
         (P("DEPT", "admin"), None, 200, j, '{}', "FAIL"),
     ]
