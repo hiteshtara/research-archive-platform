@@ -231,6 +231,9 @@ public class AwardEvidenceSearchService {
                     correlationId.toString()
             );
         } catch (RuntimeException exception) {
+            // F3: an access refusal is not an outage - let it reach its own status.
+            edu.bu.archive.application.authorization.AccessControlFailures
+                    .rethrowIfAccessControl(exception);
             throw new AwardEvidenceSearchException(
                     correlationId, exception
             );

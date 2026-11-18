@@ -284,6 +284,14 @@ public class GlobalSearchService {
      *                those modules return rather than a client-side slice.
      */
     public GlobalSearchResponse search(String query, Set<String> modules) {
+        /*
+         * F2 (A8, 2026-11-18): refuse an unprovisioned, denied or stale-sign-in
+         * caller here, with the same 403/401 every module endpoint gives, rather
+         * than letting each fault-tolerant leg fail and answering 200 with every
+         * module in failedModules. A no-op when enforcement is off or the caller
+         * is scoped, so DEV today is unchanged.
+         */
+        visibility.requireProvisioned();
         String normalizedQuery = query == null ? "" : query.trim();
         Set<String> selected = normalizeModules(modules);
         // TC-042: the id for this request, set by

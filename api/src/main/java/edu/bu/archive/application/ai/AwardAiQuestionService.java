@@ -291,6 +291,9 @@ public class AwardAiQuestionService {
                     normalizedQuestion.length()
             );
         } catch (RuntimeException exception) {
+            // F3: an access refusal is not an outage - let it reach its own status.
+            edu.bu.archive.application.authorization.AccessControlFailures
+                    .rethrowIfAccessControl(exception);
             metadataLogger.logQuestion(
                     correlationId,
                     authenticatedUserId,

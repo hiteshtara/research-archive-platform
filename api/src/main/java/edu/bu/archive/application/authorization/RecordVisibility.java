@@ -12,6 +12,16 @@ public interface RecordVisibility {
     /** Not enforced, or a Central caller. */
     boolean unrestricted();
 
+    /**
+     * Refuses an unprovisioned, denied or stale-sign-in caller with its own
+     * exception (403 ACCESS_NOT_PROVISIONED / 403 ACCESS_DENIED / 401), and does
+     * nothing when enforcement is off or the caller is scoped. The default is a
+     * no-op so {@link #ALL} and test doubles keep today's behaviour;
+     * RecordAuthorizationService supplies the real check.
+     */
+    default void requireProvisioned() {
+    }
+
     boolean canSeeAward(long awardId);
 
     boolean canSeeAwardNumber(String awardNumber);
