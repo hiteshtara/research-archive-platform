@@ -155,6 +155,8 @@ class NamedBuScenarioAuthorizationIntegrationTest {
     private static final long C_V1 = 7300001L;
     private static final long C_V2 = 7300002L;
     private static final long C_V3 = 7300003L;
+    /** F1: a synthetic Subaward funded by Award C's current version. */
+    private static final long SUB_C = 7550001L;
     /** D: synthetic. At C's PARENT unit, so a grant without descendants on C's unit cannot reach it. */
     private static final String AWARD_D = "990901-00001";
     private static final long D_V1 = 7400001L;
@@ -479,6 +481,30 @@ class NamedBuScenarioAuthorizationIntegrationTest {
         }
 
         @Test
+        @DisplayName("F1: the IO grant does not reach the Subaward funded by C, though C itself opens")
+        void ioDoesNotInheritToTheFundedSubaward() {
+            /*
+             * Found live in the isolated A8 window: S3 (IO 9500312705) opened all
+             * 12 endpoints of Subaward 92899, funded by C. Documented boundary and
+             * owner decision 2026-11-18: an IO grant reaches Awards only.
+             * RED on main c339e94; GREEN with the RecordAccessEvaluator /
+             * RecordScopeSqlBuilder fix.
+             */
+            asVoid(OAV_USER, () -> {
+                assertThatCode(() -> awards.findFamily(AWARD_C))
+                        .as("C itself must still open through the IO grant")
+                        .doesNotThrowAnyException();
+                assertThat(access.canSeeSubaward(SUB_C))
+                        .as("an IO grant must not authorise a Subaward through its funding Award")
+                        .isFalse();
+                assertDenied(() -> access.requireSubaward(SUB_C));
+            });
+            assertThat(as(OAV_USER, dashboard::counts).subawards())
+                    .as("the scoped Subaward count (list SQL) must not include it either")
+                    .isZero();
+        }
+
+        @Test
         @DisplayName("dashboard: 1 Award")
         void dashboardCount() {
             DashboardDto counts = as(OAV_USER, dashboard::counts);
@@ -516,6 +542,13 @@ class NamedBuScenarioAuthorizationIntegrationTest {
     @Nested
     @DisplayName("Central - CENTRAL grant")
     class Central {
+
+        @Test
+        @DisplayName("F1 control: Central reaches the Subaward funded by C")
+        void centralReachesTheFundedSubaward() {
+            asVoid(CENTRAL_USER, () -> assertThat(access.canSeeSubaward(SUB_C)).isTrue());
+            assertThat(as(CENTRAL_USER, dashboard::counts).subawards()).isEqualTo(1);
+        }
 
         @Test
         @DisplayName("Award search returns every Award, including A, B and C")
@@ -853,6 +886,29 @@ class NamedBuScenarioAuthorizationIntegrationTest {
                 (61002, 7200002, '211144-00007', 2, 91002, 'SYNTHETIC attachment B'),
                 (61003, 7300003, '209407-00002', 3, 91003, 'SYNTHETIC attachment C'),
                 (61004, 7400001, '990901-00001', 1, 91004, 'SYNTHETIC attachment D')
+                """).update();
+
+        /*
+         * F1 (A8 isolated window, 2026-11-18): the live shape of the defect - a
+         * Subaward funded by Award C, which the OAV user reaches through IO
+         * 9500312705. The documented boundary says an IO grant never reaches a
+         * Subaward; Central reaching it proves the fixture itself is reachable.
+         */
+        jdbc.sql("""
+                INSERT INTO archive.subaward (
+                    subaward_id, subaward_code, sequence_number, document_number,
+                    title, status_description, subaward_sequence_status,
+                    organization_id, account_number, requisitioner_unit
+                ) VALUES
+                (7550001, 'SYN-SUB-C', 1, 'SYN-SDOC-C', 'SYNTHETIC Subaward funded by C',
+                 'Active', 'ACTIVE', 'SYN-ORG', '9500312705', '1330420000')
+                """).update();
+        jdbc.sql("""
+                INSERT INTO archive.subaward_funding (
+                    subaward_funding_source_id, subaward_id, subaward_code,
+                    sequence_number, award_id, award_number
+                ) VALUES
+                (7560001, 7550001, 'SYN-SUB-C', 1, 7300003, '209407-00002')
                 """).update();
 
         // Proposals for the Global Search Proposal leg.

@@ -391,9 +391,10 @@ public class RecordAuthorizationService
         try {
             /*
              * canSeeAwardForInheritance, not canSeeAward: SEC-005 restricts
-             * PARENT_AWARD grants to Award records, so a funding Award that
-             * is visible ONLY through such a grant does not authorise this
-             * Subaward. Every other grant type behaves exactly as before.
+             * PARENT_AWARD grants, and F1 (2026-11-18) restricts IO grants, to
+             * Award records, so a funding Award that is visible ONLY through
+             * such a grant does not authorise this Subaward. Department,
+             * contact and Central access behave exactly as before.
              */
             return facts.subawardFamilyFundingAwardIds(subawardId).stream()
                     .anyMatch(this::canSeeAwardForInheritance);
@@ -840,8 +841,9 @@ public class RecordAuthorizationService
      * Can this caller see this Award <em>for the purpose of deciding a
      * Subaward or Negotiation</em>?
      *
-     * <p>SEC-005: identical to {@link #canSeeAward} except that PARENT_AWARD
-     * grants do not count. A separate method rather than a flag on the public
+     * <p>Identical to {@link #canSeeAward} except that PARENT_AWARD grants
+     * (SEC-005) and IO grants (F1, 2026-11-18) do not count: both authorise
+     * Award records only. A separate method rather than a flag on the public
      * one, so no caller can reach the inherited semantics by accident, and so
      * the two uses are visible in a call hierarchy.
      */
@@ -855,7 +857,7 @@ public class RecordAuthorizationService
         });
     }
 
-    /** As {@link #canSeeAwardNumber}, ignoring PARENT_AWARD grants (SEC-005). */
+    /** As {@link #canSeeAwardNumber}, ignoring PARENT_AWARD (SEC-005) and IO (F1) grants. */
     private boolean canSeeAwardNumberForInheritance(String awardNumber) {
         return silently(() -> {
             requireProvisioned();
