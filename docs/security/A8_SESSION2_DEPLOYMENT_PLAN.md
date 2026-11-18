@@ -100,3 +100,59 @@ message shown for 401 and 403 responses.
 - The rest is unchanged from session 1: re-enable S1/S3/S4, then grants, the attachment group, baseline on shared, C1–C4, isolation proof both ways, matrix, cross-check, manual checks, cleanup.
 - Target: **655 PASS, 0 FAIL, 0 LEAK, 11 NOT TESTED**.
 - The operator task definitions (`dev-grant-admin:6`, `dev-link-identity:2`) stay on the `:106` image, because the provisioning code did not change.
+
+## 8. Execution record (2026-11-18, owner-approved P1–P4)
+
+| Step | Result |
+|---|---|
+| P0 | account 770203350335; `:106` 1/1, one deployment; listener default only |
+| P1 | `c85be89a…` (matches the approved digest) tagged `protected-rev106-1c3f0c8` |
+| P2 | pushed `research-archive-platform-dev-api:f6addd4` → digest **`sha256:7257b72f00b6e473d25a3bd7c40b97c04d78aeef4bceac40002bba46490d4363`**. It is an OCI index whose image child `1c3e6407…` is linux/amd64 (the other child is a build attestation). Scan COMPLETE: 0 critical, 4 high, 12 medium, 6 low, the **identical finding set** to `:106`'s image (base-image CVEs only). Tagged `protected-rev107-f6addd4` |
+| P3 | registered **`research-archive-platform-dev-api:107`**. The registered revision was diffed against live `:106` across 51 fields: **only the image differs** |
+| P4 | `update-service` at 20:36:10Z; services-stable at 20:39:14Z; rollout **COMPLETED**; 1/1 on `:107`. The task runs digest `7257b72f…` |
+
+**Smoke tests, all passed:**
+- **Infrastructure:**
+  - ALB target healthy;
+  - `/actuator/health` 200 `UP`;
+  - unauthenticated `/api/dashboard` and `/api/v1/me/capabilities` → 401;
+  - startup: profile `aws`, started in 53.6 s, no ERROR, no Flyway or migration lines.
+- **Owner's existing browser session, read-only:**
+  - Dashboard **40,926 / 33,960 / 267,386 / 119,788 / 10,775 / 3,511 / 491,678**, equal to the baseline, so enforcement is OFF;
+  - Award search `212137` → 2 found (200), and `209407` → 6;
+  - Global Search 200 with results;
+  - Security Administration: **Authorization Enforcement OFF, Write Operations Disabled (read-only)**.
+- **Database, read-only:**
+  - 86 migrations, latest 88; **no V089/V090** and none of their tables;
+  - `authz` row counts and **every insert/update/delete counter identical** to the 18:37Z post-cleanup snapshot, so the deployment made no writes;
+  - the owner's CGS grant 2 is active and unchanged; synthetic grants 3 and 4 are still revoked.
+- **Explorer and audit:** no new setting. `APP_EXPLORER_ENABLED=false`, and audit and writes keep their defaults (OFF).
+
+**Observation, not a regression.** An uncached Award search takes about 8.5 s. With
+enforcement OFF the Award-search SQL is identical to `:106`'s (`scopeSql` returns
+nothing before any changed code runs). Under `:106` this morning the ALB
+already showed averages around 2 s and maximums of 42–44 s, and RDS CPU is 4–6%
+with full credits. This is pre-existing search performance (compare DEF-5),
+recorded separately.
+
+**Rollback readiness:** `:106` is registered, and its image is protected and
+present. Rollback is the §6 `update-service` to `:106`. It was not needed.
+
+## 9. A8 session 2: final isolated execution plan (for separate approval)
+
+- **Private task definition `-a8:2`:**
+  - prepared from the **registered `:107`** (`a8iso-taskdef-2.json`, sha256 `5cb7743b…`), not registered;
+  - diff against `:107`: the six settings, the family name and the `purpose` tag; nothing else;
+  - image digest `7257b72f…`.
+- **Steps:** identical to session 1, §8.3 / §9:
+  1. pre-checks: IP and VPN; shared `:107` 1/1; listener default only;
+  2. re-enable S1/S3/S4; grants (dry run, `--confirm`, scope query), expiring at session end + 24 h;
+  3. attachment group (record the pre-session list);
+  4. baseline on shared (no rule);
+  5. C1 `-a8:2`, C2 TG, C3 task (digest check), inert rule until healthy, then C4 on the real host;
+  6. isolation proof both ways: AWS-source RequestCount 40/0; S4 dashboard 403 private and 40,926 shared;
+  7. matrix (666 probes, including `no_sub_c`), cross-check, owner browser checks (D2–D16 plus the S4 Global Search message);
+  8. cleanup: rule, task, TG, grants, group, disable users; verify.
+- **Acceptance:** **655 PASS, 0 FAIL, 0 LEAK, 11 NOT TESTED**.
+- **Limits:** 3 h maximum, with an operator present.
+- **Abort:** delete the rule first, on any real disclosure, failed isolation or shared-DEV impact.
