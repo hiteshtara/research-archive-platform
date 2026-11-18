@@ -84,6 +84,10 @@ LIST_PATHS = [  # {n} is an award number, {t} a short title fragment
 # they REFUSE every scoped caller (AwardRecordAccess.requireUnrestrictedForCrossModuleSearch ->
 # 403 ACCESS_DENIED) rather than filter, because four of the five modules in the UNION have no
 # Award-style rule there. Expected: refusal, never rows. Judged as kind "refused".
+# Endpoints that return attachment FILE CONTENT. Never requested at baseline (enforcement OFF), so no
+# attachment content is opened while records are unrestricted (owner condition, 2026-11-18). Judged
+# under enforcement on their own: allow = 200 application/pdf; deny = 403/404 JSON, no identifier.
+NO_BASELINE_CONTENT = ("report-with-attachments.pdf",)
 REFUSED_FOR_SCOPED = ("/api/documents/search", "/api/v1/documents?", "/api/v1/attachments/search")
 # Recorded, never judged: Explorer is off on DEV; IRB is excluded from release scope and its
 # API stays on (app.irb.api.enabled defaults true) because IRB exclusion is not activated in A8.
@@ -370,6 +374,12 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
     if status == 403 and '"ATTACHMENT_ACCESS_DENIED"' in text:
         # The Cognito-group gate runs before record scope, so this proves nothing about scope.
         return "NOT TESTED", ["attachment group gate (account not in ArchiveAttachmentViewer)"]
+    if base_row and base_row.get("skipped_baseline") and kind in ("allow", "deny"):
+        if kind == "allow":
+            ok = status == 200 and "pdf" in (ctype or "").lower()
+            return ("PASS" if ok else "FAIL"), ([] if ok else [f"status {status} {ctype!r}, expected 200 PDF"])
+        ok = status in (403, 404)
+        return ("PASS" if ok else "FAIL"), ([] if ok else [f"status {status}, expected 403/404"])
     if kind == "refused":
         ok = status == 403 and '"ACCESS_DENIED"' in text
         return ("PASS" if ok else "FAIL"), ([] if ok else [
@@ -429,6 +439,9 @@ def do_baseline(base, fixture_path):
             uniq.setdefault(f"{pr['method']} {pr['path']}", pr)
 
     def one(pr):
+        if pr["path"].split("?")[0].endswith(NO_BASELINE_CONTENT):
+            return {"status": None, "skipped_baseline": "attachment content not opened with enforcement off",
+                    "in_seen": {}, "out_seen": {}}
         s, ct, b = http(base, t, pr["method"], pr["path"], pr.get("body"))
         text = b.decode("utf-8", "replace")
         row = {"status": s, "ctype": ct, "sha256": hashlib.sha256(b).hexdigest(),
@@ -542,6 +555,9 @@ def self_test():
         (P("DEPT", "refused"), base200, 403, j, '{"code":"ACCESS_DENIED","x":"209407-00002"}', "LEAK"),
         (P("NONE", "none"), base200, 403, j, '{"code":"ATTACHMENT_ACCESS_DENIED"}', "NOT TESTED"),
         (P("DEPT", "deny"), base200, 403, j, '{"code":"ATTACHMENT_ACCESS_DENIED"}', "NOT TESTED"),
+        (P("DEPT", "allow"), {"status": None, "skipped_baseline": "x"}, 200, "application/pdf", "%PDF", "PASS"),
+        (P("DEPT", "deny"), {"status": None, "skipped_baseline": "x"}, 404, j, '{"code":"NOT_FOUND"}', "PASS"),
+        (P("DEPT", "deny"), {"status": None, "skipped_baseline": "x"}, 200, "application/pdf", "%PDF", "FAIL"),
         (P("DEPT", "admin"), None, 403, j, '{}', "PASS"),
         (P("DEPT", "admin"), None, 200, j, '{}', "FAIL"),
     ]

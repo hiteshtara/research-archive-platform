@@ -592,9 +592,9 @@ The 26-probe `a8_enforcement_probe.py` also runs as an independent cross-check.
 | Time | Step | Stop if |
 |---|---|---|
 | Thu | DEV-user notice sent (§6 of A8_ENFORCEMENT_WINDOW_1.md) | not sent: postpone |
-| 09:00 | re-confirm the notice went out; AWS account, `:106` serving 1/1, no other task running | any mismatch |
+| 09:00 | **notice actually sent**: search mukadder@bu.edu Sent Items for the subject "Research Archive DEV: access restricted Friday 20 Nov", with all 10 recipients. A draft is not enough. Also: AWS account, `:106` serving 1/1, no other task running | **not found in Sent Items: A8 does not start**; then run the cancellation cleanup below |
 | 09:15 | A6-3 grants: dry run, then `--confirm`; read-only query shows exactly 2 grants, the right type/unit/IO, `include_descendants=false`, expiry `2026-11-21T17:00:00Z`, none for S4 | any difference |
-| 09:20 | only if approved: §7.5 group step (add the 3 synthetic users to `ArchiveAttachmentViewer`, verify membership is exactly those 3 plus the existing members). It must be before the baseline, so baseline attachment probes return 200 | any other user changes |
+| 09:20 | approved 2026-11-18: §7.5 group step (add the 3 synthetic users to `ArchiveAttachmentViewer`, verify membership is exactly those 3 plus the existing members). It must be before the baseline, so baseline attachment probes return 200 | any other user changes |
 | 09:30 | baseline: matrix `baseline --execute` + `capture-baseline --execute` | a fixture missing or in the wrong unit |
 | 10:00 | register 107 (re-diffed: exactly the six settings); `update-service` | 107 not COMPLETED by 10:15 |
 | 10:10 | capabilities for S1, S3, S4: enforcement true, writes false (automatic stop) | otherwise |
@@ -614,6 +614,30 @@ Abort, then roll back immediately, on any of:
 - material DEV-user impact;
 - 11:50 reached.
 
+**Cancellation or abort cleanup (owner condition 4).** Whatever ends the window
+(cancelled at 09:00, aborted at any step, or completed), the same cleanup runs:
+- roll back to `:106` if 107 was ever deployed;
+- remove S1, S3 and S4 from `ArchiveAttachmentViewer` (a no-op if never added);
+- check that the group's membership equals the pre-window list;
+- revoke grants, unlink 5/7/6, disable the users, schedule secret deletion.
+
+If the window is only postponed, the group is still removed. It is re-added at
+09:20 on the new date.
+
+**Security failures and usability limitations are recorded separately.** The
+evidence tally has two lists:
+1. **Security:** PASS / FAIL / LEAK / REVIEW / NOT TESTED, judged by the matrix.
+2. **Usability observations:** never counted as a FAIL. Known in advance:
+   - **U1:** Documents search, the document explorer and the Archived File
+     Finder refuse every scoped account with the generic "Access to the archive
+     is denied for this account." The "use the module-specific search" guidance
+     is not shown.
+   - **U2:** Global Search silently omits IRB under enforcement, with no notice
+     to the user.
+
+   Anything the owner observes in the manual session goes here unless it
+   discloses a record that should not be visible.
+
 ### 7.4 Still needed before Friday
 
 1. ~~The owner's approval of this §7~~: approved 2026-11-18, with the manual
@@ -624,8 +648,11 @@ Abort, then roll back immediately, on any of:
    drafted for sending from mukadder@bu.edu. **Not sent: the sending method
    awaits the owner's confirmation.** Enforcement is not enabled until it has
    gone out.
-3. The §7.5 group step: shown to be safe; awaiting the owner's go to apply it
-   at 09:20 Friday.
+3. ~~The §7.5 group step~~: approved 2026-11-18 for 09:20 Friday, for A8
+   only, and removed in every cleanup path.
+4. **Notice draft created** in mukadder@bu.edu Drafts on 2026-11-18 (10
+   recipients). The owner reviews and sends it. **The 09:00 check requires it in
+   Sent Items.**
 
 ### 7.5 `ArchiveAttachmentViewer`: does it grant record access? (verified 2026-11-18)
 
@@ -641,10 +668,32 @@ Evidence, on `origin/main` c339e94:
 | Explorer attachments | Group gate; Explorer is OFF on DEV |
 | No-Grant (S4) | Passes the group gate, then `requireProvisioned` refuses: 403 `ACCESS_NOT_PROVISIONED`. Without the group, S4's attachment probes stop at the group gate and prove nothing |
 
+**Owner approval, 2026-11-18:** add the group at 09:20 Friday for A8 only, and
+remove it in every cleanup path.
+
 Side effect before and after the window: with enforcement OFF, any account in
-the group can open every attachment, as the existing members do today. So the
-membership is added at 09:20 on Friday, not earlier, and removed at cleanup.
-Passwords stay in Secrets Manager only.
+the group can open every attachment, as the existing members do today. The
+membership is therefore added at 09:20 on Friday, not earlier, and removed at
+cleanup. Passwords stay in Secrets Manager only.
+
+**No unrelated attachments are opened while enforcement is OFF (owner condition 3):**
+- The 09:30 baseline reads attachment *lists* (metadata) only, and only for the
+  test records A, B, C and G, plus negotiation 12373/12511, subaward 92899 and
+  proposals 01092706/01444988.
+- It never downloads a file.
+- It skips `report-with-attachments.pdf`, the one endpoint that embeds file
+  content. That probe is judged only under enforcement: allow = 200 PDF, deny =
+  403/404.
+- The evidence keeps a status, content type, SHA-256 and the test identifiers
+  seen, never a response body.
+- Nobody opens attachments by hand before 10:10.
+
+**Live proof that the group adds no record permission:**
+- S4 is in the group but has no identity scope. Every attachment probe for S4
+  must return 403 `ACCESS_NOT_PROVISIONED`.
+- S1 and S3 are in the group. Their out-of-scope attachment probes must return
+  403/404 with no file names.
+- Any 200 is a LEAK, and the window aborts.
 
 Prepared, not executed (AWS_PROFILE=bu-nprd, account 770203350335):
 

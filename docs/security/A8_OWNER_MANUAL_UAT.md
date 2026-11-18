@@ -124,6 +124,13 @@ Disease*, *National Center on Improving Literacy*.
 | N2a (only if the §7.5 group step was applied) | Address bar `/awards/3476042`, Attachments tab, and **Archived Files** | The same "not provisioned" message; no file names |
 | N3 (optional) | Sign out. Sign in on localhost as your **native** user `mukadder@bu.edu` | The same message (reason: no identity link). Your native user is unlinked, so this shows the unlinked case on your own account without changing anything |
 
+Record what you see in two places: a **security result** (PASS / FAIL /
+NOT TESTED) per step, and, separately, a **usability note** for anything
+confusing that does not disclose a record. For example, D14's generic denial
+message or D16's missing IRB results are usability notes (U1, U2 in package
+§7.3), not security failures. Do not open any attachment before 10:10, when
+enforcement is confirmed on.
+
 ## 6. Cleanup
 
 - **Your account:** nothing to undo; nothing was changed. Grant 2 still
