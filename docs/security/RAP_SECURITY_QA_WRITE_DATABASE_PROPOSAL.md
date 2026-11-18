@@ -74,3 +74,59 @@ operator Mac ──(same IP-restricted ALB rule as the Security QA environment)�
 1. Approve option A in principle.
 2. Approve the first session's scope: (a) V089/V090 rehearsal, (b) audit, (c) admin writes and approvals. One at a time is recommended.
 3. Approve per session: restore, network and secret creation, and the teardown list above.
+
+## 7. Implementation and cost plan (for review, 2026-11-18)
+
+Not approved and not executed. Facts read 2026-11-18:
+- **Source:** `research-archive-platform-dev-postgres`, db.t4g.micro, PostgreSQL 17.9, 20 GB gp3, encrypted, not public.
+- **Snapshots:** daily automated at about 05:25Z, kept 7 days.
+- **Network:** subnet group `research-archive-platform-dev-db-subnet-group`; security group `sg-0ded3637b04384f60`, which is NOT reused.
+
+### 7.1 Resources per session (all deleted at teardown)
+
+| # | Resource | Name |
+|---|---|---|
+| 1 | RDS instance restored from the latest automated snapshot | `rap-dev-secqa-<yyyymmdd>` (db.t4g.micro, single-AZ, same subnet group, `--no-publicly-accessible`, deletion protection off, backup retention 0) |
+| 2 | Security group on the instance: inbound 5432 only from #3 | `rap-dev-secqa-db-<yyyymmdd>` |
+| 3 | Security group for the `-a8w` task; egress to #2 and HTTPS | `rap-dev-secqa-task-<yyyymmdd>` |
+| 4 | Secret with the restored instance's credentials (master password reset after restore) | `rap/dev/secqa/<yyyymmdd>` |
+| 5 | Task definition `research-archive-platform-dev-api-a8w:N` = `-a8:N` with the datasource secrets pointing at #4 and only the flags under test changed | kept inert like `-a8`, or deregistered |
+| 6 | TG, task and listener rule | as the Security QA environment |
+
+### 7.2 Commands (outline; full scripted versions are reviewed before any session)
+
+```
+aws rds restore-db-instance-from-db-snapshot --db-instance-identifier rap-dev-secqa-<d> \
+  --db-snapshot-identifier <latest rds:research-archive-platform-dev-postgres-...> \
+  --db-instance-class db.t4g.micro --db-subnet-group-name research-archive-platform-dev-db-subnet-group \
+  --vpc-security-group-ids <#2> --no-publicly-accessible --no-multi-az --tags Key=purpose,Value=secqa-temporary
+aws rds wait db-instance-available --db-instance-identifier rap-dev-secqa-<d>
+aws rds modify-db-instance --db-instance-identifier rap-dev-secqa-<d> --master-user-password <generated> \
+  --backup-retention-period 0 --apply-immediately          # password goes straight into secret #4, never printed
+# ... session ...
+aws rds delete-db-instance --db-instance-identifier rap-dev-secqa-<d> --skip-final-snapshot --delete-automated-backups
+aws secretsmanager delete-secret --secret-id rap/dev/secqa/<d> --force-delete-without-recovery   # owner's choice
+aws ec2 delete-security-group --group-id <#3>; aws ec2 delete-security-group --group-id <#2>
+```
+
+**Pre-use guards:**
+- the restored endpoint differs from the shared endpoint;
+- the `-a8w` task's resolved datasource host equals the restored endpoint;
+- a read-only snapshot of shared DEV `authz` write counters before and after the session must be unchanged.
+
+### 7.3 Cost (approximate us-east-1 on-demand list prices; verify before approval)
+
+| Item | Rate (approx.) | 3 h session | Notes |
+|---|---|---|---|
+| db.t4g.micro single-AZ | ≈ $0.016/h | ≈ $0.05 | billed per second while the instance exists, including the 15–30 min restore |
+| 20 GB gp3 storage | ≈ $0.115/GB-month | ≈ $0.01 | prorated hourly |
+| Snapshot restore | no charge | $0 | |
+| Session secret | ≈ $0.40/month | ≈ $0.01 | deleted at teardown |
+| Fargate task (0.5 vCPU / 1 GB) | ≈ $0.025/h | ≈ $0.08 | as the Security QA environment |
+| **Total** | | **≈ $0.15 per session** | a forgotten instance costs ≈ $12/month: hence the teardown verification and the daily `rap-dev-secqa-*` check |
+
+### 7.4 First-session candidates (owner picks one per session)
+
+1. **V089/V090 migration rehearsal:** loader `--migrate-only` pointed at the restored secret; verify the schema, then run the admin-write suites against it.
+2. **Activity audit:** enable audit on `-a8w` only; prove view and download rows for S1/S3 (US-SEC-004 #1/#2).
+3. **Admin writes, revocation and approvals:** link, grant, revoke through the admin API; prove access is gone on the next request (US-SEC-002 #3); rehearse second-administrator bootstrap and the approval workflow (prerequisite for Central).
