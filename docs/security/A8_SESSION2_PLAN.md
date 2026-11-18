@@ -88,3 +88,29 @@ On a clean session 2, these become candidates for DONE, on the owner's direction
 - US-SEC-003 #1 and #2.
 
 Formal BU acceptance stays separate. The technical count stays at 29/47 until then.
+
+## 7. Execution record: session 2 (2026-11-18, 20:45–21:10Z, owner-approved)
+
+| Step | Result |
+|---|---|
+| Pre-checks | IP 108.12.232.44, Cisco VPN Disconnected; shared `:107` 1/1, COMPLETED, healthy; listener default only; timebox until 23:45Z |
+| Accounts | S1/S3/S4 re-enabled. Grants **6** (S1 UNIT 2573180018, no descendants) and **5** (S3 IO 9500312705), each dry run then `--confirm`, expiring 2026-11-19T23:45Z; S4 none. Group: the 3 synthetic accounts added to the 2 pre-session members. Owner grant 2 and admin seat unchanged |
+| Baseline (shared, no rule) | 233 requests; same fixtures as session 1; all three accounts see 40,926, so shared enforcement is OFF |
+| Private API | `-a8:2` = `:107` plus the six settings (diff verified); task on digest `7257b72f…`; inert rule until healthy (20:54:43Z); via the inert host: S4 403, S1 244 |
+| Isolation | real-host rule live at 20:55:06Z. AWS source 54.167.105.184: 40 requests on the shared TG, 0 on the private TG. From the owner IP: S4 403, S1 244, S3 1. Shared via the ALB name: S4 40,926 |
+| **Matrix** | **666: 655 PASS, 0 FAIL, 0 LEAK, 11 NOT TESTED**, exactly the target. All 25 session-1 FAILs are now PASS (12 return 404, 13 return 403) |
+| Fix checks | S3: subaward 92899 12/12 → 404; `no_sub_c` 5/5 PASS; Negotiations 7/7 → 404; Award C 36/36 still open. S4: Global Search 12/12 → 403; AI Evidence Search → 403 |
+| Cross-check | 22 PASS, 1 NOT TESTED (no PI account). Two flagged results reproduced at field level: C's number appears only in the echoed `$.query`, with 0 results |
+| Owner browser checks (own BU session, private route) | D1 enforcement ON, writes disabled; D2 2/1/6/3/0/0/9; D3–D14 the same as session 1, with no restricted marker anywhere. The F5 401 path was not exercised, because the session was fresh |
+| DB writes | none: `authz` and `archive` write counters unchanged from 20:49:58 to 21:03:19Z |
+| Cleanup | rule deleted 21:04:09Z (routing back 21:04:47Z); task stopped; TG deleted; grants 5 and 6 revoked; group back to the pre-session list; users disabled and globally signed out. Verified 21:10Z: 0 unrevoked synthetic grants, shared `:107` healthy, listener default only |
+
+**BU technical acceptance.** Recommended and prepared; the workbook is open in Excel,
+so it is not yet written:
+- **US-OAV-001 #1 → DONE (technical count 30/47).**
+- **US-OAV-001 #2 → IN PROGRESS:** still needs independent QA review of this evidence.
+- **US-SEC-003 #1 and #2 → IN PROGRESS:** still need the IRB release flag set false and the owner's scope reconciliation.
+
+Formal BU business acceptance is unchanged.
+
+**Evidence:** `~/projects/rap-security-evidence/a8-session2-2026-11-18` (`MANIFEST.sha256`).
