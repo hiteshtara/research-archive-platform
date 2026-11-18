@@ -271,6 +271,80 @@ class GlobalSearchSemanticScopeTest {
         assertThat(response.results()).anyMatch(r -> "IRB".equals(r.module()));
     }
 
+    // --- F2 (A8 isolated window, 2026-11-18) ------------------------------
+    // Live, a No-Grant caller's Global Search answered 200 with no results and
+    // failedModules [AWARD, NEGOTIATION, SUBAWARD]: each module leg threw
+    // AccessNotProvisionedException and the fault-tolerant fan-out reported it
+    // as a broken module. Every other endpoint refuses such a caller with 403
+    // ACCESS_NOT_PROVISIONED, which the UI turns into "no archive access has been
+    // provisioned". Global Search must give the same answer, before fan-out.
+
+    @Test
+    void anUnprovisionedCallerIsRefusedBeforeAnyModuleIsSearched() {
+        RecordVisibility unprovisioned = refusing(
+                new edu.bu.archive.application.authorization.AccessNotProvisionedException());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service(unprovisioned).search("212128-00002"))
+                .isInstanceOf(edu.bu.archive.application.authorization.AccessNotProvisionedException.class);
+
+        org.mockito.Mockito.verifyNoInteractions(awardArchiveService, negotiationArchiveService,
+                subawardArchiveService, proposalArchiveRepository, irbSearchRepository,
+                semanticSearchRepository);
+    }
+
+    @Test
+    void aStaleSignInIsRefusedAsReauthenticationNotAsFailedModules() {
+        RecordVisibility stale = refusing(
+                new edu.bu.archive.application.authorization.ReauthenticationRequiredException());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service(stale).search("anything"))
+                .isInstanceOf(edu.bu.archive.application.authorization.ReauthenticationRequiredException.class);
+    }
+
+    /** A scoped caller whose provisioning check refuses with {@code refusal}. */
+    private static RecordVisibility refusing(RuntimeException refusal) {
+        RecordVisibility base = scoped();
+        return new RecordVisibility() {
+            @Override public void requireProvisioned() {
+                throw refusal;
+            }
+
+            @Override public boolean unrestricted() {
+                return base.unrestricted();
+            }
+
+            @Override public boolean canSeeAward(long awardId) {
+                return base.canSeeAward(awardId);
+            }
+
+            @Override public boolean canSeeAwardNumber(String awardNumber) {
+                return base.canSeeAwardNumber(awardNumber);
+            }
+
+            @Override public boolean canSeeProposalNumber(String proposalNumber) {
+                return base.canSeeProposalNumber(proposalNumber);
+            }
+
+            @Override public boolean canSeeProposal(long proposalId) {
+                return base.canSeeProposal(proposalId);
+            }
+
+            @Override public boolean canSeeEveryProposalVersion(String proposalNumber) {
+                return base.canSeeEveryProposalVersion(proposalNumber);
+            }
+
+            @Override public boolean canSeeEveryAwardVersion(String awardNumber) {
+                return base.canSeeEveryAwardVersion(awardNumber);
+            }
+
+            @Override public <T> java.util.function.Supplier<T> propagate(
+                    java.util.function.Supplier<T> work) {
+                return work;
+            }
+        };
+    }
+
     // --- helpers ----------------------------------------------------------
 
     private GlobalSearchService service(RecordVisibility visibility) {

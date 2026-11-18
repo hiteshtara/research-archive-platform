@@ -453,4 +453,41 @@ class AwardEvidenceSearchServiceTest {
         assertThat(response.query())
                 .isEqualTo("Which proposal is connected to this Award?");
     }
+
+    // ── F3 (A8 isolated window, 2026-11-18) ─────────────────────────────
+    // Live, a No-Grant caller's evidence search answered 503 "temporarily
+    // unavailable": the catch-all below wrapped AccessNotProvisionedException in
+    // AwardEvidenceSearchException, which AiExceptionHandler maps to 503. An
+    // access refusal is not an outage. These exceptions must leave the service
+    // unwrapped so GlobalExceptionHandler gives them their own status (403/401).
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0} is not wrapped")
+    @org.junit.jupiter.params.provider.MethodSource("accessControlRefusals")
+    void anAccessControlRefusalIsNotReportedAsAnOutage(RuntimeException refusal) {
+        when(awardArchiveService.findFamily("204713-00001")).thenThrow(refusal);
+
+        assertThatThrownBy(() ->
+                service.search("204713-00001", "query", List.of(), null)
+        ).isSameAs(refusal);
+        verify(embeddingProvider, never()).embed(anyString());
+    }
+
+    static java.util.stream.Stream<RuntimeException> accessControlRefusals() {
+        return java.util.stream.Stream.of(
+                new edu.bu.archive.application.authorization.AccessNotProvisionedException(),
+                new edu.bu.archive.application.authorization.IdentityAccessDeniedException(),
+                new edu.bu.archive.application.authorization.ReauthenticationRequiredException(),
+                new edu.bu.archive.application.authorization.PartialFamilyAccessException());
+    }
+
+    @Test
+    void anUnexpectedFailureIsStillWrappedAsBefore() {
+        // Unchanged behaviour: a genuine failure is still the 503 path.
+        when(awardArchiveService.findFamily("204713-00001"))
+                .thenThrow(new IllegalStateException("database went away"));
+
+        assertThatThrownBy(() ->
+                service.search("204713-00001", "query", List.of(), null)
+        ).isInstanceOf(AwardEvidenceSearchException.class);
+    }
 }

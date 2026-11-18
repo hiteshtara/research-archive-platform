@@ -582,3 +582,28 @@ test("the initial hint is guidance, not a validation error", () => {
   // that nothing erroneous happens.
   assert.doesNotMatch(INITIAL_SEARCH_HINT, /error|invalid|must|required/i);
 });
+
+// --- F5 (A8 isolated window, 2026-11-18) ---------------------------------
+// Live: a sign-in older than the 12 h maximum made /api/v1/awards/search answer
+// 401 "Please sign in again", and the page said "Unable to search Awards right
+// now. Try again in a moment." - advice that can never work. The archive already
+// words these states (accessStatePresentation); search pages must use it.
+
+test("a stale sign-in (401) tells the user to sign in again, not to retry", () => {
+  const message = searchErrorMessage({ status: 401, code: "REAUTHENTICATION_REQUIRED" }, GENERIC);
+  assert.notEqual(message, GENERIC);
+  assert.match(message, /sign in again/i);
+});
+
+test("an unprovisioned caller (403 ACCESS_NOT_PROVISIONED) is told access is not set up", () => {
+  const message = searchErrorMessage({ status: 403, code: "ACCESS_NOT_PROVISIONED" }, GENERIC);
+  assert.notEqual(message, GENERIC);
+  assert.match(message, /not been set up|provisioned/i);
+  assert.match(message, /administrators/i, "tells the user who can grant access");
+});
+
+test("a generic 403 keeps the page's own message (it also means cross-module refusal)", () => {
+  // ACCESS_DENIED is also how Documents/attachment search refuse a scoped caller,
+  // where "your account cannot be used" would be wrong. Left to the page.
+  assert.equal(searchErrorMessage({ status: 403, code: "ACCESS_DENIED" }, GENERIC), GENERIC);
+});

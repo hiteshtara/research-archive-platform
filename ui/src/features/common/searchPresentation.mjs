@@ -8,6 +8,12 @@
  * harness (this repo has none).
  */
 
+import {
+  ACCESS_STATES,
+  accessNotice,
+  classifyAccessError,
+} from "../access/accessStatePresentation.mjs";
+
 /**
  * Splits a Kuali status that carries a leading ordinal code.
  *
@@ -237,9 +243,27 @@ export const SEARCH_INPUT_REJECTED_MESSAGE =
  * because for those, waiting and retrying genuinely is the advice.
  */
 export function searchErrorMessage(error, genericMessage) {
-  return isSearchInputRejection(error)
-    ? SEARCH_INPUT_REJECTED_MESSAGE
-    : genericMessage;
+  if (isSearchInputRejection(error)) {
+    return SEARCH_INPUT_REJECTED_MESSAGE;
+  }
+  /*
+   * F5 (A8, 2026-11-18): a stale sign-in (401) and an unprovisioned caller
+   * (403 ACCESS_NOT_PROVISIONED) are answers, not outages, and "try again in a
+   * moment" can never fix them. Reuse the archive's own wording for those two
+   * states. A generic 403 ACCESS_DENIED is deliberately NOT mapped here: the same
+   * code is how cross-module search refuses a scoped caller, so the page's own
+   * message stays more accurate than "your account cannot be used".
+   */
+  const state = classifyAccessError(error);
+  if (
+    state === ACCESS_STATES.REAUTHENTICATION_REQUIRED ||
+    state === ACCESS_STATES.NOT_PROVISIONED
+  ) {
+    const notice = accessNotice(error);
+    // Include the next step when the notice has one (QA: say who to contact).
+    return [`${notice.title}.`, notice.body, notice.action].filter(Boolean).join(" ");
+  }
+  return genericMessage;
 }
 
 /*
