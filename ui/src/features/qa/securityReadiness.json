@@ -1,36 +1,36 @@
 {
   "_comment": "Security Readiness dashboard data. Every 'verified' field below records WHEN something was measured and HOW, never an assumption. Nothing here is refreshed at page load - the page says 'Last verified' for exactly that reason, and runtimeSource below records why a live source is not used. securityReadinessConsistency.test.mjs fails the build if these facts contradict each other or go stale against the recorded deployment.",
-  "verifiedAt": "2026-11-11",
+  "verifiedAt": "2026-11-17",
   "verifiedBy": "read-only AWS inspection, the 2026-11-10 DEV API deployment itself, and an authenticated browser check of every module",
   "deployment": {
     "environment": "Development",
-    "apiTaskDefinition": "research-archive-platform-dev-api:91",
+    "apiTaskDefinition": "research-archive-platform-dev-api:106",
     "taskDefinitionIsNewest": true,
-    "imageCommit": "458de9c",
-    "imageCommitDate": "2026-11-11",
-    "imageDigest": "sha256:f0f42ab61271e9d3bf4113836fe5736c7ff4aa2d563c5cfa8da9d39ba5b912f1",
-    "imagePushed": "2026-11-11",
-    "mainCommit": "458de9c",
-    "mainCommitDate": "2026-11-11",
+    "imageCommit": "1c3f0c8",
+    "imageCommitDate": "2026-11-17",
+    "imageDigest": "sha256:c85be89ade227565dcb561d0df98557aa30be37a0f95d7c96ed3fab8e3725b90",
+    "imagePushed": "2026-11-17",
+    "mainCommit": "1c3f0c8",
+    "mainCommitDate": "2026-11-17",
     "commitsBehindMain": 0,
     "runningTasks": "1 of 1",
-    "verifiedAt": "2026-11-11",
-    "verifiedHow": "aws ecs describe-services and describe-tasks on 2026-11-11: the service and the running task are both on revision 91, rollout COMPLETED, 1 of 1, and the ALB target group reports the task healthy; the running container's digest is sha256:f0f42ab61271e9d3bf4113836fe5736c7ff4aa2d563c5cfa8da9d39ba5b912f1, which is the digest docker push reported and the digest ECR holds for the tag the release built. GET /actuator/health returned 200 UP and an unauthenticated /api/global-search returned 401. A field-by-field diff against the previous revision showed exactly one difference, the container image: the 8 environment variables and 5 secrets are byte-for-byte identical, as are both IAM roles, cpu 512, memory 1024, awsvpc networking and the port mappings.",
-    "note": "The running image is the tip of main as released. It carries SEC-001 to SEC-009, the startup safeguard that refuses to start when enforcement is enabled without a complete policy, and new on 2026-11-11 the completion of the Global Search lexical-relevance fix in Proposal and Subaward together with the Proposal sponsor-acronym path. It is deployed and switched off, which is not the same as working.",
-    "imageCommitFull": "458de9c941393b138abed3e38c1a65cf6ab3357d",
+    "verifiedAt": "2026-11-17",
+    "verifiedHow": "aws ecs describe-services and describe-tasks on 2026-11-17: the service and its only running task are on revision 106, rollout COMPLETED, 1 of 1; the running container's digest is sha256:c85be89ade227565dcb561d0df98557aa30be37a0f95d7c96ed3fab8e3725b90, the digest docker push reported and ECR holds for the immutable tag 1c3f0c8 (an OCI index whose image manifest is linux/amd64). The image was built with buildx --platform linux/amd64 from a clean detached worktree at the merge commit. Revision 106 was registered from the previous revision with only the image changed, confirmed by a field-by-field diff: the 9 environment variables and 5 secrets, both IAM roles, cpu 512, memory 1024 and networking are identical. The application started at 22:56:37Z on profile aws with no errors.",
+    "note": "The running image is the tip of main after the PR #166 merge. It carries the H1-H3 fixes (#164), H5 (#165), the N-161 relink and approval-binding fixes (#161), the activity-audit fixes (#160) and the V090 phase-1 approval code (#166), which has no live caller. Enforcement, administrator writes and activity auditing are OFF, and V089 and V090 are not applied. Rollback is the previous revision, whose image is recorded under priorVerifications.",
+    "imageCommitFull": "1c3f0c80685cb5afaf0d1e986a9511a0275e2115",
     "imageIsMainTip": true,
-    "imageReference": "Revision 91 pins the image by DIGEST. The deploy script first registered revision 90 referencing the same image by tag; this repository is imageTagMutability=MUTABLE, so a tag could later be moved and 90 would pull different code on its next task start. 90 remains ACTIVE but unused, and the service was never pointed at it."
+    "imageReference": "Revision 106 pins the image by DIGEST. Only the immutable tag 1c3f0c8 was pushed - not latest - because this repository is imageTagMutability=MUTABLE and a tag could later be moved. No intermediate tag-referenced revision was registered."
   },
   "enforcement": {
     "state": "off",
-    "verifiedAt": "2026-11-10",
-    "verifiedHow": "task definition 91 carries the same 8 environment variables as the revision before it and no APP_AUTHORIZATION_* of any kind, and no activity-audit key - read from aws ecs describe-task-definition on 2026-11-11. A field-by-field diff of the two revisions showed exactly one difference: the container image.",
+    "verifiedAt": "2026-11-17",
+    "verifiedHow": "task definition 106 carries the same 9 environment variables as the previous revision. The only APP_AUTHORIZATION_* variable is APP_AUTHORIZATION_ADMINISTRATION_ENABLED, which turns on the read-only Security Administration views; there is no enforcement, administration-writes or activity-audit key - read from aws ecs describe-task-definition on 2026-11-17. GET /api/v1/me/capabilities returned enforcementEnabled=false and administrationWritesAvailable=false. A field-by-field diff of the two revisions showed exactly one difference: the container image.",
     "businessMeaning": "Every signed-in user can see every archived record. Record-level restrictions are built and tested but are not switched on.",
     "whyNotOn": "Turning it on today would show nobody anything: with no access grants issued, a denial is indistinguishable from a record that does not exist, so dashboards would read zero. Grants have to be issued and checked first."
   },
   "database": {
     "migrationsApplied": "V082-V088",
-    "migrationsPending": "V089 (activity audit)",
+    "migrationsPending": "V089 (activity audit) and V090 (privilege approval), both held in database/migrations-pending-approval and not applied",
     "verifiedAt": "2026-11-09",
     "verifiedHow": "V082-V087 catalog-verified read-only on 2026-11-09 over pg_indexes and pg_tables through the SSM tunnel as archive_analyst; the migration ledger is deliberately unreadable by that role, so the catalog is the evidence. V088 was applied on 2026-11-09 by the ECS loader task running its own packaged migration runner, which logged a single 'Applying migration V088' line and exited 0",
     "v087Confirmed": true,
@@ -75,9 +75,9 @@
       },
       "evidence": {
         "implemented": "GrantType.CENTRAL; AccessScope.central short-circuits every module rule.",
-        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit 458de9c (verified by file presence at that commit).",
+        "deployed": "RecordAccessEvaluator and AccessScopeResolver are present in image commit 1c3f0c8 (verified by file presence at that commit).",
         "migrationApplied": "V082 authz.access_grant exists in DEV (catalog-verified 2026-11-09).",
-        "configured": "No APP_AUTHORIZATION_* on task definition 91.",
+        "configured": "No enforcement key on task definition 106: its only APP_AUTHORIZATION_* variable is APP_AUTHORIZATION_ADMINISTRATION_ENABLED (read-only administration views).",
         "tested": "Covered by the four record-authorization integration suites against real PostgreSQL.",
         "enforcing": "Enforcement flag is off, so no grant of any type restricts anything."
       },
@@ -99,7 +99,7 @@
       "evidence": {
         "implemented": "Single-grant department access and bulk assignment (grantAccessInBulk) are both in main.",
         "merged": "Merged into main by PR #114 on 2026-11-09. Bulk assignment is no longer outstanding.",
-        "deployed": "Both are in image 458de9c.",
+        "deployed": "Both are in image 1c3f0c8.",
         "tested": "8 tests for bulk assignment; department access covered by the Award, Proposal and Negotiation authorization suites.",
         "enforcing": "Enforcement flag is off."
       },
@@ -124,7 +124,7 @@
         "migrationApplied": "No migration needed - award_person.award_id is already a version key.",
         "tested": "RecordAccessEvaluator and RecordScopeSqlBuilder tests, plus Sec003AiPartialFamilyAccessTest which proves a partially-visible award family is refused for the AI and history endpoints.",
         "enforcing": "Enforcement flag is off.",
-        "deployed": "In image 458de9c."
+        "deployed": "In image 1c3f0c8."
       },
       "pendingApproval": "Whether research staff should keep access to Subawards linked to award versions from before they joined. The current behaviour is the stricter reading."
     },
@@ -143,7 +143,7 @@
       },
       "evidence": {
         "implemented": "AwardAccountNumberIoResolver and AwardAccountNumberIoSql are wired in AuthorizationConfiguration - verified in both main and the running image commit, not inferred from comments.",
-        "deployed": "Present at image commit 458de9c.",
+        "deployed": "Present at image commit 1c3f0c8.",
         "enforcing": "Enforcement flag is off."
       },
       "pendingApproval": null
@@ -167,7 +167,7 @@
         "tested": "10 Testcontainers tests for the traversal (depth limit, a real two-row cycle, a cross-family row that must not be followed) and 22 for resolution, decisions, list SQL and grant shape.",
         "enforcing": "Enforcement flag is off.",
         "merged": "Merged into main by PR #114 on 2026-11-09.",
-        "deployed": "In image 458de9c.",
+        "deployed": "In image 1c3f0c8.",
         "configured": "Off. The award_number column V088 adds is read only when record-level enforcement is on, so that query has not yet run against DEV - it was rehearsed against throwaway PostgreSQL carrying V088. Expect it to be the first thing to check when enforcement is switched on."
       },
       "pendingApproval": "Depth default of 1 (maximum 10) is the working value, pending business confirmation. Broader inheritance to subawards and negotiations is deliberately NOT enabled."
@@ -204,7 +204,7 @@
         "enforcing": "no"
       },
       "evidence": {
-        "deployed": "The revocation endpoint and the operator command-line tool's revocation support (#103) are both in image 458de9c.",
+        "deployed": "The revocation endpoint and the operator command-line tool's revocation support (#103) are both in image 1c3f0c8.",
         "tested": "Revocation and optional expiry are covered by the grant provisioning integration suite against real PostgreSQL.",
         "enforcing": "Enforcement flag is off, so revoking changes nothing visible today."
       },
@@ -224,9 +224,9 @@
         "enforcing": "no"
       },
       "evidence": {
-        "deployed": "Present in image 458de9c, which is the current tip of main. New on 2026-11-10: the application now REFUSES TO START if enforcement is enabled without a complete policy. Before that, setting the flag alone started cleanly and denied every record to every user, administrators included, because the policy is checked before any grant. Verified in the deployed jar by byte-search, not inferred from the commit.",
+        "deployed": "Present in image 1c3f0c8, which is the current tip of main. New on 2026-11-10: the application now REFUSES TO START if enforcement is enabled without a complete policy. Before that, setting the flag alone started cleanly and denied every record to every user, administrators included, because the policy is checked before any grant. Verified in the deployed jar by byte-search, not inferred from the commit.",
         "migrationApplied": "V082-V088 confirmed in DEV on 2026-11-09.",
-        "configured": "Off, confirmed from task definition 91 on 2026-11-11.",
+        "configured": "Off, confirmed from task definition 106 on 2026-11-17.",
         "enforcing": "No. This is the deliberate state."
       },
       "pendingApproval": "Approval to issue the first access grants, and then to switch enforcement on."
@@ -248,9 +248,9 @@
         "implemented": "All five recording points are wired: record views and refusals at the single authorization decision point, attachment downloads and report exports before any file is released, and searches in the global, document, file-finder and evidence search services.",
         "migrationApplied": "V089 is written but NOT applied anywhere, and is held outside the directory the ETL loaders glob so no scheduled run can apply it. The database permission to write audit rows is a separate reviewed script, also not applied - and it explicitly removes the read access a blanket grant would otherwise have given.",
         "tested": "50 tests. An audit failure can never grant access - proved under both failure settings. Downloads and exports stop if their audit record cannot be written; routine views and searches continue and the gap is counted and logged.",
-        "configured": "Collection is off, confirmed from task definition 91 on 2026-11-11. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one.",
+        "configured": "Collection is off, confirmed from task definition 106 on 2026-11-17. Switching it on without choosing a failure policy stops the application from starting, rather than silently picking one.",
         "merged": "Merged into main by PR #114 on 2026-11-09. The migration and the database permission were deliberately kept out of the applied migration directory.",
-        "deployed": "All five recording points are in image 458de9c. Collection is off, so each one is a no-op that cannot throw - which is why wiring them before approval is safe."
+        "deployed": "All five recording points are in image 1c3f0c8. Collection is off, so each one is a no-op that cannot throw - which is why wiring them before approval is safe."
       },
       "pendingApproval": "How long audit records should be kept (90 days is proposed, not approved; automatic deletion is not implemented). Whether the proposed failure settings - continue on a failed view audit, stop on a failed download audit - are accepted as BU policy. And approval to apply the migration and grant the database permission."
     },
@@ -269,7 +269,7 @@
       },
       "evidence": {
         "implemented": "The database role grants SELECT and nothing else on the archive schema. The regression tests that keep it that way are PR #112.",
-        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script. The regression suite is in image 458de9c. The database itself was not re-checked on 2026-11-10 - no privilege changed, and this records when it was last measured rather than implying it was measured again.",
+        "deployed": "Verified against the live development database on 2026-11-09: the application's database role holds no insert, update, delete or truncate permission on any of the 115 archive tables. No drift from the committed role script. The regression suite is in image 1c3f0c8. The database itself was not re-checked on 2026-11-10 - no privilege changed, and this records when it was last measured rather than implying it was measured again.",
         "tested": "17 tests, including a catalog-wide sweep that fails if any future grant widens it.",
         "enforcing": "Yes - this one is in force today, independently of the enforcement flag.",
         "merged": "PR #112 merged into main by PR #114 on 2026-11-09."
@@ -292,18 +292,26 @@
     "followUp": "Generating Spring Boot build-info (git commit and build time) and exposing it on /actuator/info would let this panel read the running revision at page load and make staleness structurally impossible. That is an API change and is not done here."
   },
   "smokeTest": {
-    "performedAt": "2026-11-11",
-    "revision": "research-archive-platform-dev-api:91",
-    "checks": 14,
-    "passed": 14,
+    "performedAt": "2026-11-17",
+    "revision": "research-archive-platform-dev-api:106",
+    "checks": 21,
+    "passed": 21,
     "failed": 0,
     "blocked": 0,
-    "how": "Post-deployment verification in an authenticated browser against https://nonprod.kuali-archive.bu.edu, plus read-only AWS inspection and authenticated API calls made from that browser session.",
-    "covered": "service and running task on revision 91 at 1 of 1 with rollout COMPLETED; ALB target healthy; the running container's digest against the digest docker push reported; health 200 UP; unauthenticated API rejected 401; authorization and activity-audit variables absent with environment, secrets, roles, resources and networking unchanged; all seven Dashboard counts; Global Search across all four modules with zero mid-word matches remaining; the Proposal sponsor-acronym path; Global Search agreeing with the Proposal module page; Negotiation cards showing both identifiers; legitimate transformation, transferase and prefix searches preserved; the QA Testing and Security Readiness pages",
+    "how": "Body-asserting authenticated API calls from a signed-in browser session against https://api-dev.app-nprd.aws-cloud.bu.edu, plus the Security Administration page in the browser and read-only AWS inspection. The same checks were run against the previous revision minutes before the switch, as the baseline.",
+    "covered": "service and running task on revision 106 at 1 of 1 with rollout COMPLETED; the running container's digest against the digest docker push reported; capabilities enforcement off, administration available, writes off; all seven Dashboard counts; Award search, summary, by-number, history and related Proposals; Proposal search and detail; Negotiation list and detail; Subaward list and detail; Documents search; Global Search; Security Administration identities, administrators and audit log readable; a well-formed grant revocation refused 409 ADMINISTRATION_WRITES_DISABLED with the audit log unchanged; Archive Explorer absent (404); the Security Administration page showing Enforcement OFF and Write Operations Disabled",
     "recordsStillVisible": true,
-    "note": "All seven Dashboard counts were unchanged from the pre-deployment baseline. The two failures recorded against the previous revision are both fixed and verified on live data: of 78 direct-match captions for \"NSF\", zero are now mid-word matches, where 16 were before; Proposal rose from 347 to 3,736 as the sponsor-acronym path reached the NSF-sponsored records, and Subaward fell from 287 to 162 as the false matches went; and a Negotiation card now reads \"Negotiation 12219 - Document 1122911\". Nothing was modified beyond the API image: no grant, identity link, database row, migration, privilege or enforcement flag."
+    "note": "Every result matched the pre-switch baseline, and all seven Dashboard counts were unchanged (40926 / 267386 / 33960 / 119788 / 10775 / 3511 / 491678). Archived File Finder returned 403 on both revisions; that is the known US-DEP-002 issue, not a regression, and is not counted. The revocation probe must pass ?reason=: without it the request is rejected 400 before the writes gate is reached. Nothing was modified beyond the API image: no grant, identity link, database row, migration, privilege or enforcement flag."
   },
   "priorVerifications": [
+    {
+      "performedAt": "2026-11-11",
+      "revision": "research-archive-platform-dev-api:91",
+      "commit": "458de9c",
+      "what": "Post-deployment verification in an authenticated browser against https://nonprod.kuali-archive.bu.edu, plus read-only AWS inspection and authenticated API calls made from that browser session.",
+      "result": "14 of 14 passed, 0 failed, 0 blocked",
+      "note": "Superseded as the CURRENT verification by the 2026-11-17 A1 deployment of revision 106. Revisions 92-105 were deployed after this snapshot was last refreshed and were not recorded here; 104 and 105 ran image sha256:b0648a8b1ab9ad5ba39a725637961d056d3f8afc69eed1e270c401bfebcc1415 (pushed 2026-11-13)."
+    },
     {
       "performedAt": "2026-11-10",
       "revision": "research-archive-platform-dev-api:89",
