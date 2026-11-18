@@ -119,11 +119,14 @@ public final class RecordScopeSqlBuilder {
      */
     /**
      * @param includeParentAward false when this predicate is being built to
-     *        decide a Subaward or Negotiation. SEC-005 (business decision
-     *        2026-11-09) restricts PARENT_AWARD grants to Award records, and
-     *        the inherited predicate is literally the Award predicate - so
-     *        the clause is omitted there rather than filtered afterwards.
-     *        Mirrors {@code RecordAccessEvaluator.DecisionContext}.
+     *        decide a Subaward or Negotiation (an INHERITED decision). SEC-005
+     *        (business decision 2026-11-09) restricts PARENT_AWARD grants to
+     *        Award records, and F1 (owner decision 2026-11-18, the documented
+     *        IO boundary) restricts IO grants the same way. The inherited
+     *        predicate is literally the Award predicate - so both clauses are
+     *        omitted there rather than filtered afterwards. Mirrors
+     *        {@code RecordAccessEvaluator.DecisionContext}. Name kept for a
+     *        minimal diff; it means "this is a DIRECT Award decision".
      */
     private String awardRow(AccessScope scope, Set<String> units, Map<String, Object> params,
                             boolean includeParentAward) {
@@ -132,7 +135,11 @@ public final class RecordScopeSqlBuilder {
             params.put("az_units", List.copyOf(units));
             familyScoped.add("{row}.lead_unit_number IN (:az_units)");
         }
-        if (!scope.ioValues().isEmpty()) {
+        // F1 (A8, 2026-11-18): IO grants authorise Awards only, so - like the
+        // SEC-005 parent-award clause below - the IO clause is omitted from the
+        // inherited Award predicate that subawardRow and negotiationRow reuse.
+        // Mirrors RecordAccessEvaluator's DecisionContext.DIRECT check.
+        if (includeParentAward && !scope.ioValues().isEmpty()) {
             io.ioPredicate(RecordModule.AWARD, "{row}").ifPresent(predicate -> {
                 params.put("az_ios", List.copyOf(scope.ioValues()));
                 familyScoped.add(predicate);

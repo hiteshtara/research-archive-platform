@@ -539,7 +539,9 @@ class TimeAndMoneySapNegotiationScopingIntegrationTest {
         assertThat(ids(DEPT, NegotiationSearchFilters.ofQuery("ROOT-00001"))).containsExactly(702L);
         assertThat(ids(DEPT, associationId("ROOT-00001"))).containsExactly(702L);
         assertThat(ids(PI, associationId("ROOT-00001"))).containsExactly(702L);
-        assertThat(ids(IO, associationId("ROOT-00001"))).containsExactly(702L);
+        // F1 (owner decision 2026-11-18): an IO grant reaches Awards only, so an IO
+        // caller does not reach Negotiation 702 through its associated Award.
+        assertThat(ids(IO, associationId("ROOT-00001"))).isEmpty();
         // A genuinely unassociated row still matches its own document number.
         assertThat(ids(DEPT, associationId("NDOC-703"))).containsExactly(703L);
         // Central can search the same identifiers.
