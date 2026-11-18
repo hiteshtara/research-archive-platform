@@ -484,11 +484,13 @@ grants (dry run, `--confirm`, read-only scope verification) → 09:30 baseline
 probes → 10:30 documented go/no-go → L1 session → **11:50 rollback to `:106`**
 → verify enforcement OFF + core smoke → cleanup (§2.7) → workbook.
 
-## 7. Revised A8 window 1: fully synthetic and automated (proposed 2026-11-18)
+## 7. Revised A8 window 1: fully synthetic and automated (approved 2026-11-18)
 
-Supersedes §3.3's Lalitha slot and §3.5. **Nothing in this section has been
-executed; enforcement stays OFF until the owner approves this plan and the
-notice prerequisite is met.**
+Supersedes §3.3's Lalitha slot and §3.5. **Approved by the owner on 2026-11-18,
+together with A8_OWNER_MANUAL_UAT.md (manual session Fri 10:30–11:30 ET). No
+Lalitha participation in this first technical test. Nothing has been
+executed: enforcement stays OFF until the DEV-user notice has been sent and
+every prerequisite in §7.4 is re-confirmed at 09:00 Friday.**
 
 ### 7.1 Who takes part
 
@@ -552,11 +554,28 @@ a verdict.
 | Admin API | identities, administrators, audit: refused to all three accounts |
 | No-Grant Control | every path above as S4: 403 `ACCESS_NOT_PROVISIONED`, no identifier |
 
+**Cross-module indexes are refused, not filtered (found 2026-11-18, code-verified).**
+`/api/documents/search`, `/api/v1/documents` and `/api/v1/attachments/search`
+UNION Award, Proposal, Negotiation, Subaward and IRB rows. Under enforcement
+they call `AwardRecordAccess.requireUnrestrictedForCrossModuleSearch`, which
+throws for every scoped caller: `403 ACCESS_DENIED` ("Access to the archive is
+denied for this account."). The matrix judges these 32 probes (S1 and S3) as
+kind `refused`: 403 `ACCESS_DENIED` with no identifier is PASS; any 200 is FAIL.
+Before this fix they would have been reported as false FAILs. UX observation for
+the record: the specific "use the module-specific search" text is not shown; the
+caller sees the generic denial message.
+
+**Global Search drops IRB under enforcement.** `GlobalSearchService.irbExcludedFromSharedSearch()`
+returns true once enforcement is on, so IRB rows leave shared search during the
+window. Only the IRB module's own `/api/irb` endpoints stay reachable.
+
 Known NOT TESTED (40 at rehearsal), each with its reason in the evidence:
-- **Attachments, attachment search and report-with-attachments (29 probes):**
-  they are already 403 for the synthetic accounts with enforcement off. They
-  are gated by the Cognito group `ArchiveAttachmentViewer` (US-DEP-002).
-  Testing them needs that group added to S1/S3/S4, which is a separate approval.
+- **Attachments and report-with-attachments (29 at rehearsal):** 403
+  `ATTACHMENT_ACCESS_DENIED` for the synthetic accounts, because they are not in
+  the Cognito group `ArchiveAttachmentViewer` (US-DEP-002). The matrix records
+  any `ATTACHMENT_ACCESS_DENIED` as NOT TESTED, never PASS or FAIL. **§7.5
+  shows the group is safe to add and gives the prepared steps.** If it is
+  added, these probes are judged normally.
 - **Investigators (3):** a lookup by a named person's email. Excluded, because
   this test never queries a real identity.
 - **Explorer (off) and IRB (3 + 3):** IRB is excluded from release scope. Its
@@ -575,6 +594,7 @@ The 26-probe `a8_enforcement_probe.py` also runs as an independent cross-check.
 | Thu | DEV-user notice sent (§6 of A8_ENFORCEMENT_WINDOW_1.md) | not sent: postpone |
 | 09:00 | re-confirm the notice went out; AWS account, `:106` serving 1/1, no other task running | any mismatch |
 | 09:15 | A6-3 grants: dry run, then `--confirm`; read-only query shows exactly 2 grants, the right type/unit/IO, `include_descendants=false`, expiry `2026-11-21T17:00:00Z`, none for S4 | any difference |
+| 09:20 | only if approved: §7.5 group step (add the 3 synthetic users to `ArchiveAttachmentViewer`, verify membership is exactly those 3 plus the existing members). It must be before the baseline, so baseline attachment probes return 200 | any other user changes |
 | 09:30 | baseline: matrix `baseline --execute` + `capture-baseline --execute` | a fixture missing or in the wrong unit |
 | 10:00 | register 107 (re-diffed: exactly the six settings); `update-service` | 107 not COMPLETED by 10:15 |
 | 10:10 | capabilities for S1, S3, S4: enforcement true, writes false (automatic stop) | otherwise |
@@ -582,7 +602,7 @@ The 26-probe `a8_enforcement_probe.py` also runs as an independent cross-check.
 | 10:30 | **documented go/no-go**: tally by verdict, every FAIL/REVIEW listed, ECS/ALB/log health | |
 | 10:30–11:30 | only if separately approved: the owner's manual session (A8_OWNER_MANUAL_UAT.md). Otherwise roll back straight after go/no-go | |
 | **≤ 11:50** | `update-service` to `:106`; wait COMPLETED; capabilities `enforcementEnabled=false`; core smoke (dashboard 40926/267386/33960/119788/10775/3511/491678, search, detail, Global Search, documents) | |
-| ≤ 12:00 | cleanup §2.7: revoke grants → unlink 5, 7, 6 → disable the 3 users → schedule secret deletion; read-only check: 0 unrevoked synthetic grants, 0 ACTIVE synthetic links | |
+| ≤ 12:00 | cleanup §2.7: revoke grants → unlink 5, 7, 6 → (if §7.5 was applied) remove the 3 users from `ArchiveAttachmentViewer` → disable the 3 users → schedule secret deletion; read-only check: 0 unrevoked synthetic grants, 0 ACTIVE synthetic links, group members back to the pre-window list | |
 | after | workbook: per-criterion PASS / FAIL / NOT TESTED with evidence file hashes; BU stays 25/47 unless live PASS evidence supports a change and the owner directs it | |
 
 Abort, then roll back immediately, on any of:
@@ -596,10 +616,51 @@ Abort, then roll back immediately, on any of:
 
 ### 7.4 Still needed before Friday
 
-1. The owner's approval of this §7.
-2. **The notice.** Recipients and a sending channel must be confirmed by the
-   owner, or the owner sends it.
-3. Optional and separate:
-   - adding `ArchiveAttachmentViewer` to the three synthetic users, so the 29
-     attachment probes become testable;
-   - the owner's manual session.
+1. ~~The owner's approval of this §7~~: approved 2026-11-18, with the manual
+   session (Fri 10:30–11:30 ET).
+2. **The notice.** The audience is approved: 10 addresses, each verified on
+   2026-11-18 as a DEV pool sign-in (antcast, dbaldwin, dhaywood, jfnick,
+   lhuval, lsreddy, mukadder, rolilly, rrussell, wrh @bu.edu). The text is
+   drafted for sending from mukadder@bu.edu. **Not sent: the sending method
+   awaits the owner's confirmation.** Enforcement is not enabled until it has
+   gone out.
+3. The §7.5 group step: shown to be safe; awaiting the owner's go to apply it
+   at 09:20 Friday.
+
+### 7.5 `ArchiveAttachmentViewer`: does it grant record access? (verified 2026-11-18)
+
+**No. It is an additional gate, never an alternative to record scope.**
+Evidence, on `origin/main` c339e94:
+
+| Check | Finding |
+|---|---|
+| Where the group is read | Cognito groups become `ROLE_<group>` in `SecurityConfiguration.jwtAuthenticationConverter()`. `ROLE_ArchiveAttachmentViewer` is read in exactly one place: `AttachmentAuthorizationService.requireAttachmentAccess`. No authorization-package class (scope resolver, grants, admin seat) reads any Cognito group |
+| Per-record list and download, all four modules | The controller calls `requireAttachmentAccess`, then the service calls `recordAccess.requireAward` / `requireProposal` / `requireSubaward` / `requireNegotiation` before any row is read (`AwardArchiveService` findAttachments/downloadAttachment; `ProposalArchiveV1Service`; `SubawardArchiveService`; `NegotiationArchiveService`) |
+| Report with attachments | Group gate, then `findSummary`, which calls `recordAccess.requireAward` first |
+| Archived File Finder (`/api/v1/attachments/search`) | Group gate, then `requireUnrestrictedForCrossModuleSearch`: refused for every scoped caller |
+| Explorer attachments | Group gate; Explorer is OFF on DEV |
+| No-Grant (S4) | Passes the group gate, then `requireProvisioned` refuses: 403 `ACCESS_NOT_PROVISIONED`. Without the group, S4's attachment probes stop at the group gate and prove nothing |
+
+Side effect before and after the window: with enforcement OFF, any account in
+the group can open every attachment, as the existing members do today. So the
+membership is added at 09:20 on Friday, not earlier, and removed at cleanup.
+Passwords stay in Secrets Manager only.
+
+Prepared, not executed (AWS_PROFILE=bu-nprd, account 770203350335):
+
+```
+# before: record the current membership
+aws cognito-idp list-users-in-group --user-pool-id us-east-1_VJ4ekQ27c --group-name ArchiveAttachmentViewer --query 'Users[].Username'
+# add (09:20 Friday, only on the owner's go)
+for u in rap-synth-a6-dept@example.invalid rap-synth-a6-oav@example.invalid rap-synth-a6-none@example.invalid; do
+  aws cognito-idp admin-add-user-to-group --user-pool-id us-east-1_VJ4ekQ27c --group-name ArchiveAttachmentViewer --username "$u"
+done
+# verify: the before list plus exactly these 3
+# cleanup (before disabling the users)
+for u in rap-synth-a6-dept@example.invalid rap-synth-a6-oav@example.invalid rap-synth-a6-none@example.invalid; do
+  aws cognito-idp admin-remove-user-from-group --user-pool-id us-east-1_VJ4ekQ27c --group-name ArchiveAttachmentViewer --username "$u"
+done
+```
+
+Tokens are issued fresh by `a8_tokens.py` at each step, so the new group claim
+is present from the baseline onwards.

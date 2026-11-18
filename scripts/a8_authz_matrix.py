@@ -20,6 +20,7 @@ How a verdict is reached
     list   status equals baseline; in-scope identifiers the baseline showed
            must remain; out-of-scope identifiers it showed must be gone.
     none   403 ACCESS_NOT_PROVISIONED and no fixture identifier at all.
+    refused 403 ACCESS_DENIED: a cross-module index refuses a scoped caller (never filtered rows).
     admin  403/404 for a non-administrator, no identifier.
     count  dashboard total for the role is below the unscoped baseline.
   A probe whose baseline cannot discriminate (the record had no data, the
@@ -79,6 +80,11 @@ LIST_PATHS = [  # {n} is an award number, {t} a short title fragment
     "/api/documents/search?businessRecordNumber={n}", "/api/awards/families?query={n}",
     "/api/v1/attachments/search?awardNumber={n}",
 ]
+# Cross-module indexes that UNION Award/Proposal/Negotiation/Subaward/IRB rows. With enforcement on
+# they REFUSE every scoped caller (AwardRecordAccess.requireUnrestrictedForCrossModuleSearch ->
+# 403 ACCESS_DENIED) rather than filter, because four of the five modules in the UNION have no
+# Award-style rule there. Expected: refusal, never rows. Judged as kind "refused".
+REFUSED_FOR_SCOPED = ("/api/documents/search", "/api/v1/documents?", "/api/v1/attachments/search")
 # Recorded, never judged: Explorer is off on DEV; IRB is excluded from release scope and its
 # API stays on (app.irb.api.enabled defaults true) because IRB exclusion is not activated in A8.
 DISABLED_PATHS = ["/api/v1/explorer/awards", "/api/irb"]
@@ -298,7 +304,9 @@ def plan(fx):
         for t in LIST_PATHS:
             path = t.format(n=Q(r["award_number"]), t=Q(frag))
             for role in ROLES:
-                add(role, "none" if role == "NONE" else "list", path, f"list/search for {k}")
+                kind = "none" if role == "NONE" else (
+                    "refused" if path.startswith(REFUSED_FOR_SCOPED) else "list")
+                add(role, kind, path, f"list/search for {k}")
     for role in ROLES:
         kind = "none" if role == "NONE" else "list"
         add(role, kind, "/api/negotiations?leadUnit=1330420000&size=25", "negotiation list, unit of C")
@@ -359,6 +367,13 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
     if hard:
         return "LEAK", [f"out-of-scope identifier in body: {hard}"]
     bs = base_row.get("status") if base_row else None
+    if status == 403 and '"ATTACHMENT_ACCESS_DENIED"' in text:
+        # The Cognito-group gate runs before record scope, so this proves nothing about scope.
+        return "NOT TESTED", ["attachment group gate (account not in ArchiveAttachmentViewer)"]
+    if kind == "refused":
+        ok = status == 403 and '"ACCESS_DENIED"' in text
+        return ("PASS" if ok else "FAIL"), ([] if ok else [
+            f"expected 403 ACCESS_DENIED (cross-module search refused for a scoped caller), got {status}"])
     if kind == "none":
         ok = status == 403 and '"ACCESS_NOT_PROVISIONED"' in text
         return ("PASS" if ok else "FAIL"), ([] if ok else [f"expected 403 ACCESS_NOT_PROVISIONED, got {status}"])
@@ -522,6 +537,11 @@ def self_test():
         (P("NONE", "none"), base200, 200, j, '{"content":[]}', "FAIL"),
         (P("DEPT", "caps"), None, 200, j, '{"enforcementEnabled":true,"administrationWritesAvailable":false}', "PASS"),
         (P("DEPT", "caps"), None, 200, j, '{"enforcementEnabled":false,"administrationWritesAvailable":false}', "FAIL"),
+        (P("DEPT", "refused"), base200, 403, j, '{"code":"ACCESS_DENIED"}', "PASS"),
+        (P("OAV", "refused"), base200, 200, j, '{"content":[]}', "FAIL"),
+        (P("DEPT", "refused"), base200, 403, j, '{"code":"ACCESS_DENIED","x":"209407-00002"}', "LEAK"),
+        (P("NONE", "none"), base200, 403, j, '{"code":"ATTACHMENT_ACCESS_DENIED"}', "NOT TESTED"),
+        (P("DEPT", "deny"), base200, 403, j, '{"code":"ATTACHMENT_ACCESS_DENIED"}', "NOT TESTED"),
         (P("DEPT", "admin"), None, 403, j, '{}', "PASS"),
         (P("DEPT", "admin"), None, 200, j, '{}', "FAIL"),
     ]

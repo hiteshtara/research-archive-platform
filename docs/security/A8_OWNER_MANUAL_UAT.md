@@ -1,7 +1,10 @@
 # A8 manual UAT plan: mukadder@bu.edu
 
-Status: **proposed, not approved.** Nothing in this plan has been executed.
-No account, link, grant or DEV setting has been changed to prepare it.
+Status: **approved 2026-11-18, for Friday 2026-11-20, 10:30–11:30 AM ET,** subject
+to the DEV-user notice having been sent and the 09:00 execution checks passing
+(package §7.3). Nothing has been executed. No account, link, grant or DEV setting
+has been changed to prepare it. Your administrator role and CGS grant 2 stay
+unchanged.
 
 ## 1. What your DEV identity is today (read-only inspection, 2026-11-18)
 
@@ -89,8 +92,9 @@ operator, who rolls back.
 | D11 | **Negotiations**; then address bar `/negotiations/12373` | List shows no Biomedical Genetics or WCEHD negotiation; 12373 is "not found" |
 | D12 | **Subawards**, search `3259` | Subaward 3259 (C's) does not appear |
 | D13 | **Proposals**, search `01092706` | Not found (Biomedical Genetics proposal) |
-| D14 | **Documents**, search `212128-00002` | No documents for A |
-| D15 | **Archived Files** | 403 as today (US-DEP-002): **NOT TESTED**, not a result |
+| D14 | **Documents**, search `212128-00002`, then `212137-00001` (your own CGS award) | An access-denied message **both times**, never a list. Document search spans all five modules, so under enforcement it is refused for any scoped account rather than filtered (package §7.2). The API says "Access to the archive is denied for this account."; record the exact wording the page shows. A list of documents, even for 212137, is a **FAIL** |
+| D15 | **Archived Files** | 403 as today (your BU login is not in `ArchiveAttachmentViewer`): **NOT TESTED**, not a result |
+| D16 | **Global Search** for `IRB` or a known protocol number | No IRB results: shared search drops IRB while enforcement is on |
 
 Must not appear anywhere in D: `212128-00002`, `211144-00007`, `209407-00002`,
 the titles *Genetics of Alzheimer Disease…*, *Asian Cohort for Alzheimer's
@@ -108,6 +112,8 @@ Disease*, *National Center on Improving Literacy*.
 | I6 | Awards search `212128-00002`; address bar `/awards/3784681` | No result; not found |
 | I7 | Global Search `Alzheimer` and `Diversifying Curriculum` | No results |
 | I8 | Negotiations, Subawards, Proposals pages | Empty lists, not an error |
+| I9 (only if the package §7.5 group step was applied) | C → **Attachments** tab | Loads C's attachment list |
+| I10 (same condition) | Address bar `/awards/3784681` (A) → Attachments; and **Archived Files**, search `209407-00002` | A: not found. Archived Files: access-denied message (refused for scoped accounts), never a file list |
 
 ### NG: No-Grant, synthetic S4 at http://localhost:5173
 
@@ -115,6 +121,7 @@ Disease*, *National Center on Improving Literacy*.
 |---|---|---|
 | N1 | Sign in as `rap-synth-a6-none@example.invalid` | Every archive page shows **"No archive access has been provisioned for this account"** |
 | N2 | Dashboard, Awards search, Global Search, address bar `/awards/3476042` | The same message; **never** an empty archive, a count or a record |
+| N2a (only if the §7.5 group step was applied) | Address bar `/awards/3476042`, Attachments tab, and **Archived Files** | The same "not provisioned" message; no file names |
 | N3 (optional) | Sign out. Sign in on localhost as your **native** user `mukadder@bu.edu` | The same message (reason: no identity link). Your native user is unlinked, so this shows the unlinked case on your own account without changing anything |
 
 ## 6. Cleanup
