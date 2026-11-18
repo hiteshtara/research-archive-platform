@@ -114,3 +114,23 @@ so it is not yet written:
 Formal BU business acceptance is unchanged.
 
 **Evidence:** `~/projects/rap-security-evidence/a8-session2-2026-11-18` (`MANIFEST.sha256`).
+
+### 7.1 Corrections after independent QA (2026-11-18)
+
+An independent review of the session 2 evidence (requested by the owner for
+US-OAV-001 #2) found **no OAV leak**. It also found that three statements in §7
+over-claimed:
+- **H3 was not exercised live.** Award C has no SAP data, so the SAP probes were empty at baseline and under enforcement. "H3 verified" in earlier reports was wrong. It rests on code and integration tests.
+- **`no_sub_c` is 3 strong and 2 weak, not 5/5.**
+  - Strong: C's `funding-subawards` tab and the two Subaward searches.
+  - Weak: the two Global Search probes. They read `subawardId` keys, but Global Search items carry `recordId`.
+- **No `/api/v1/proposals/*` probe ran in either session.** The fixture's proposal ids were null.
+
+**Reviewer verdict for US-OAV-001 #2:** DOES NOT YET MEET ALL RECORDED CONDITIONS.
+**It stays IN PROGRESS.** Before any change, the owner decides:
+1. whether H3 may be accepted on code and integration tests;
+2. whether isolated-copy evidence substitutes for shared-DEV enforcement.
+
+The matrix gaps get a reviewed fix and a re-run. Details:
+`~/projects/rap-security-evidence/a8-session2-2026-11-18/CORRECTIONS-and-QA-2026-11-18.md`.
+The 655/0/0/11 tally itself is unchanged and recomputes correctly.
