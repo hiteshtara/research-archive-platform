@@ -273,7 +273,14 @@ def plan(fx):
     for role in ("DEPT", "OAV"):
         for k in allow[role]:
             for path, label in award_paths(k):
-                add(role, "allow", path, label)
+                # F1 (#171): the IO account still opens Award C, but C's funding-subawards
+                # tab must no longer list subaward C. Its title equals C's, so a text
+                # check cannot tell the two apart; judge it structurally by subaward id.
+                if role == "OAV" and k == "C" and path.endswith("/funding-subawards") and fx.get("sub_out"):
+                    add(role, "no_sub_c", path, label + " (F1: subaward C absent)")
+                    p[-1]["sub_out_id"] = fx["sub_out"]
+                else:
+                    add(role, "allow", path, label)
         for k in deny[role]:
             for path, label in award_paths(k):
                 add(role, "deny", path, label)
@@ -345,8 +352,13 @@ def plan(fx):
         add(role, kind, "/api/negotiations?leadUnit=1330420000&size=25", "negotiation list, unit of C")
         add(role, kind, f"/api/negotiations?leadUnit={DEPT_UNIT}&size=25", "negotiation list, unit of A/B")
         for code in (fx.get("sub_out_codes") or [])[:2]:
-            add(role, kind, f"/api/subawards?query={Q(code)}", "subaward list by C's subaward code")
-            add(role, kind, f"/api/global-search?query={Q(code)}", "global search by C's subaward code")
+            # F1 (#171): for the IO account these must not return subaward C at all.
+            k2 = "no_sub_c" if role == "OAV" and fx.get("sub_out") else kind
+            for path_, label_ in ((f"/api/subawards?query={Q(code)}", "subaward list by C's subaward code"),
+                                  (f"/api/global-search?query={Q(code)}", "global search by C's subaward code")):
+                add(role, k2, path_, label_)
+                if k2 == "no_sub_c":
+                    p[-1]["sub_out_id"] = fx["sub_out"]
         for num in [fx.get("prop_out_number"), fx.get("prop_in_number")]:
             if num:
                 add(role, kind, f"/api/proposals/search?query={Q(str(num))}", "proposal search")
@@ -422,6 +434,30 @@ def judge(probe, base_row, status, ctype, text, tok, ambiguous):
             return ("PASS" if ok else "FAIL"), ([] if ok else [f"status {status} {ctype!r}, expected 200 PDF"])
         ok = status in (403, 404)
         return ("PASS" if ok else "FAIL"), ([] if ok else [f"status {status}, expected 403/404"])
+    if kind == "no_sub_c":
+        # Structural F1 check: no record in the body may carry subaward C's id.
+        sub_id = (base_row or {}).get("sub_out_id") or probe.get("sub_out_id")
+        try:
+            body = json.loads(text) if is_json and text[:1] in "{[" else None
+        except Exception:
+            body = None
+        def ids(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if k in ("subawardId", "navigableCurrentSubawardId") and v is not None:
+                        yield str(v)
+                    yield from ids(v)
+            elif isinstance(o, list):
+                for v in o:
+                    yield from ids(v)
+        if status in (403, 404):
+            return "PASS", ["refused (no subaward C)"]
+        if status != 200 or body is None:
+            return "FAIL", [f"status {status}, expected 200 JSON without subaward C"]
+        if sub_id is None:
+            return "NOT TESTED", ["subaward C id unknown in fixture"]
+        found = str(sub_id) in set(ids(body))
+        return ("LEAK" if found else "PASS"), ([f"subaward C ({sub_id}) present"] if found else [])
     if kind == "refused":
         ok = status == 403 and '"ACCESS_DENIED"' in text
         return ("PASS" if ok else "FAIL"), ([] if ok else [
@@ -614,6 +650,12 @@ def self_test():
          '{"query":"212128-00002","totalResults":0,"results":["209407-00002 in scope"]}', "PASS"),
         ({"role": "OAV", "kind": "list", "path": "/api/global-search?query=212128-00002", "method": "GET"}, base200, 200, j,
          '{"query":"212128-00002","results":[{"awardNumber":"212128-00002"}]}', "LEAK"),
+        ({"role": "OAV", "kind": "no_sub_c", "path": "/api/subawards?query=3259", "method": "GET", "sub_out_id": 9},
+         base200, 200, j, '{"content":[],"totalElements":0}', "PASS"),
+        ({"role": "OAV", "kind": "no_sub_c", "path": "/api/subawards?query=3259", "method": "GET", "sub_out_id": 9},
+         base200, 200, j, '{"content":[{"navigableCurrentSubawardId":9,"title":"x"}]}', "LEAK"),
+        ({"role": "OAV", "kind": "no_sub_c", "path": "/api/v1/awards/3/funding-subawards", "method": "GET", "sub_out_id": 9},
+         base200, 404, j, '{"code":"NOT_FOUND"}', "PASS"),
         (P("DEPT", "admin"), None, 403, j, '{}', "PASS"),
         (P("DEPT", "admin"), None, 200, j, '{}', "FAIL"),
     ]

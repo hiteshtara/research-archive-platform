@@ -44,7 +44,15 @@ unchanged). The 666-probe plan is unchanged, so session 1 and session 2 are
 directly comparable. Any FAIL, or any new NOT TESTED, is investigated before a
 go/no-go. No verdict is reclassified.
 
-**Additional probes** (added to the matrix before the session, reviewed and self-tested):
+**Matrix change made 2026-11-18 (self-test passes with 37 cases; still 666 probes):**
+- **New kind `no_sub_c`.** It replaces the text-based check on 5 IO-account probes:
+  - Award C's `funding-subawards` tab (was `allow`);
+  - the Subaward list and Global Search for C's subaward codes 3259 and 3260 (was `list`).
+- **Why the text check fails here.** Subaward 92899's title is identical to Award C's, so text cannot tell them apart. After F1 the old kinds would report false FAILs ("in-scope identifiers missing").
+- **How the new check judges.** PASS when no record in the body has `subawardId` or `navigableCurrentSubawardId` 92899 (or the request is refused); LEAK if it is present.
+- **Session 1 coverage gap.** Under this check, session 1's responses for these 5 probes would have been LEAK. F1 was caught there only through the 12 detail-endpoint probes.
+
+**Further probes still to add** (reviewed and self-tested before the session):
 - S3 Subaward **list and search** for 92899's code and title return nothing (F1, SQL side), and the dashboard Subaward count for S3 is 0.
 - S3 Award C's **funding-subawards** and **negotiations** tabs are empty (F1, related lists).
 - S4 `GET /api/global-search?query=…` body has `code=ACCESS_NOT_PROVISIONED` and no `results` key.
