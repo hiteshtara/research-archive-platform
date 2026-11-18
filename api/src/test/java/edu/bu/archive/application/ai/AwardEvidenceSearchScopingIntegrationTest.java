@@ -321,30 +321,38 @@ class AwardEvidenceSearchScopingIntegrationTest {
 
     @Test
     void evidenceSearchOmitsUnauthorizedRelatedNegotiation() {
-        for (Caller caller : List.of(DEPARTMENT, PI, IO)) {
+        for (Caller caller : List.of(DEPARTMENT, PI)) {
             assertThat(keys(search(caller, List.of("RELATED_NEGOTIATION"), 20)))
                     .as("%s may open Negotiation 501 but not 502 (lead unit 1234, associated with "
                             + "OUT-00001); expected RELATED_NEGOTIATION evidence 502 to be omitted", caller)
                     .containsExactly("RELATED_NEGOTIATION:501");
         }
-        assertThat(keys(search(PARENT_AWARD, List.of("RELATED_NEGOTIATION"), 20)))
-                .as("PARENT_AWARD reaches Award records only (SEC-005); "
-                        + "expected every RELATED_NEGOTIATION row to be omitted")
-                .isEmpty();
+        // F1 (owner decision 2026-11-18): IO joins PARENT_AWARD here. Both reach
+        // Award records only; neither is inherited by a related Negotiation.
+        for (Caller caller : List.of(PARENT_AWARD, IO)) {
+            assertThat(keys(search(caller, List.of("RELATED_NEGOTIATION"), 20)))
+                    .as("%s reaches Award records only (PARENT_AWARD: SEC-005; IO: F1); "
+                            + "expected every RELATED_NEGOTIATION row to be omitted", caller)
+                    .isEmpty();
+        }
     }
 
     @Test
     void evidenceSearchOmitsUnauthorizedRelatedSubaward() {
-        for (Caller caller : List.of(DEPARTMENT, PI, IO)) {
+        for (Caller caller : List.of(DEPARTMENT, PI)) {
             assertThat(keys(search(caller, List.of("RELATED_SUBAWARD"), 20)))
                     .as("%s may open SUB-A (funded by HUB) but not SUB-B (its only resolvable funding "
                             + "Award is OUT-00001); expected RELATED_SUBAWARD evidence 302 to be omitted", caller)
                     .containsExactly("RELATED_SUBAWARD:301");
         }
-        assertThat(keys(search(PARENT_AWARD, List.of("RELATED_SUBAWARD"), 20)))
-                .as("PARENT_AWARD is never inherited by a Subaward (SEC-005); "
-                        + "expected every RELATED_SUBAWARD row to be omitted")
-                .isEmpty();
+        // F1 (owner decision 2026-11-18): an IO grant is never inherited by a
+        // Subaward either - the documented IO boundary, defect found live in A8.
+        for (Caller caller : List.of(PARENT_AWARD, IO)) {
+            assertThat(keys(search(caller, List.of("RELATED_SUBAWARD"), 20)))
+                    .as("%s is never inherited by a Subaward (PARENT_AWARD: SEC-005; IO: F1); "
+                            + "expected every RELATED_SUBAWARD row to be omitted", caller)
+                    .isEmpty();
+        }
     }
 
     // =====================================================================
@@ -370,8 +378,9 @@ class AwardEvidenceSearchScopingIntegrationTest {
     @Test
     void ioCallerSeesOnlyAuthorizedEvidence() {
         assertThat(keys(search(IO, null, 20)))
-                .as("IO (account IO-HUB): no Proposal rule exists for IO; expected only authorized evidence")
-                .containsExactly("RELATED_SUBAWARD:301", "RELATED_NEGOTIATION:501", "AWARD_VERSION:1002");
+                .as("IO (account IO-HUB) reaches Awards only - no Proposal rule, and since F1 "
+                        + "(2026-11-18) no Subaward or Negotiation inheritance; expected the Award's own evidence")
+                .containsExactly("AWARD_VERSION:1002");
     }
 
     @Test

@@ -78,7 +78,8 @@ public class RecordAccessEvaluator {
     /**
      * @param context {@link DecisionContext#INHERITED} when this Award is
      *                being consulted on behalf of a Subaward or Negotiation.
-     *                PARENT_AWARD grants are ignored in that case (SEC-005).
+     *                PARENT_AWARD grants (SEC-005) and IO grants (F1) are
+     *                ignored in that case: both authorise Award records only.
      */
     public AccessDecision decide(AccessOutcome outcome, RecordFacts record,
                                  List<RecordFacts> familyVersions, DecisionContext context) {
@@ -99,7 +100,16 @@ public class RecordAccessEvaluator {
             if (departmentMatches(scope, version)) {
                 reasons.add(AccessReason.DEPARTMENT);
             }
-            if (ioMatches(scope, version)) {
+            /*
+             * F1 (A8, 2026-11-18): an IO grant authorises Awards only - the
+             * documented boundary is "an IO grant never reaches Proposals,
+             * Subawards or Negotiations". Subaward and Negotiation access is
+             * inherited by asking this same question about a linked Award, so
+             * the IO clause is honoured only for a DIRECT decision, exactly as
+             * SEC-005 does for PARENT_AWARD. RecordScopeSqlBuilder.awardRow
+             * mirrors it for the list SQL.
+             */
+            if (context == DecisionContext.DIRECT && ioMatches(scope, version)) {
                 reasons.add(AccessReason.IO_GRANT);
             }
             if (context == DecisionContext.DIRECT && parentAwardMatches(scope, version)) {
