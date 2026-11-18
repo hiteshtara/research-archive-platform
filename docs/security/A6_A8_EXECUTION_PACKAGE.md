@@ -459,3 +459,27 @@ scheduled, with `--expires-at` = planned window end + 24 hours:
 
 Until A8, the links confer no access: enforcement is off, and they hold no
 grants.
+
+## 6. A8 window 1: approved schedule and preparation (2026-11-18)
+
+**Approved:** Friday 2026-11-20, 10:00–12:00 ET (15:00–17:00Z), reference
+`OWNER-APPROVAL-2026-11-18-A8`. L1 witness mode for Lalitha; no real BU test
+account is created or changed. Grants expire `2026-11-21T17:00:00Z`.
+**Prerequisites before execution:** Lalitha's availability confirmed and the
+§6 DEV-user notice sent; if either is unmet, postpone and ask for a new date.
+
+Preparation done 2026-11-18, all non-writing:
+
+| Check | Result |
+|---|---|
+| Grant dry runs on `dev-grant-admin:6` | both `DRY_RUN_OK`: S1 UNIT 2573180018 only, no descendants; S3 IO (Awards only); expiry accepted; no identical active grant; actor ACTIVE. Nothing written |
+| Revision 107 input (built from `:106`, **not registered**) | field diff = exactly the six `APP_AUTHORIZATION_*` additions; image `c85be89a…`, 5 secrets, `APP_EXPLORER_ENABLED=false`, `ADMINISTRATION_ENABLED=true` (reads) unchanged; no audit, IRB, writes or enrollment key |
+| Synthetic sign-in (ADMIN_USER_PASSWORD_AUTH, client `seqgmc8s…`) | S1, S3, S4 → `/api/v1/me/capabilities` 200, `administrator=false`, `enforcementEnabled=false`, writes unavailable. Tokens never printed |
+| `a8_enforcement_probe.py self-test` | PASS (9 cases) |
+| Baseline rehearsal (enforcement OFF, GET only) | records A/B/C resolved; T&M ids for B and C found; **no Negotiation linked to C**, so the H2 probe will be recorded as not tested, not passed |
+
+Friday running order (ET): 09:00 prerequisites re-confirmed → 09:15 A6-3
+grants (dry run, `--confirm`, read-only scope verification) → 09:30 baseline
+→ 10:00 register 107 (re-diffed) and deploy → 10:10 capabilities → 10:15
+probes → 10:30 documented go/no-go → L1 session → **11:50 rollback to `:106`**
+→ verify enforcement OFF + core smoke → cleanup (§2.7) → workbook.
