@@ -492,6 +492,8 @@ Lalitha participation in this first technical test. Nothing has been
 executed: enforcement stays OFF until the DEV-user notice has been sent and
 every prerequisite in §7.4 is re-confirmed at 09:00 Friday.**
 
+> **Superseded in part by §8 (2026-11-18):** A8 now runs on a private enforcement-on API task behind the DEV ALB, reachable only from the owner's IP. Shared DEV stays on `:106` with enforcement OFF. The DEV-user notice prerequisite is replaced by §8.3 step 6 (verified network isolation); the notice stays an unsent draft.
+
 ### 7.1 Who takes part
 
 - **No business user.** Lalitha does not take part live; she reviews the
@@ -713,3 +715,135 @@ done
 
 Tokens are issued fresh by `a8_tokens.py` at each step, so the new group claim
 is present from the baseline onwards.
+
+## 8. Isolated A8: a private enforcement-on API task behind the DEV ALB (prepared 2026-11-18)
+
+Approved for preparation by the owner on 2026-11-18. **Nothing in this section
+has been created.** It supersedes §7's shared-DEV deployment (the 10:00
+`update-service` to 107 and the 11:50 rollback) and the DEV-user notice
+prerequisite. The notice stays an unsent draft. Only the owner and the
+synthetic accounts S1/S3/S4 take part.
+
+Shared DEV is never redeployed. `research-archive-platform-dev-api` stays on
+`:106` with enforcement OFF for everyone else throughout.
+
+### 8.1 Pre-creation checks (all read-only, 2026-11-18)
+
+| Check | Result |
+|---|---|
+| Path to the ALB | `api-dev.app-nprd.aws-cloud.bu.edu` resolves straight to the ALB's IPs. No CloudFront, proxy headers or WAF, so the ALB sees each client's own IP |
+| Listener 443 | `…/94ab5e429b5f9467`. **One rule only (default)**, forwarding to `rap-dev-api-tg`. The certificate covers only `api-dev.app-nprd.aws-cloud.bu.edu`. No priority conflict; priority 10 proposed |
+| ALB | internet-facing, IPv4 only; XFF append; access logs off |
+| Owner's IP | `108.12.232.44` (`pool-108-12-232-44.prvdri.fios.verizon.net`), a home connection, not the BU VPN. Re-checked at execution |
+| Shared TG health check | HTTP `/actuator/health` on 8080, 30 s / 5 s, 2 healthy / 3 unhealthy, matcher 200, target type `ip`, deregistration 30 s. Copied exactly |
+| Network for the task | API subnets `subnet-0812bd0296da79d44`, `subnet-03d8ef305b4e55f87` (IGW route), SG `sg-02840378085557988`, which accepts 8080 only from the ALB SG `sg-0e07276f482064afb`. No SG or IAM change is needed |
+| Task definition | `a8iso-taskdef.json` (sha256 `8083872c…`), built from live `:106`. Diff: **the six settings, family `research-archive-platform-dev-api-a8`, tag `purpose=A8-isolated-enforcement-test-temporary`; nothing else**. Same image `sha256:c85be89a…` |
+
+**Who can reach the private task.** The rule forwards only when **both**
+conditions hold: Host is `api-dev.app-nprd.aws-cloud.bu.edu` **and** source IP is
+`108.12.232.44/32`.
+- **BU VPN users** egress from BU addresses, so they don't match.
+- **Other DEV users** don't match.
+- **Requests sent to the ALB's own DNS name** don't match the host condition.
+- **The only other possible match** is another device on the owner's home
+  network.
+- **Fail-safe:** if the owner's IP changes or the owner joins the VPN, the
+  owner's requests go to the shared, unenforced API. That causes no disclosure,
+  and the capabilities check detects it.
+
+**Database safety (code on `origin/main` c339e94, the source of the `:106` image):**
+- **No background work:** no `@Scheduled`, `@Async`, `TaskScheduler` or executors.
+- **Startup runners:** the four `ApplicationRunner`s are the operator CLIs, each
+  behind `@Profile` (`bootstrap-admin`, `grant-admin`, `link-identity`,
+  `bootstrap-second-admin`). The task runs profile `aws` only. Flyway is
+  disabled and `ddl-auto: none`.
+- **Write SQL exists in eight `authz` classes only:**
+  - Grants, links, suspension, administrators and approvals are reachable only
+    through `AdminAuthorizationController`'s 8 write endpoints. Each calls
+    `requireAdministrationWrites()` first, and `administration-writes-enabled`
+    is unset (false).
+  - Activity audit requires `activity-audit.enabled` (unset).
+  - Enrollment requires `enrollment.enabled` (unset).
+  - The request path calls only reads: `findForGrantee`, `identities.current`,
+    `adminRoles.findActive`.
+  - The three AI POST endpoints have no JDBC.
+- **Shared database load:** one extra connection pool on RDS.
+
+### 8.2 Exact changes for execution (AWS_PROFILE=bu-nprd, account 770203350335)
+
+```
+L443=arn:aws:elasticloadbalancing:us-east-1:770203350335:listener/app/rap-dev-api-alb/bdaaa111433a5725/94ab5e429b5f9467
+TAG=Key=purpose,Value=A8-isolated-enforcement-test-temporary
+# C1 task definition (expect research-archive-platform-dev-api-a8:1), then re-diff the registered copy against :106
+aws ecs register-task-definition --cli-input-json file://a8iso-taskdef.json
+# C2 target group (same health check as rap-dev-api-tg)
+aws elbv2 create-target-group --name rap-dev-api-a8-tg --protocol HTTP --port 8080 --target-type ip \
+  --vpc-id vpc-0590614d7cfcdedf6 --health-check-protocol HTTP --health-check-path /actuator/health \
+  --health-check-interval-seconds 30 --health-check-timeout-seconds 5 --healthy-threshold-count 2 \
+  --unhealthy-threshold-count 3 --matcher HttpCode=200 --tags $TAG
+aws elbv2 modify-target-group-attributes --target-group-arn $A8TG --attributes Key=deregistration_delay.timeout_seconds,Value=30
+# C3 one task (not a service), then register its private IP once RUNNING
+aws ecs run-task --cluster research-archive-platform-dev-api --task-definition research-archive-platform-dev-api-a8:1 \
+  --launch-type FARGATE --count 1 --started-by A8-isolated --propagate-tags TASK_DEFINITION \
+  --network-configuration 'awsvpcConfiguration={subnets=[subnet-0812bd0296da79d44,subnet-03d8ef305b4e55f87],securityGroups=[sg-02840378085557988],assignPublicIp=ENABLED}'
+aws elbv2 register-targets --target-group-arn $A8TG --targets Id=$TASK_IP,Port=8080   # wait: healthy
+# C4 the rule, created only after the target is healthy AND the baseline has run against shared DEV
+aws elbv2 create-rule --listener-arn $L443 --priority 10 --tags $TAG --actions Type=forward,TargetGroupArn=$A8TG \
+  --conditions '[{"Field":"host-header","HostHeaderConfig":{"Values":["api-dev.app-nprd.aws-cloud.bu.edu"]}},{"Field":"source-ip","SourceIpConfig":{"Values":["108.12.232.44/32"]}}]'
+```
+
+Cost: one 0.5 vCPU / 1 GB Fargate task for about 3 h (about $0.10). The target
+group and rule have no charge. None of these resources is in Terraform state,
+so after removal DEV's plan from `main` is unchanged.
+
+### 8.3 Order on the day (replaces §7.3 rows 09:00–11:50)
+
+1. **Pre-checks:**
+   - AWS account;
+   - `curl checkip.amazonaws.com` = `108.12.232.44`, owner off the VPN;
+   - shared service `:106` 1/1;
+   - listener has exactly 1 rule;
+   - S1 capabilities via shared: `enforcementEnabled=false`.
+2. **Grants:** A6-3 grants, dry run then `--confirm`, then the scope query.
+3. **Group:** §7.5 add of `ArchiveAttachmentViewer`, with the membership check.
+4. **Baseline:** matrix `baseline --execute` against **shared DEV** (no rule
+   exists yet, so this is the unenforced reference).
+5. **Create:** C1, C2, C3; wait for the target to be healthy; then C4.
+6. **Isolation proof:**
+   - **Positive:** from the Mac, S1/S3/S4 capabilities show
+     `enforcementEnabled=true`, `administrationWritesAvailable=false`.
+   - **Negative:** a one-off task from the loader image runs in the API subnets
+     with a public IP. It has no token and no secrets, and sends 40 GETs to
+     `https://api-dev…/actuator/health` from an AWS address. CloudWatch
+     `RequestCount` by target group for that minute must show ≥ 40 on
+     `rap-dev-api-tg` and **0** added on `rap-dev-api-a8-tg`. The Mac stays idle
+     during this check.
+   - Either check failing triggers R1 immediately.
+7. **Matrix:** `run --execute`, then the 26-probe cross-check, then the
+   documented go/no-go.
+8. **Manual session:** the owner's session (A8_OWNER_MANUAL_UAT.md). The deployed
+   nonprod UI works for the owner's BU login, because the owner's browser calls
+   the same API hostname. Synthetic accounts use the local UI.
+9. **Rollback:** R1 to R4; then the §7.3 cleanup (grants, links, group, users,
+   secrets).
+
+### 8.4 Rollback (exact, in this order, each safe to repeat)
+
+| Step | Command | Verify |
+|---|---|---|
+| R1 (emergency stop: restores everything by itself) | `aws elbv2 delete-rule --rule-arn $RULE` | `describe-rules` shows only the default; S1 capabilities from the Mac show `enforcementEnabled=false` |
+| R2 | `aws ecs stop-task --cluster research-archive-platform-dev-api --task $TASK --reason "A8 isolated test complete"` | task STOPPED; shared service still `:106` 1/1 |
+| R3 | `aws elbv2 delete-target-group --target-group-arn $A8TG` | not found |
+| R4 | `aws ecs deregister-task-definition --task-definition research-archive-platform-dev-api-a8:1`, then `delete-task-definitions` | INACTIVE / DELETE_IN_PROGRESS |
+
+**Abort conditions (R1 at once):**
+- any LEAK, or S4 data;
+- capabilities not showing enforcement through the rule;
+- the negative isolation check reaching the a8 TG;
+- shared target `rap-dev-api-tg` unhealthy;
+- unexpected 5xx;
+- any write seen in the a8 task logs.
+
+The 11:50 deadline no longer applies, because shared DEV is not changed.
+**Cleanup of grants, links, group, users and secrets runs on every exit path**,
+including cancellation.
