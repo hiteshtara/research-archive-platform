@@ -483,3 +483,123 @@ grants (dry run, `--confirm`, read-only scope verification) → 09:30 baseline
 → 10:00 register 107 (re-diffed) and deploy → 10:10 capabilities → 10:15
 probes → 10:30 documented go/no-go → L1 session → **11:50 rollback to `:106`**
 → verify enforcement OFF + core smoke → cleanup (§2.7) → workbook.
+
+## 7. Revised A8 window 1: fully synthetic and automated (proposed 2026-11-18)
+
+Supersedes §3.3's Lalitha slot and §3.5. **Nothing in this section has been
+executed; enforcement stays OFF until the owner approves this plan and the
+notice prerequisite is met.**
+
+### 7.1 Who takes part
+
+- **No business user.** Lalitha does not take part live; she reviews the
+  evidence afterwards.
+- Identities: only S1 (Department, `UNIT 2573180018`), S3 (IO `9500312705`)
+  and S4 (No-Grant Control). No real BU identity is used, queried or impersonated.
+- Operator present throughout (hitesh, with Claude Code executing) to monitor
+  and to roll back.
+
+### 7.2 The matrix: `scripts/a8_authz_matrix.py`
+
+It is baseline-differential:
+- With enforcement OFF, it records every probe path's status and which fixture
+  identifiers each body carried. It stores no bodies.
+- With enforcement ON, it repeats every probe as S1, S3 and S4 and compares
+  each one with its baseline.
+
+It writes nothing. It sends GETs, plus one read-only POST to AI evidence search.
+
+Verdicts are recorded separately:
+
+| Verdict | Meaning |
+|---|---|
+| **PASS** | Matches the expected result and the baseline |
+| **FAIL** | Wrong status, in-scope access lost, enforcement not confirmed, or an admin path open to a non-admin |
+| **LEAK** | An out-of-scope identifier appeared in a body. **The run stops at once and DEV is rolled back** |
+| **REVIEW** | An out-of-scope identifier appeared, but it also appears in an in-scope baseline body for the same role. A person decides |
+| **NOT TESTED** | The baseline cannot tell allowed from denied: the record has no data there, the endpoint is group-gated, disabled or out of scope. **Never counted as PASS** |
+
+Fixture records, resolved and checked at baseline:
+
+| Record | Identifier | Unit | S1 Dept | S3 IO | S4 |
+|---|---|---|---|---|---|
+| Award A | `212128-00002` (3784681) | 2573180018 | allow | deny | 403 |
+| Award B | `211144-00007` (3899037) | 2573180018 | allow | deny | 403 |
+| Award C | `209407-00002` (3476042) | 1330420000, IO 9500312705 | deny | allow | 403 |
+| Award G (CGS) | `212137-00001` (3798004) | 1250000000 | deny | deny | 403 |
+| Negotiation 12373 (A's) | | 2573180018 | allow | deny (IO never reaches Negotiations) | 403 |
+| Negotiation 12511 | | 1330420000 | deny | (not probed) | |
+| Subaward 92899 (C's, code 3259) | | requisitioner 1000000000 | deny | deny (IO never reaches Subawards) | 403 |
+| Proposal 01092706 (1092805) | | 2573180018 | allow | deny | 403 |
+| Proposal 01444988 (1452409, G's) | | 1250400000 | deny | deny | |
+
+Coverage of the 2026-11-18 rehearsal: **700 probes**, of which 626 can produce
+a verdict.
+
+| Area | Endpoints probed |
+|---|---|
+| Award workspace | all 26 `/api/v1/awards/{id}/…` paths (summary, versions, people, unit/sponsor/central-admin contacts, amounts, terms, custom data, comments, budget ×5, report PDFs) and 9 by-number/legacy `/api/awards/{n}/…` paths, for A, B, C and G |
+| Search | Award search, Award version search, Global Search (by number and by title) |
+| Documents | Document Explorer (`query`, `businessRecordNumber`), document search, Archived File Finder |
+| Related records | funding proposals, funding subawards, negotiations, legacy `/proposals` and `/funding` (#159) |
+| Time & Money | summary, actions, history; own transaction allowed; another award's transaction and document refused both directly and **through an in-scope award id** (H1: the latter is already 404 with enforcement off, scored as structural) |
+| SAP | `sap-transmissions` for every fixture (H3) |
+| Negotiations | detail and 6 sub-resources for 12373 and 12511; lists by unit of A/B and of C (H2) |
+| Subawards | detail and 11 sub-resources for 92899; list and Global Search by its code |
+| Proposals | 8 `/api/v1/proposals/{id}` paths and 3 legacy paths; proposal search; Global Search by proposal number |
+| AI Evidence Search | `POST /api/ai/awards/{n}/evidence-search`, allowed and denied, per role (H5). It is enabled on DEV via `app.search.semantic.enabled=true` |
+| Dashboard | the scoped Awards count must fall below the unscoped 40,926 |
+| Admin API | identities, administrators, audit: refused to all three accounts |
+| No-Grant Control | every path above as S4: 403 `ACCESS_NOT_PROVISIONED`, no identifier |
+
+Known NOT TESTED (40 at rehearsal), each with its reason in the evidence:
+- **Attachments, attachment search and report-with-attachments (29 probes):**
+  they are already 403 for the synthetic accounts with enforcement off. They
+  are gated by the Cognito group `ArchiveAttachmentViewer` (US-DEP-002).
+  Testing them needs that group added to S1/S3/S4, which is a separate approval.
+- **Investigators (3):** a lookup by a named person's email. Excluded, because
+  this test never queries a real identity.
+- **Explorer (off) and IRB (3 + 3):** IRB is excluded from release scope. Its
+  API stays on, because IRB exclusion is not activated in A8, so IRB stays
+  reachable to any signed-in user during the window, exactly as today.
+- **AI summary and AI questions:** not probed. `app.ai.enabled` is unset, and
+  probing them would require a model call at baseline.
+- **Two list searches** that returned no fixture identifier at baseline.
+
+The 26-probe `a8_enforcement_probe.py` also runs as an independent cross-check.
+
+### 7.3 Running order, Friday 2026-11-20 (ET)
+
+| Time | Step | Stop if |
+|---|---|---|
+| Thu | DEV-user notice sent (§6 of A8_ENFORCEMENT_WINDOW_1.md) | not sent: postpone |
+| 09:00 | re-confirm the notice went out; AWS account, `:106` serving 1/1, no other task running | any mismatch |
+| 09:15 | A6-3 grants: dry run, then `--confirm`; read-only query shows exactly 2 grants, the right type/unit/IO, `include_descendants=false`, expiry `2026-11-21T17:00:00Z`, none for S4 | any difference |
+| 09:30 | baseline: matrix `baseline --execute` + `capture-baseline --execute` | a fixture missing or in the wrong unit |
+| 10:00 | register 107 (re-diffed: exactly the six settings); `update-service` | 107 not COMPLETED by 10:15 |
+| 10:10 | capabilities for S1, S3, S4: enforcement true, writes false (automatic stop) | otherwise |
+| 10:12 | matrix `run --execute` (~2–3 min, 8 parallel workers; stops automatically on LEAK), then the 26-probe cross-check | LEAK, S4 data, 5xx |
+| 10:30 | **documented go/no-go**: tally by verdict, every FAIL/REVIEW listed, ECS/ALB/log health | |
+| 10:30–11:30 | only if separately approved: the owner's manual session (A8_OWNER_MANUAL_UAT.md). Otherwise roll back straight after go/no-go | |
+| **≤ 11:50** | `update-service` to `:106`; wait COMPLETED; capabilities `enforcementEnabled=false`; core smoke (dashboard 40926/267386/33960/119788/10775/3511/491678, search, detail, Global Search, documents) | |
+| ≤ 12:00 | cleanup §2.7: revoke grants → unlink 5, 7, 6 → disable the 3 users → schedule secret deletion; read-only check: 0 unrevoked synthetic grants, 0 ACTIVE synthetic links | |
+| after | workbook: per-criterion PASS / FAIL / NOT TESTED with evidence file hashes; BU stays 25/47 unless live PASS evidence supports a change and the owner directs it | |
+
+Abort, then roll back immediately, on any of:
+- any LEAK;
+- S4 receiving data or a 200 list;
+- a capabilities check not showing enforcement;
+- unexpected 5xx errors, or the ALB target going unhealthy;
+- 107 not COMPLETED by 10:15;
+- material DEV-user impact;
+- 11:50 reached.
+
+### 7.4 Still needed before Friday
+
+1. The owner's approval of this §7.
+2. **The notice.** Recipients and a sending channel must be confirmed by the
+   owner, or the owner sends it.
+3. Optional and separate:
+   - adding `ArchiveAttachmentViewer` to the three synthetic users, so the 29
+     attachment probes become testable;
+   - the owner's manual session.
