@@ -262,9 +262,8 @@ def discover(base, t, scope_sets=None):
             sys.exit(f"refusing: award {k} {r['award_number']} not resolvable (status {s})")
         aid = find_all(a, "awardId")[0]
         s, summ = jget(base, t, f"/api/v1/awards/{aid}/summary")
-        units = {str(u) for u in find_all(summ, "leadUnitNumber")}
-        if r["lead_unit"] not in units:
-            sys.exit(f"refusing: award {k} lead unit {units} != {r['lead_unit']}")
+        # AwardSummaryResponse carries only leadUnit (a NAME), so fixture scope is confirmed against the
+        # read-only DB scope sets below instead (second review, 2026-11-19).
         title = (find_all(summ, "title") or [None])[0]
         fx["awards"][k] = dict(r, award_id=aid, title=title)
         s, h = jget(base, t, f"/api/v1/awards/{aid}/time-and-money/history")
@@ -340,6 +339,12 @@ def discover(base, t, scope_sets=None):
                         "DEPT_versions": (scope_sets or {}).get("DEPT_versions"),
                         "OAV_versions": (scope_sets or {}).get("OAV_versions"),
                         "computed_at": (scope_sets or {}).get("at")}
+    dset, oset = set(fx["scope_sets"]["DEPT"]), set(fx["scope_sets"]["OAV"])
+    want = {"A": (True, False), "B": (True, False), "C": (False, True), "G": (False, False)}
+    wrong = [k for k, (d_, o_) in want.items()
+             if (FIXED[k]["award_number"] in dset) != d_ or (FIXED[k]["award_number"] in oset) != o_]
+    if dset and oset and wrong:
+        sys.exit(f"refusing: fixture award(s) {wrong} do not sit where the plan assumes in the DEPT/OAV scope sets")
     missing = [k for k in REQUIRED_FIXTURES if not fx.get(k)]
     if not fx["scope_sets"]["DEPT"] or not fx["scope_sets"]["OAV"] or not fx["sub_out_ids"]:
         missing.append("scope_sets (--scope-sets file from the read-only DB query)")
@@ -628,8 +633,9 @@ def _judge(probe, base_row, status, ctype, text, tok, ambiguous, sets=None):
     text_scan = json.dumps({k: v for k, v in _j.items() if k not in ("path", "query")}) if isinstance(_j, dict) else text
     hits = present(text_scan, out_t)
     amb = set() if probe.get("strict") else ambiguous.get(role, set())
-    if probe.get("assoc_ok"):
-        amb = amb | set(out_t)
+    if probe.get("assoc_ok") and isinstance(_j, dict):
+        assoc = {str(v) for v in find_all(_j, "associatedDocumentId")}
+        amb = amb | {t for t in out_t if t in assoc}
     hard = [h for h in hits if h not in amb]
     soft = [h for h in hits if h in amb]
     if kind == "excluded":
@@ -867,6 +873,9 @@ def do_baseline(base, fixture_path, scope_sets_path):
 
     with cf.ThreadPoolExecutor(WORKERS) as ex:
         rows = dict(zip(uniq, ex.map(one, uniq.values())))
+    dead = sorted(k for k, r in rows.items() if r.get("status") == 0)
+    if dead:
+        sys.exit(f"refusing: {len(dead)} baseline request(s) failed in transport (status 0), e.g. {dead[:5]}")
     # An out-of-scope identifier that appears in an in-scope body for the same role is ambiguous.
     ambiguous = {}
     for pr in plan(fx):
@@ -1088,6 +1097,9 @@ def self_test():
          200, j, sap_ok, "FAIL"),
         ({"role": "DEPT", "kind": "list", "path": "/api/negotiations?query=x", "method": "GET", "assoc_ok": True}, dict(base200, in_seen={"DEPT": []}), 200, j,
          '{"content":[{"negotiationId":1,"associatedDocumentId":"209407-00002"}]}', "REVIEW"),
+        ({"role": "DEPT", "kind": "list", "path": "/api/negotiations?query=x", "method": "GET", "assoc_ok": True},
+         dict(base200, in_seen={"DEPT": []}), 200, j,
+         '{"content":[{"negotiationId":1,"associatedDocumentId":"300000-00001","title":"Title of record C long"}]}', "LEAK"),
         ({"role": "DEPT", "kind": "list", "path": "/api/negotiations?query=x", "method": "GET"}, base200, 200, j,
          '{"content":[{"negotiationId":1,"associatedDocumentId":"209407-00002"}]}', "LEAK"),
         # exact dashboard
@@ -1123,7 +1135,14 @@ def self_test():
         if exit_code(t_, u_) != want:
             bad += 1
             print("SELF-TEST FAIL (exit code):", t_, u_, exit_code(t_, u_), "wanted", want)
-    s0, _, b0 = http("https://127.0.0.1:9", "t", "GET", "/x", timeout=2)  # nothing listens: must not raise
+    real_open = urllib.request.urlopen
+    def _boom(*a, **k):
+        raise urllib.error.URLError("simulated")
+    try:  # offline: the opener is replaced, nothing is sent
+        urllib.request.urlopen = _boom
+        s0, _, b0 = http("https://dev.invalid", "t", "GET", "/x", timeout=2)
+    finally:
+        urllib.request.urlopen = real_open
     if s0 != 0:
         bad += 1
         print("SELF-TEST FAIL (transport): status", s0)
@@ -1175,7 +1194,7 @@ def _self_test_discovery():
                 if rest == "summary":
                     if aid in sap:
                         return 200, {"awardNumber": sap[aid]}
-                    return 200, {"leadUnitNumber": lu[aid], "title": f"Title {aid} long enough"}
+                    return 200, {"leadUnit": f"Unit name {lu[aid]}", "title": f"Title {aid} long enough"}
                 if rest == "funding-subawards":
                     return 200, [{"subawardId": 92899, "navigableCurrentSubawardId": 92899, "subawardCode": "3259"}]
                 if rest == "funding-proposals":
@@ -1204,7 +1223,7 @@ def _self_test_discovery():
             return 404, None
         return jget_
 
-    scope = {"DEPT_awards": ["212128-00002"], "OAV_awards": ["209407-00002"], "DEPT_versions": 1, "OAV_versions": 1,
+    scope = {"DEPT_awards": ["212128-00002", "211144-00007"], "OAV_awards": ["209407-00002"], "DEPT_versions": 1, "OAV_versions": 1,
              "C_subawards": [{"subaward_id": 92899, "subaward_code": "3259"}, {"subaward_id": 93912, "subaward_code": "3260"}],
              "C_subaward_funding": {"3259": ["209407-00002"], "3260": ["209407-00002"]}}
     real, bad = globals()["jget"], 0
@@ -1216,7 +1235,9 @@ def _self_test_discovery():
             print("SELF-TEST FAIL (discovery): ids", fx["prop_in_id"], fx["prop_out_id"], fx["sub_out_by_code"], fx["neg_out"])
         for label, bad_scope in (("co-funded by DEPT", dict(scope, C_subaward_funding={"3260": ["212128-00002"]})),
                                  ("API id not in DB set", dict(scope, C_subawards=[{"subaward_id": 93912, "subaward_code": "3260"}])),
-                                 ("no funding map", {k: v for k, v in scope.items() if k != "C_subaward_funding"})):
+                                 ("no funding map", {k: v for k, v in scope.items() if k != "C_subaward_funding"}),
+                                 ("B outside DEPT set", dict(scope, DEPT_awards=["212128-00002"])),
+                                 ("G inside DEPT set", dict(scope, DEPT_awards=["212128-00002", "211144-00007", "212137-00001"]))):
             try:
                 discover("https://x", "t", bad_scope)
                 bad += 1

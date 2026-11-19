@@ -101,7 +101,7 @@ probes.
   - The 11th (S3's list for that unit) becomes decisive.
   - **More will be predicted:** new probes whose baseline holds no data (for example `?associationId=` / `?query=` lists that return nothing, or empty v1 Proposal tabs) will be predicted NOT TESTED too. The exact list is reported at the baseline step.
 - **H3 PASS through the Department route:** S1 `sap_scoped` on both roots. The S3 probes on C's parent must deny, but they are Award-denial evidence, not H3.
-- **Exit code 0** from the run (no REVIEW left unadjudicated, no unpredicted NOT TESTED).
+- **Exit code 0, or 3** with every REVIEW adjudicated in writing and no unpredicted NOT TESTED. (S1's Negotiation lists can produce REVIEWs by design, so 3 is the likely clean outcome.)
 
 ## 5. Execution (unchanged from session 2)
 
@@ -129,8 +129,8 @@ decision. Formal BU acceptance stays separate.
 
 ## 7. Independent review of the harness (2026-11-19)
 
-Verdict: **SOUND WITH FIXES**, no blocker. All 7 SHOULD-FIX findings were applied, plus the
-fixable parts of the 3 notes:
+Review 1 (commit 932b3125): **SOUND WITH FIXES**, no blocker. All 7 SHOULD-FIX findings were
+applied in 959f50cf, plus the fixable parts of the 3 notes:
 - the real Award search shape;
 - Award C's Proposals tab;
 - the subaward cross-check (DB set only, plus co-funding);
@@ -143,8 +143,25 @@ fixable parts of the 3 notes:
 - the lead-unit and truncation checks.
 
 Plan over-claims corrected: 175 ids (not 186), dashboard history not yet observed live,
-the IO route is not H3, and the added-probe count. A second review of these fixes comes
-before Session 3 is proposed.
+the IO route is not H3, and the added-probe count.
+
+Review 2 (commit 959f50cf): **NOT SOUND, one blocker**, now fixed:
+- **Blocker:** the stricter fixture lead-unit check read `leadUnitNumber` from the Award
+  summary, which carries only `leadUnit` (a name). It would have refused every real
+  baseline, and the self-test's fake API hid this. Fixture scope is now confirmed against the
+  read-only scope sets: A and B inside S1's set, C and G outside it, and C the only IO award.
+  The fake now returns the real shape.
+- **`assoc_ok` narrowed:** only tokens that appear in a row's `associatedDocumentId` are
+  softened to REVIEW. A C title or another identifier elsewhere still aborts.
+- **Baseline transport errors:** any status-0 baseline request refuses the baseline, instead
+  of becoming a predicted NOT TESTED.
+- **Self-test fully offline:** the transport case replaces the opener.
+- **Exit-code wording** corrected in §4.
+- **Remaining NOTEs, accepted:** `neg_out` selection does not cover Proposal-type
+  associations, and the `prop_out` lead-unit check uses the current version only. Each can
+  produce a false FAIL, not a false PASS.
+
+A third review of these fixes comes before Session 3 is proposed.
 
 ## 8. Live state confirmed before this plan (2026-11-19 ~03:05Z, read-only)
 
