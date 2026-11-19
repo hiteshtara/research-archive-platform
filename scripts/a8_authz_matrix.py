@@ -143,6 +143,9 @@ def http(base, token, method, path, body=None, timeout=90):
             return r.status, r.headers.get("Content-Type", ""), r.read(MAX_BODY)
     except urllib.error.HTTPError as e:
         return e.code, e.headers.get("Content-Type", ""), e.read(MAX_BODY)
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+        # Recorded as status 0 (judged FAIL), never a crash that loses the evidence file.
+        return 0, "", f"transport error: {type(e).__name__}".encode()
 
 
 def token(role):
@@ -260,7 +263,7 @@ def discover(base, t, scope_sets=None):
         aid = find_all(a, "awardId")[0]
         s, summ = jget(base, t, f"/api/v1/awards/{aid}/summary")
         units = {str(u) for u in find_all(summ, "leadUnitNumber")}
-        if units and r["lead_unit"] not in units:
+        if r["lead_unit"] not in units:
             sys.exit(f"refusing: award {k} lead unit {units} != {r['lead_unit']}")
         title = (find_all(summ, "title") or [None])[0]
         fx["awards"][k] = dict(r, award_id=aid, title=title)
@@ -273,7 +276,9 @@ def discover(base, t, scope_sets=None):
     fx["neg_in"] = (find_all(n, "negotiationId") or [None])[0]
     # A negotiation outside unit 2573180018 and not tied to A/B: out of scope for DEPT and OAV.
     s, nl = jget(base, t, "/api/negotiations?leadUnit=1330420000&size=5")
-    fx["neg_out"] = (find_all(nl, "negotiationId") or [None])[0]
+    dept_set = set((scope_sets or {}).get("DEPT_awards") or [])
+    fx["neg_out"] = first([r.get("negotiationId") for r in (nl or {}).get("content", []) if isinstance(r, dict)
+                           and str(r.get("associatedDocumentId")) not in dept_set])
     # C's subawards: an IO grant never reaches Subawards; C is out of DEPT's unit.
     s, sl = jget(base, t, f"/api/v1/awards/{c['award_id']}/funding-subawards")
     fx["sub_out"] = (find_all(sl, "navigableCurrentSubawardId") or find_all(sl, "subawardId") or [None])[0]
@@ -285,14 +290,24 @@ def discover(base, t, scope_sets=None):
     # Every version id of every subaward Award C funds (read-only DB scope sets, cross-checked here
     # against the API's own ids): the IO account must see none of them.
     c_subs = (scope_sets or {}).get("C_subawards") or []
-    fx["sub_out_ids"] = sorted({str(r["subaward_id"]) for r in c_subs}
-                               | {str(x) for k in ("subawardId", "navigableCurrentSubawardId") for x in find_all(sl, k)})
+    db_ids = {str(r["subaward_id"]) for r in c_subs}
+    api_ids = {str(x) for k in ("subawardId", "navigableCurrentSubawardId") for x in find_all(sl, k)}
+    if not db_ids:
+        sys.exit("refusing: scope sets carry no Award C subawards (C_subawards)")
+    if api_ids - db_ids:
+        sys.exit(f"refusing: API subaward ids {sorted(api_ids - db_ids)} are not in the DB set of Award C's subawards")
+    if "C_subaward_funding" not in (scope_sets or {}):
+        sys.exit("refusing: scope sets lack C_subaward_funding (re-run scope-sets.py)")
+    # A subaward is visible when ANY funding award is: none of C's may be co-funded by a DEPT award.
+    dept = set((scope_sets or {}).get("DEPT_awards") or [])
+    cofunded = sorted(c for c, nums in scope_sets["C_subaward_funding"].items() if set(nums) & dept)
+    if cofunded:
+        sys.exit(f"refusing: Award C subaward code(s) {cofunded} are co-funded by a DEPT award; DEPT deny would be wrong")
+    fx["sub_out_ids"] = sorted(db_ids)
     by_code = {}
     for r in c_subs:
         by_code[str(r["subaward_code"])] = max(by_code.get(str(r["subaward_code"]), 0), int(r["subaward_id"]))
     fx["sub_out_by_code"] = {c: i for c, i in sorted(by_code.items()) if str(i) != str(fx["sub_out"])}
-    if fx["sub_out"] and str(fx["sub_out"]) not in fx["sub_out_ids"]:
-        sys.exit(f"refusing: API subaward {fx['sub_out']} is not among the DB scope set's Award C subawards")
     # Proposal funding the CGS award: out of scope for both synthetic roles. Funding links carry
     # exactLinkedProposalId / navigableActiveProposalId, not 'proposalId' (the session 1-2 defect).
     s, pl = jget(base, t, f"/api/v1/awards/{g['award_id']}/funding-proposals")
@@ -310,6 +325,9 @@ def discover(base, t, scope_sets=None):
             s, pv = jget(base, t, f"/api/v1/proposals/{fx[f'prop_{side}_id']}")
             if s != 200 or str(first(find_all(pv, "proposalNumber"))) != str(num):
                 sys.exit(f"refusing: v1 proposal {fx[f'prop_{side}_id']} does not resolve to {num} (status {s})")
+            lead = {str(x) for x in find_all(pv, "leadUnitNumber")}
+            if not lead or ((DEPT_UNIT in lead) != (side == "in")):
+                sys.exit(f"refusing: proposal {num} lead unit {sorted(lead)} does not fit prop_{side} for UNIT {DEPT_UNIT}")
     # H3 fixtures: confirm each transmitting award id is the expected award number.
     fx["sap_dept_roots"], fx["sap_io_parent"] = [], None
     for r in SAP_DEPT_ROOTS + [SAP_IO_PARENT]:
@@ -402,6 +420,8 @@ def plan(fx):
                     add(role, "no_records", path, label + " (F1: no subaward)", module="SUBAWARD")
                 elif role == "OAV" and k == "C" and path.endswith("/negotiations"):
                     add(role, "no_records", path, label + " (F1: no negotiation)", module="NEGOTIATION")
+                elif role == "OAV" and k == "C" and (path.endswith("/funding-proposals") or path.endswith("/proposals")):
+                    add(role, "no_records", path, label + " (D-A: no proposal)", module="PROPOSAL")
                 else:
                     add(role, "allow", path, label)
         for k in deny[role]:
@@ -518,7 +538,10 @@ def plan(fx):
             neg_lists += [(f"/api/negotiations?query={n}&size=25", f"negotiation search by {k}'s number"),
                           (f"/api/negotiations?associationId={n}&size=25", f"negotiation filter by {k} association")]
         for path_, label_ in neg_lists:
-            add(role, nkind, path_, label_, **({"module": "NEGOTIATION"} if nkind == "no_records" else {}))
+            # DEPT reaches a negotiation by lead unit OR association, so a visible row can name an
+            # out-of-scope award in associatedDocumentId: such hits are adjudicated, not an abort.
+            extra = {"module": "NEGOTIATION"} if nkind == "no_records" else ({"assoc_ok": True} if role == "DEPT" else {})
+            add(role, nkind, path_, label_, **extra)
         for code in (fx.get("sub_out_codes") or [])[:5]:
             # F1 (#171): the IO account must get no subaward at all; Global Search is judged on its
             # SUBAWARD items (module + recordId), not on 'subawardId' keys it never carries.
@@ -552,7 +575,7 @@ def present(body_text, toks):
 
 
 IO_FORBIDDEN_MODULES = ("SUBAWARD", "NEGOTIATION", "PROPOSAL")  # decision D-A: IO reaches Awards only
-RECORD_LEVEL = re.compile(r"^\$(\.(results|content))?\[\d+\]\.(awardNumber|identifier)$")
+RECORD_LEVEL = re.compile(r"^\$((\.results)?(\.content)?\[\d+\]\.(awardNumber|identifier)|\.exactDocumentMatch\.awardNumber)$")
 IRB_DASHBOARD_FIELDS = ("irb", "submissions", "fundingRecords", "timelineEvents")
 
 
@@ -605,6 +628,8 @@ def _judge(probe, base_row, status, ctype, text, tok, ambiguous, sets=None):
     text_scan = json.dumps({k: v for k, v in _j.items() if k not in ("path", "query")}) if isinstance(_j, dict) else text
     hits = present(text_scan, out_t)
     amb = set() if probe.get("strict") else ambiguous.get(role, set())
+    if probe.get("assoc_ok"):
+        amb = amb | set(out_t)
     hard = [h for h in hits if h not in amb]
     soft = [h for h in hits if h in amb]
     if kind == "excluded":
@@ -676,8 +701,9 @@ def _judge(probe, base_row, status, ctype, text, tok, ambiguous, sets=None):
         total = body.get("totalElements", len(content))
         if total != b["sap_tx"]:
             return "FAIL", [f"{total} transmissions vs {b['sap_tx']} at baseline: authorized SAP rows lost"]
-        if not kids & set(probe["sap_visible"]):
-            return "FAIL", [f"in-unit child(ren) {probe['sap_visible']} missing: authorized SAP data lost"]
+        need = set(probe["sap_visible"]) & set(b.get("sap_children") or [])
+        if not need or need - kids:
+            return "FAIL", [f"in-unit child(ren) {sorted(need - kids) or probe['sap_visible']} missing: authorized SAP data lost"]
         return "PASS", [f"{total} transmissions; children {sorted(kids)}; payloads withheld"]
     if kind == "refused":
         ok = status == 403 and '"ACCESS_DENIED"' in text
@@ -786,7 +812,9 @@ def predict_not_tested(fx):
     for pr in plan(fx):
         b = fx["baseline"].get(f"{pr['method']} {pr['path']}") or {}
         k, why = pr["kind"], None
-        if k == "excluded":
+        if b.get("truncated"):
+            why = "baseline body truncated at MAX_BODY"
+        elif k == "excluded":
             why = pr["label"]
         elif k == "disabled":
             why = f"feature disabled/out of scope (baseline {b.get('status')})"
@@ -829,6 +857,8 @@ def do_baseline(base, fixture_path, scope_sets_path):
                     "in_seen": {}, "out_seen": {}}
         s, ct, b = http(base, t, pr["method"], pr["path"], pr.get("body"))
         text = b.decode("utf-8", "replace")
+        if len(b) >= MAX_BODY:
+            return {"status": s, "truncated": True, "in_seen": {}, "out_seen": {}}
         row = {"status": s, "ctype": ct, "sha256": hashlib.sha256(b).hexdigest(),
                "in_seen": {r: present(text, [x for k in IN_SCOPE[r] for x in tok.get(k, [])]) for r in ROLES},
                "out_seen": {r: present(text, [x for k in OUT_SCOPE[r] for x in tok.get(k, [])]) for r in ROLES}}
@@ -901,21 +931,34 @@ def do_run(base, fx, out, stop_on_leak):
                 stop.set()
 
     caps = [x for x in ps if x["kind"] == "caps"]
-    for pr in caps:
-        one(pr)
-    with cf.ThreadPoolExecutor(WORKERS) as ex:
-        list(ex.map(one, [x for x in ps if x["kind"] != "caps"]))
-    if stop.is_set():
-        tally["ABORTED"] = 1
-    with open(out, "w") as f:
-        json.dump({"run_at": dt.datetime.now(dt.timezone.utc).isoformat(), "base": base,
-                   "fixture_captured_at": fx.get("captured_at"), "tally": tally, "probes": rows}, f, indent=1)
+    try:
+        for pr in caps:
+            one(pr)
+        with cf.ThreadPoolExecutor(WORKERS) as ex:
+            list(ex.map(one, [x for x in ps if x["kind"] != "caps"]))
+    finally:  # evidence is written even if the run dies part-way
+        if stop.is_set():
+            tally["ABORTED"] = 1
+        with open(out, "w") as f:
+            json.dump({"run_at": dt.datetime.now(dt.timezone.utc).isoformat(), "base": base,
+                       "fixture_captured_at": fx.get("captured_at"), "tally": tally, "probes": rows}, f, indent=1)
     print(f"\n{len(rows)} probes: {dict(sorted(tally.items()))}; evidence {out} (bodies hashed, not stored)")
     pred = {(x["role"], x["method"], x["path"]) for x in fx.get("predicted_not_tested") or []}
     got = {(r["role"], r["method"], r["path"]) for r in rows if r["verdict"] == "NOT TESTED"}
     if got - pred:
         print(f"UNPREDICTED NOT TESTED ({len(got - pred)}): investigate before any go/no-go", sorted(got - pred)[:20])
-    return 2 if (tally.get("LEAK") or tally.get("ABORTED")) else (1 if tally.get("FAIL") else 0)
+    if pred - got:
+        print(f"predicted NOT TESTED but decided ({len(pred - got)}): review each", sorted(pred - got)[:20])
+    return exit_code(tally, got - pred)
+
+
+def exit_code(tally, unpredicted):
+    """2 LEAK/abort, 1 FAIL, 3 REVIEW or unpredicted NOT TESTED (not acceptable without adjudication), 0 clean."""
+    if tally.get("LEAK") or tally.get("ABORTED"):
+        return 2
+    if tally.get("FAIL"):
+        return 1
+    return 3 if (tally.get("REVIEW") or unpredicted) else 0
 
 
 def self_test():
@@ -1034,6 +1077,19 @@ def self_test():
         # strict probes do not downgrade a hit to REVIEW because the baseline also showed it
         ({"role": "DEPT", "kind": "allow", "path": "/h", "method": "GET", "strict": True},
          dict(base200, in_seen={"DEPT": []}), 200, j, '{"n":"110224-00003"}', "LEAK"),
+        # review fixes: the REAL Award search shape, C's proposals tab, multi-child SAP, association rows
+        ({"role": "DEPT", "kind": "list", "path": "/api/v1/awards/search?q=x", "method": "GET"}, base200, 200, j,
+         '{"exactDocumentMatch":null,"results":{"content":[{"awardNumber":"212128-00002"},{"awardNumber":"999999-00001"}],"totalElements":2}}', "LEAK"),
+        ({"role": "DEPT", "kind": "list", "path": "/api/v1/awards/search?q=x", "method": "GET"}, dict(base200, in_seen={"DEPT": []}), 200, j,
+         '{"exactDocumentMatch":{"awardNumber":"999999-00001"},"results":{"content":[]}}', "LEAK"),
+        (NR("/api/v1/awards/3/funding-proposals", "PROPOSAL"), recb, 200, j, '[{"proposalNumber":"00099001","navigableActiveProposalId":5}]', "LEAK"),
+        (NR("/api/v1/awards/3/funding-proposals", "PROPOSAL"), recb, 200, j, '[]', "PASS"),
+        (dict(sapP, sap_visible=["110224-00002", "110224-00009"]), dict(sapB, sap_children=["110224-00002", "110224-00003", "110224-00009"]),
+         200, j, sap_ok, "FAIL"),
+        ({"role": "DEPT", "kind": "list", "path": "/api/negotiations?query=x", "method": "GET", "assoc_ok": True}, dict(base200, in_seen={"DEPT": []}), 200, j,
+         '{"content":[{"negotiationId":1,"associatedDocumentId":"209407-00002"}]}', "REVIEW"),
+        ({"role": "DEPT", "kind": "list", "path": "/api/negotiations?query=x", "method": "GET"}, base200, 200, j,
+         '{"content":[{"negotiationId":1,"associatedDocumentId":"209407-00002"}]}', "LEAK"),
         # exact dashboard
         (CNT("OAV"), dashB, 200, j, json.dumps(oav_dash), "PASS"),
         (CNT("OAV"), dashB, 200, j, json.dumps(dict(oav_dash, awards=2)), "LEAK"),
@@ -1062,6 +1118,15 @@ def self_test():
         bad += 1
         print("SELF-TEST FAIL: ambiguous identifier ->", got)
     bad += _self_test_discovery()
+    for t_, u_, want in (({"PASS": 3}, set(), 0), ({"PASS": 3, "REVIEW": 1}, set(), 3), ({"PASS": 3}, {("a",)}, 3),
+                         ({"FAIL": 1, "REVIEW": 1}, set(), 1), ({"LEAK": 1}, set(), 2)):
+        if exit_code(t_, u_) != want:
+            bad += 1
+            print("SELF-TEST FAIL (exit code):", t_, u_, exit_code(t_, u_), "wanted", want)
+    s0, _, b0 = http("https://127.0.0.1:9", "t", "GET", "/x", timeout=2)  # nothing listens: must not raise
+    if s0 != 0:
+        bad += 1
+        print("SELF-TEST FAIL (transport): status", s0)
     # Prediction: a fully populated baseline predicts only the excluded/disabled probes; an empty one
     # predicts every baseline-dependent probe.
     full = {"status": 200, "in_seen": {r: ["x"] for r in ROLES}, "out_seen": {}, "sap_tx": 2, "sap_payload": True,
@@ -1087,7 +1152,7 @@ def self_test():
         if not need:
             bad += 1
             print("SELF-TEST FAIL (plan):", why)
-    total = len(cases) + len(scoped_cases) + 1 + 3 + 1
+    total = len(cases) + len(scoped_cases) + 1 + 6 + 1 + 5 + 1
     print("self-test", "PASS" if not bad else f"FAIL ({bad})", f"({total} cases); plan has {n} probes; kinds {dict(sorted(kinds.items()))}")
     return 1 if bad else 0
 
@@ -1119,8 +1184,9 @@ def _self_test_discovery():
                 if rest == "negotiations":
                     return 200, [{"negotiationId": 12373}]
                 return 200, {}
-            if path.startswith("/api/negotiations?"):
-                return 200, {"content": [{"negotiationId": 12511}]}
+            if path.startswith("/api/negotiations?"):  # first row is tied to a DEPT award and must be skipped
+                return 200, {"content": [{"negotiationId": 999, "associatedDocumentId": "212128-00002"},
+                                         {"negotiationId": 12511, "associatedDocumentId": "300000-00001"}]}
             if path.startswith("/api/subawards/"):
                 return 200, {"title": "National Center on Improving Literacy"}
             if path.startswith("/api/proposals/search?leadUnit="):
@@ -1133,19 +1199,30 @@ def _self_test_discovery():
                 return 200, {"content": [{"proposalNumber": num, "currentProposalId": ids[num]}]}
             if path.startswith("/api/v1/proposals/"):
                 pid = int(path.rsplit("/", 1)[1])
-                return 200, {"proposalNumber": {1092805: "01092706", 1452409: "01444988"}.get(pid)}
+                return 200, {"proposalNumber": {1092805: "01092706", 1452409: "01444988"}.get(pid),
+                             "leadUnitNumber": {1092805: "2573180018", 1452409: "1250000000"}.get(pid)}
             return 404, None
         return jget_
 
     scope = {"DEPT_awards": ["212128-00002"], "OAV_awards": ["209407-00002"], "DEPT_versions": 1, "OAV_versions": 1,
-             "C_subawards": [{"subaward_id": 92899, "subaward_code": "3259"}, {"subaward_id": 93912, "subaward_code": "3260"}]}
+             "C_subawards": [{"subaward_id": 92899, "subaward_code": "3259"}, {"subaward_id": 93912, "subaward_code": "3260"}],
+             "C_subaward_funding": {"3259": ["209407-00002"], "3260": ["209407-00002"]}}
     real, bad = globals()["jget"], 0
     try:
         globals()["jget"] = fake()
         fx = discover("https://x", "t", scope)
-        if (fx["prop_in_id"], fx["prop_out_id"], fx["sub_out_by_code"]) != (1092805, 1452409, {"3260": 93912}):
+        if (fx["prop_in_id"], fx["prop_out_id"], fx["sub_out_by_code"], fx["neg_out"]) != (1092805, 1452409, {"3260": 93912}, 12511):
             bad += 1
-            print("SELF-TEST FAIL (discovery): ids", fx["prop_in_id"], fx["prop_out_id"], fx["sub_out_by_code"])
+            print("SELF-TEST FAIL (discovery): ids", fx["prop_in_id"], fx["prop_out_id"], fx["sub_out_by_code"], fx["neg_out"])
+        for label, bad_scope in (("co-funded by DEPT", dict(scope, C_subaward_funding={"3260": ["212128-00002"]})),
+                                 ("API id not in DB set", dict(scope, C_subawards=[{"subaward_id": 93912, "subaward_code": "3260"}])),
+                                 ("no funding map", {k: v for k, v in scope.items() if k != "C_subaward_funding"})):
+            try:
+                discover("https://x", "t", bad_scope)
+                bad += 1
+                print("SELF-TEST FAIL (discovery): did not refuse:", label)
+            except SystemExit:
+                pass
         globals()["jget"] = fake(drop_prop=True)
         try:
             discover("https://x", "t", scope)

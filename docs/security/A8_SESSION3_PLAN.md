@@ -32,11 +32,13 @@ bound at connect; evidence in `a8-session3-prep-2026-11-19`):
   number. An IO grant (Awards only, decision D-A) therefore never opens SAP data directly.
   There is no "authorized SAP data" for an IO account anywhere in the archive. This is a
   data fact, not a gap in the test.
-- **The IO route is the parent of the IO award.** Award C (`209407-00002`, IO 9500312705, S3's
-  existing grant) is the only child in **9 transmissions** stored on its parent
-  `209407-00001` (award_id 3868241). The parent has no IO and lead units
-  1330420000/1333250000, and every transmission has payloads. Without the fixes, an IO
-  account reaching the parent would see them.
+- **H3 cannot be exercised through an IO grant (a data limit).** Award C (`209407-00002`,
+  IO 9500312705, S3's existing grant) is the only child in **9 transmissions** stored on
+  its parent `209407-00001` (award_id 3868241). The parent has no account number, so the
+  IO rule never matches it, and `requireAward` refuses it **before** the SAP child filter
+  or payload withholding runs. It would be refused even without the H3 fix. The parent
+  probes are kept as an IO/F1 Award-denial regression, **not** as H3 evidence. **H3 is
+  proven live only through the Department route.**
 - **The Department route proves both directions.** S1's existing grant (UNIT 2573180018, no
   descendants) opens these transmitting awards:
 
@@ -49,11 +51,11 @@ Live H3 probes:
 
 | Probe | Role | Pass condition |
 |---|---|---|
-| root `sap-transmissions` (kind `sap_scoped`) | S1 | 200; **same transmission count as baseline** (authorized SAP still accessible); in-unit child present; other-unit child absent; `sentData`/`returnedData` null |
+| root `sap-transmissions` (kind `sap_scoped`) | S1 | 200; **same transmission count as baseline** (authorized SAP still accessible); **every** in-unit child the baseline showed is present; other-unit child absent; `sentData`/`returnedData` null |
 | root `summary`, `hierarchy` (strict) | S1 | allowed; the hidden child is never in the body, and the baseline cannot downgrade a hit to REVIEW |
 | hidden child by number | S1, S3 | 403/404 |
 | root `sap-transmissions` | S3 / S4 | 403/404 / 403 `ACCESS_NOT_PROVISIONED` |
-| C's parent: `sap-transmissions`, summary, versions, T&M history, attachments, by number | S1, S3 (S4) | 403/404 (403 `ACCESS_NOT_PROVISIONED`) |
+| C's parent (Award-denial regression, not H3): `sap-transmissions`, summary, versions, T&M history, attachments, by number | S1, S3 (S4) | 403/404 (403 `ACCESS_NOT_PROVISIONED`) |
 
 **Known limit:** the Award Report PDF reads the same SAP method, but its compressed PDF text
 cannot be inspected reliably. It stays covered by the integration tests only.
@@ -67,16 +69,27 @@ payload.
 
 | Session 2 QA gap | Correction | Self-test cases |
 |---|---|---|
-| `/api/v1/proposals/*` never probed: the fixture looked for a `proposalId` key, which no response carries | Ids come from Proposal search `currentProposalId` (fallback: funding-link `navigableActiveProposalId`/`exactLinkedProposalId`), then are verified by `GET /api/v1/proposals/{id}` returning the same number. **A missing required fixture now refuses the baseline** instead of silently dropping probes | fake-API discovery: ids resolve; an unresolved id refuses; missing scope sets refuse |
+| `/api/v1/proposals/*` never probed: the fixture looked for a `proposalId` key, which no response carries | Ids come from Proposal search `currentProposalId` (fallback: funding-link `navigableActiveProposalId`/`exactLinkedProposalId`), then are verified by `GET /api/v1/proposals/{id}` returning the same number. **A missing required fixture now refuses the baseline** instead of silently dropping probes | fake-API discovery: ids resolve; an unresolved id refuses; missing scope sets refuse; Proposal lead units must fit in/out |
 | Global Search judged on `subawardId`, which its items never carry | Kind `no_records` judges Global Search on its `module` + `recordId` items. For the IO account, **any** SUBAWARD, NEGOTIATION or PROPOSAL item in **any** Global Search is a LEAK (D-A) | 3 |
-| Only subaward 92899 checked, but C funds 5 subawards (186 version ids) | The IO account must receive **no** subaward record at all (record count, not text). The newest version of each of the other 4 codes gets detail/versions/amounts deny probes. All 5 codes are searched | 7 |
-| Negotiation gaps: 12511 probed only for S1; no `?query=` probes; an empty IO list could not PASS | 12511 × 7 endpoints for S3 and S4. `?query=` and `?associationId=` for A, B, C and G. IO negotiation lists are judged by record count (`no_records`), so an empty list is decisive | 2 + plan checks |
-| Dashboard judged only on "awards below baseline" | **Exact:** awards = 244 / 1 and award history = 1,674 / 14 (DB scope sets, which matched session 2's dashboards); IO proposals, negotiations and subawards = 0; IRB figures absent; no figure above the unscoped baseline. Over = LEAK, under = FAIL | 8 |
-| Allowed pages checked only for the 4 fixture awards | Every 200 body of an allowed or list probe is scanned for **any** award number outside the role's full allowed set (244 / 1). A record-level listing is a LEAK; any other mention is a REVIEW, adjudicated with its JSON path | 8 |
-| NOT TESTED known only after the run | The baseline writes the **predicted NOT TESTED list** (with reasons) before enforcement starts. Any unpredicted NOT TESTED blocks the go/no-go | 1 |
+| Only subaward 92899 checked, but C funds 5 subawards (175 version ids) | The IO account must receive **no** subaward record at all (record count, not text). The newest version of each of the other 4 codes gets detail/versions/amounts deny probes. All 5 codes are searched. Discovery refuses if the API lists a C subaward the DB set lacks, or if any of C's subawards is co-funded by a DEPT award (none is: checked 03:33Z) | 7 + 3 |
+| Negotiation gaps: 12511 probed only for S1; no `?query=` probes; an empty IO list could not PASS | 12511 × 7 endpoints for S3 and S4. `?query=` and `?associationId=` for A, B, C and G. IO negotiation lists are judged by record count (`no_records`), so an empty list is decisive. `neg_out` must not be associated with a DEPT award. In S1's negotiation lists an out-of-scope award named in a visible row's association is a REVIEW, not an abort (S1 reaches negotiations by lead unit OR association) | 4 + plan checks |
+| Dashboard judged only on "awards below baseline" | **Exact:** awards = 244 / 1 and award history = 1,674 / 14 (DB scope sets; the award counts matched session 2's dashboards, the history counts have **not** yet been observed live); IO proposals, negotiations and subawards = 0; IRB figures absent; no figure above the unscoped baseline. Over = LEAK, under = FAIL | 8 |
+| Allowed pages checked only for the 4 fixture awards | Every 200 body of an allowed or list probe is scanned for **any** award number outside the role's full allowed set (244 / 1). A record-level listing (including Award search's `$.results.content[i]` and `exactDocumentMatch`) is a LEAK; any other mention is a REVIEW, adjudicated with its JSON path. IO: Award C's Proposals tabs must list no Proposal (D-A) | 8 + 4 |
+| NOT TESTED known only after the run | The baseline writes the **predicted NOT TESTED list** (with reasons) before enforcement starts. Any unpredicted NOT TESTED blocks the go/no-go, and predicted-but-decided probes are listed | 1 |
 
-Self-test: **74 cases PASS** (was 37). Plan: **829 probes** (was 666), including 40 v1
-Proposal probes, 2 `sap_scoped`, 22 `no_records`, and 67 H3 / no-record / 12511 probes.
+Robustness, added after the independent review of this harness:
+- a transport error is recorded as status 0 (FAIL), not a crash;
+- evidence is written even if the run dies part-way;
+- the exit code is non-zero for REVIEW and unpredicted NOT TESTED (3), FAIL (1) and LEAK/abort (2);
+- a fixture award's lead unit must be present to be confirmed;
+- a truncated baseline body is predicted NOT TESTED.
+
+Self-test: **90 cases PASS** (was 37), using the real response shapes for Award search,
+Award C's Proposals tab and multi-child SAP. Plan: **829 probes**. Session 2 planned 666; on
+the same fixture the previous harness would plan 706, because the Proposal ids now resolve,
+so the corrections add 123. The 829 include 40 v1 Proposal probes, 31 H3 probes, 2
+`sap_scoped`, 24 `no_records`, 14 S3/S4 probes on negotiation 12511 and 36 per-code subaward
+probes.
 
 ## 4. Acceptance bar
 
@@ -86,7 +99,9 @@ Proposal probes, 2 `sap_scoped`, 22 `no_records`, and 67 H3 / no-record / 12511 
   enforced run.
   - Expected to include **10 of session 2's 11**, with unchanged reasons: 3 excluded real-person lookups, 6 Explorer/IRB out of scope, and S1's Negotiation list for unit 1330420000.
   - The 11th (S3's list for that unit) becomes decisive.
-- **Both H3 routes PASS:** S1 `sap_scoped` on both roots, and every S3 probe on C's parent.
+  - **More will be predicted:** new probes whose baseline holds no data (for example `?associationId=` / `?query=` lists that return nothing, or empty v1 Proposal tabs) will be predicted NOT TESTED too. The exact list is reported at the baseline step.
+- **H3 PASS through the Department route:** S1 `sap_scoped` on both roots. The S3 probes on C's parent must deny, but they are Award-denial evidence, not H3.
+- **Exit code 0** from the run (no REVIEW left unadjudicated, no unpredicted NOT TESTED).
 
 ## 5. Execution (unchanged from session 2)
 
@@ -112,7 +127,26 @@ satisfy the separate shared-DEV activation or named-user acceptance requirements
 criterion stays IN PROGRESS until those are met. US-SEC-003 #1/#2 still need the IRB release
 decision. Formal BU acceptance stays separate.
 
-## 7. Live state confirmed before this plan (2026-11-19 ~03:05Z, read-only)
+## 7. Independent review of the harness (2026-11-19)
+
+Verdict: **SOUND WITH FIXES**, no blocker. All 7 SHOULD-FIX findings were applied, plus the
+fixable parts of the 3 notes:
+- the real Award search shape;
+- Award C's Proposals tab;
+- the subaward cross-check (DB set only, plus co-funding);
+- every in-unit SAP child required;
+- transport errors and evidence write;
+- exit codes;
+- the IO H3 route restated as a data limit;
+- Proposal and `neg_out` scope checks;
+- S1 association REVIEW;
+- the lead-unit and truncation checks.
+
+Plan over-claims corrected: 175 ids (not 186), dashboard history not yet observed live,
+the IO route is not H3, and the added-probe count. A second review of these fixes comes
+before Session 3 is proposed.
+
+## 8. Live state confirmed before this plan (2026-11-19 ~03:05Z, read-only)
 
 - **Shared DEV:** `:107` 1/1, rollout COMPLETED, target healthy; no enforcement setting.
 - **Private environment:** no a8 task, target group or listener rule (default rule only).
