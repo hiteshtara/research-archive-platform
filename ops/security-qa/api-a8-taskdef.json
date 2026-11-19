@@ -1,0 +1,131 @@
+{
+ "family": "research-archive-platform-dev-api-a8",
+ "taskRoleArn": "arn:aws:iam::770203350335:role/research-archive-platform-dev-api-task-role",
+ "executionRoleArn": "arn:aws:iam::770203350335:role/research-archive-platform-dev-api-execution-role",
+ "networkMode": "awsvpc",
+ "containerDefinitions": [
+  {
+   "name": "api",
+   "image": "770203350335.dkr.ecr.us-east-1.amazonaws.com/research-archive-platform-dev-api@sha256:c85be89ade227565dcb561d0df98557aa30be37a0f95d7c96ed3fab8e3725b90",
+   "cpu": 0,
+   "portMappings": [
+    {
+     "containerPort": 8080,
+     "hostPort": 8080,
+     "protocol": "tcp"
+    }
+   ],
+   "essential": true,
+   "environment": [
+    {
+     "name": "APP_AUTHORIZATION_ADMINISTRATION_ENABLED",
+     "value": "true"
+    },
+    {
+     "name": "APP_AUTHORIZATION_CONTACT_DERIVATION",
+     "value": "EXPLICIT_GRANT"
+    },
+    {
+     "name": "APP_AUTHORIZATION_DEPARTMENT_MATCH",
+     "value": "LEAD_UNIT_WITH_DESCENDANTS"
+    },
+    {
+     "name": "APP_AUTHORIZATION_ENFORCEMENT_ENABLED",
+     "value": "true"
+    },
+    {
+     "name": "APP_AUTHORIZATION_MAX_SIGN_IN_AGE",
+     "value": "12h"
+    },
+    {
+     "name": "APP_AUTHORIZATION_RESEARCH_STAFF_ROLES",
+     "value": "PI,MPI,COI"
+    },
+    {
+     "name": "APP_AUTHORIZATION_VERSION_SCOPE",
+     "value": "FAMILY_WIDE"
+    },
+    {
+     "name": "APP_CORS_ALLOWED_ORIGINS",
+     "value": "http://localhost:5173,https://main.d288p9gmoteftb.amplifyapp.com,https://nonprod.kuali-archive.bu.edu"
+    },
+    {
+     "name": "APP_EXPLORER_ENABLED",
+     "value": "false"
+    },
+    {
+     "name": "APP_SEARCH_SEMANTIC_ENABLED",
+     "value": "true"
+    },
+    {
+     "name": "APP_SEARCH_TIMING_ENABLED",
+     "value": "false"
+    },
+    {
+     "name": "ARCHIVE_DOCUMENTS_BUCKET",
+     "value": "research-archive-platform-dev-documents-770203350335"
+    },
+    {
+     "name": "COGNITO_CLIENT_ID",
+     "value": "seqgmc8sccr22sq8lcafqjcpb"
+    },
+    {
+     "name": "COGNITO_ISSUER_URI",
+     "value": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_VJ4ekQ27c"
+    },
+    {
+     "name": "SPRING_PROFILES_ACTIVE",
+     "value": "aws"
+    }
+   ],
+   "mountPoints": [],
+   "volumesFrom": [],
+   "secrets": [
+    {
+     "name": "POSTGRES_DB",
+     "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:dbname::"
+    },
+    {
+     "name": "POSTGRES_HOST",
+     "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:host::"
+    },
+    {
+     "name": "POSTGRES_PASSWORD",
+     "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:password::"
+    },
+    {
+     "name": "POSTGRES_PORT",
+     "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:port::"
+    },
+    {
+     "name": "POSTGRES_USER",
+     "valueFrom": "arn:aws:secretsmanager:us-east-1:770203350335:secret:research-archive-platform/dev/postgres-api-zVoc3j:username::"
+    }
+   ],
+   "logConfiguration": {
+    "logDriver": "awslogs",
+    "options": {
+     "awslogs-group": "/ecs/research-archive-platform-dev-api",
+     "awslogs-region": "us-east-1",
+     "awslogs-stream-prefix": "api"
+    }
+   },
+   "systemControls": []
+  }
+ ],
+ "requiresCompatibilities": [
+  "FARGATE"
+ ],
+ "cpu": "512",
+ "memory": "1024",
+ "runtimePlatform": {
+  "cpuArchitecture": "X86_64",
+  "operatingSystemFamily": "LINUX"
+ },
+ "tags": [
+  {
+   "key": "purpose",
+   "value": "A8-isolated-enforcement-test-temporary"
+  }
+ ]
+}
