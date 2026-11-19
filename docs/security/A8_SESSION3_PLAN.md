@@ -103,6 +103,29 @@ probes.
 - **H3 PASS through the Department route:** S1 `sap_scoped` on both roots. The S3 probes on C's parent must deny, but they are Award-denial evidence, not H3.
 - **Exit code 0, or 3** with every REVIEW adjudicated in writing and no unpredicted NOT TESTED. (S1's Negotiation lists can produce REVIEWs by design, so 3 is the likely clean outcome.)
 
+## 4a. Conditions that stay untested (reported as such, never counted as passes)
+
+- **H3 through an IO grant:** a data limit. No transmitting award has an IO. The C-parent
+  probes are an Award-denial regression only.
+- **SAP content inside the Award Report PDFs:** covered by integration tests only.
+- **Dashboard history counts:** observed live for the first time in this session.
+- **Later list pages:** only the first page (≤25 rows) of each list is checked.
+- **S1's Negotiation, Subaward and Proposal lists:** there is no full allowed set for these
+  modules. A non-fixture leak or over-filtering there is not detected. Award over-filtering is
+  detected only through fixture tokens, SAP counts and the dashboard.
+- **Cross-module indexes:** only the refusal is tested.
+- **Not probed:** attachment downloads, AI summary and questions.
+- **Grant types not exercised:** contact, PARENT_AWARD and descendant-unit grants.
+- **Out of scope:** Explorer and IRB. The 3 real-person lookups are excluded.
+- **Writes:** checked only through the capabilities flag.
+- **Existence-oracle finding (LOW, already recorded):** a hidden record's 404 message differs
+  from a true not-found.
+- **NOT TESTED the baseline cannot predict:** the attachment-group gate and "dashboard count
+  not found". Either gives exit 3.
+- **Outside the harness:** shared-DEV enforcement and named-user acceptance.
+- **Accepted false-FAIL risks (not false-PASS):** `neg_out` selection ignores Proposal-type
+  associations, and the `prop_out` lead-unit check uses only the current version.
+
 ## 5. Execution (unchanged from session 2)
 
 The steps are those of `A8_SESSION2_DEPLOYMENT_PLAN.md` §9:
@@ -114,6 +137,9 @@ The steps are those of `A8_SESSION2_DEPLOYMENT_PLAN.md` §9:
 6. matrix, then cross-check;
 7. cleanup on every exit path (rule, task, TG, grants, group, disable users) and verify.
 
+- **Expected duration:** about 60–75 minutes. Session 2 took 25 minutes for 666 probes, plus
+  setup and cleanup. This session adds the scope-set recompute (about 5 minutes), 163 more
+  probes, and adjudication of S1's Negotiation-list REVIEWs.
 - **Limits:** 3 h maximum, with an operator present.
 - **Abort:** delete the rule first, on any real disclosure, failed isolation or shared-DEV impact.
 
@@ -161,7 +187,15 @@ Review 2 (commit 959f50cf): **NOT SOUND, one blocker**, now fixed:
   associations, and the `prop_out` lead-unit check uses the current version only. Each can
   produce a false FAIL, not a false PASS.
 
-A third review of these fixes comes before Session 3 is proposed.
+Review 3 (commit e7249518): **SOUND WITH FIXES.** No code change is required; the
+condition is that the untested conditions in §4a are reported explicitly. It confirmed:
+- all seven review-1 weaknesses are fixed;
+- 829 probes;
+- the three SAP properties are asserted separately against `findSapTransmissions`;
+- no check can skip silently (every skip is a predicted NOT TESTED, or exit 3);
+- the allowed Award set is raw SQL that matches the FAMILY_WIDE / UNIT / IO rules, independent of the app's decision.
+
+Self-test: 91 cases, fully offline.
 
 ## 8. Live state confirmed before this plan (2026-11-19 ~03:05Z, read-only)
 
