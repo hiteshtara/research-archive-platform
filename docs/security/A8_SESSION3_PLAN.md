@@ -204,3 +204,24 @@ Self-test: 91 cases, fully offline.
 - **Synthetic accounts and grants:** S1/S3/S4 disabled; grants 3–6 revoked.
 - **Owner:** grant 2 (UNIT 1250000000) and admin seat 3 unchanged.
 - **Database:** 86 migrations, latest V088.
+
+## 9. Execution record: session 3 (2026-11-19, 03:42–04:12Z, owner-approved at 41d92c0)
+
+| Step | Result |
+|---|---|
+| Pre-checks | IP 108.12.232.44, Cisco VPN Disconnected; shared `:107` 1/1, COMPLETED, healthy; listener default only; `-a8:2` = `:107` + exactly the six settings (re-diffed) |
+| Accounts | S1/S3/S4 re-enabled. Grants **7** (S1 UNIT 2573180018, no descendants) and **8** (S3 IO 9500312705), each dry run then `--confirm`, expiring 2026-11-20T06:45Z. Group: 2 pre-session members recorded, 3 added. Owner grant 2 and admin seat 3 unchanged |
+| Baseline (shared, OFF) | Scope sets recomputed 03:48Z (244 / 1,674; 1 / 14; 175 C-subaward ids; no DEPT co-funding). 289 requests, no transport errors; every fixture resolved, including v1 Proposals 1092805 / 1452409. SAP baseline decisive on both roots. **25 NOT TESTED predicted**: 10 carried + 15 in the categories §4 anticipated |
+| Private API | Task on digest `7257b72f…`; inert rule until healthy (03:54:56Z): S4 403, S1 244 |
+| Isolation | Real-host rule live 03:55:34Z. AWS source 3.80.116.121: 40 requests on the shared TG, 0 on the private. From the owner IP: S4 403, S1 244, S3 1. Shared via the ALB name: 40,926 |
+| **Matrix** | **829: 800 PASS, 0 FAIL, 0 LEAK, 4 REVIEW, 25 NOT TESTED** (exit 3). NOT TESTED = predicted set exactly |
+| **H3 (Department route)** | `110224-00001`: 5/5 transmissions, child `-00002` kept, `-00003` removed, 0 rows with `sentData`/`returnedData`. `208096-00001`: 11/11, `-00002`/`-00004` kept, `-00003` removed, payloads null. Hidden children 404; S3 404 and S4 403 on both roots |
+| Other modules | v1 Proposals 40 PASS; other Proposal 23 PASS (1 NOT TESTED); Subaward 99 PASS; Negotiation 70 PASS (14 NOT TESTED, predicted); Global Search 45 PASS; dashboard exact (S1 244 / 1,674; S3 1 / 14 with 0 Proposals, Negotiations and Subawards; IRB figures absent) |
+| REVIEWs | R1/R2 `parentAwardNumber 000000-00000` (no-parent placeholder, 0 rows): no disclosure. R3/R4: Award C's own summary and search row name its parent/root `209407-00001` to the IO account. Not a record disclosure (every parent endpoint 404), recorded as **LOW finding F7** |
+| Cross-check | 23/25 not failed. The 2 FAILs reproduced at field level: C's number only in the echoed `$.query`, 0 results (same as session 2). 1 NOT TESTED (no PI account) |
+| DB writes | none: archive/authz write counters identical 03:52:35 → 04:03:56Z. Audit rows are only the two grant creations (03:46Z) |
+| Cleanup | rule deleted 04:04:29Z (shared confirmed 04:05:08Z); task stopped; TG deleted; grants 7/8 revoked (dry run first); group back to the 2 pre-session members; users disabled and globally signed out. **Independently verified 04:09–04:11Z**: no a8 rule/TG/task, `:107` healthy with no enforcement setting, 0 unrevoked synthetic grants, owner grant 2 and admin seat 3 unchanged, 86 migrations / V088 |
+
+Evidence: `~/projects/rap-security-evidence/a8-session3-2026-11-19` (`MANIFEST.sha256`, `ADJUDICATION.md`).
+**US-OAV-001 #2 stays IN PROGRESS.** Shared-DEV activation and named-user acceptance remain
+separate requirements, and the untested conditions in §4a stand.
