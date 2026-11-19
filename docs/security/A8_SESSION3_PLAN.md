@@ -225,3 +225,14 @@ Self-test: 91 cases, fully offline.
 Evidence: `~/projects/rap-security-evidence/a8-session3-2026-11-19` (`MANIFEST.sha256`, `ADJUDICATION.md`).
 **US-OAV-001 #2 stays IN PROGRESS.** Shared-DEV activation and named-user acceptance remain
 separate requirements, and the untested conditions in §4a stand.
+
+**Independent review of the session evidence:** SUPPORTS WITH CAVEATS, no blocker. Tally,
+predicted NOT TESTED, H3, isolation, no-writes and cleanup all recomputed from the raw files.
+Corrections recorded in `ADJUDICATION.md`:
+- R1/R2 are proven by the Kuali constant `ROOTS_PARENT_AWARD_NUMBER`;
+- H3 retention rests on the row counts and the children, since the count is code-guaranteed;
+- 64 `allow` PASSes are "not denied", not "retained";
+- F7 is open (LOW), with the deeper-hierarchy case untested;
+- the existence-oracle finding is still open (LOW).
+
+Valid technical evidence for US-OAV-001 #2 in an isolated setting. **It stays IN PROGRESS.**
